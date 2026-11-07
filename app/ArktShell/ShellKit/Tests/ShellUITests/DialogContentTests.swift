@@ -41,6 +41,27 @@ struct DialogContentTests {
     #expect(content.paragraphs == [.init("This cannot be undone.")])
   }
 
+  // MARK: Crash report ask (#129)
+
+  @Test func theCrashReportAskIsTheSharedAlertWithThreeAnswers() {
+    let content = DialogContent.crashReportAsk
+    #expect(content.title == "Arkt quit unexpectedly. Send a report?")
+    #expect(content.primaryTitle == "Send")
+    #expect(content.secondaryTitle == "Always Send")
+    #expect(content.cancelTitle == "Don't Send")
+    #expect(content.icon == .appIcon && content.iconPlacement == .stacked)
+    #expect(content.defaultButton == .primary)
+    #expect(content.escapeAnswersCancel, "Escape answers Don't Send")
+    #expect(!content.isDestructive)
+  }
+
+  @Test func theCrashReportAskPromisesNothingItDoesNotDo() {
+    let text = ([DialogContent.crashReportAsk.title] + DialogContent.crashReportAsk.paragraphs.map(\.text)).joined(separator: " ")
+    #expect(text.contains("Nothing is sent until you review it"))
+    #expect(!text.lowercased().contains("arc "), "no user-facing Arc")
+    #expect(!DialogContent.crashReportAsk.paragraphs.contains { $0.text.contains("http") })
+  }
+
   // MARK: Launch
 
   @Test func launchFailureOffersTryAgainAndTheDataFolder() {

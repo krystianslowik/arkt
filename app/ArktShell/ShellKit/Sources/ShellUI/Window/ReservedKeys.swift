@@ -11,6 +11,11 @@ import Carbon.HIToolbox
 /// no ASCII character (a Cyrillic layout) matches by its virtual key code (`kVK_ANSI_W` for the W key), as the main
 /// menu does for such layouts. Keys without a character (arrows) match by key code. Modifiers must match exactly:
 /// Shift-Cmd-T is not Cmd-T.
+///
+/// The digit row and the punctuation keys (`matchesKeyCode`) also match by key code on every layout: AZERTY types
+/// "&" on the 1 key and QWERTZ types "-" on the slash key, so the typed character is not the menu's key. Matching
+/// more than the menu does is harmless, because a reserved key only goes to the main menu first and the menu
+/// decides; matching less drops the key when a page has focus (#497).
 public struct ReservedKeys: Sendable {
   public struct Key: Hashable, Sendable {
     public let keyCode: UInt16
@@ -18,11 +23,15 @@ public struct ReservedKeys: Sendable {
     public let character: String
     /// Device-independent modifiers, `.function` and `.numericPad` excluded.
     public let modifiers: UInt
+    /// Whether the key code matches whatever the layout types on that key (digit row, punctuation). Letters stay
+    /// off: AZERTY's Z key sits where W is, and Cmd-Z there belongs to the page.
+    public let matchesKeyCode: Bool
 
-    public init(keyCode: Int, character: String, modifiers: NSEvent.ModifierFlags) {
+    public init(keyCode: Int, character: String, modifiers: NSEvent.ModifierFlags, matchesKeyCode: Bool = false) {
       self.keyCode = UInt16(keyCode)
       self.character = character
       self.modifiers = modifiers.rawValue
+      self.matchesKeyCode = matchesKeyCode
     }
   }
 
@@ -34,7 +43,13 @@ public struct ReservedKeys: Sendable {
   /// #108), Shift-Cmd-K (Clear Today Tabs, KB-019, #110), Cmd-Opt-Right, Cmd-Opt-Left, and the tab switcher's
   /// Ctrl-Tab and Ctrl-Shift-Tab (#103; `ShellWindow.sendEvent` already hands those to the switcher before any view).
   /// The copy-link keys (KB-013 to KB-016, #118) are here too: a page must not swallow them. Incognito
-  /// (Shift-Cmd-N) joins when Arkt has it. Cmd-Z stays the page's first (`ReopenUndoRouter`).
+  /// (Shift-Cmd-N, KB-007) and Blank Window (Ctrl-Cmd-N, KB-006) are reserved with them (#487). Cmd-Z stays the
+  /// page's first (`ReopenUndoRouter`).
+  ///
+  /// #489: every main-menu key equivalent without Cmd is reserved too: Space 1 to 9 (Ctrl-1 ... Ctrl-9) and the Split
+  /// View items (Ctrl-Shift-=, -, ], [, 1 ... 4). A focused page takes any key equivalent first, and the engine hands
+  /// only the Cmd keys it did not use back to the menu (`ArktBrowserWindow::HandleKeyboardEvent`), so without this a
+  /// page that has focus (after every reload) drops them.
   public static let arkt = ReservedKeys([
     Key(keyCode: kVK_ANSI_T, character: "t", modifiers: .command),
     Key(keyCode: kVK_ANSI_T, character: "t", modifiers: [.command, .shift]),
@@ -42,6 +57,8 @@ public struct ReservedKeys: Sendable {
     Key(keyCode: kVK_ANSI_W, character: "w", modifiers: .command),
     Key(keyCode: kVK_ANSI_W, character: "w", modifiers: [.command, .shift]),
     Key(keyCode: kVK_ANSI_N, character: "n", modifiers: .command),
+    Key(keyCode: kVK_ANSI_N, character: "n", modifiers: [.command, .shift]),     // KB-007 (#487)
+    Key(keyCode: kVK_ANSI_N, character: "n", modifiers: [.command, .control]),   // KB-006 (#487)
     Key(keyCode: kVK_ANSI_Q, character: "q", modifiers: .command),
     Key(keyCode: kVK_ANSI_D, character: "d", modifiers: .command),
     Key(keyCode: kVK_ANSI_C, character: "c", modifiers: [.command, .shift]),             // KB-013
@@ -53,7 +70,38 @@ public struct ReservedKeys: Sendable {
     Key(keyCode: kVK_LeftArrow, character: "", modifiers: [.command, .option]),
     Key(keyCode: kVK_Tab, character: "", modifiers: .control),
     Key(keyCode: kVK_Tab, character: "", modifiers: [.control, .shift]),
-  ])
+  ] + spaceKeys + splitKeys)
+
+  /// Ctrl-1 ... Ctrl-9 (KB-035, BH-041: `SpacesMenu`). The numeric keypad digits count too, with or without Shift:
+  /// Shift does not change what a keypad digit types, and the menu takes Ctrl-Shift-keypad 5 as Space 5 (seen in the
+  /// layout test of #497).
+  private static let spaceKeys: [Key] = {
+    var keys = digits.map { Key(keyCode: $0.code, character: $0.character, modifiers: .control, matchesKeyCode: true) }
+    for flags: NSEvent.ModifierFlags in [.control, [.control, .shift]] {
+      for digit in keypadDigits {
+        keys.append(Key(keyCode: digit.code, character: digit.character, modifiers: flags, matchesKeyCode: true))
+      }
+    }
+    return keys
+  }()
+
+  private static let keypadDigits: [(code: Int, character: String)] = [
+    (kVK_ANSI_Keypad1, "1"), (kVK_ANSI_Keypad2, "2"), (kVK_ANSI_Keypad3, "3"), (kVK_ANSI_Keypad4, "4"),
+    (kVK_ANSI_Keypad5, "5"), (kVK_ANSI_Keypad6, "6"), (kVK_ANSI_Keypad7, "7"), (kVK_ANSI_Keypad8, "8"),
+    (kVK_ANSI_Keypad9, "9"),
+  ]
+
+  /// Ctrl-Shift-=, -, ], [ and Ctrl-Shift-1 ... 4 (KB-070 to KB-072: `SplitMenu`): the unshifted US characters, and
+  /// the US key codes on any layout (#497).
+  private static let splitKeys: [Key] = (
+    [(kVK_ANSI_Equal, "="), (kVK_ANSI_Minus, "-"), (kVK_ANSI_RightBracket, "]"), (kVK_ANSI_LeftBracket, "[")]
+      + digits.prefix(4).map { ($0.code, $0.character) }
+  ).map { Key(keyCode: $0.0, character: $0.1, modifiers: [.control, .shift], matchesKeyCode: true) }
+
+  private static let digits: [(code: Int, character: String)] = [
+    (kVK_ANSI_1, "1"), (kVK_ANSI_2, "2"), (kVK_ANSI_3, "3"), (kVK_ANSI_4, "4"), (kVK_ANSI_5, "5"),
+    (kVK_ANSI_6, "6"), (kVK_ANSI_7, "7"), (kVK_ANSI_8, "8"), (kVK_ANSI_9, "9"),
+  ]
 
   /// The modifiers a key equivalent is compared on: Cmd, Shift, Option and Control. Arrow keys also carry
   /// `.function` and `.numericPad`, and Caps Lock changes nothing.
@@ -68,6 +116,7 @@ public struct ReservedKeys: Sendable {
     let typesASCII = character.unicodeScalars.count == 1 && character.unicodeScalars.allSatisfy(\.isASCII)
     return keys.contains { key in
       guard key.modifiers == flags else { return false }
+      if key.matchesKeyCode, key.keyCode == keyCode { return true }
       guard !key.character.isEmpty, typesASCII else { return key.keyCode == keyCode }
       return key.character == character
     }

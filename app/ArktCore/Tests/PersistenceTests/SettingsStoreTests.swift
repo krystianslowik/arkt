@@ -156,6 +156,30 @@ struct SettingsStoreTests {
     #expect(try await store.loadArchiveSettings() == settings)
   }
 
+  /// #448: each Settings row changes its own field; the other stored field is kept, and the result is what is stored.
+  @Test func updateArchiveSettingsChangesOneFieldAndKeepsTheOther() async throws {
+    let store = SettingsStore(database: try ArktDatabase.inMemory())
+    var stored = ArchiveSettings()
+    stored.littleArcThreshold = .never
+    try await store.save(stored, at: Self.date)
+
+    let updated = try await store.updateArchiveSettings(at: Self.date.addingTimeInterval(1)) {
+      $0.setTabThreshold(.thirtyDays, forProfile: ArchiveSettings.defaultProfile, scope: .thisProfile)
+    }
+
+    #expect(updated.tabThreshold(forProfile: ArchiveSettings.defaultProfile) == .thirtyDays)
+    #expect(updated.littleArcThreshold == .never)
+    #expect(try await store.loadArchiveSettings() == updated)
+  }
+
+  @Test func updateArchiveSettingsWithNothingStoredStartsFromTheDefaults() async throws {
+    let store = SettingsStore(database: try ArktDatabase.inMemory())
+    let updated = try await store.updateArchiveSettings(at: Self.date) { $0.littleArcThreshold = .oneHour }
+    #expect(updated.littleArcThreshold == .oneHour)
+    #expect(updated.tabThreshold(forProfile: ArchiveSettings.defaultProfile) == .tabsDefault)
+    #expect(try await store.loadArchiveSettings() == updated)
+  }
+
   @Test func storesConformToTheArchiveProtocols() throws {
     let database = try ArktDatabase.inMemory()
     let _: any ArchiveStoring = ArchiveStore(database: database)
@@ -178,6 +202,18 @@ struct SettingsStoreTests {
     let record = try await store.loadArcImportRecord()
     #expect(record == ArcImportRecord(spaceIDs: ["s1", "s2"], favoriteItemIDs: ["f1", "f2"]))
     #expect(!record.isEmpty)
+  }
+
+  @Test func recordArcImportMergesVersionTwoFieldsAndKeepsTheLaterWatermark() async throws {
+    let store = SettingsStore(database: try ArktDatabase.inMemory())
+    let early = Self.date
+    let late = Self.date.addingTimeInterval(500)
+    try await store.recordArcImport(ArcImportRecord(historyWatermark: late, cookieKeys: ["c1"]), at: Self.date)
+    try await store.recordArcImport(
+      ArcImportRecord(historyWatermark: early, bookmarkKeys: ["b1"], cookieKeys: ["c2"], extensionIDs: ["e1"]), at: Self.date)
+    let record = try await store.loadArcImportRecord()
+    #expect(record == ArcImportRecord(
+      historyWatermark: late, bookmarkKeys: ["b1"], cookieKeys: ["c1", "c2"], extensionIDs: ["e1"]))
   }
 
   @Test func arcImportRecordIsStoredSortedAndSurvivesReopen() async throws {

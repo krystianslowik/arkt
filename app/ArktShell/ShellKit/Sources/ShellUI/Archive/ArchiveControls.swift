@@ -1,17 +1,18 @@
 import AppKit
+import Motion
 
 // MARK: - Motion
 
 /// The Archive window's two small motions (design section 10), both transform or opacity only.
 @MainActor
 enum ArchiveMotion {
-  /// The strong ease-out of the design system: `cubic-bezier(0.23, 1, 0.32, 1)`.
-  static let easeOut = CAMediaTimingFunction(controlPoints: 0.23, 1, 0.32, 1)
+  /// The strong ease-out of the design system.
+  static let easeOut = MotionCurve.strongEaseOut.timingFunction
   /// Press feedback on a pill: scale 0.97 for 160 ms.
   static let pressDuration: CFTimeInterval = 0.16
   static let pressScale: CGFloat = 0.97
   /// The chip strip fades in and out in 150 ms; layout never animates.
-  static let fadeDuration: CFTimeInterval = 0.15
+  static let fadeDuration: CFTimeInterval = FadeDuration.standard
   /// Test seam and Reduce Motion: AppKit's setting unless overridden.
   static var reduceMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
 
@@ -59,9 +60,9 @@ extension NSControl {
 
 /// The brand's pills, shared by the Archive window (design section 2), the dialogs and the toasts (alerts design 3.2,
 /// 4.2): the mustard primary (Restore, Try Again), and neutral pills (Got It, Cancel, a toast's Undo) whose title may
-/// be destructive (Clear Archive, Delete Space). A real `NSButton`, so Space, VoiceOver's press, the key view loop and
-/// the system focus ring work; the cell draws nothing and layers draw the pill. Colors follow the effective
-/// appearance, so a host sets `appearance` to choose the flavor (a toast takes its Space theme's).
+/// be destructive (Clear Archive, Delete Space). A real `NSButton`, so Space, VoiceOver's press and the key view loop
+/// work; the cell draws nothing, layers draw the pill and `KeyboardFocusRingView` its focus ring (#642). Colors follow
+/// the effective appearance, so a host sets `appearance` to choose the flavor (a toast takes its Space theme's).
 @MainActor
 final class ArchivePillButton: NSButton {
   enum Style { case primary, neutral, destructive }
@@ -83,8 +84,13 @@ final class ArchivePillButton: NSButton {
     }
 
     static let dialog = Metrics(height: 28, fontSize: 13, weight: .semibold, padding: 16, minWidth: 76, pressScale: 0.97)
+    /// An infobar's buttons: 24 high, 12 semibold, padding 12 (design: the small neutral pill).
+    static let infobar = Metrics(height: 24, fontSize: 12, weight: .semibold, padding: 12, minWidth: 0, pressScale: 0.97)
     static let toastAction = Metrics(height: 24, fontSize: 12, weight: .semibold, padding: 12, minWidth: 0,
                                      pressScale: 0.96)
+    /// The sidebar banner's Restart (design/sidebar-banner): 22 high, 12 semibold, padding 10.
+    static let sidebarBanner = Metrics(height: 22, fontSize: 12, weight: .semibold, padding: 10, minWidth: 0,
+                                       pressScale: 0.97)
   }
 
   let style: Style
@@ -99,6 +105,8 @@ final class ArchivePillButton: NSButton {
   private var hovering = false
   private(set) var pressing = false
   private var tracking: NSTrackingArea?
+  /// `ShellTokens.focusRing` around the capsule while the pill has keyboard focus (#642).
+  private(set) lazy var keyboardFocusRing = KeyboardFocusRingView.attach(outside: self, radius: metrics.height / 2)
 
   convenience init(style: Style, title: String, height: CGFloat = ArchiveMetrics.pillHeight) {
     self.init(style: style, title: title, metrics: .archive(height: height))
@@ -115,7 +123,7 @@ final class ArchivePillButton: NSButton {
     isBordered = false
     bezelStyle = .regularSquare
     setButtonType(.momentaryChange)
-    focusRingType = .default
+    focusRingType = .none
     wantsLayer = true
     layer?.masksToBounds = false
     body.cornerCurve = .continuous
@@ -135,6 +143,18 @@ final class ArchivePillButton: NSButton {
   override var isEnabled: Bool { didSet { restyle() } }
   override var mouseDownCanMoveWindow: Bool { false }
   override var wantsUpdateLayer: Bool { true }
+
+  override func becomeFirstResponder() -> Bool {
+    let became = super.becomeFirstResponder()
+    if became { keyboardFocusRing.setFocused(true) }
+    return became
+  }
+
+  override func resignFirstResponder() -> Bool {
+    let resigned = super.resignFirstResponder()
+    if resigned { keyboardFocusRing.setFocused(false) }
+    return resigned
+  }
   override func updateLayer() { restyle() }
 
   private var titleFont: NSFont {
@@ -155,6 +175,12 @@ final class ArchivePillButton: NSButton {
 
   /// The drawn title, the key included (tests).
   var displayedTitleText: String { displayedTitle.string }
+
+  /// The title color the label layer holds now, not the one the appearance would give (tests).
+  var drawnTitleColor: NSColor? {
+    guard let text = label.string as? NSAttributedString, text.length > 0 else { return nil }
+    return text.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor
+  }
 
   override var intrinsicContentSize: NSSize {
     let width = ceil(displayedTitle.size().width) + 2 * metrics.padding
@@ -263,7 +289,7 @@ final class ArchivePillButton: NSButton {
   }
 }
 
-/// Draws nothing but the focus ring mask (a capsule) and reports highlight changes to its button.
+/// Draws nothing and reports highlight changes to its button.
 @MainActor
 final class ArchivePillCell: NSButtonCell {
   weak var owner: ArchivePillButton?
@@ -273,13 +299,6 @@ final class ArchivePillCell: NSButtonCell {
   }
 
   override func draw(withFrame cellFrame: NSRect, in controlView: NSView) {}
-
-  override func drawFocusRingMask(withFrame cellFrame: NSRect, in controlView: NSView) {
-    let radius = cellFrame.height / 2
-    NSBezierPath(roundedRect: cellFrame, xRadius: radius, yRadius: radius).fill()
-  }
-
-  override func focusRingMaskBounds(forFrame cellFrame: NSRect, in controlView: NSView) -> NSRect { cellFrame }
 }
 
 // MARK: - Text link
@@ -296,6 +315,10 @@ final class ArchiveLinkButton: NSButton {
   let fontSize: CGFloat
   private var hovering = false
   private var tracking: NSTrackingArea?
+  /// `ShellTokens.focusRing` around the link while it has keyboard focus (#642).
+  private(set) lazy var keyboardFocusRing = KeyboardFocusRingView.attach(outside: self, radius: Self.focusRadius)
+  /// The ring's corner radius around the text.
+  static let focusRadius: CGFloat = 4
 
   init(style: Style, title: String, fontSize: CGFloat = 12) {
     self.style = style
@@ -305,7 +328,7 @@ final class ArchiveLinkButton: NSButton {
     isBordered = false
     bezelStyle = .regularSquare
     setButtonType(.momentaryChange)
-    focusRingType = .default
+    focusRingType = .none
     restyle()
   }
 
@@ -317,6 +340,18 @@ final class ArchiveLinkButton: NSButton {
   override var mouseDownCanMoveWindow: Bool { false }
   /// The opacity while disabled; Settings dims the whole row control itself and sets 1.
   var disabledOpacity: Float = 0.4 { didSet { restyle() } }
+
+  override func becomeFirstResponder() -> Bool {
+    let became = super.becomeFirstResponder()
+    if became { keyboardFocusRing.setFocused(true) }
+    return became
+  }
+
+  override func resignFirstResponder() -> Bool {
+    let resigned = super.resignFirstResponder()
+    if resigned { keyboardFocusRing.setFocused(false) }
+    return resigned
+  }
 
   var displayedColor: RGBA {
     let flavor = archiveFlavor
@@ -371,6 +406,9 @@ final class ArchiveFilterButton: NSButton {
   var isActive = false { didSet { if isActive != oldValue { restyle() } } }
   private var hovering = false
   private var tracking: NSTrackingArea?
+  /// `ShellTokens.focusRing` around the button while it has keyboard focus (#642).
+  private(set) lazy var keyboardFocusRing = KeyboardFocusRingView.attach(outside: self,
+                                                                         radius: ArchiveMetrics.fieldRadius)
 
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
@@ -379,7 +417,7 @@ final class ArchiveFilterButton: NSButton {
     bezelStyle = .regularSquare
     setButtonType(.momentaryChange)
     imagePosition = .imageOnly
-    focusRingType = .default
+    focusRingType = .none
     wantsLayer = true
     layer?.cornerRadius = ArchiveMetrics.fieldRadius
     layer?.cornerCurve = .continuous
@@ -417,11 +455,17 @@ final class ArchiveFilterButton: NSButton {
     restyle()
   }
 
-  override func drawFocusRingMask() {
-    NSBezierPath(roundedRect: bounds, xRadius: ArchiveMetrics.fieldRadius, yRadius: ArchiveMetrics.fieldRadius).fill()
+  override func becomeFirstResponder() -> Bool {
+    let became = super.becomeFirstResponder()
+    if became { keyboardFocusRing.setFocused(true) }
+    return became
   }
 
-  override var focusRingMaskBounds: NSRect { bounds }
+  override func resignFirstResponder() -> Bool {
+    let resigned = super.resignFirstResponder()
+    if resigned { keyboardFocusRing.setFocused(false) }
+    return resigned
+  }
 
   override func updateTrackingAreas() {
     super.updateTrackingAreas()

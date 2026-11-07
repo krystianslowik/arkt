@@ -330,6 +330,7 @@ final class ArchiveSearchWindowTests: XCTestCase {
     let controller = try await shown(source)
     for _ in 0..<50 where source.faviconRequests.isEmpty { await Task.yield() }
     for _ in 0..<50 { await Task.yield() }
+    await controller.settleFaviconDecodes()
 
     XCTAssertEqual(source.faviconRequests.first, Set(rows.map(\.id)))
     let first = try XCTUnwrap(controller.tableView.view(atColumn: 0, row: 0, makeIfNecessary: true)

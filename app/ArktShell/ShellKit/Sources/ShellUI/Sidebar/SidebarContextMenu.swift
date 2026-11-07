@@ -20,6 +20,8 @@ public enum SidebarMenuAction: Hashable, Sendable {
   case archive([NodeID])
   case resetPinned(NodeID)
   case replacePin(NodeID)
+  /// The Edit Pin popover (#363): Edit Pinned URL... on a pinned tab or a Favorite, Rename... on a Favorite.
+  case editPin(NodeID, focus: EditPinFocus)
   case separateFromPinned(NodeID)
   /// Remove from Favorites (BH-047's inverse).
   case removeFromFavorites(NodeID)
@@ -72,7 +74,7 @@ public struct SidebarMenuEntry: Equatable, Sendable {
     self.submenu = submenu
   }
 
-  /// An item that is shown but not built yet (Share, Change Icon, Edit Pinned URL): disabled, as the settings
+  /// An item that is shown but not built yet (Share, Change Icon): disabled, as the settings
   /// precedent shows unbuilt rows (design OQ6).
   static func unavailable(_ title: String) -> SidebarMenuEntry {
     SidebarMenuEntry(title: title, action: nil, isEnabled: false)
@@ -193,6 +195,9 @@ public enum SidebarContextMenu {
 
   // MARK: 3.2 Pinned tab
 
+  /// Opens the Edit Pin popover, so it ends in an ellipsis (#363). Rename on a pinned row stays the inline field.
+  static let editPinnedURLTitle = "Edit Pinned URL\u{2026}"
+
   /// Separate From Pinned Tab (BH-061) is not in the design's table; it shipped with #108 and this menu is its only
   /// entry point, so it stays in the reset group.
   @MainActor
@@ -207,7 +212,7 @@ public enum SidebarContextMenu {
               SidebarMenuEntry(title: "Replace Pin with Current Page", action: .replacePin(id), isEnabled: navigated),
               SidebarMenuEntry(title: "Separate From Pinned Tab", action: .separateFromPinned(id),
                                isEnabled: navigated),
-              .unavailable("Edit Pinned URL"),
+              SidebarMenuEntry(title: editPinnedURLTitle, action: .editPin(id, focus: .url)),
               .separator,
               moveTo([id], source, context),
               .separator]
@@ -218,11 +223,14 @@ public enum SidebarContextMenu {
 
   // MARK: 3.3 Favorite
 
-  /// Rename has no in-place field on a tile (no title is drawn), so it waits with Change Icon and Edit Pinned URL.
-  /// Back to Pinned URL for Favorites is PARITY and disabled, as the design's screenshot shows it.
+  /// A tile draws no title, so Rename... opens the Edit Pin popover on Name (#363, design/edit-pin); Edit Pinned
+  /// URL... opens it on Pinned URL. Back to Pinned URL for Favorites is PARITY and disabled, as the design's
+  /// screenshot shows it.
   private static func favorite(_ id: NodeID, _ context: SidebarMenuContext) -> [SidebarMenuEntry] {
-    [.unavailable("Rename"), .unavailable("Change Icon"), .separator,
-     .unavailable("Back to Pinned URL"), .unavailable("Edit Pinned URL"), .separator]
+    [SidebarMenuEntry(title: "Rename\u{2026}", action: .editPin(id, focus: .name)), .unavailable("Change Icon"),
+     .separator,
+     .unavailable("Back to Pinned URL"), SidebarMenuEntry(title: editPinnedURLTitle, action: .editPin(id, focus: .url)),
+     .separator]
       + copyLink([id], plural: false)
       + [.separator,
          SidebarMenuEntry(title: "Remove from Favorites", action: .removeFromFavorites(id)),

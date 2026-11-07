@@ -10,4 +10,10 @@
 
 ARKT_ENGINE_APP =
 
+// CrProductDirName: the folder under ~/Library/Application Support that is the engine's default user-data-dir
+// (written into the app's Info.plist by the Engine build phase). Development builds keep their own folder, so they
+// never share a profile with the product. A product build passes ARKT_PRODUCT_DIR_NAME=Arkt/Engine (inside the
+// product data folder "Arkt"; engine/README.md, "Product identity").
+ARKT_PRODUCT_DIR_NAME = Arkt Dev Engine
+
 #include? "Local.xcconfig"

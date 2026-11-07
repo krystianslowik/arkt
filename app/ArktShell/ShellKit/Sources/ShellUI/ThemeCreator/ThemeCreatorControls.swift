@@ -44,6 +44,23 @@ enum ThemeCreatorMetrics {
   static var arrowCenterY: CGFloat { padding + headerHeight / 2 }
 }
 
+/// Shadows of the theme creator's controls (#764). One black in both appearances: they sit on the popover's own
+/// surface, not on the window. Values are the ones the controls drew before they were named.
+enum ThemeCreatorTokens {
+  /// The slider knob's lift, drawn at (0, -2).
+  static let sliderKnobShadow = ShadowToken(color: TokenPair(light: .black(0.25), dark: .black(0.25)),
+                                            radius: 3, offsetY: 2)
+  /// The pad's inner shadow along its top edge.
+  static let padInnerShadow = ShadowToken(color: TokenPair(light: .black(0.12), dark: .black(0.12)),
+                                          radius: 7, offsetY: 3)
+  /// A colour dot resting on the pad.
+  static let dotRestShadow = ShadowToken(color: TokenPair(light: .black(0.35), dark: .black(0.35)),
+                                         radius: 4, offsetY: 2)
+  /// A colour dot picked up off the pad; it fades in over `dotRestShadow`.
+  static let dotLiftShadow = ShadowToken(color: TokenPair(light: .black(0.38), dark: .black(0.38)),
+                                         radius: 11, offsetY: 8)
+}
+
 /// Motion of the theme creator (README, "Motion"): transform and opacity only.
 public enum ThemeCreatorMotion {
   /// Popover open: scale 0.96 to 1 and fade in from the arrow.
@@ -62,14 +79,15 @@ public enum ThemeCreatorMotion {
   /// Small state changes inside the popover (the colour-count button's swatches, a dot leaving the pad).
   static let stateDuration: TimeInterval = 0.2
   /// The strong ease-out for entering and state changes.
-  @MainActor static var easeOut: CAMediaTimingFunction { CAMediaTimingFunction(controlPoints: 0.23, 1, 0.32, 1) }
+  @MainActor static var easeOut: CAMediaTimingFunction { MotionCurve.strongEaseOut.timingFunction }
 }
 
 // MARK: - Focus
 
-/// A control in the theme creator that takes keyboard focus. The system focus ring is drawn only once the keyboard
-/// is in use (`ThemeCreatorView.keyboardFocusVisible`), so opening the popover with the first dot focused shows no
-/// ring until a key is pressed.
+/// A control in the theme creator that takes keyboard focus. Its focus ring is the chrome's ink ring
+/// (`KeyboardFocusRingView`, #687) around the part that has the focus (`focusRingRect`), drawn only once the
+/// keyboard is in use (`ThemeCreatorView.keyboardFocusVisible`), so opening the popover with the first dot focused
+/// shows no ring until a key is pressed. The system ring never draws.
 @MainActor
 class ThemeFocusableView: NSView {
   /// Set by the popover: whether focus rings show.
@@ -78,35 +96,65 @@ class ThemeFocusableView: NSView {
   var onCancel: (() -> Void)?
   /// A key reached a control: the popover starts showing focus rings.
   var onKeyboardUse: (() -> Void)?
+  /// Shown while the control has keyboard focus and the keyboard is in use; placed in `layout()`.
+  let keyboardFocusRing = KeyboardFocusRingView(frame: .zero)
+  private var hasKeyboardFocus = false
+
+  override init(frame frameRect: NSRect) {
+    super.init(frame: frameRect)
+    focusRingType = .none
+    addSubview(keyboardFocusRing)
+    keyboardFocusRing.layer?.zPosition = 1                    // above the sublayers the control adds
+    placeFocusRing()
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
   override var isFlipped: Bool { true }
   override var acceptsFirstResponder: Bool { true }
   override var canBecomeKeyView: Bool { true }
 
   override func becomeFirstResponder() -> Bool {
+    hasKeyboardFocus = true
     refreshFocusRing()
     return true
   }
 
   override func resignFirstResponder() -> Bool {
+    hasKeyboardFocus = false
     refreshFocusRing()
     return true
   }
 
   func refreshFocusRing() {
-    focusRingType = focusVisible() ? .default : .none
-    noteFocusRingMaskChanged()
+    placeFocusRing()
+    keyboardFocusRing.setFocused(hasKeyboardFocus && focusVisible())
   }
 
-  override var focusRingMaskBounds: NSRect { bounds }
+  /// The popover's tone; the colour dot overrides it (its ring sits on the dot's white edge).
+  func applyFocusRingFlavor(_ flavor: ThemeFlavor) {
+    keyboardFocusRing.flavor = flavor
+  }
 
-  override func drawFocusRingMask() {
-    NSBezierPath(roundedRect: focusRingRect, xRadius: focusRingRadius, yRadius: focusRingRadius).fill()
+  /// Moves the ring to the focus shape; subclasses call it when that shape moves outside `layout()`.
+  func placeFocusRing() {
+    keyboardFocusRing.place(around: focusRingRect, radius: focusRingRadius)
+  }
+
+  override func layout() {
+    super.layout()
+    placeFocusRing()
+  }
+
+  override func setFrameSize(_ newSize: NSSize) {
+    super.setFrameSize(newSize)
+    placeFocusRing()
   }
 
   /// The shape the focus ring follows.
   var focusRingRect: NSRect { bounds }
-  var focusRingRadius: CGFloat { bounds.height / 2 }
+  var focusRingRadius: CGFloat { focusRingRect.height / 2 }
 
   override func keyDown(with event: NSEvent) {
     onKeyboardUse?()
@@ -163,7 +211,7 @@ final class ThemeSliderView: ThemeFocusableView {
   let trackContent = CALayer()
   private let track = CALayer()
   private let trackEdge = CALayer()
-  private let knob = CALayer()
+  private let knob = ShadowPathLayer()
   private let knobEdge = CALayer()
   private var dragging = false
   private static let noActions: [String: CAAction] = ["position": NSNull(), "bounds": NSNull(), "contents": NSNull(),
@@ -180,10 +228,10 @@ final class ThemeSliderView: ThemeFocusableView {
     trackEdge.borderWidth = 0.5
     knob.cornerRadius = ThemeCreatorMetrics.knob / 2
     knob.backgroundColor = CGColor.white
-    knob.shadowColor = CGColor.black
-    knob.shadowOpacity = 0.25
-    knob.shadowRadius = 3
-    knob.shadowOffset = CGSize(width: 0, height: -2)
+    knob.shadowColor = ThemeCreatorTokens.sliderKnobShadow.color.light.cgColor
+    knob.shadowOpacity = 1
+    knob.shadowRadius = ThemeCreatorTokens.sliderKnobShadow.radius
+    knob.shadowOffset = ThemeCreatorTokens.sliderKnobShadow.unflippedOffset
     knobEdge.cornerRadius = ThemeCreatorMetrics.knob / 2
     knobEdge.borderWidth = 0.5
     knobEdge.borderColor = CGColor(gray: 0, alpha: 0.2)
@@ -230,6 +278,7 @@ final class ThemeSliderView: ThemeFocusableView {
     knob.frame = CGRect(x: bounds.width * value - knobSize / 2, y: (bounds.height - knobSize) / 2, width: knobSize,
                         height: knobSize)
     knobEdge.frame = knob.bounds
+    placeFocusRing()
   }
 
   override var focusRingRect: NSRect { knob.frame }
@@ -405,9 +454,12 @@ final class ThemeTextureSwatchesView: ThemeFocusableView {
   /// A swatch was picked by the pointer (`true`) or the keyboard.
   var onSelect: ((ThemeTexture?, _ byPointer: Bool) -> Void)?
   private(set) var selected: ThemeTexture?
+  /// The popover's tone from the last `update`; layout passes keep it rather than the view's appearance.
+  private var flavor: ThemeFlavor?
   private var fills: [CALayer] = []
   private var inks: [CALayer] = []
-  private let ring = CALayer()
+  /// The selected swatch's 1.5 pt ring, 2 pt out, in the popover's text tone (`primaryText`, #687).
+  let selectionRing = CALayer()
   private var elements: [ThemeSwatchElement] = []
 
   override init(frame: NSRect) {
@@ -426,10 +478,10 @@ final class ThemeTextureSwatchesView: ThemeFocusableView {
       fills.append(fill)
       inks.append(ink)
     }
-    ring.borderWidth = ThemeCreatorMetrics.swatchRing
-    ring.cornerRadius = (ThemeCreatorMetrics.swatch + 2 * (ThemeCreatorMetrics.swatchRingGap
-                                                           + ThemeCreatorMetrics.swatchRing)) / 2
-    layer?.addSublayer(ring)
+    selectionRing.borderWidth = ThemeCreatorMetrics.swatchRing
+    selectionRing.cornerRadius = (ThemeCreatorMetrics.swatch + 2 * (ThemeCreatorMetrics.swatchRingGap
+                                                                    + ThemeCreatorMetrics.swatchRing)) / 2
+    layer?.addSublayer(selectionRing)
     setAccessibilityElement(true)
     setAccessibilityRole(.radioGroup)
     setAccessibilityLabel("Texture")
@@ -456,6 +508,7 @@ final class ThemeTextureSwatchesView: ThemeFocusableView {
 
   func update(selected: ThemeTexture?, flavor: ThemeFlavor) {
     self.selected = selected
+    self.flavor = flavor
     CATransaction.begin()
     CATransaction.setDisableActions(true)
     let scale = window?.backingScaleFactor ?? 2
@@ -469,21 +522,25 @@ final class ThemeTextureSwatchesView: ThemeFocusableView {
     }
     let index = Self.choices.firstIndex(of: selected) ?? 0
     let out = ThemeCreatorMetrics.swatchRingGap + ThemeCreatorMetrics.swatchRing
-    ring.frame = swatchFrame(index).insetBy(dx: -out, dy: -out)
-    ring.borderColor = NSColor.controlAccentColor.cgColor
+    selectionRing.frame = swatchFrame(index).insetBy(dx: -out, dy: -out)
+    selectionRing.borderColor = ShellTokens.primaryText.resolve(flavor).cgColor
     CATransaction.commit()
+    placeFocusRing()
     for (offset, element) in elements.enumerated() { element.isSelected = offset == index }
     setAccessibilityValue(Self.title(selected))
   }
 
   override func layout() {
     super.layout()
-    update(selected: selected, flavor: ThemeFlavor(appearance: effectiveAppearance))
+    update(selected: selected, flavor: flavor ?? ThemeFlavor(appearance: effectiveAppearance))
   }
 
+  /// Focused, the 3 pt ink ring covers the selection ring: it starts where that ring starts, 2 pt out, and stays
+  /// clear of the next swatch (6 pt away).
   override var focusRingRect: NSRect {
     let index = Self.choices.firstIndex(of: selected) ?? 0
-    return swatchFrame(index)
+    let gap = ThemeCreatorMetrics.swatchRingGap
+    return swatchFrame(index).insetBy(dx: -gap, dy: -gap)
   }
 
   override func mouseDown(with event: NSEvent) {

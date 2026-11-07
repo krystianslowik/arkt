@@ -5,6 +5,7 @@
 #include <string>
 #include <utility>
 
+#include "arkt/browser/arkt_autofill_bubble_handler.h"
 #include "arkt/browser/arkt_browser_window_parts.h"
 #include "arkt/browser/arkt_extension_calls.h"
 #include "arkt/browser/arkt_extensions_bridge.h"
@@ -12,6 +13,7 @@
 #include "arkt/browser/arkt_extensions_menu.h"
 #import "arkt/browser/arkt_infobar_view.h"
 #include "arkt/browser/arkt_infobars.h"
+#include "arkt/browser/arkt_javascript_dialog.h"
 #include "arkt/browser/arkt_permission_prompt.h"
 #import "arkt/browser/arkt_placeholder_window_host.h"
 #import "arkt/browser/arkt_tab_container_view.h"
@@ -292,6 +294,10 @@ ArktBrowserWindow::ArktBrowserWindow(BrowserWindowInterface* browser,
   scoped_extensions_container_ =
       std::make_unique<ui::ScopedUnownedUserData<ExtensionsContainer>>(
           browser_->GetUnownedUserDataHost(), *extensions_container_);
+  // Autofill finds its bubble handler both through GetAutofillBubbleHandler()
+  // and through the browser's unowned user data, as AutofillBubbleHandlerImpl.
+  autofill_bubble_handler_ =
+      std::make_unique<ArktAutofillBubbleHandler>(browser_);
 
   browser_->GetTabStripModel()->AddObserver(this);
   BindHost();
@@ -314,6 +320,7 @@ ArktBrowserWindow::~ArktBrowserWindow() {
     new_tab_footer_controller_->TearDown();
     new_tab_footer_controller_.reset();
   }
+  autofill_bubble_handler_.reset();
   scoped_extensions_container_.reset();
   extensions_container_.reset();
   side_panel_ui_.reset();
@@ -1131,6 +1138,7 @@ void ArktBrowserWindow::OnTabStripModelChanged(
         CHECK_LE(static_cast<size_t>(inserted.index), entries_.size());
         entries_.insert(entries_.begin() + inserted.index, TabEntry());
         arkt::UseArktPermissionPrompts(inserted.contents);
+        arkt::UseArktJavaScriptDialogs(inserted.contents);
         AddInfobarPresenter(inserted.contents);
         [events addObject:EntryEvent(ArktTabEventKindInserted,
                                      inserted.contents, inserted.index, -1)];
@@ -1176,6 +1184,7 @@ void ArktBrowserWindow::OnTabStripModelChanged(
       tab_modal_dialog_hosts_.erase(replace->old_contents);
       infobar_presenters_.erase(replace->old_contents);
       arkt::UseArktPermissionPrompts(replace->new_contents);
+      arkt::UseArktJavaScriptDialogs(replace->new_contents);
       AddInfobarPresenter(replace->new_contents);
       [events
           addObject:EntryEvent(ArktTabEventKindUpdated, replace->new_contents,
@@ -1514,9 +1523,8 @@ PinnedToolbarActions* ArktBrowserWindow::GetPinnedToolbarActions() {
 }
 
 autofill::AutofillBubbleHandler* ArktBrowserWindow::GetAutofillBubbleHandler() {
-  // Week 3: a non-null no-op handler (six callers dereference it).
-  ARKT_STUB("BrowserWindow");
-  return nullptr;
+  // Non-null: six callers dereference it unchecked (#575).
+  return autofill_bubble_handler_.get();
 }
 
 // BrowserWindow: bubbles and dialogs Arkt does not show this week -------------

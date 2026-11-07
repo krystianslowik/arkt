@@ -42,6 +42,10 @@ class ArktBrowserWindow;
 // The profile the hook started with (PostProfileInit, initial profile).
 void SetEmbedderProfile(Profile* profile);
 
+// The same profile, for the facade's import writes (#512); nil before the
+// hook set it.
+Profile* EmbedderProfile();
+
 // Looks up the embedder class and, when it is present, starts the seam.
 // Called once from PostBrowserStart.
 void StartEmbedder();

@@ -14,8 +14,18 @@ extension ShellWindowController {
   /// Something can be reopened: a close on the stack, or a Peek still on its way out.
   public var canReopenClosed: Bool { peek.isClosing || !reopenStack.isEmpty }
 
-  /// File > Reopen Closed Tab (Cmd-Shift-T, KB-010).
-  @objc public func reopenClosedTab(_ sender: Any?) { reopenClosed() }
+  /// File > Reopen Closed Tab (Cmd-Shift-T, KB-010). With nothing of this window's to reopen, the last closed Little
+  /// Arkt window comes back (#355), except in a blank or incognito window (#726): it reopens only its own closes and
+  /// never a page of normal browsing or its Archive entry.
+  @objc public func reopenClosedTab(_ sender: Any?) {
+    if !reopenClosed(), reopensLittleArkt { reopenLittleArkt?() }
+  }
+
+  /// Whether Reopen Closed Tab is on: a close of this window's, or a closed Little Arkt it falls through to.
+  var canReopenClosedTab: Bool { canReopenClosed || (reopensLittleArkt && canReopenLittleArkt()) }
+
+  /// Whether Reopen Closed Tab falls through to the last closed Little Arkt: never in a blank or incognito window.
+  private var reopensLittleArkt: Bool { !isPrivateWindow }
 
   /// Takes the most recent close back. A Peek still closing turns around where it is; otherwise the top of the stack
   /// reopens, skipping items whose row is gone for good. True when something came back.
@@ -23,9 +33,10 @@ extension ShellWindowController {
   public func reopenClosed() -> Bool {
     defer { toasts.dismiss(PeekController.closedToast) }
     if peek.reverseClose() { return true }
+    settlePendingClear()                             // #413: Cmd-Z mid-exit undoes that Clear, on the return spring
     while let item = reopenStack.pop() {
       if case .batch(let batch) = item { dismissUndoToast(of: batch.id) }
-      if reopen(item) { return true }
+      if withTodayReturnMotion({ reopen(item) }) { return true }
     }
     return false
   }
@@ -44,7 +55,7 @@ extension ShellWindowController {
   func undo(batch id: UUID) -> Bool {
     guard let batch = reopenStack.remove(batch: id) else { return false }
     dismissUndoToast(of: id)
-    return reopen(.batch(batch))
+    return withTodayReturnMotion { reopen(.batch(batch)) }
   }
 
   private func dismissUndoToast(of id: UUID) {
@@ -134,8 +145,9 @@ extension ShellWindowController {
       parkedTabs.remove(tab)
       reopenStack.forget(parked: tab)
     case .activeTabChanged(let tab):
-      // Chromium makes a duplicate its window's active tab, after the shell may have picked another (a new Peek's
-      // tab): what the shell last asked for stays active, else the current tab.
+      // A parked copy is outside the window's tab strip until it is shown (#380), so it is not activated on its own;
+      // this guards an engine that does make it active (Chromium did before #380): what the shell last asked for
+      // stays active, else the current tab.
       guard let engineWindow, engine.latestActiveTab(in: engineWindow) == tab,
             let mine = [engineActiveTab, currentTab].compactMap({ $0 }).first(where: { !parkedTabs.contains($0) })
       else { break }

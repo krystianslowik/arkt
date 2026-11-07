@@ -292,6 +292,7 @@ private final class FailingSpaceSidebar: SidebarSource {
   func updateTab(_ id: NodeID, url: URL?, title: String?) { base.updateTab(id, url: url, title: title) }
   func renameNode(_ id: NodeID, to title: String?) { base.renameNode(id, to: title) }
   func duplicateNode(_ id: NodeID) throws -> NodeID { try base.duplicateNode(id) }
+  func removeNode(_ id: NodeID) { base.removeNode(id) }
   func addFolder(title: String, in location: SidebarLocation, at index: Int?) throws -> NodeID {
     base.addFolder(title: title, in: location, at: index)
   }

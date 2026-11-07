@@ -67,6 +67,49 @@ final class SidebarViewTests: XCTestCase {
     XCTAssertEqual(outline.rowConfigureCount, settled, "an unchanged resolver touches no row")
   }
 
+  /// #455: the flight's old selection is captured on the first arrival frame. A first frame with no selection (no
+  /// current row) must not start fading a row that becomes current later in the flight.
+  func testTheArrivalCapturesTheOldSelectionOnItsFirstFrame() throws {
+    let sidebar = StubSidebar.sample()
+    let controller = makeSidebar(sidebar)
+    let space = try XCTUnwrap(controller.currentSpace)
+    let today = sidebar.children(of: .today(space)).filter { isTab(sidebar, $0) }
+    XCTAssertGreaterThanOrEqual(today.count, 2)
+    let arrival = today[0], later = today[1]
+    let outline = try XCTUnwrap(controller.currentPage?.outlineController)
+    outline.setRowStates(.empty)
+    outline.presentArrival(of: arrival, room: 0, appear: 0)
+    XCTAssertEqual(outline.rowStyle(for: later).selectionAlpha, 1)
+
+    outline.setRowStates(TabRowState.Resolver(current: later, visible: [later], previous: nil))
+    outline.presentArrival(of: arrival, room: 0.5, appear: 0.5)
+    XCTAssertEqual(outline.rowStyle(for: later).selectionAlpha, 1,
+                   "the old selection was captured as none; a row that becomes current mid-flight does not fade")
+    outline.endArrival()
+  }
+
+  /// #455: when the old current is a pane, the split row is the selection that fades; the pane row does not.
+  func testTheSplitRowFadesWhenTheOldSelectionIsAPane() throws {
+    let sidebar = StubSidebar.sample()
+    let controller = makeSidebar(sidebar)
+    let work = sidebar.spaceOrder[1]
+    controller.showSpace(work)
+    controller.view.layoutSubtreeIfNeeded()
+    let split = try XCTUnwrap(sidebar.children(of: .today(work)).first { !isTab(sidebar, $0) })
+    let pane = try XCTUnwrap(sidebar.children(of: .split(split)).first)
+    controller.activate(node: pane)
+    let outline = try XCTUnwrap(controller.currentPage?.outlineController)
+    XCTAssertEqual(outline.state(for: split), .current, "the split row draws the pane's selection")
+    let arrival = try XCTUnwrap(sidebar.children(of: .today(work)).first { isTab(sidebar, $0) })
+
+    outline.presentArrival(of: arrival, room: 0.5, appear: 0.5)
+    XCTAssertEqual(outline.rowStyle(for: split).selectionAlpha, 0.5, accuracy: 1e-6)
+    if outline.row(for: pane) >= 0 {
+      XCTAssertEqual(outline.rowStyle(for: pane).selectionAlpha, 1, "the pane row itself is not faded")
+    }
+    outline.endArrival()
+  }
+
   // C7: symbol and letter glyphs are cached bitmaps, never template symbols drawn per display.
   func testRowGlyphsAreCachedBitmaps() throws {
     let sidebar = StubSidebar.sample()
@@ -355,7 +398,7 @@ final class SidebarViewTests: XCTestCase {
     XCTAssertNil(controller.current, "folders toggle in place and never become current")
   }
 
-  func testFaviconReplacesLetterPlaceholder() throws {
+  func testFaviconReplacesLetterPlaceholder() async throws {
     let sidebar = StubSidebar.sample()
     let controller = makeSidebar(sidebar)
     let tab = sidebar.children(of: .today(sidebar.spaceOrder[0]))[0]
@@ -365,6 +408,7 @@ final class SidebarViewTests: XCTestCase {
     }
     let data = try XCTUnwrap(image.tiffRepresentation)
     controller.setFavicon(data, for: tab)
+    await controller.settleFaviconDecodes()
     let updated = try XCTUnwrap(try cell(controller, tab).faviconView.image)
     XCTAssertFalse(updated === placeholder)
     XCTAssertEqual(updated.size, NSSize(width: 4, height: 4))
@@ -656,7 +700,7 @@ final class SidebarReviewTests: XCTestCase {
     let tile = try XCTUnwrap(controller.view.favorites.tile(for: favorite))
     tile.layoutSubtreeIfNeeded()
     tile.displayIfNeeded()
-    let layer = try XCTUnwrap(tile.layer)
+    let layer = tile.fillLayer
     XCTAssertEqual(layer.shadowOpacity, 1)
     XCTAssertEqual(try XCTUnwrap(layer.shadowPath).boundingBox, layer.bounds)
     tile.flavor = .dark
@@ -690,13 +734,14 @@ final class SidebarReviewTests: XCTestCase {
   }
 
   // E4b: the favicon stays while the node exists (engine tab closed or not); it goes with the node.
-  func testFaviconIsKeptWhileTheNodeExistsAndDroppedWithIt() throws {
+  func testFaviconIsKeptWhileTheNodeExistsAndDroppedWithIt() async throws {
     let sidebar = StubSidebar.sample()
     let controller = makeSidebar(sidebar)
     let today = sidebar.children(of: .today(sidebar.spaceOrder[0]))
     let data = try faviconData()
     controller.setFavicon(data, for: today[0])
     controller.setFavicon(data, for: today[2])
+    await controller.settleFaviconDecodes()
     controller.activate(node: today[0])
     controller.deactivate(node: today[0])
     controller.deactivate(node: today[2])                 // never current
@@ -707,7 +752,7 @@ final class SidebarReviewTests: XCTestCase {
     XCTAssertNotNil(controller.favicons[today[2]])
   }
 
-  func testFaviconsOfARemovedSpaceAreDropped() throws {
+  func testFaviconsOfARemovedSpaceAreDropped() async throws {
     let sidebar = StubSidebar.sample()
     let controller = makeSidebar(sidebar)
     let removed = sidebar.spaceOrder[1]
@@ -715,12 +760,13 @@ final class SidebarReviewTests: XCTestCase {
     let favorite = sidebar.children(of: .favorites(profile: "default"))[0]
     let data = try faviconData()
     controller.setFavicons([tab: data, favorite: data])
+    await controller.settleFaviconDecodes()
     sidebar.removeSpace(removed)                          // emits `.spaceRemoved` only
     XCTAssertNil(controller.favicons[tab])
     XCTAssertNotNil(controller.favicons[favorite])
   }
 
-  func testSetFaviconsDecodesABatchAndShowsIt() throws {
+  func testSetFaviconsDecodesABatchAndShowsIt() async throws {
     let sidebar = StubSidebar.sample()
     let controller = makeSidebar(sidebar)
     let today = sidebar.children(of: .today(sidebar.spaceOrder[0]))
@@ -732,6 +778,7 @@ final class SidebarReviewTests: XCTestCase {
     let placeholder = try cell().faviconView.image
     let data = try faviconData()
     controller.setFavicons([today[0]: data, today[1]: data, NodeID(): data])
+    await controller.settleFaviconDecodes()
     XCTAssertNotNil(controller.favicons[today[0]])
     XCTAssertNotNil(controller.favicons[today[1]])
     XCTAssertEqual(controller.favicons.count, 2, "ids that are not in the source are ignored")
@@ -750,5 +797,62 @@ final class SidebarReviewTests: XCTestCase {
     XCTAssertEqual(outline.numberOfRows, rows + 1)
     XCTAssertEqual(seen, [.structure(.today(sidebar.spaceOrder[0]))])
     observation.cancel()
+  }
+
+  // MARK: - GS-035: hovering "+ New Tab" with Cmd held offers Paste and Go (BH-108)
+
+  func testNewTabButtonDefaultsToPlainNewTab() throws {
+    let controller = makeSidebar(.sample())
+    XCTAssertEqual(controller.view.newTabButton.accessibilityLabel(), "New Tab")
+    XCTAssertFalse(controller.view.newTabOffersPasteAndGo)
+  }
+
+  func testHoverWithCmdAndAClipboardURLOffersPasteAndGo() throws {
+    let controller = makeSidebar(.sample())
+    controller.clipboardURLProvider = { URL(string: "https://clip.example") }
+    controller.updateNewTabButton(hovered: true, commandHeld: true)
+    XCTAssertTrue(controller.view.newTabOffersPasteAndGo)
+    XCTAssertEqual(controller.view.newTabButton.accessibilityLabel(), "Paste and Go")
+    XCTAssertEqual(controller.view.newTabButton.toolTip, "Paste and Go")
+  }
+
+  func testNoCmdOrNoClipboardURLKeepsPlainNewTab() throws {
+    let controller = makeSidebar(.sample())
+    controller.clipboardURLProvider = { URL(string: "https://clip.example") }
+    controller.updateNewTabButton(hovered: true, commandHeld: false)
+    XCTAssertFalse(controller.view.newTabOffersPasteAndGo)
+    controller.updateNewTabButton(hovered: true, commandHeld: true)
+    XCTAssertTrue(controller.view.newTabOffersPasteAndGo)
+    controller.clipboardURLProvider = { nil as URL? }
+    controller.updateNewTabButton(hovered: true, commandHeld: true)
+    XCTAssertFalse(controller.view.newTabOffersPasteAndGo)
+    controller.updateNewTabButton(hovered: false, commandHeld: false)
+    XCTAssertEqual(controller.view.newTabButton.accessibilityLabel(), "New Tab")
+  }
+
+  func testClickInPasteAndGoStateOpensTheClipboardURL() throws {
+    let controller = makeSidebar(.sample())
+    var pasted: URL?
+    var newTabbed = false
+    controller.clipboardURLProvider = { URL(string: "https://clip.example/x") }
+    controller.onPasteAndGo = { pasted = $0 }
+    controller.onNewTab = { newTabbed = true }
+    controller.updateNewTabButton(hovered: true, commandHeld: true)
+    controller.view.newTabButton.performClick(nil)
+    XCTAssertEqual(pasted?.absoluteString, "https://clip.example/x")
+    XCTAssertFalse(newTabbed)
+  }
+
+  func testClickInPlainStateOpensTheCommandBar() throws {
+    let controller = makeSidebar(.sample())
+    var pasted: URL?
+    var newTabbed = false
+    controller.clipboardURLProvider = { URL(string: "https://clip.example/x") }
+    controller.onPasteAndGo = { pasted = $0 }
+    controller.onNewTab = { newTabbed = true }
+    controller.updateNewTabButton(hovered: true, commandHeld: false)
+    controller.view.newTabButton.performClick(nil)
+    XCTAssertTrue(newTabbed)
+    XCTAssertNil(pasted)
   }
 }

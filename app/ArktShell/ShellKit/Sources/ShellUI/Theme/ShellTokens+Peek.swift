@@ -11,6 +11,20 @@ public struct ShadowToken: Sendable, Equatable {
   public let contactOffsetY: CGFloat
 }
 
+extension ShadowToken {
+  /// A single soft shadow with no contact edge: the small lifts of rows, tiles, the card and controls.
+  init(color: TokenPair, radius: CGFloat, offsetY: CGFloat) {
+    self.init(color: color, radius: radius, offsetY: offsetY,
+              contactColor: TokenPair(light: .black(0), dark: .black(0)), contactRadius: 0, contactOffsetY: 0)
+  }
+
+  /// The `shadowOffset` for a layer whose y axis points up (AppKit's default), where down is negative.
+  var unflippedOffset: CGSize { CGSize(width: 0, height: -offsetY) }
+
+  /// The `shadowOffset` for a layer whose y axis points down (a flipped view's sublayer), where down is positive.
+  var flippedOffset: CGSize { CGSize(width: 0, height: offsetY) }
+}
+
 // Peek (docs/design/peek.md, #313). Kept apart from `ShellTokens.swift` to stay off a file other work changes.
 extension ShellTokens {
   /// Over the source card while a Peek is open, clipped to it: the source reads as set aside.

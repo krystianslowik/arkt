@@ -75,8 +75,10 @@ The pin moves by rebase only, following `engine/REBASE.md` step by step, tracked
 Every test launch of a built engine (`out/Spike`, `out/Arkt`, or an installed test bundle) passes both of these:
 
 - `--use-mock-keychain`: an in-memory fake keychain, so a test run never reads, creates or changes an item in the
-  login keychain and never shows a keychain prompt. Encrypted profile data (cookies, saved passwords) therefore does
-  not survive a relaunch of a test profile; extension installs and extension state do.
+  login keychain and never shows a keychain prompt. The fake keychain answers with one fixed password
+  (`FakeKeychainV2`, `"mock_password"`), so cookies and saved passwords are still encrypted (`v10` values) and a
+  relaunch of the same test profile reads them back; they are not readable with a real profile's key, and nothing
+  reaches the login keychain (#512 checked both the encrypted rows and the relaunch).
 - `--user-data-dir=<test profile>`: a throwaway profile under `$CHROMIUM_ROOT/profiles` (or
   `~/Library/Application Support/ArktTest` for an installed bundle), never a real browser profile.
 
@@ -139,7 +141,7 @@ replace WebKit's platform and engine tokens with a hand-written copy that drifts
 A self-contained, Arkt-branded, non-component build in its own output directory (`$REL=$CR/out/Arkt`). It shares no
 objects with the component build in `out/Spike`. Branding comes from the GN arg `branding_file_path`, which points at
 `arkt/branding/BRANDING` (no patch): it renames the app (`Arkt.app`), the framework (`Arkt Framework`), the helpers
-(`Arkt Helper*.app`) and the bundle id (`com.arkt.Arkt`, a placeholder). Icons and UI strings stay Chromium's.
+(`Arkt Helper*.app`) and the bundle id (`dev.arkt.Arkt`, #73 and #128; helpers and the framework derive theirs from it). Icons and UI strings stay Chromium's.
 
 `$REL/args.gn`:
 
@@ -207,7 +209,7 @@ personal-information entitlements only on the app):
     $S "Arkt.app/Contents/Frameworks/Arkt Framework.framework"
     $S --options runtime --entitlements $ENT/app-entitlements.plist Arkt.app
     codesign --verify --deep --strict --verbose=2 Arkt.app      # valid on disk, satisfies its Designated Requirement
-    codesign -dv Arkt.app 2>&1 | grep -E '^(Identifier|CodeDirectory)'   # com.arkt.Arkt, flags=0x10000(runtime)
+    codesign -dv Arkt.app 2>&1 | grep -E '^(Identifier|CodeDirectory)'   # dev.arkt.Arkt, flags=0x10000(runtime)
 
 List `"$F"/Helpers` first: every executable there must be covered (11 entries on 156: eight `Arkt Helper*.app`,
 including the four `Aperitif` ones, plus the three tools above). `--timestamp=none` keeps signing offline; a
@@ -291,7 +293,7 @@ not on the Chromium disk (a launch from a removable volume shows the removable-v
 
 **Launch** the executable directly, with the launch flags above, a profile under
 `~/Library/Application Support/ArktTest`, and the `ARKT_*` overrides so the shell's own data, Arc folder and
-defaults stay away from the real ones (the bundle id is the dev app's, `dev.arkt.ArktShell`):
+defaults stay away from the real ones (the bundle id is the product's, `dev.arkt.Arkt`, unless the build overrides it):
 
     T=~/Library/Application\ Support/ArktTest/<run>
     ARKT_DATA_DIR=$T/shell ARKT_ARC_DIR=$T/arc ARKT_DEFAULTS_SUITE=arkt-test-<run> \
@@ -302,7 +304,215 @@ Add `--enable-sandbox-logging` to see seatbelt denials in the unified log (Chrom
 otherwise), and use `/usr/bin/log`, not zsh's `log` builtin:
 `/usr/bin/log show --start '<launch time>' --style compact --predicate 'sender == "Sandbox"' | grep -i arkt`.
 
-Ids in this bundle (until #128 aligns them): app `dev.arkt.ArktShell`; framework `com.arkt.Arkt.framework`; helpers
-`com.arkt.Arkt.helper` (Helper, GPU, Aperitif, Aperitif GPU), `com.arkt.Arkt.helper.renderer` (Renderer, Aperitif
-Renderer), `com.arkt.Arkt.framework.AlertNotificationService` (Alerts, Aperitif Alerts). The Mach rendezvous service
-follows the outer app: `dev.arkt.ArktShell.MachPortRendezvousServer.<browser pid>`.
+Ids in this bundle: see "Product identity" below.
+
+## Preview release
+
+How a maintainer cuts a preview build (v0.1.0-preview.1, tracking issue #481). The preview is an unsigned,
+ad-hoc signed zip on a GitHub pre-release. There is no DMG, no Developer ID signing, no notarization and no update
+feed; those follow in #125. Nothing here is scripted: run the steps in order, in zsh, with the variables from the top
+of this file (`$REPO`, `$CHROMIUM_ROOT`, `$CR`, `$PIN`). The release is the maintainer's to publish; do not run steps
+5 and 6 without that go-ahead.
+
+    export REL=$CR/out/Arkt
+    export VERSION=0.1.0-preview.1
+    export OUT=$CHROMIUM_ROOT/preview-$VERSION     # build and staging folder, outside the repo
+
+### 1. Freeze the overlay and build the engine
+
+Check out the commit to release in `$REPO` and leave it there until the build ends: the build compiles whatever
+overlay and patches are in `$CR`. Do not edit `engine/` or run Apply, Export or a rebase meanwhile. `$REPO` must be
+the worktree that the overlay link points at: `readlink $CR/arkt` prints `$REPO/engine/arkt`, otherwise the build
+compiles another checkout's overlay. Run the disk and swap checks of "Release build (out/Arkt)" first (swap was
+12.8 of 14.3 GiB used on the dry run before the build started; record it), then the release build, with its PID
+recorded so it can be stopped:
+
+    cd $CR && gn gen out/Arkt
+    cd $CR && nice -n 15 autoninja -C out/Arkt chrome > $CHROMIUM_ROOT/build-arkt.log 2>&1 &
+    echo $! > $CHROMIUM_ROOT/build-arkt.pid
+
+The build is incremental: with an up-to-date `out/Arkt` and one new patch it took 94 s (a clean build takes the hours
+listed in "Release build (out/Arkt)"). Wait for it to end before running the checks below.
+
+Check the result:
+
+    tail -3 $CHROMIUM_ROOT/build-arkt.log                       # The build has finished successfully.
+    grep -c FAILED: $CHROMIUM_ROOT/build-arkt.log               # 0
+    wc -l < $REPO/engine/patches/chromium/.patches              # N
+    git -C $CR rev-list --count $PIN..arkt                      # N again: every exported patch is in the build
+
+The two counts must match, and the build must report 0 `FAILED:` lines. If they differ, the checkout is not the
+overlay in the repo: run Export (or Apply) and rebuild.
+
+### 2. Build the Distribution app
+
+Generate the Xcode project (it is not committed), then build the `Distribution` configuration against the engine
+app, into a folder outside the repo (see "Embedding in the app" for what the configuration contains):
+
+    mkdir -p $OUT
+    cd $REPO/app/ArktShell && xcodegen generate
+    cd $REPO && xcodebuild -project app/ArktShell/ArktShell.xcodeproj -scheme ArktShell -configuration Distribution \
+      ARKT_ENGINE_APP=$REL/Arkt.app CONFIGURATION_BUILD_DIR=$OUT/build build
+
+Expect `BUILD SUCCEEDED` and `Engine framework copied: Arkt Framework.framework <version>` in the log (a
+"CoreSimulator is out of date" line from `xcodebuild` is harmless). The product is `$OUT/build/Arkt.app` (executable
+`Arkt`, bundle id `dev.arkt.Arkt`). Xcode signs only the app, ad hoc.
+
+On a machine that has a development build, this build registers `$OUT/build/Arkt.app` and its helpers with
+LaunchServices under the product bundle id. When you delete `$OUT/build` and `$OUT/stage` (after step 4), unregister
+them first, so a stale `dev.arkt.Arkt` entry cannot take over link opens: run
+`lsregister -u $OUT/build/Arkt.app` (`lsregister` is
+`/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister`) and check
+`lsregister -dump | grep -c "path:.*$OUT"` prints `0`, unregistering any remaining helper path the same way.
+
+### 3. Ad-hoc sign a copy
+
+Sign a copy, inside-out, in the order of "Embedding in the app": libraries, tools, helpers, framework, app. The
+identity is `-` (ad hoc). Pass no `--options runtime` and no entitlements: an ad-hoc bundle has no team id, so the
+hardened runtime's library validation would refuse to load the framework, and the entitlements only mean something
+under a real identity.
+
+    rm -rf $OUT/stage && mkdir -p $OUT/stage && ditto $OUT/build/Arkt.app $OUT/stage/Arkt.app && cd $OUT/stage
+    S=(codesign --force --timestamp=none --sign -)
+    FW="Arkt.app/Contents/Frameworks/Arkt Framework.framework"; F="$FW/Versions/Current"
+    for l in "$F"/Libraries/*.dylib; do $S "$l"; done
+    for t in chrome_crashpad_handler app_mode_loader web_app_shortcut_copier; do $S "$F/Helpers/$t"; done
+    for h in "$F"/Helpers/*.app; do $S "$h"; done
+    $S "$FW"
+    $S Arkt.app
+    codesign --verify --deep --strict --verbose=2 Arkt.app      # valid on disk, satisfies its Designated Requirement
+    codesign -dv Arkt.app 2>&1 | grep -E '^(Identifier|Signature|CodeDirectory)'   # dev.arkt.Arkt, Signature=adhoc
+
+List `"$F"/Helpers` first: every executable there must be covered (11 entries on 156). Expect `Signature=adhoc` and
+no `runtime` in the flags. `spctl --assess` reports `rejected`; that is expected for this build.
+
+### 4. Package
+
+Zip with `ditto`, which keeps the bundle's symlinks and metadata (`zip` does not), then record the checksum:
+
+    cd $OUT/stage && ditto -c -k --keepParent Arkt.app $OUT/Arkt-$VERSION-arm64.zip
+    cd $OUT && shasum -a 256 Arkt-$VERSION-arm64.zip | tee Arkt-$VERSION-arm64.zip.sha256
+    ls -l Arkt-$VERSION-arm64.zip                                  # about 196 MB (569 MB unpacked) on 156
+
+### 5. Draft the release and smoke test the asset
+
+Write the notes from `docs/release/0.1.0-preview.1.md` (copy it to a file outside the repo, and put the checksum in
+it). Create a draft pre-release; a draft is not visible to the public:
+
+    gh release create v$VERSION --draft --prerelease --target main \
+      --title "Arkt $VERSION" --notes-file <notes file> \
+      $OUT/Arkt-$VERSION-arm64.zip $OUT/Arkt-$VERSION-arm64.zip.sha256
+
+Smoke test the downloaded asset, not the local build, on a fresh macOS user account (System Settings > Users &
+Groups, a standard user with no Arkt data). Download the zip from the draft release in Safari, so the file carries the
+quarantine flag a user's download carries. Then, as that user:
+
+    cd ~/Downloads && shasum -a 256 Arkt-$VERSION-arm64.zip        # equals the .sha256 file
+    ditto -x -k Arkt-$VERSION-arm64.zip /Applications              # or drag Arkt.app to /Applications
+
+Open it as described in the README ("Download the preview"). What to expect on 156 (dry run, quarantine flag set with
+`xattr -w com.apple.quarantine "0081;$(printf %x $(date +%s));Safari;"`): `spctl -a -vv Arkt.app` prints `rejected`,
+and launching the executable directly shows the "Arkt Not Opened" dialog ("Apple could not verify ...") with the
+buttons Move to Trash and Done. Choose Done, never Move to Trash. The process sits at `_dyld_start` with no window
+until the dialog is answered, and the dialog stays on screen after you kill that process, so do not start a second
+launch before dismissing it. Do not dry-run this on the maintainer's own login: use the fresh user above. Run the
+checklist below. If any item fails, delete the
+draft (`gh release delete v$VERSION --yes --cleanup-tag`), fix the cause and start again from step 1 or 2.
+
+### 6. Publish
+
+Only after the whole checklist passes and the maintainer agrees:
+
+    gh release edit v$VERSION --draft=false
+
+Then check the Releases page shows the asset, the checksum and the pre-release label, and download the published
+asset once more to confirm the checksum.
+
+### A launch that waits at `_dyld_start` (#481)
+
+Direct launch of a quarantined copy parks the process behind Gatekeeper's "Arkt Not Opened" prompt. It is not the
+signing, the framework, the Keychain or the first-launch scan. Seen on the dry run (macOS 27, ad-hoc build, scratch
+`CFFIXED_USER_HOME`):
+
+- `sample <pid>` shows the main thread in `_dyld_start`, a 96 KB footprint, 0 % CPU, no window and no helper
+  processes. CoreServicesUIAgent logs `present code-evaluation prompt` about 10 s after the launch. After 5 minutes
+  the process was still waiting.
+- Killing the process does not clear the prompt, and neither does `xattr -dr com.apple.quarantine`: a second launch
+  of the same bundle, flag removed, waited the same way (0 CPU, no window, `_dyld_start`) for as long as it was
+  watched. A fresh `ditto` copy at another path launched in 8 s while the first prompt was still on screen.
+- Signing is not involved. Step 3 (inside-out, ad hoc) and a one-shot `codesign --deep --sign -` both launch to a
+  window in 8 s, as does a copy with a signature macOS has never seen (no 110 s scan). `--options runtime` on an
+  ad-hoc app fails at once with `dlopen failed` (library validation), and an unsigned app is killed at launch, so
+  neither looks like a hang.
+
+To get out, answer the prompt (Done) or make a fresh copy. To test an app after Open Anyway without that prompt,
+set and clear the flag on a fresh copy before its first launch, then launch the executable by path:
+
+    ditto Arkt.app copy/Arkt.app
+    xattr -w com.apple.quarantine "0081;$(printf %x $(date +%s));Safari;" copy/Arkt.app
+    xattr -dr com.apple.quarantine copy/Arkt.app
+    CFFIXED_USER_HOME=$(mktemp -d) copy/Arkt.app/Contents/MacOS/Arkt --use-mock-keychain & echo $!
+
+The window comes up in about 8 s. Kill that PID and delete the copy and the scratch home afterwards.
+
+### Smoke checklist
+
+Run it on the fresh user, from `/Applications/Arkt.app`, on Apple silicon with macOS 15 or later.
+
+- [ ] Onboarding completes and lands in a window with a sidebar.
+- [ ] Browsing works; a YouTube video plays with sound.
+- [ ] Google sign-in completes.
+- [ ] A Chrome Web Store extension installs and runs.
+- [ ] Cmd-T, Cmd-L, Cmd-N and Cmd-F each do their job.
+- [ ] Three Spaces exist and a trackpad swipe moves between them.
+- [ ] Quit and relaunch restores the Spaces and tabs.
+- [ ] Cmd-W closes a tab and reopening it brings it back.
+- [ ] Camera, microphone and location each show their permission prompt (try a page that requests them).
+- [ ] After Make Default, a link opened from another app opens in Arkt.
+- [ ] Peek opens and dismisses.
+- [ ] Little Arkt opens and dismisses.
+- [ ] Full screen enters and leaves cleanly.
+- [ ] The window moves between a 1x and a 2x display without a blurry or blank frame.
+- [ ] `chrome://credits` loads.
+- [ ] No seatbelt denials for Arkt in the log. Launch once from Terminal with `--enable-sandbox-logging` (see
+      "Embedding in the app"):
+      `/Applications/Arkt.app/Contents/MacOS/Arkt --enable-sandbox-logging`, run the items above, then
+      `/usr/bin/log show --last 30m --style compact --predicate 'sender == "Sandbox"' | grep -i arkt` prints nothing.
+
+## Product identity (#128)
+
+One prefix, `dev.arkt.*` (#73), for everything a user's machine binds to: app `dev.arkt.Arkt` (`PRODUCT_BUNDLE_IDENTIFIER`,
+shown as "Arkt"), framework `dev.arkt.Arkt.framework`, helpers `dev.arkt.Arkt.helper` (Helper, GPU, Aperitif, Aperitif
+GPU), `dev.arkt.Arkt.helper.renderer` (Renderer, Aperitif Renderer) and
+`dev.arkt.Arkt.framework.AlertNotificationService` (Alerts, Aperitif Alerts). The framework and helper ids come from
+`MAC_BUNDLE_ID` in `arkt/branding/BRANDING`, which must equal the app id (`ProductIdentityTests` pins it). The Mach
+rendezvous service follows the outer app: `<app id>.MachPortRendezvousServer.<browser pid>`.
+
+Data folders, all under `~/Library/Application Support`:
+
+| Folder | Holds | Set by |
+|---|---|---|
+| `Arkt` | the shell's database, backups, favicons | `DatabaseLocation.productFolderName` |
+| `Arkt/Engine` | the product engine's default user-data-dir | `CrProductDirName` in the app's Info.plist |
+| `Arkt Dev Engine` | the development engine's default user-data-dir | the same key, from `Engine.xcconfig` |
+
+`CrProductDirName` is written by the embed build phase from the build setting `ARKT_PRODUCT_DIR_NAME`
+(`app/ArktShell/Engine.xcconfig`, default `Arkt Dev Engine`, so a development build never shares a profile with the
+product). The Distribution configuration (#334) sets the product value, `ARKT_PRODUCT_DIR_NAME=Arkt/Engine`, in
+`app/ArktShell/Distribution.xcconfig`.
+
+Distribution is the shipped app: the Engine configuration's engine-backed shell, optimized (`-O`, whole module), named
+`Arkt.app`, without the test-only code. It does not link `EngineAPITestSupport` (so the contract runner and its
+loopback server are not in the binary), compiles the `ARKT_*` overrides and the `--arkt-engine-contract` switch out
+(`ArktEnvironmentOverrides` is `NO`; the stand-in shell and its probes go with them), and writes `CrProductDirName` = `Arkt/Engine`. Build it like the Engine
+configuration, against the self-contained engine app:
+
+    cd $REPO/app/ArktShell && xcodebuild -scheme ArktShell -configuration Distribution \
+      ARKT_ENGINE_APP=$REL/Arkt.app CONFIGURATION_BUILD_DIR=<output dir> build
+
+The result is `Arkt.app` with the engine framework embedded. Signing and the hardened-runtime check (#125) follow the
+steps above and are not part of the configuration yet.
+
+The key is a seam (Chromium's `chrome_paths_mac.mm` reads it from the outer bundle; its fallback is `Chromium`), so there
+is no patch. The keychain item stays "Arkt Safe Storage" (patch 0003); the existing "Chromium Safe Storage" item is
+the maintainer's and is never touched (#20).

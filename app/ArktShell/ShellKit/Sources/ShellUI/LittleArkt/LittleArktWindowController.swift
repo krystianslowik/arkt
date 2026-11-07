@@ -7,10 +7,17 @@ import EngineAPI
 ///
 /// The engine owns the close: the close button, Cmd-W and Close Window animate the window out and ask the engine,
 /// which closes the tabs and reports `.windowClosed`; a page that closes its popup (`window.close()`) arrives the same
-/// way and fades the window out. Open in fades the window out (the no-flight path), then the main window takes the
-/// tab (`EngineClient.moveTab`) and the engine closes the emptied window.
+/// way and fades the window out. Open in flies a snapshot of the page into the main window's content card
+/// (`LittleArktFlight`, #352) and moves the tab at rest (`EngineClient.moveTab`); the engine then closes the emptied
+/// window. Without the flight (Reduce Motion, no main window the user can see) the window fades out, then the tab
+/// moves.
 ///
-/// A responder after the window (`nextResponder`), so the main menu's Archive Tab (`closeTab:`) reaches it.
+/// A close the user asks for (close button, Cmd-W) and the idle timer's close archive the page under the Archive's
+/// Little Arkt source (#355, BH-138, BH-137) once the engine closed the window; a page that closes its own popup, a
+/// quit and a hand-off archive nothing.
+///
+/// A responder after the window (`nextResponder`), so the main menu's Archive Tab (`closeTab:`) and Reopen Closed Tab
+/// (`reopenClosedTab:`) reach it.
 @MainActor
 public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
   private enum Phase: Equatable {
@@ -19,6 +26,8 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
     case open
     /// Fading out before the page moves to the main window.
     case handingOff
+    /// The snapshot flies to the main window; the page moves when it lands.
+    case flying
     /// The page went to the main window; the engine closes this window.
     case handedOff
     /// Animating out for a close the user asked for; the engine is asked when the motion ends.
@@ -28,6 +37,8 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
 
   public let engine: any EngineClient
   public let isPopup: Bool
+  /// Names the window for the idle timer (#355).
+  public let id = UUID()
   let window: LittleArktWindow
   let rootView: LittleArktRootView
   public let engineHost: LittleArktEngineHost
@@ -35,12 +46,40 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
   /// The tab whose page the card shows.
   public private(set) var shownTab: TabID?
   private(set) var lastTransition: LittleArktTransition?
-  private var phase = Phase.pending
+  private var phase = Phase.pending {
+    didSet {
+      guard phase != oldValue else { return }
+      javaScriptDialogs.refresh()                                       // a panel goes while the window is not open
+      infobarStrips.refresh()
+    }
+  }
+  /// A page's `alert()`, `confirm()` and `prompt()` as panels over its page (#471). The same presenter the main window
+  /// uses: it shows the panel while the page is on screen here, and hands the dialog over (`release` / `adopt`, #467)
+  /// when Open in moves the page.
+  private(set) lazy var javaScriptDialogs = makeJavaScriptDialogPresenter()
+  /// The page's infobars as a strip at the top of its page (#400); the engine reserves the strip's height there.
+  private(set) lazy var infobarStrips = makeInfobarPresenter()
+  /// The crashed tab view over the page when its process went away (#683).
+  private(set) lazy var crashedTabs = makeCrashedTabPresenter()
+  /// The pending dialog of the page on its way to the main window (Open in), from the start of the fade or flight
+  /// until the page lands (it goes with it) or stays (it comes back to this window's presenter).
+  private var carriedDialog: JavaScriptDialog?
   private let animator = LittleArktAnimator(scene: .rest)
   private var tabObservation: EngineObservation?
   private var windowObservation: EngineObservation?
   /// The engine closed the window while it was still moving out; it closes when the motion ends.
   private var engineClosed = false
+  /// The Open in flight while it runs, through its crossfade.
+  private(set) var flight: LittleArktFlight?
+  private var snapshotTask: Task<Void, Never>?
+  /// The page and frame a close the user (or the idle timer) asked for, captured by `requestClose` because the engine
+  /// has closed the tab by the time it reports the window closed. Archived (`onArchiveClose`) when the window closes
+  /// with `.userClose`; forgotten when a leave-site prompt cancels the close, when Open in moves the page, and when
+  /// the window closes for any other reason (a quit, an extension).
+  private var requestedClose: LittleArktClosedWindow?
+  /// The last time the user was in the window: it opened, became key or stopped being key. A page that navigates on
+  /// its own (a refresh, a polling dashboard) does not count.
+  public private(set) var lastActiveAt = Date.distantPast
 
   // MARK: Hooks (set by ShellWindowSet)
 
@@ -50,17 +89,53 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
   /// The Spaces the chooser lists, in sidebar order.
   var spaces: @MainActor () -> [SidebarSpaceInfo] = { [] }
   /// Moves `tab` into the main window as the first Today tab of `space` (nil: the target Space); false when it could
-  /// not, and the page stays here.
-  var onOpenIn: @MainActor (TabID, SpaceID?) -> Bool = { _, _ in false }
+  /// not, and the page stays here. The page's pending dialog goes with it.
+  var onOpenIn: @MainActor (TabID, SpaceID?, JavaScriptDialog?) -> Bool = { _, _, _ in false }
+  /// The chooser's Open in New Window (#356): moves `tab` into a new main window, on the Space Open in names; false
+  /// when it could not, and the page stays here.
+  var onOpenInNewWindow: @MainActor (TabID, JavaScriptDialog?) -> Bool = { _, _ in false }
   /// The user resized the window: new windows use the size (BH-142).
   var onResize: @MainActor (CGSize) -> Void = { _ in }
   /// The window closed; the set forgets it.
   var onClosed: @MainActor (LittleArktWindowController) -> Void = { _ in }
+  /// A close the user or the idle timer asked for ended: the page goes to the Archive and the window can be reopened.
+  /// Runs before `onClosed`.
+  var onArchiveClose: @MainActor (LittleArktClosedWindow) -> Void = { _ in }
+  /// Reopen Closed Tab (Cmd-Shift-T) while this window is key; `canReopenClosed` enables the menu item.
+  var onReopenClosed: @MainActor () -> Void = {}
+  var canReopenClosed: @MainActor () -> Bool = { false }
+  /// The clock `lastActiveAt` reads (tests set it).
+  var now: @MainActor () -> Date = { Date() }
+  /// The open main window Open in flies to; nil takes today's path (which opens one).
+  var flightDestination: @MainActor () -> (any LittleArktFlightDestination)? = { nil }
+  /// Whether the main window can take the flight (minimized, another desktop, full screen); Reduce Motion is added.
+  var mainWindowConditions: @MainActor (NSWindow) -> LittleArktFlightConditions = {
+    LittleArktFlightConditions(window: $0)
+  }
+  /// Schedules the flight's watchdog checks (tests inject a clock of their own); nil: the real clock.
+  var flightWatchdog: LittleArktFlightWatchdog?
+  /// The page's frame for the flight; nil asks the engine (`snapshot(of:)`).
+  var snapshotSource: (@MainActor (TabID) async -> LittleArktSnapshot?)?
+  /// Tests turn this off and step the motion and the flight by hand.
+  var drivesDisplayLink = true {
+    didSet { animator.drivesDisplayLink = drivesDisplayLink }
+  }
+  /// The clock the window's own motion reads (tests set it by hand).
+  var motionClock: @MainActor () -> CFTimeInterval {
+    get { animator.now }
+    set { animator.now = newValue }
+  }
 
   var topBar: LittleArktTopBar { rootView.topBar }
   var card: ContentCardView { rootView.card }
   public var isClosed: Bool { phase == .closed }
+  /// Open and showing its page, not moving it out or closing.
+  var isOpen: Bool { phase == .open }
+  /// The top bar's Space chooser is up (its delegate reports the open and the close); it owns Esc meanwhile.
+  var isChooserOpen = false
   var isAnimating: Bool { animator.isRunning }
+  /// What the window's own motion shows now.
+  var currentScene: LittleArktScene { animator.currentScene }
   var contentLayer: CALayer? { rootView.layer }
 
   init(engine: any EngineClient, isPopup: Bool, frame: CGRect) {
@@ -77,6 +152,10 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
     window.commandHost = engineHost
     window.onKeyEquivalent = { [weak self] event in self?.handleKeyEquivalent(event) ?? false }
     engineHost.controller = self
+    rootView.onLayout = { [weak self] in
+      self?.javaScriptDialogs.layoutDidFinish()
+      self?.infobarStrips.layoutDidFinish()
+    }
     topBar.openButton.target = self
     topBar.openButton.action = #selector(openInAction(_:))
     topBar.chooserButton.target = self
@@ -97,9 +176,13 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
   func adopt(engineWindow id: EngineWindowID) {
     guard engineWindow == nil, phase == .pending else { return }
     engineWindow = id
+    lastActiveAt = now()
     tabObservation = engine.observe(window: id) { [weak self] event in self?.handle(event) }
     windowObservation = engine.observeWindows { [weak self] event in
-      guard let self, event.windowID == self.engineWindow, case .windowClosed = event else { return }
+      guard let self, event.windowID == self.engineWindow, case .windowClosed(_, let reason) = event else { return }
+      // Only the close that was asked for archives: a quit or an extension ending the window while a leave-site
+      // prompt is up does not.
+      if reason != .userClose { self.requestedClose = nil }
       self.engineWindowClosed()
     }
     if let active = engine.activeTab(in: id) { mount(active) }
@@ -117,14 +200,65 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
       mount(tab)
     case .urlChanged(let tab, _) where tab == shownTab:
       refreshTopBar()
+    case .closeCancelled(let tab) where tab == shownTab:
+      requestedClose = nil                                    // the user stayed at the leave-site prompt
     case .titleChanged(let tab, let title) where tab == shownTab:
       window.title = title
+    case .dialogRequested(let dialog) where isCarrying && dialog.tab == shownTab:
+      carriedDialog = dialog                                  // raised in the air: it goes with the page
+    case .dialogEnded(_, let id) where isCarrying && carriedDialog?.id == id:
+      carriedDialog = nil
+    case .dialogRequested, .dialogEnded:
+      javaScriptDialogs.handle(event)                         // #471
+    case .infobarsChanged, .tabFullscreenChanged:
+      infobarStrips.handle(event)                             // #400; rows hide in HTML fullscreen (#581)
+      javaScriptDialogs.refresh()                             // the panel follows the rows' height
+    case .tabCrashed(let tab, _) where tab == shownTab:
+      refreshCrashedTab(crashed: tab)                         // #683
+    case .tabRecovered(let tab) where tab == shownTab:
+      refreshCrashedTab()
     case .tabClosed(let tab, _) where tab == shownTab:
       shownTab = nil
       if card.contentView?.isDescendant(of: rootView) == true { card.setContent(nil) }
+      refreshCrashedTab()
+      flight?.abort(.pageClosed)                              // nothing left to land; the engine closes the window
     default:
       break
     }
+  }
+
+  private var isCarrying: Bool { phase == .handingOff || phase == .flying }
+
+  /// The anchor of a dialog's panel: the page of the tab this window shows, while the window is open.
+  private func makeJavaScriptDialogPresenter() -> JavaScriptDialogPresenter {
+    let presenter = JavaScriptDialogPresenter(engine: engine, anchor: pageAnchor)
+    presenter.host.topInset = { [weak self] tab in self?.infobarStrips.height(of: tab) ?? 0 }
+    return presenter
+  }
+
+  /// The infobars of the page this window shows, while the window is open.
+  private func makeInfobarPresenter() -> InfobarPresenter {
+    InfobarPresenter(engine: engine, anchor: pageAnchor)
+  }
+
+  private func pageAnchor(_ tab: TabID) -> NSView? {
+    guard phase == .open, tab == shownTab, let view = engine.contentView(for: tab), view.window === window,
+          !view.isHiddenOrHasHiddenAncestor else { return nil }
+    return view
+  }
+
+  /// The page stays here, so its dialog comes back to this window's presenter.
+  private func takeBackCarriedDialog() {
+    guard let dialog = carriedDialog else { return }
+    carriedDialog = nil
+    javaScriptDialogs.adopt(dialog)
+  }
+
+  /// A tab the window set moved in (Opt-Cmd-click on a sidebar tab, #356): shown, unless the engine's activation of
+  /// it mounted it already.
+  func showMovedTab(_ tab: TabID) {
+    guard phase == .open, shownTab != tab, engine.snapshot(of: tab)?.window == engineWindow else { return }
+    mount(tab)
   }
 
   private func mount(_ tab: TabID) {
@@ -133,6 +267,7 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
     card.setContent(view)
     window.title = engine.snapshot(of: tab)?.title ?? ""
     refreshTopBar()
+    refreshCrashedTab()
     if window.isKeyWindow { engine.focusPage(of: tab) }
   }
 
@@ -147,8 +282,11 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
     switch phase {
     case .closing where !animator.isRunning:
       finishClose()                                         // the close motion ended before the engine answered
-    case .closing, .handingOff:
+    case .closing, .handingOff, .flying:
       engineClosed = true
+    case .handedOff where flight != nil:
+      engineClosed = true                                   // closes when the flight's crossfade ends
+      window.orderOut(nil)
     case .handedOff, .pending:
       finishClose()
     case .open:
@@ -166,6 +304,10 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
     rootView.removeToolTipsInSubtree()                      // a tool tip shown at the close goes with it (#301)
     window.orderOut(nil)
     window.close()
+    if let requestedClose {
+      self.requestedClose = nil
+      onArchiveClose(requestedClose)
+    }
     onClosed(self)
   }
 
@@ -179,26 +321,53 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
 
   public func windowWillClose(_ notification: Notification) {
     rootView.removeToolTipsInSubtree()
+    flight?.abort(.smallWindowClosing)                        // the page lands in the main window first
+    javaScriptDialogs.closeAll()                              // the engine ends the dialog; nothing answers it
+    infobarStrips.closeAll()
     guard phase != .closed else { return }
     phase = .closed
     onClosed(self)
   }
 
-  /// The main menu's Archive Tab (Cmd-W) closes the window (KB-080). Archiving under the Little Arkt source comes
-  /// with the Archive's source (follow-up).
+  /// The main menu's Archive Tab (Cmd-W) closes the window and archives its page (KB-080, BH-138).
   @objc public func closeTab(_ sender: Any?) {
     window.performClose(sender)
   }
 
+  /// File > Reopen Closed Tab (Cmd-Shift-T) while a Little Arkt window is key: the last closed Little Arkt window
+  /// comes back (#355).
+  @objc public func reopenClosedTab(_ sender: Any?) {
+    onReopenClosed()
+  }
+
+  /// The idle timer closes the window (BH-137): the same close as the user's, archived as idle.
+  func closeForIdle() {
+    requestClose(idle: true)
+  }
+
   /// Scale 0.97 and fade (`firmFast`), then the engine closes the window. A page that would ask before leaving
   /// (`beforeunload`) is asked at once, without the motion, so its prompt is never on an invisible window.
-  func requestClose() {
+  /// `withMotion` false asks the engine at once (a hidden window, Close Little Arkt Windows); the page is recorded for
+  /// the Archive and Cmd-Shift-T either way.
+  func requestClose(idle: Bool = false, withMotion: Bool = true) {
+    if phase == .flying {
+      flight?.abort(.closeRequested)                          // the page lands now, never stranded in a hidden window
+      if phase == .handedOff { return }                       // the engine closes the emptied window
+    }
     guard phase == .open, engineWindow != nil else { return }
+    requestedClose = shownTab.flatMap { engine.snapshot(of: $0) }.flatMap { page in
+      page.url.map { LittleArktClosedWindow(url: $0, title: page.title, frame: window.frame, isIdle: idle) }
+    }
     if let shownTab, engine.snapshot(of: shownTab)?.wouldHoldClose == true {
       engineHost.onCloseRequested?()
       return
     }
     phase = .closing
+    guard withMotion else {
+      engineHost.onCloseRequested?()                          // an in-process engine may close at once
+      if engineClosed || engineWindow == nil { finishClose() }
+      return
+    }
     run(.close) { [weak self] _ in
       guard let self else { return }
       if !self.engineClosed { self.engineHost.onCloseRequested?() }   // an in-process engine may close at once
@@ -206,14 +375,44 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
     }
   }
 
+  // MARK: Dock and Window menus (#356)
+
+  /// The window's row in the Dock and Window menus: its page title, else its host.
+  var menuTitle: String {
+    let url = shownTab.flatMap { engine.snapshot(of: $0)?.url }
+    return LittleArktCopy.menuTitle(pageTitle: window.title, host: LittleArktCopy.host(of: url))
+  }
+
+  /// A Dock or Window menu row: the window comes forward as key, also from Hide All.
+  func bringForward() {
+    guard phase == .open else { return }
+    window.makeKeyAndOrderFront(nil)
+    NSApp.activate()
+  }
+
+  /// Close Little Arkt Windows: the same close as Cmd-W, so the page goes to the Archive and Cmd-Shift-T brings it
+  /// back (#355). A hidden window closes without the motion (it would run where nobody sees it), unless its page asks
+  /// before leaving: then it comes forward first, so the prompt is never on a hidden window.
+  func closeFromMenu() {
+    guard phase == .open, engineWindow != nil else { return }
+    if !window.isVisible, let shownTab, engine.snapshot(of: shownTab)?.wouldHoldClose == true {
+      window.orderFront(nil)
+    }
+    requestClose(withMotion: window.isVisible)
+  }
+
   // MARK: Open in (Cmd-O, KB-076)
 
   @objc private func openInAction(_ sender: Any?) { openIn() }
 
   /// The page moves into the target Space of the main window, as the first Today tab, selected, with its history
-  /// and state (BH-136). The no-flight path for now: this window fades out (0.12 s), then the tab moves.
+  /// and state (BH-136). With an open main window the user can see, the page flies there (`beginFlight`); otherwise
+  /// this window fades out (0.12 s), then the tab moves.
   func openIn(space: SpaceID? = nil) {
     guard phase == .open, let tab = shownTab else { return }
+    requestedClose = nil                                    // the page moves on: a close held at a prompt is gone
+    if beginFlight(tab, space: space) { return }
+    carriedDialog = javaScriptDialogs.release(tab)          // the panel goes at once; the main window shows it
     phase = .handingOff
     run(.fadeOut) { [weak self] completed in
       guard completed else { return }
@@ -221,29 +420,180 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
     }
   }
 
-  private func commitOpenIn(_ tab: TabID, space: SpaceID?) {
+  /// The chooser's Open in New Window (#356): this window fades out (0.12 s), then the tab moves into a new main
+  /// window as its first Today tab, selected. No flight: the window it lands in is not on screen yet.
+  func openInNewWindow() {
+    guard phase == .open, let tab = shownTab else { return }
+    carriedDialog = javaScriptDialogs.release(tab)
+    phase = .handingOff
+    run(.fadeOut) { [weak self] completed in
+      guard completed else { return }
+      self?.commitOpenIn(tab, space: nil, newWindow: true)
+    }
+  }
+
+  private func commitOpenIn(_ tab: TabID, space: SpaceID?, newWindow: Bool = false) {
     guard phase == .handingOff else { return }
-    let spaceName = (space.flatMap { id in spaces().first { $0.id == id } } ?? targetSpace())?.title
+    let spaceName = self.spaceName(space)
     card.releaseContent()                                   // the main window's card takes the page's view
-    guard onOpenIn(tab, space) else {
+    let moved = newWindow ? onOpenInNewWindow(tab, carriedDialog) : onOpenIn(tab, space, carriedDialog)
+    guard moved else {
       phase = .open
       if let view = engine.contentView(for: tab) { card.setContent(view) }
+      refreshCrashedTab()                                   // #683: a crash during the handoff
+      takeBackCarriedDialog()
       run(.appear) { _ in }
       return
     }
+    carriedDialog = nil                                     // adopted by the main window
+    handedOff(spaceName: spaceName)
+  }
+
+  private func spaceName(_ space: SpaceID?) -> String? {
+    (space.flatMap { id in spaces().first { $0.id == id } } ?? targetSpace())?.title
+  }
+
+  private func handedOff(spaceName: String?) {
     phase = .handedOff
     NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested, userInfo: [
       .announcement: LittleArktCopy.announcement(spaceName: isPopup ? nil : spaceName),
       .priority: NSAccessibilityPriorityLevel.high.rawValue,
     ])
-    if engineClosed || engineWindow == nil { finishClose() }
+    if flight == nil, engineClosed || engineWindow == nil { finishClose() }
+  }
+
+  // MARK: Open in flight (#352)
+
+  /// Flies the page's snapshot from this card into the open main window's content card, from wherever this window's
+  /// motion has the card now (an Open in during the appear picks up its scale and opacity). The row appears in the
+  /// main window's sidebar at once (drawn by the flight); the page moves at rest. False when the flight does not
+  /// apply: no open main window, one the user cannot see, Reduce Motion, or a row the sidebar refuses.
+  private func beginFlight(_ tab: TabID, space: SpaceID?) -> Bool {
+    requestedClose = nil
+    guard let destination = flightDestination(), let mainWindow = destination.flightWindow else { return false }
+    var conditions = mainWindowConditions(mainWindow)
+    conditions.reduceMotion = conditions.reduceMotion || reduceMotion()
+    guard conditions.allowsFlight, let target = destination.flightCardFrame else { return false }
+    rootView.layoutSubtreeIfNeeded()
+    let scene = animator.currentScene
+    let source = LittleArktFlightGeometry.visibleCard(card.frame, in: rootView.bounds, scene: scene,
+                                                      windowOrigin: window.frame.origin)
+    guard let node = destination.beginReceiving(tab, in: space) else { return false }
+    let level = NSWindow.Level(rawValue: max(NSWindow.Level.floating.rawValue,
+                                             max(window.level.rawValue, mainWindow.level.rawValue) + 1))
+    let flight = LittleArktFlight(source: source, scale: scene[.scale], opacity: scene[.opacity], target: target,
+                                  span: window.frame.union(mainWindow.frame), level: level,
+                                  flavor: ThemeFlavor(appearance: mainWindow.effectiveAppearance))
+    flight.drivesDisplayLink = drivesDisplayLink
+    let spaceName = self.spaceName(space)
+    flight.onStart = { [weak self, weak mainWindow] in
+      guard let self else { return }
+      self.window.ignoresMouseEvents = true                   // the page underneath is hidden from here on
+      self.run(.fadeOut) { _ in }                             // the small frame fades at once (0.12 s)
+      mainWindow?.orderFront(nil)                             // the main window comes forward at the start
+    }
+    flight.onRoom = { [weak destination] room, row in destination?.presentArrival(of: node, room: room, appear: row) }
+    flight.onLand = { [weak self, weak destination] in
+      self?.landFlight(tab, node: node, destination: destination, spaceName: spaceName)
+    }
+    flight.onAbort = { [weak self, weak destination] reason in
+      self?.flightAborted(reason, tab, node: node, destination: destination, spaceName: spaceName)
+    }
+    flight.onFinish = { [weak self] in self?.flightFinished() }
+    flight.watchdog = flightWatchdog
+    self.flight = flight
+    carriedDialog = javaScriptDialogs.release(tab)          // the panel goes at once; the main window shows it
+    phase = .flying
+    snapshotTask = Task { [weak self] in
+      guard let self else { return }
+      let snapshot: LittleArktSnapshot?
+      if let source = self.snapshotSource {
+        snapshot = await source(tab)
+      } else {
+        snapshot = await self.snapshot(of: tab)
+      }
+      self.flight?.snapshotArrived(snapshot)
+    }
+    flight.start(on: mainWindow.contentView)
+    return true
+  }
+
+  /// The page's current frame from the engine, uncapped (`.fullFrame`), decoded off the main actor.
+  private func snapshot(of tab: TabID) async -> LittleArktSnapshot? {
+    guard let page = await engine.pageImage(of: tab, .fullFrame) else { return nil }
+    return await LittleArktSnapshot.decode(page)
+  }
+
+  /// At rest: the page moves once, into the main card at its final size; the snapshot stays over it until its
+  /// first frame there.
+  private func landFlight(_ tab: TabID, node: NodeID,
+                          destination: (any LittleArktFlightDestination)?, spaceName: String?) {
+    guard phase == .flying else { return }
+    snapshotTask?.cancel()
+    snapshotTask = nil
+    card.releaseContent()                                   // the main window's card takes the page's view
+    if destination?.finishReceiving(tab, node: node, clearingPrevious: true, dialog: carriedDialog) == true {
+      carriedDialog = nil                                   // adopted by the main window
+      handedOff(spaceName: spaceName)
+      return
+    }
+    // The main window went away mid-flight: the page stays here (another window would add a second row for it).
+    keepPage(tab, node: node, destination: destination)
+  }
+
+  /// The flight ended early (`LittleArktFlight.abort`). The page lands in the main window without the flight, stays
+  /// here when that window is going away, or, when the page closed itself, there is nothing to land.
+  private func flightAborted(_ reason: LittleArktFlightAbort, _ tab: TabID, node: NodeID,
+                             destination: (any LittleArktFlightDestination)?, spaceName: String?) {
+    guard phase == .flying else { return }
+    switch reason {
+    case .mainWindowClosed:
+      snapshotTask?.cancel()
+      snapshotTask = nil
+      keepPage(tab, node: node, destination: destination)
+    case .pageClosed:
+      snapshotTask?.cancel()
+      snapshotTask = nil
+      destination?.cancelReceiving(tab, node: node)
+      carriedDialog = nil                                     // the page and its dialog are gone
+      phase = .handedOff                                      // the engine closes this window; no appear on it
+      if engineClosed || engineWindow == nil { finishClose() }
+    case .mainWindowMiniaturized, .framesStopped, .appTerminating, .smallWindowClosing, .closeRequested:
+      landFlight(tab, node: node, destination: destination, spaceName: spaceName)
+    }
+  }
+
+  /// The page stays in this window: the row made for it goes, and the window comes back.
+  private func keepPage(_ tab: TabID, node: NodeID, destination: (any LittleArktFlightDestination)?) {
+    destination?.cancelReceiving(tab, node: node)
+    phase = .open
+    window.ignoresMouseEvents = false
+    if let view = engine.contentView(for: tab) { card.setContent(view) }
+    refreshCrashedTab()                                     // #683: a crash during the flight
+    takeBackCarriedDialog()
+    run(.appear) { _ in }
+  }
+
+  private func flightFinished() {
+    flight = nil
+    guard phase == .handedOff, engineClosed || engineWindow == nil else { return }
+    finishClose()
   }
 
   // MARK: Space chooser (Cmd-Opt-O, KB-077)
 
   @objc func showChooser(_ sender: Any?) {
     guard phase == .open else { return }
+    let menu = chooserMenu()
+    let anchor = topBar.chooserButton
+    menu.popUp(positioning: nil, at: Self.menuOrigin(below: anchor), in: anchor)
+  }
+
+  /// "Open in", every Space with its swatch (the target one with Cmd-O), "Open in New Window", "Copy Link"
+  /// (docs/design/little-arkt.md, Copy).
+  func chooserMenu() -> NSMenu {
     let menu = NSMenu(title: LittleArktCopy.chooseSpace)
+    menu.delegate = self
     let heading = NSMenuItem(title: LittleArktCopy.chooserHeading, action: nil, keyEquivalent: "")
     heading.isEnabled = false
     menu.addItem(heading)
@@ -260,12 +610,18 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
       menu.addItem(item)
     }
     menu.addItem(.separator())
+    let newWindow = NSMenuItem(title: LittleArktCopy.openInNewWindow, action: #selector(openInNewWindowAction(_:)),
+                               keyEquivalent: "")
+    newWindow.target = self
+    menu.addItem(newWindow)
+    menu.addItem(.separator())
     let copy = NSMenuItem(title: LittleArktCopy.copyLink, action: #selector(copyLink(_:)), keyEquivalent: "")
     copy.target = self
     menu.addItem(copy)
-    let anchor = topBar.chooserButton
-    menu.popUp(positioning: nil, at: Self.menuOrigin(below: anchor), in: anchor)
+    return menu
   }
+
+  @objc private func openInNewWindowAction(_ sender: Any?) { openInNewWindow() }
 
   /// 4 pt below `view`'s bottom edge, in its own coordinates (a button is flipped).
   static func menuOrigin(below view: NSView) -> NSPoint {
@@ -303,7 +659,7 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
   func refreshTopBar() {
     let url = shownTab.flatMap { engine.snapshot(of: $0)?.url }
     let target = targetSpace()
-    topBar.configure(host: LittleArktCopy.host(of: url), fullURL: url?.absoluteString ?? "",
+    topBar.configure(host: LittleArktCopy.host(of: url), fullURL: LittleArktCopy.fullAddress(of: url),
                      secure: url?.scheme == "https",
                      openLabel: LittleArktCopy.openLabel(isPopup: isPopup, spaceName: target?.title),
                      openHelp: LittleArktCopy.openHelp(isPopup: isPopup, spaceName: target?.title),
@@ -311,7 +667,26 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
   }
 
   public func windowDidBecomeKey(_ notification: Notification) {
+    lastActiveAt = now()
     refreshTopBar()
+  }
+
+  public func windowDidResignKey(_ notification: Notification) {
+    lastActiveAt = now()
+  }
+
+  /// Marks the window in use now (the idle timer's pass while the user is in it).
+  func touch() {
+    lastActiveAt = now()
+  }
+
+  /// Open and showing its page: the idle timer may consider it.
+  var isOpenForIdle: Bool { phase == .open && engineWindow != nil }
+
+  /// The page plays sound (BH-076) or would ask before it leaves: the idle timer leaves the window open.
+  var pageKeepsWindowOpen: Bool {
+    guard let shownTab, let page = engine.snapshot(of: shownTab) else { return false }
+    return page.isAudible || page.wouldHoldClose
   }
 
   public func windowDidEndLiveResize(_ notification: Notification) {
@@ -341,5 +716,29 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
   /// Settles the running transition at once (tests).
   func finishMotion() {
     animator.settleNow()
+  }
+}
+
+extension LittleArktWindowController: NSMenuItemValidation {
+  public func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+    if menuItem.action == #selector(reopenClosedTab(_:)) { return canReopenClosed() }
+    return true
+  }
+}
+
+/// A Little Arkt window closed by the user or the idle timer (#355): its page for the Archive, and its frame for
+/// Reopen Closed Tab.
+public struct LittleArktClosedWindow: Equatable, Sendable {
+  public let url: URL
+  public let title: String
+  public let frame: CGRect
+  /// Closed by the idle timer (BH-137) rather than by the user.
+  public let isIdle: Bool
+
+  public init(url: URL, title: String, frame: CGRect, isIdle: Bool) {
+    self.url = url
+    self.title = title
+    self.frame = frame
+    self.isIdle = isIdle
   }
 }

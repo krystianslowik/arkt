@@ -155,6 +155,17 @@ Overlay fixes are committed on the rebase branch, one commit per fix, with the r
 needs an upstream change is a new patch only after the patch budget gate (section 6) allows it; say so in the
 issue first.
 
+### Patch 0010 (UpdateTargetURL hook, #114)
+
+One hunk (five lines) in `BrowserWebContentsDelegate::UpdateTargetURL` (`browser_web_contents_delegate.cc`), calling
+`arkt::NotifyTargetURLChanged` under `BUILDFLAG(IS_MAC)` before the status bubble loop. It relies on patch 0009 for the
+`arkt/browser/arkt_link_activation.h` include and for the `//arkt/browser:link_activation` dependency in the delegate's
+`BUILD.gn`, so apply it after 0009 and drop neither alone. On a rebase check that `UpdateTargetURL` still exists in
+`WebContentsDelegate` with the signature `(WebContents*, const GURL&)` and still reaches the bubble code only through
+`GetStatusBubbles()`; that Arkt windows still return no bubbles (a bubble that is not `StatusBubbleViews` is a bad
+cast); and that `rule 23` of the in-app contract runner (`--arkt-engine-contract=hoveredLinkReportsItsTargetURL`) passes.
+If upstream adds a target URL observer to `WebContentsObserver`, drop the patch and observe it in the facade instead.
+
 ## 6. Patch budget gate
 
 Run after Export and before the verification:
@@ -212,7 +223,7 @@ A failed check blocks the merge. Fix it on the rebase branch, or roll back (sect
    staples before install.
 2. Keep the previous installed bundle for rollback, then replace it (W10 Step 1):
 
-       codesign -dv /Applications/Arkt.app 2>&1 | grep Identifier=com.arkt.Arkt
+       codesign -dv /Applications/Arkt.app 2>&1 | grep Identifier=dev.arkt.Arkt
        mkdir -p $CHROMIUM_ROOT/releases && ditto /Applications/Arkt.app $CHROMIUM_ROOT/releases/Arkt-$OLD.app
        rm -rf /Applications/Arkt.app && ditto $CR/out/Arkt/Arkt.app /Applications/Arkt.app
 

@@ -11,8 +11,9 @@ import Testing
 ///   Black and white are the same in sRGB and P3, so the black/white text levels composite exactly.
 /// - The composited color is converted to sRGB (unclamped) before `Contrast.ratio`, so P3 luminance is not
 ///   read through sRGB coefficients.
-/// - Gradients are sampled between every pair of stops, because the luminance of a component-wise blend can dip
-///   below both ends.
+/// - Gradients are sampled between every pair of stops in OKLab (`ThemeGradient.mix`), the interpolation the window
+///   draws (#381); the luminance of a blend can dip below both ends. A theme's overlay colors are composited over
+///   each sample at the same position.
 /// - The texture multiplies the gradient (#120), so it darkens: each sample is also measured multiplied by the
 ///   theme's mean texture factor (`SpaceThemeInfo.meanTextureFactor`, encoded components).
 /// - Arc-imported themes are user data and not covered; the measured set is what ships: the bridge default, the
@@ -46,9 +47,15 @@ enum ShellContrastProbe {
 
   static func sampleGradient(_ theme: SpaceThemeInfo) -> [RGBA] {
     let stops = theme.baseColors.map(toP3)
-    let samples = stops.count > 1 ? zip(stops, stops.dropFirst()).flatMap { a, b in
-      (0...samplesPerSegment).map { RGBA.mix(a, b, Double($0) / Double(samplesPerSegment)) }
+    var samples = stops.count > 1 ? zip(stops, stops.dropFirst()).flatMap { a, b in
+      (0...samplesPerSegment).map { ThemeGradient.mix(a, b, Double($0) / Double(samplesPerSegment)) }
     } : stops
+    if !theme.overlayColors.isEmpty, samples.count > 1 {
+      let overlay = theme.overlayColors.map(toP3)
+      samples = samples.enumerated().map { index, base in
+        over(ThemeGradient.sample(overlay, at: Double(index) / Double(samples.count - 1)), base)
+      }
+    }
     let factor = theme.meanTextureFactor
     guard factor < 1 else { return samples }
     return samples + samples.map {
@@ -192,14 +199,14 @@ struct ShellTokensContrastTests {
   }
 
   @Test func probeReadsP3ThroughP3Luminance() {
-    // P3 #F29BBB (the sample Personal Space's end stop): Y = 0.4694 with the P3 matrix; read as sRGB it would be
-    // 0.4369.
-    let pink = ShellContrastProbe.toSRGB(.p3(hex: 0xF29BBB, alpha: 1))
-    #expect(abs(Contrast.relativeLuminance(pink) - 0.4694) < 1e-3)
+    // P3 #DDB4D2 (the sample Personal Space's end stop): Y = 0.5324 with the P3 matrix; the sRGB matrix on the same
+    // components gives 0.5267.
+    let pink = ShellContrastProbe.toSRGB(.p3(hex: 0xDDB4D2, alpha: 1))
+    #expect(abs(Contrast.relativeLuminance(pink) - 0.5324) < 1e-3)
   }
 
-  /// `Contrast` linearizes negative components wrongly (a P3 color far outside sRGB); above 1 is fine (the pink end
-  /// stop reaches 1.003 red), so the measured surfaces must convert without negative components.
+  /// `Contrast` linearizes negative components wrongly (a P3 color far outside sRGB); above 1 is fine (a P3 color
+  /// outside sRGB can reach it), so the measured surfaces must convert without negative components.
   @Test(arguments: flavors)
   func everyFlavorHasShippedSurfacesWithoutNegativeSRGB(flavor: ThemeFlavor) {
     let surfaces = ShellContrastProbe.themeSurfaces(flavor).map(ShellContrastProbe.toSRGB)
@@ -290,5 +297,66 @@ struct ShellTokensContrastTests {
     let foreground = bare(ShellTokens.sidebarForeground)
     #expect(primary > secondary, "\(flavor): primary \(primary), secondary \(secondary)")
     #expect(secondary > foreground, "\(flavor): secondary \(secondary), sidebarForeground \(foreground)")
+  }
+
+  // MARK: Command bar (#371, design/command-bar/README.md, Accessibility)
+
+  /// The fills a command bar text sits on, over the opaque surface: bare, the selected row, a key cap, the pill well.
+  private static func commandBarFills(_ flavor: ThemeFlavor) -> [RGBA] {
+    let surface = ShellTokens.commandBarSurfaceOpaque.resolve(flavor)
+    let layers = [ShellTokens.commandBarSelectedRow, ShellTokens.commandBarKeyCap, ShellTokens.commandBarPillWell]
+    return [surface] + layers.map { ShellContrastProbe.over($0.resolve(flavor), surface) }
+  }
+
+  @Test(arguments: flavors)
+  func commandBarTextReadsOnTheOpaqueSurfaceAndItsFills(flavor: ThemeFlavor) {
+    for fill in Self.commandBarFills(flavor) {
+      for (name, token) in [("text", ShellTokens.commandBarText), ("secondary", ShellTokens.commandBarSecondaryText),
+                            ("tertiary", ShellTokens.commandBarTertiaryText)] {
+        let ratio = ShellContrastProbe.ratio(token.resolve(flavor), onOpaque: fill)
+        #expect(ratio >= Contrast.minimumText, "commandBar \(name) \(flavor): \(ratio)")
+      }
+    }
+  }
+
+  @Test(arguments: flavors)
+  func theSelectedPillReadsInTheCapsule(flavor: ThemeFlavor) {
+    let surface = ShellTokens.commandBarSurfaceOpaque.resolve(flavor)
+    let well = ShellContrastProbe.over(ShellTokens.commandBarPillWell.resolve(flavor), surface)
+    let on = ShellContrastProbe.over(ShellTokens.commandBarPillOn.resolve(flavor), well)
+    let text = ShellContrastProbe.ratio(ShellTokens.commandBarPillOnText.resolve(flavor), onOpaque: on)
+    #expect(text >= Contrast.minimumText, "selected pill text \(flavor): \(text)")
+    let count = ShellContrastProbe.over(CommandBarFilterPills.selectedCountColor(flavor), on)
+    #expect(ShellContrastProbe.ratio(count, on) >= Contrast.minimumText, "selected pill count \(flavor)")
+  }
+
+  /// Text on a mustard fill is graphite (the brand pair), above 7:1.
+  @Test func graphiteOnMustardIsAbove7() {
+    let ratio = ShellContrastProbe.ratio(BrandTokens.onAccent.dark, onOpaque: ShellTokens.commandBarTick.dark)
+    #expect(ratio >= 7, "graphite on mustard: \(ratio)")
+  }
+
+  /// Mustard is a fill only: no command bar text token is the accent.
+  @Test func mustardIsOnlyAFillInTheCommandBar() {
+    #expect(ShellTokens.commandBarTick == BrandTokens.accent)
+    let text = [ShellTokens.commandBarText, ShellTokens.commandBarSecondaryText, ShellTokens.commandBarTertiaryText,
+                ShellTokens.commandBarPillOnText]
+    for token in text {
+      #expect(token.light != BrandTokens.Palette.mustard && token.dark != BrandTokens.Palette.mustard)
+    }
+  }
+
+  @Test func theTextLevelsKeepTheirOrderOnTheSurface() {
+    for flavor in Self.flavors {
+      let surface = ShellTokens.commandBarSurfaceOpaque.resolve(flavor)
+      func ratio(_ token: TokenPair) -> Double { ShellContrastProbe.ratio(token.resolve(flavor), onOpaque: surface) }
+      #expect(ratio(ShellTokens.commandBarText) > ratio(ShellTokens.commandBarSecondaryText))
+      #expect(ratio(ShellTokens.commandBarSecondaryText) > ratio(ShellTokens.commandBarTertiaryText))
+    }
+  }
+
+  @Test func theScrimIsLighterInLight() {
+    #expect(ShellTokens.commandBarScrim.dark.alpha == 0.28)
+    #expect(ShellTokens.commandBarScrim.light.alpha < ShellTokens.commandBarScrim.dark.alpha)
   }
 }

@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import EngineAPI
 import Foundation
@@ -41,6 +42,14 @@ public enum LittleArktLayout {
     return CGRect(x: x, y: top - size.height, width: size.width, height: size.height)
   }
 
+  /// A closed window's last frame for Reopen Closed Tab (#355): as it was when it is fully on a screen's visible
+  /// frame; otherwise (a display was removed or rearranged) moved fully onto the screen it overlaps most, else the
+  /// main screen, shrunk to fit but never below the minimum size (`WindowFramePlacement.restoredFrame`). As it was
+  /// when no screen is known.
+  public static func frame(reopening frame: CGRect, on screens: [ScreenGeometry]) -> CGRect {
+    WindowFramePlacement.restoredFrame(saved: frame, savedScreen: nil, screens: screens, minSize: minimumSize) ?? frame
+  }
+
   /// The page card in the window's content view.
   public static func cardFrame(in bounds: CGRect) -> CGRect {
     CGRect(x: bounds.minX + frameInset, y: bounds.minY + frameInset,
@@ -65,6 +74,17 @@ public enum LittleArktRouting {
   public static func opensInLittleArkt(_ request: EngineWindowRequest) -> Bool {
     request.kind == .page || request.isPopup
   }
+
+  /// A link activated with exactly Option and Command held opens in a new Little Arkt window while Settings > Links
+  /// "Open Little Arkt when clicking on links with ⌥⌘ held" is on (#356, BH-132, GS-028).
+  public static func opensInLittleArkt(_ activation: EngineLinkActivation, enabled: Bool) -> Bool {
+    enabled && activation.modifiers == [.command, .option]
+  }
+
+  /// A sidebar click that moves the tab into a Little Arkt window (BH-132): exactly Option and Command.
+  public static func isLittleArktClick(_ flags: NSEvent.ModifierFlags) -> Bool {
+    flags.intersection([.command, .option, .shift, .control]) == [.command, .option]
+  }
 }
 
 /// Little Arkt's copy (docs/design/little-arkt.md, Copy).
@@ -74,6 +94,13 @@ public enum LittleArktCopy {
   public static let chooseSpace = "Choose a Space"
   public static let chooserHeading = "Open in"
   public static let openInNewWindow = "Open in New Window"
+  /// The Dock menu (BH-139, GS-041) and the Window menu's heading (#356).
+  public static let hideAll = "Hide All Little Arkt Windows"
+  public static let showAll = "Show All Little Arkt Windows"
+  public static let closeAll = "Close Little Arkt Windows"
+  public static let windowMenuHeading = "Little Arkt"
+  /// Settings > Links (BH-132), on by default (docs/design/little-arkt.md, Parity notes).
+  public static let optionCommandClickSetting = "Open Little Arkt when clicking on links with \u{2325}\u{2318} held"
 
   /// The primary button: "Open in <Space>", "Open as Tab" for a popup (the quiet style), "Open in New Window" while
   /// no main window has a Space to name.
@@ -94,9 +121,23 @@ public enum LittleArktCopy {
     return "Opened in \(spaceName)"
   }
 
-  /// The top bar's host: the URL's host, else the whole URL (about:blank, data:), else nothing.
-  public static func host(of url: URL?) -> String {
-    guard let url else { return "" }
-    return url.host() ?? url.absoluteString
+  /// A Dock or Window menu row: the page title, else the host, else "Little Arkt"; at most 60 characters, a longer
+  /// title ends in an ellipsis.
+  public static func menuTitle(pageTitle: String, host: String) -> String {
+    let trimmed = pageTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+    let title = !trimmed.isEmpty ? trimmed : !host.isEmpty ? host : windowDescription
+    guard title.count > menuTitleLimit else { return title }
+    return String(title.prefix(menuTitleLimit - 1)).trimmingCharacters(in: .whitespaces) + "\u{2026}"
   }
+
+  static let menuTitleLimit = 60
+
+  /// The top bar's host: the URL's host as the address bar writes it (`HostDisplay`, #732), else the whole URL
+  /// (about:blank, data:), else nothing.
+  public static func host(of url: URL?) -> String {
+    url.map(HostDisplay.hostOrAddress) ?? ""
+  }
+
+  /// The top bar's tooltip and VoiceOver help: the whole address, its host written by `HostDisplay`.
+  public static func fullAddress(of url: URL?) -> String { url.map(HostDisplay.address) ?? "" }
 }

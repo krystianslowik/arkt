@@ -18,6 +18,8 @@ public final class LittleArktLookupController: NSObject, NSTextFieldDelegate, NS
 
   public private(set) var isVisible = false
   public private(set) var results: [CommandBarResults.Result] = []
+  /// Speaks a keyboard selection move (the row's label, #608); replaced in tests.
+  var announce: AXAnnouncement.Poster = AXAnnouncement.post
 
   let panel = LittleArktLookupPanel()
   let barView = LittleArktLookupView()
@@ -45,7 +47,7 @@ public final class LittleArktLookupController: NSObject, NSTextFieldDelegate, NS
       return AXProxyRowContent(identifier: AXID.LittleArktLookup.row, label: results[row].title,
                                value: results[row].accessibilityCaption)
     }
-    barView.onHoverRow = { [weak self] row in self?.select(row, scroll: false) }
+    barView.onHoverRow = { [weak self] row in self?.select(row, byKeyboard: false) }
     NotificationCenter.default.addObserver(self, selector: #selector(appDidResignActive(_:)),
                                            name: NSApplication.didResignActiveNotification, object: nil)
   }
@@ -114,7 +116,7 @@ public final class LittleArktLookupController: NSObject, NSTextFieldDelegate, NS
     }
   }
 
-  /// Return on the selected result. `.restore` is not offered here (no archive provider), so it only closes the bar.
+  /// Return on the selected result. `.restore`, actions and Spaces are not offered here (no providers), so it only closes the bar.
   public func commit() {
     commit(row: max(barView.table.selectedRow, 0))
   }
@@ -122,13 +124,16 @@ public final class LittleArktLookupController: NSObject, NSTextFieldDelegate, NS
   private func commit(row: Int) {
     guard row < results.count else { hide(); return }
     switch results[row].kind {
-    case .open(let url), .search(let url):
+    case .open(let url), .search(let url), .pasteAndGo(let url), .siteSearch(let url):
       hide(returningActivation: false)
       onOpen?(url)
     case .switchTo(let node):
       hide(returningActivation: false)
       onSwitch?(node)
-    case .restore:
+    case .history(let url):
+      hide(returningActivation: false)
+      onOpen?(url)
+    case .restore, .action, .switchSpace, .noMatch:
       hide()
     }
   }
@@ -174,20 +179,26 @@ public final class LittleArktLookupController: NSObject, NSTextFieldDelegate, NS
   private func moveSelection(_ delta: Int) {
     guard let next = CommandBarSelection.step(from: barView.table.selectedRow, by: delta, count: results.count)
     else { return }
-    select(next, scroll: true)
+    select(next, byKeyboard: true)
   }
 
   private func movePage(_ pages: Int) {
     guard let next = CommandBarSelection.page(from: barView.table.selectedRow, by: pages, count: results.count)
     else { return }
-    select(next, scroll: true)
+    select(next, byKeyboard: true)
   }
 
-  /// `scroll` is false for hover: the row under the pointer is already visible.
-  private func select(_ row: Int, scroll: Bool) {
+  /// A keyboard move scrolls the row into view and, since focus stays in the field, speaks it in the command bar's
+  /// words ("title, host, kind, k of n", #608). A hover does neither.
+  private func select(_ row: Int, byKeyboard: Bool) {
     guard row >= 0, row < results.count else { return }
-    if barView.table.selectedRow != row { barView.table.selectRowIndexes([row], byExtendingSelection: false) }
-    if scroll { barView.table.scrollRowToVisible(row) }
+    let changed = barView.table.selectedRow != row
+    if changed { barView.table.selectRowIndexes([row], byExtendingSelection: false) }
+    guard byKeyboard else { return }
+    barView.table.scrollRowToVisible(row)
+    if changed {
+      announce(results[row].accessibilityLabel(position: row + 1, of: results.count), AXAnnouncement.selectionPriority)
+    }
   }
 
   // MARK: Table
@@ -195,16 +206,16 @@ public final class LittleArktLookupController: NSObject, NSTextFieldDelegate, NS
   public func numberOfRows(in tableView: NSTableView) -> Int { results.count }
 
   public func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-    let cell = tableView.makeView(withIdentifier: CommandBarCellView.identifier, owner: nil) as? CommandBarCellView
-      ?? CommandBarCellView(frame: .zero)
+    let cell = tableView.makeView(withIdentifier: LittleArktLookupCellView.identifier, owner: nil) as? LittleArktLookupCellView
+      ?? LittleArktLookupCellView(frame: .zero)
     cell.configure(results[row], scale: cellScale)
     return cell
   }
 
   public func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
-    let rowView = tableView.makeView(withIdentifier: CommandBarRowView.identifier, owner: nil) as? CommandBarRowView
-      ?? CommandBarRowView(frame: .zero)
-    rowView.identifier = CommandBarRowView.identifier
+    let rowView = tableView.makeView(withIdentifier: LittleArktLookupRowView.identifier, owner: nil) as? LittleArktLookupRowView
+      ?? LittleArktLookupRowView(frame: .zero)
+    rowView.identifier = LittleArktLookupRowView.identifier
     rowView.setAccessibilityIdentifier(AXID.LittleArktLookup.row)
     if results.indices.contains(row) {
       rowView.setAccessibilityLabel(results[row].title)
@@ -222,8 +233,8 @@ public final class LittleArktLookupController: NSObject, NSTextFieldDelegate, NS
 @MainActor
 final class LittleArktLookupPanel: NSPanel {
   init() {
-    super.init(contentRect: NSRect(x: 0, y: 0, width: CommandBarGeometry.preferredWidth,
-                                   height: CommandBarGeometry.inputHeight),
+    super.init(contentRect: NSRect(x: 0, y: 0, width: LittleArktGeometry.preferredWidth,
+                                   height: LittleArktGeometry.inputHeight),
                styleMask: [.borderless, .fullSizeContentView], backing: .buffered, defer: false)
     level = .statusBar                              // over another app's full-screen window (needs a check on screen)
     hidesOnDeactivate = true
@@ -244,7 +255,6 @@ final class LittleArktLookupPanel: NSPanel {
       guard isPresented != oldValue else { return }
       alphaValue = isPresented ? 1 : 0
       ignoresMouseEvents = !isPresented
-      contentView?.setAccessibilityValue(isPresented ? AXID.LittleArktLookup.open : AXID.LittleArktLookup.closed)
     }
   }
 
@@ -278,26 +288,25 @@ final class LittleArktLookupView: NSView {
     setAccessibilityElement(true)
     setAccessibilityRole(.group)
     setAccessibilityIdentifier(AXID.LittleArktLookup.root)
-    setAccessibilityValue(AXID.LittleArktLookup.closed)
-    layer?.cornerRadius = CommandBarGeometry.cornerRadius
+    layer?.cornerRadius = LittleArktGeometry.cornerRadius
     layer?.cornerCurve = .continuous
     layer?.masksToBounds = true
-    layer?.backgroundColor = ShellTokens.commandBarSurface.cgColor
+    layer?.backgroundColor = ShellTokens.lookupSurface.cgColor
     layer?.borderWidth = 1
-    layer?.borderColor = ShellTokens.commandBarBorder.cgColor
+    layer?.borderColor = ShellTokens.lookupBorder.cgColor
 
     field.isBordered = false
     field.isBezeled = false
     field.drawsBackground = false
     field.focusRingType = .none
     field.font = .systemFont(ofSize: 18)
-    field.textColor = ShellTokens.commandBarText.nsColor()
+    field.textColor = ShellTokens.lookupText.nsColor()
     field.cell?.isScrollable = true
     field.cell?.wraps = false
     field.cell?.usesSingleLineMode = true
     field.placeholderAttributedString = NSAttributedString(string: LittleArktLookup.placeholder, attributes: [
       .font: NSFont.systemFont(ofSize: 18),
-      .foregroundColor: ShellTokens.commandBarSecondaryText.nsColor(),
+      .foregroundColor: ShellTokens.lookupSecondaryText.nsColor(),
     ])
     field.setAccessibilityIdentifierWithCell(AXID.LittleArktLookup.field)
     field.setAccessibilityLabel(LittleArktLookup.fieldLabel)
@@ -305,14 +314,14 @@ final class LittleArktLookupView: NSView {
     addSubview(field)
 
     divider.wantsLayer = true
-    divider.layer?.backgroundColor = ShellTokens.commandBarDivider.cgColor
+    divider.layer?.backgroundColor = ShellTokens.lookupDivider.cgColor
     addSubview(divider)
 
     let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("result"))
     table.addTableColumn(column)
     table.headerView = nil
     table.style = .plain
-    table.rowHeight = CommandBarGeometry.rowHeight
+    table.rowHeight = LittleArktGeometry.rowHeight
     table.intercellSpacing = .zero
     table.selectionHighlightStyle = .none
     table.backgroundColor = .clear
@@ -354,7 +363,7 @@ final class LittleArktLookupView: NSView {
 
   override func layout() {
     super.layout()
-    let g = CommandBarGeometry.self
+    let g = LittleArktGeometry.self
     let tagSize = tagView.intrinsicSize
     tagView.frame = NSRect(x: g.inputLeading, y: ((g.inputHeight - tagSize.height) / 2).rounded(),
                        width: tagSize.width, height: tagSize.height)

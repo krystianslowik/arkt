@@ -126,11 +126,15 @@ public struct EngineWindowRequest: Equatable, Sendable {
   /// A popup window: a page's `window.open` with window features, or `chrome.windows.create({type: "popup"})`.
   /// False for a normal window (#314: popups open in Little Arkt).
   public var isPopup: Bool
+  /// The engine keeps this window off the record (#669): the shell builds it as an incognito window, whatever its
+  /// opener. False by default; a window whose opener is a blank or incognito window is private either way.
+  public var isOffTheRecord: Bool
 
   public init(kind: EngineWindowRequestKind, openerWindow: EngineWindowID? = nil, bounds: CGRect? = nil,
-              profile: EngineProfileID, initialURL: URL? = nil, isPopup: Bool = false) {
+              profile: EngineProfileID, initialURL: URL? = nil, isPopup: Bool = false, isOffTheRecord: Bool = false) {
     self.kind = kind; self.openerWindow = openerWindow; self.bounds = bounds
     self.profile = profile; self.initialURL = initialURL; self.isPopup = isPopup
+    self.isOffTheRecord = isOffTheRecord
   }
 }
 

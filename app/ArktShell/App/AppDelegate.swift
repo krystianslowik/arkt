@@ -10,6 +10,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private let composition = AppComposition()
   /// True while a `.terminateLater` reply is outstanding; a second quit request then waits for the same flush.
   private var terminationPending = false
+  /// Cmd-Q asks only while Settings > Warn before quitting is on (#487, BH-177).
+  private let quitWarning = QuitWarningGate()
   #if DEBUG || ARKT_SMOKE_BUILD
   /// The in-memory window the scripted smoke drives (`-ArktSmoke YES`, Debug and Profile builds only); nil on a
   /// normal launch.
@@ -74,6 +76,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
     guard !terminationPending else { return .terminateLater }   // the pending flush replies for both
+    let warns = composition.session?.settings.warnsBeforeQuitting ?? false
+    switch quitWarning.begin(warns: warns) {
+    case .ask:
+      // The alert runs on the next turn. A modal inside this callback would nest under the terminate reply.
+      RunLoop.main.perform(inModes: [.common]) { [weak self] in
+        MainActor.assumeIsolated { self?.presentQuitWarning() }
+      }
+      return .terminateLater
+    case .wait:
+      return .terminateLater
+    case .stop:
+      return .terminateCancel
+    case .proceed:
+      return finishTermination(sender)
+    }
+  }
+
+  /// The existing alert. Quit continues into the flush; Cancel leaves the app running and unsaved state unstamped.
+  private func presentQuitWarning() {
+    let confirmed = DialogAlert(content: .quitWarning).runModal() == .primary
+    switch quitWarning.reply(confirmed: confirmed) {
+    case .proceed:
+      let reply = finishTermination(NSApp)
+      if reply != .terminateLater { NSApp.reply(toApplicationShouldTerminate: reply == .terminateNow) }
+    case .stop:
+      NSApp.reply(toApplicationShouldTerminate: false)
+    case .ask, .wait:
+      break
+    }
+  }
+
+  /// The quit path used when the warning is off, and after the user confirms. A failed save never blocks quitting.
+  private func finishTermination(_ sender: NSApplication) -> NSApplication.TerminateReply {
     guard composition.session != nil else { return .terminateNow }
     composition.prepareForTermination()               // stamps visible tabs first (decision 10)
     guard composition.needsFlush else { return .terminateNow }
@@ -89,6 +124,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   /// A link or file another app opened with Arkt (it can be the default browser, onboarding section 6.4).
   func application(_ application: NSApplication, open urls: [URL]) {
     composition.session?.openFromOtherApp(urls)
+  }
+
+  /// The Dock menu (#356): the Little Arkt windows and their actions, New Window and New Little Arkt Window.
+  func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+    MainMenu.dockMenu(commands: composition.commands, littleArkts: composition.session?.windows.littleArktMenus)
   }
 
   /// Closing the last window keeps the app running, as the engine build does (Chromium's keep-alive) and as macOS

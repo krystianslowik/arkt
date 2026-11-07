@@ -1,4 +1,4 @@
-#if ARKT_CHROMIUM_ENGINE
+#if ARKT_CHROMIUM_ENGINE && ARKT_TEST_SWITCHES
 import AppKit
 import ChromiumEngineKit
 import Darwin
@@ -9,24 +9,6 @@ import EngineAPI
 // embedderReady (or a failure with --arkt-embedder-fail), plain windows for the engine's own window requests that
 // mount the active tab's container, logged quit seams and a simulated flush. W3-9 decides whether the probes move to
 // the Arkt shell.
-
-nonisolated func shellLog(_ message: String) {
-    var now = timeval()
-    gettimeofday(&now, nil)
-    var seconds = now.tv_sec
-    var local = tm()
-    localtime_r(&seconds, &local)
-    let stamp = String(
-        format: "%02d:%02d:%02d.%03d", local.tm_hour, local.tm_min, local.tm_sec,
-        Int(now.tv_usec) / 1000)
-    FileHandle.standardError.write(Data("[\(stamp)] ARKT engine shell: \(message)\n".utf8))
-}
-
-/// The main run loop's current mode, for logs ("none" outside any run loop).
-@MainActor
-func runLoopModeName() -> String {
-    RunLoop.current.currentMode?.rawValue ?? "none"
-}
 
 @MainActor
 final class StandInShell: ChromiumEmbedderDelegate {

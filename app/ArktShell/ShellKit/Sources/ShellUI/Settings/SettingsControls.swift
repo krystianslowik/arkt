@@ -49,8 +49,11 @@ public final class SettingsSwitch: NSButton {
 
   private let track = CALayer()
   private let onFill = CALayer()
-  private let knob = CALayer()
+  private let knob = ShadowPathLayer()
   fileprivate private(set) var pressing = false
+  /// `ShellTokens.focusRing` around the track while the switch has keyboard focus (#642).
+  private(set) lazy var keyboardFocusRing = KeyboardFocusRingView.attach(
+    outside: self, radius: SettingsMetrics.switchSize.height / 2)
 
   public var isOn: Bool { state == .on }
 
@@ -62,7 +65,7 @@ public final class SettingsSwitch: NSButton {
     setButtonType(.switch)
     title = ""
     isBordered = false
-    focusRingType = .default
+    focusRingType = .none
     target = self
     action = #selector(toggled(_:))
     wantsLayer = true
@@ -72,8 +75,8 @@ public final class SettingsSwitch: NSButton {
     }
     knob.cornerRadius = SettingsMetrics.knob / 2
     knob.anchorPoint = CGPoint(x: 0, y: 0.5)          // stretches from its leading edge
-    knob.shadowOffset = CGSize(width: 0, height: -1)
-    knob.shadowRadius = 1
+    knob.shadowOffset = SettingsTokens.switchKnobShadow.unflippedOffset
+    knob.shadowRadius = SettingsTokens.switchKnobShadow.radius
     track.addSublayer(onFill)
     track.addSublayer(knob)
     layer?.addSublayer(track)
@@ -112,6 +115,18 @@ public final class SettingsSwitch: NSButton {
 
   override public func accessibilityValue() -> Any? { NSNumber(value: isOn ? 1 : 0) }
 
+  override public func becomeFirstResponder() -> Bool {
+    let became = super.becomeFirstResponder()
+    if became { keyboardFocusRing.setFocused(true) }
+    return became
+  }
+
+  override public func resignFirstResponder() -> Bool {
+    let resigned = super.resignFirstResponder()
+    if resigned { keyboardFocusRing.setFocused(false) }
+    return resigned
+  }
+
   fileprivate func setPressed(_ pressed: Bool) {
     guard isEnabled, pressed != pressing else { return }
     pressing = pressed
@@ -135,7 +150,8 @@ public final class SettingsSwitch: NSButton {
       knob.bounds = CGRect(x: 0, y: 0, width: SettingsMetrics.knob, height: SettingsMetrics.knob)
       knob.backgroundColor = (isOn ? SettingsTokens.switchKnobOn : SettingsTokens.switchKnobOff)
         .resolve(flavor).cgColor
-      knob.shadowOpacity = isOn && flavor == .dark ? 0 : (flavor == .dark ? 0.40 : 0.22)
+      knob.shadowColor = SettingsTokens.switchKnobShadow.color.resolve(flavor).cgColor
+      knob.shadowOpacity = isOn && flavor == .dark ? 0 : 1
       knob.position.y = SettingsMetrics.switchSize.height / 2
     }
     let fill: Float = isOn ? 1 : 0
@@ -157,20 +173,10 @@ public final class SettingsSwitch: NSButton {
 
 }
 
-/// A button cell that draws nothing (layers draw the control) and masks the focus ring to a rounded rectangle.
+/// A button cell that draws nothing: layers draw the control, and `KeyboardFocusRingView` its focus ring.
 @MainActor
 class SettingsBlankCell: NSButtonCell {
-  /// nil: a capsule.
-  var focusRadius: CGFloat?
-
   override func draw(withFrame cellFrame: NSRect, in controlView: NSView) {}
-
-  override func drawFocusRingMask(withFrame cellFrame: NSRect, in controlView: NSView) {
-    let radius = focusRadius ?? cellFrame.height / 2
-    NSBezierPath(roundedRect: cellFrame, xRadius: radius, yRadius: radius).fill()
-  }
-
-  override func focusRingMaskBounds(forFrame cellFrame: NSRect, in controlView: NSView) -> NSRect { cellFrame }
 }
 
 /// Reports the pointer-down highlight to the switch.
@@ -195,18 +201,19 @@ public final class SettingsPopUpButton: NSButton {
   private let body = CALayer()
   private let label = CATextLayer()
   private let chevron = CALayer()
+  /// `ShellTokens.focusRing` around the button while it has keyboard focus (#642).
+  private(set) lazy var keyboardFocusRing = KeyboardFocusRingView.attach(outside: self,
+                                                                         radius: SettingsMetrics.popUpRadius)
 
   init(items: [String], selected: String) {
     self.items = items
     selectedTitle = selected
     super.init(frame: .zero)
-    let cell = SettingsBlankCell()
-    cell.focusRadius = SettingsMetrics.popUpRadius
-    self.cell = cell
+    cell = SettingsBlankCell()
     title = ""
     isBordered = false
     setButtonType(.momentaryChange)
-    focusRingType = .default
+    focusRingType = .none
     wantsLayer = true
     target = self
     action = #selector(pressed(_:))
@@ -228,6 +235,18 @@ public final class SettingsPopUpButton: NSButton {
   override public func updateLayer() { restyle() }
   override public func accessibilityValue() -> Any? { selectedTitle }
 
+  override public func becomeFirstResponder() -> Bool {
+    let became = super.becomeFirstResponder()
+    if became { keyboardFocusRing.setFocused(true) }
+    return became
+  }
+
+  override public func resignFirstResponder() -> Bool {
+    let resigned = super.resignFirstResponder()
+    if resigned { keyboardFocusRing.setFocused(false) }
+    return resigned
+  }
+
   private static let font = NSFont.systemFont(ofSize: 13)
 
   override public var intrinsicContentSize: NSSize {
@@ -246,12 +265,22 @@ public final class SettingsPopUpButton: NSButton {
     menu.popUp(positioning: menu.items.first { $0.state == .on }, at: NSPoint(x: 0, y: bounds.height - 3), in: self)
   }
 
-  @objc private func chose(_ sender: NSMenuItem) {
-    guard sender.title != selectedTitle else { return }
-    selectedTitle = sender.title
+  @objc private func chose(_ sender: NSMenuItem) { select(sender.title) }
+
+  /// Chooses `title` as the menu does: a different title restyles and reports it; the current one does nothing.
+  func select(_ title: String) {
+    guard show(title) else { return }
+    onChange?(selectedTitle)
+  }
+
+  /// Shows `title` without reporting it: the value changed elsewhere (Reset all settings). True when it changed.
+  @discardableResult
+  func show(_ title: String) -> Bool {
+    guard title != selectedTitle, items.contains(title) else { return false }
+    selectedTitle = title
     restyle()
     invalidateIntrinsicContentSize()
-    onChange?(selectedTitle)
+    return true
   }
 
   private func restyle() {
@@ -302,11 +331,14 @@ final class SettingsSegmentedControl: NSControl {
   let segments: [String]
   private(set) var selectedIndex: Int
   var onChange: (@MainActor (Int) -> Void)?
-  private let plate = CALayer()
+  private let plate = ShadowPathLayer()
   private let labels: [CATextLayer]
   static let segmentSize = NSSize(width: 80, height: 24)
+  /// A segment's width: 80 pt, or wider for longer titles (Downloads' "Ask Where to Save").
+  let segmentWidth: CGFloat
 
-  init(segments: [String], selected: Int) {
+  init(segments: [String], selected: Int, segmentWidth: CGFloat = SettingsSegmentedControl.segmentSize.width) {
+    self.segmentWidth = segmentWidth
     self.segments = segments
     selectedIndex = selected
     labels = segments.map { _ in CATextLayer() }
@@ -317,8 +349,8 @@ final class SettingsSegmentedControl: NSControl {
     plate.cornerRadius = 7
     plate.cornerCurve = .continuous
     plate.anchorPoint = .zero
-    plate.shadowOffset = CGSize(width: 0, height: -1)
-    plate.shadowRadius = 1
+    plate.shadowOffset = SettingsTokens.segmentPlateShadow.unflippedOffset
+    plate.shadowRadius = SettingsTokens.segmentPlateShadow.radius
     layer?.addSublayer(plate)
     labels.forEach {
       $0.alignmentMode = .center
@@ -333,17 +365,24 @@ final class SettingsSegmentedControl: NSControl {
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
   override var intrinsicContentSize: NSSize {
-    NSSize(width: Self.segmentSize.width * CGFloat(segments.count) + 4, height: Self.segmentSize.height + 4)
+    NSSize(width: segmentWidth * CGFloat(segments.count) + 4, height: Self.segmentSize.height + 4)
   }
 
   override var isFlipped: Bool { true }
   override var mouseDownCanMoveWindow: Bool { false }
   override func accessibilityValue() -> Any? { segments[selectedIndex] }
 
+  /// Selects `index` as a click does (tests and the pane's own updates); no `onChange` call.
+  func select(_ index: Int) {
+    guard segments.indices.contains(index), index != selectedIndex else { return }
+    selectedIndex = index
+    restyle()
+  }
+
   override func mouseDown(with event: NSEvent) {
     guard isEnabled else { return }
     let x = convert(event.locationInWindow, from: nil).x - 2
-    let index = min(max(Int(x / Self.segmentSize.width), 0), segments.count - 1)
+    let index = min(max(Int(x / segmentWidth), 0), segments.count - 1)
     guard index != selectedIndex else { return }
     selectedIndex = index
     restyle()
@@ -355,10 +394,12 @@ final class SettingsSegmentedControl: NSControl {
     let scale = window?.backingScaleFactor ?? 2
     ArchiveMotion.set {
       layer?.backgroundColor = ShellTokens.sidebarItemHovered.resolve(flavor).cgColor
-      plate.bounds = CGRect(origin: .zero, size: Self.segmentSize)
+      plate.bounds = CGRect(origin: .zero, size: NSSize(width: segmentWidth, height: Self.segmentSize.height))
       plate.position.y = 2
       plate.backgroundColor = (flavor == .dark ? RGBA.white(0.18) : ShellTokens.tabCurrent.light).cgColor
-      plate.shadowOpacity = flavor == .dark ? 0 : 0.10
+      let plateShadow = SettingsTokens.segmentPlateShadow.color.resolve(flavor)
+      plate.shadowColor = plateShadow.cgColor
+      plate.shadowOpacity = plateShadow.alpha > 0 ? 1 : 0
       for (index, label) in labels.enumerated() {
         let selected = index == selectedIndex
         label.string = NSAttributedString(string: segments[index], attributes: [
@@ -366,11 +407,11 @@ final class SettingsSegmentedControl: NSControl {
           .foregroundColor: (selected ? ShellTokens.primaryText : ShellTokens.secondaryText).resolve(flavor).nsColor(),
         ])
         label.contentsScale = scale
-        label.frame = CGRect(x: 2 + CGFloat(index) * Self.segmentSize.width, y: 2 + 4, width: Self.segmentSize.width,
+        label.frame = CGRect(x: 2 + CGFloat(index) * segmentWidth, y: 2 + 4, width: segmentWidth,
                              height: 16)
       }
     }
-    SettingsMotion.spring(plate, "position.x", to: Double(2 + CGFloat(selectedIndex) * Self.segmentSize.width),
+    SettingsMotion.spring(plate, "position.x", to: Double(2 + CGFloat(selectedIndex) * segmentWidth),
                           preset: .firm, reduceMotion: SettingsMotion.reduceMotion() || window == nil)
   }
 

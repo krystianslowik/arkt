@@ -1,8 +1,8 @@
-#if DEBUG || ARKT_SMOKE_BUILD || ARKT_CHROMIUM_ENGINE
+#if DEBUG || ARKT_SMOKE_BUILD || ARKT_TEST_SWITCHES
 import Foundation
 
-/// Parsing of the environment overrides that Debug, Profile (`ARKT_SMOKE_BUILD`) and Engine (`ARKT_CHROMIUM_ENGINE`)
-/// builds accept. Release builds compile none of it. Pure: it reads only the dictionary it is given, so ShellKit's
+/// Parsing of the environment overrides that Debug, Profile (`ARKT_SMOKE_BUILD`) and Engine (`ARKT_TEST_SWITCHES`)
+/// builds accept. Release and Distribution builds compile none of it. Pure: it reads only the dictionary it is given, so ShellKit's
 /// `ShellUITests` compile this file through a symlink and test it (the app target has no test target).
 /// `AppEnvironment` passes the process environment.
 struct EnvironmentOverrides {
@@ -53,6 +53,21 @@ struct EnvironmentOverrides {
     switch value(Self.appearanceKey) {
     case "light": .light
     case "dark": .dark
+    default: nil
+    }
+  }
+
+  static let sidebarNoticeKey = "ARKT_SIDEBAR_NOTICE"
+
+  /// A sample sidebar notice to show at launch (#648): the banner's test driver until the updater (#126) supplies
+  /// real ones.
+  enum SidebarNotice: Equatable { case update, announcement }
+
+  /// `ARKT_SIDEBAR_NOTICE=update|announcement`; nil: no sample notice.
+  var sidebarNotice: SidebarNotice? {
+    switch value(Self.sidebarNoticeKey) {
+    case "update": .update
+    case "announcement": .announcement
     default: nil
     }
   }

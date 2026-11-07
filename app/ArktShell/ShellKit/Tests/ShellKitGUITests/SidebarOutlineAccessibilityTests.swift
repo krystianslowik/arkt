@@ -143,6 +143,8 @@ final class SidebarOutlineAccessibilityTests: XCTestCase {
     XCTAssertEqual(rows[0].isAccessibilityDisclosed(), false, "a tab row discloses nothing")
 
     let firstTab = fixture.sidebar.children(of: .pinned(fixture.space))[0]
+    XCTAssertEqual(rows[0].accessibilityCustomActions()?.count ?? 0, 0, "a pinned row without a page has no close")
+    fixture.controller.activate(node: firstTab)          // its page opens, and with it the close (#601)
     let closeName = try XCTUnwrap(RowCloseAction.resolve(firstTab, in: fixture.sidebar)?.accessibilityName)
     XCTAssertEqual(rows[0].accessibilityCustomActions()?.map(\.name), [closeName], "the row's VoiceOver close")
     XCTAssertEqual(rows[folderRow].accessibilityCustomActions()?.count ?? 0, 0, "a folder has no close")
@@ -323,6 +325,49 @@ final class SidebarOutlineAccessibilityTests: XCTestCase {
     XCTAssertTrue(reloaded.contains(.valueChanged), "a row reload posts valueChanged (Closing)")
   }
 
+  /// #717: a children reload lists the item's children again, so another item may now sit at a row while the row
+  /// count stays. The proxies are rebuilt and clients told, like any other structural change; a plain reload of the
+  /// same item keeps them (`testARowReloadKeepsTheProxyElements`).
+  func testAChildrenReloadRebuildsTheProxyElements() throws {
+    let fixture = try makeFixture()
+    let proxies = fixture.outline.axProxyRows
+    let folderItem = try XCTUnwrap(fixture.outline.item(atRow: fixture.outlineController.row(for: try folder(fixture))))
+
+    proxies.postedNotificationsForTesting = []
+    let before = try proxyRows(fixture.element)
+    fixture.outline.reloadItem(folderItem, reloadChildren: false)
+    let kept = try proxyRows(fixture.element)
+    XCTAssertTrue(zip(before, kept).allSatisfy { $0 === $1 }, "control: a plain reload keeps the proxy elements")
+    XCTAssertFalse((proxies.postedNotificationsForTesting ?? []).contains { $0.0 == .rowCountChanged },
+                   "control: a plain reload posts no rowCountChanged")
+
+    let generation = fixture.outline.rowsGeneration
+    fixture.outline.reloadItem(folderItem, reloadChildren: true)
+    let rebuilt = try proxyRows(fixture.element)
+    XCTAssertEqual(rebuilt.count, before.count, "the row count did not change")
+    XCTAssertTrue(zip(before, rebuilt).allSatisfy { $0 !== $1 }, "a children reload rebuilds the proxy elements")
+    XCTAssertTrue((proxies.postedNotificationsForTesting ?? []).contains { $0.0 == .rowCountChanged && $0.1 == nil },
+                  "a children reload posts rowCountChanged on the outline")
+    XCTAssertNotEqual(fixture.outline.rowsGeneration, generation, "a children reload moves the rows generation")
+  }
+
+  /// #717: `reloadItem(nil)` reloads the root with its children, so it rebuilds the proxies and moves the rows
+  /// generation too.
+  func testReloadingTheRootRebuildsTheProxyElements() throws {
+    let fixture = try makeFixture()
+    let proxies = fixture.outline.axProxyRows
+    proxies.postedNotificationsForTesting = []
+    let before = try proxyRows(fixture.element)
+    let generation = fixture.outline.rowsGeneration
+
+    fixture.outline.reloadItem(nil)
+
+    XCTAssertTrue(zip(before, try proxyRows(fixture.element)).allSatisfy { $0 !== $1 },
+                  "a root reload rebuilds the proxy elements")
+    XCTAssertTrue((proxies.postedNotificationsForTesting ?? []).contains { $0.0 == .rowCountChanged && $0.1 == nil })
+    XCTAssertNotEqual(fixture.outline.rowsGeneration, generation)
+  }
+
   /// #297: a built page realizes only the rows near its visible rect; the rest are realized as they scroll in.
   func testBuildingAPageRealizesOnlyRowsNearTheVisibleRect() throws {
     let sidebar = StubSidebar()
@@ -349,6 +394,238 @@ final class SidebarOutlineAccessibilityTests: XCTestCase {
       XCTAssertNotNil(page.outlineView.rowView(atRow: 1, makeIfNecessary: false),
                       "parked page \(index) has its visible rows built")
     }
+  }
+
+  // MARK: Press, show menu and value (#607)
+
+  private static let press = #selector(NSAccessibilityProtocol.accessibilityPerformPress)
+  private static let showMenu = #selector(NSAccessibilityProtocol.accessibilityPerformShowMenu)
+
+  func testPressActivatesATabRowAndTogglesAFolderRow() throws {
+    let fixture = try makeFixture()
+    let element = fixture.element
+    let today = fixture.sidebar.children(of: .today(fixture.space))
+    var activated: [NodeID] = []
+    fixture.outlineController.onActivate = { activated.append($0) }
+    let rows = try proxyRows(element)
+    let tabRow = rows[fixture.outlineController.row(for: today[1])]
+    XCTAssertTrue(tabRow.isAccessibilitySelectorAllowed(Self.press))
+    XCTAssertTrue(tabRow.accessibilityPerformPress())
+    XCTAssertEqual(activated, [today[1]], "a press activates the row as a click does")
+
+    let folderID = try folder(fixture)
+    let folderRow = rows[fixture.outlineController.row(for: folderID)]
+    XCTAssertTrue(folderRow.accessibilityPerformPress())
+    XCTAssertEqual(shown(try proxyRows(element)), Self.personalExpanded.filter { $0.level == 0 },
+                   "a press closes an open folder")
+    let reopened = try proxyRows(element)[fixture.outlineController.row(for: folderID)]
+    XCTAssertTrue(reopened.accessibilityPerformPress())
+    XCTAssertEqual(shown(try proxyRows(element)), Self.personalExpanded, "and opens a closed one")
+    XCTAssertEqual(activated, [today[1]], "a folder press activates nothing")
+
+    let divider = try proxyRows(element)[fixture.outlineController.dividerRow]
+    XCTAssertFalse(divider.isAccessibilitySelectorAllowed(Self.press))
+    XCTAssertFalse(divider.isAccessibilitySelectorAllowed(Self.showMenu))
+    XCTAssertFalse(divider.accessibilityPerformPress(), "the divider does nothing")
+  }
+
+  /// A press has no mouse-down, so it never reads the point of an earlier click (a drag that began on a pinned
+  /// tab's favicon leaves one behind): it activates the row, never the favicon's reset path (GS-005).
+  func testPressIgnoresAStaleClickPointInAPinnedFavicon() throws {
+    let fixture = try makeFixture()
+    let controller = fixture.outlineController
+    let pinned = fixture.sidebar.children(of: .pinned(fixture.space))[0]
+    let row = controller.row(for: pinned)
+    var activated: [NodeID] = []
+    var faviconClicks: [NodeID] = []
+    controller.onActivate = { activated.append($0) }
+    controller.onPinnedFaviconClick = { id, _ in faviconClicks.append(id) }
+    let cell = try XCTUnwrap(fixture.outline.view(atColumn: 0, row: row, makeIfNecessary: false)
+                             as? SidebarTabCellView)
+    let favicon = cell.faviconView.frame
+    fixture.outline.lastClickPoint = cell.convert(NSPoint(x: favicon.midX, y: favicon.midY), to: fixture.outline)
+
+    XCTAssertTrue(try proxyRows(fixture.element)[row].accessibilityPerformPress())
+    XCTAssertEqual(activated, [pinned], "the press activates the pinned tab")
+    XCTAssertEqual(faviconClicks, [], "and does not reset it")
+    XCTAssertNil(fixture.outline.lastClickPoint)
+  }
+
+  /// A drag that starts on a pinned favicon ends the click it began with: its point is not kept for later.
+  func testADragForgetsTheClickPoint() throws {
+    let fixture = try makeFixture()
+    fixture.outline.lastClickPoint = NSPoint(x: 10, y: 10)
+    let pinned = fixture.sidebar.children(of: .pinned(fixture.space))[0]
+    fixture.outlineController.draggingSessionWillBegin(items: [fixture.outline.item(atRow:
+      fixture.outlineController.row(for: pinned)) as Any])
+    XCTAssertNil(fixture.outline.lastClickPoint)
+    fixture.outlineController.draggingSessionEnded()
+  }
+
+  func testShowMenuPresentsTheRowsContextMenu() throws {
+    let fixture = try makeFixture()
+    let controller = fixture.outlineController
+    var presented: [(titles: [String], row: Int)] = []
+    controller.presentAccessibilityMenu = { menu, row in presented.append((menu.items.map(\.title), row)) }
+    let rows = try proxyRows(fixture.element)
+    let today = fixture.sidebar.children(of: .today(fixture.space))
+    let tabRow = controller.row(for: today[0])
+    let folderRow = controller.row(for: try folder(fixture))
+    let expectedTab = try XCTUnwrap(controller.menu(forRow: tabRow)).items.map(\.title)
+    let expectedFolder = try XCTUnwrap(controller.menu(forRow: folderRow)).items.map(\.title)
+
+    XCTAssertTrue(rows[tabRow].isAccessibilitySelectorAllowed(Self.showMenu))
+    XCTAssertTrue(rows[tabRow].accessibilityPerformShowMenu())
+    XCTAssertTrue(rows[folderRow].accessibilityPerformShowMenu())
+    XCTAssertFalse(rows[controller.dividerRow].accessibilityPerformShowMenu())
+    XCTAssertEqual(presented.map(\.row), [tabRow, folderRow])
+    XCTAssertEqual(presented.first?.titles, expectedTab, "the same menu a right-click on the row shows")
+    XCTAssertEqual(presented.last?.titles, expectedFolder)
+    XCTAssertFalse(expectedTab.isEmpty)
+  }
+
+  func testValueSaysTheSectionAndTheState() throws {
+    let fixture = try makeFixture()
+    let controller = fixture.outlineController
+    let pinned = fixture.sidebar.children(of: .pinned(fixture.space))
+    let today = fixture.sidebar.children(of: .today(fixture.space))
+    let folderID = try folder(fixture)
+    let inFolder = fixture.sidebar.children(of: .folder(folderID))[0]
+    let sound = Box<[NodeID: TabAudio]>([pinned[0]: .playing, pinned[1]: .muted])
+    let closing = Box<Set<NodeID>>([])
+    controller.audioProvider = { sound.value[$0] ?? .silent }
+    controller.closingProvider = { closing.value.contains($0) }
+    fixture.controller.activate(node: today[0])
+
+    func value(_ id: NodeID) throws -> String? {
+      try proxyRows(fixture.element)[controller.row(for: id)].accessibilityValue() as? String
+    }
+    XCTAssertEqual(try value(pinned[0]), "Pinned, playing audio")
+    XCTAssertEqual(try value(pinned[1]), "Pinned, muted")
+    XCTAssertEqual(try value(folderID), "Pinned")
+    XCTAssertEqual(try value(inFolder), "Pinned", "a row in a folder is in the folder's section")
+    XCTAssertEqual(try value(today[0]), "Today, current")
+    XCTAssertEqual(try value(today[1]), "Today")
+
+    sound.value[today[0]] = .playing
+    closing.value.insert(today[0])
+    XCTAssertEqual(try value(today[0]), "Today, current, playing audio, closing")
+    sound.value = [:]
+    closing.value = []
+    fixture.controller.activate(node: today[1])
+    XCTAssertEqual(try value(today[0]), "Today")
+    XCTAssertEqual(try value(today[1]), "Today, current")
+  }
+
+  func testStateAndSoundChangesPostAValueChange() throws {
+    let fixture = try makeFixture()
+    let controller = fixture.outlineController
+    let proxies = fixture.outline.axProxyRows
+    let today = fixture.sidebar.children(of: .today(fixture.space))
+    _ = try proxyRows(fixture.element)
+    proxies.postedNotificationsForTesting = []
+
+    fixture.controller.activate(node: today[1])
+    let row = controller.row(for: today[1])
+    XCTAssertTrue(proxies.postedNotificationsForTesting?.contains { $0.0 == .valueChanged && $0.1 == row } ?? false,
+                  "a row that became current tells clients its value changed")
+
+    proxies.postedNotificationsForTesting = []
+    controller.audioChanged(node: today[2])
+    let audioRow = controller.row(for: today[2])
+    XCTAssertTrue(proxies.postedNotificationsForTesting?.contains { $0.0 == .valueChanged && $0.1 == audioRow }
+                  ?? false, "a sound change tells clients the value changed")
+  }
+
+  // MARK: Favorite tiles (#607)
+
+  func testPressAndShowMenuOnAFavoriteTile() throws {
+    let fixture = try makeFixture()
+    let grid = fixture.controller.view.favorites
+    grid.collectionView.layoutSubtreeIfNeeded()
+    let favorites = fixture.sidebar.children(of: .favorites(profile: "default"))
+    let id = try XCTUnwrap(favorites.first)
+    let tile = try XCTUnwrap(grid.tile(for: id))
+    var activated: [NodeID] = []
+    grid.onActivate = { activated.append($0) }
+    var presented: [(titles: [String], tile: NSView)] = []
+    grid.presentAccessibilityMenu = { menu, view in presented.append((menu.items.map(\.title), view)) }
+
+    XCTAssertTrue(tile.isAccessibilitySelectorAllowed(Self.press))
+    XCTAssertTrue(tile.isAccessibilitySelectorAllowed(Self.showMenu))
+    XCTAssertTrue(tile.accessibilityPerformPress())
+    XCTAssertEqual(activated, [id], "a press activates the Favorite as a click does")
+
+    XCTAssertTrue(tile.accessibilityPerformShowMenu())
+    let expected = try XCTUnwrap(grid.contextMenu(for: id)).items.map(\.title)
+    XCTAssertEqual(presented.first?.titles, expected, "the same menu a right-click on the tile shows")
+    XCTAssertTrue(presented.first?.tile === tile)
+    XCTAssertFalse(expected.isEmpty)
+  }
+
+  /// VoiceOver does not speak "selected" on a button, so the tile's value description says the section and state;
+  /// the value itself stays the `loaded` / `unloaded` token the UI tests read.
+  func testAFavoriteTileSpeaksItsState() throws {
+    let fixture = try makeFixture()
+    let grid = fixture.controller.view.favorites
+    let favorites = fixture.sidebar.children(of: .favorites(profile: "default"))
+    let loaded = Box<Set<NodeID>>([favorites[0], favorites[1]])
+    grid.pageLoadedProvider = { loaded.value.contains($0) }
+    fixture.controller.activate(node: favorites[1])
+    grid.collectionView.layoutSubtreeIfNeeded()
+    func tile(_ index: Int) throws -> FavoriteTileView { try XCTUnwrap(grid.tile(for: favorites[index])) }
+
+    XCTAssertEqual(try tile(1).accessibilityValue() as? String, AXID.Favorites.loaded)
+    XCTAssertEqual(try tile(1).accessibilityValueDescription(), "Favorites, current")
+    XCTAssertEqual(try tile(0).accessibilityValueDescription(), "Favorites, loaded")
+    XCTAssertEqual(try tile(2).accessibilityValue() as? String, AXID.Favorites.unloaded)
+    XCTAssertEqual(try tile(2).accessibilityValueDescription(), "Favorites")
+
+    loaded.value.remove(favorites[0])
+    fixture.controller.activate(node: favorites[0])
+    grid.collectionView.layoutSubtreeIfNeeded()
+    XCTAssertEqual(try tile(0).accessibilityValueDescription(), "Favorites, current")
+    XCTAssertEqual(try tile(1).accessibilityValueDescription(), "Favorites, loaded")
+  }
+
+  func testATileWhoseCurrentStateChangesPostsAValueChange() throws {
+    let fixture = try makeFixture()
+    let grid = fixture.controller.view.favorites
+    let favorites = fixture.sidebar.children(of: .favorites(profile: "default"))
+    grid.collectionView.layoutSubtreeIfNeeded()
+    let tile = try XCTUnwrap(grid.tile(for: favorites[0]))
+    var posted: [NSAccessibility.Notification] = []
+    tile.postedNotificationsForTesting = { posted.append($0) }
+    fixture.controller.activate(node: favorites[0])
+    XCTAssertEqual(posted.filter { $0 == .valueChanged }.count, 1, "becoming current is announced once")
+    posted = []
+    fixture.controller.activate(node: favorites[1])
+    XCTAssertEqual(posted.filter { $0 == .valueChanged }.count, 1, "and so is leaving it")
+  }
+
+  func testAFavoriteTileReportsItselfSelectedWhileCurrent() throws {
+    let fixture = try makeFixture()
+    let grid = fixture.controller.view.favorites
+    let favorites = fixture.sidebar.children(of: .favorites(profile: "default"))
+    fixture.controller.activate(node: favorites[1])
+    grid.collectionView.layoutSubtreeIfNeeded()
+    XCTAssertEqual(try XCTUnwrap(grid.tile(for: favorites[1])).isAccessibilitySelected(), true)
+    XCTAssertEqual(try XCTUnwrap(grid.tile(for: favorites[0])).isAccessibilitySelected(), false)
+    fixture.controller.activate(node: favorites[0])
+    grid.collectionView.layoutSubtreeIfNeeded()
+    XCTAssertEqual(try XCTUnwrap(grid.tile(for: favorites[1])).isAccessibilitySelected(), false)
+    XCTAssertEqual(try XCTUnwrap(grid.tile(for: favorites[0])).isAccessibilitySelected(), true)
+  }
+
+  func testAReusedTileForgetsItsPressAndMenu() throws {
+    let tile = FavoriteTileView(frame: NSRect(x: 0, y: 0, width: 52, height: 46))
+    var calls = 0
+    tile.onAccessibilityPress = { calls += 1 }
+    tile.onAccessibilityShowMenu = { calls += 10 }
+    tile.prepareForReuse()
+    XCTAssertFalse(tile.accessibilityPerformPress())
+    XCTAssertFalse(tile.accessibilityPerformShowMenu())
+    XCTAssertEqual(calls, 0)
   }
 
   // MARK: Cells
@@ -383,6 +660,13 @@ final class SidebarOutlineAccessibilityTests: XCTestCase {
       .compactMap { $0 as? NSAccessibilityProtocol }
     return children.flatMap { [$0] + descendants(of: $0) }
   }
+}
+
+/// A value the providers read and the test changes between reads.
+@MainActor
+private final class Box<Value> {
+  var value: Value
+  init(_ value: Value) { self.value = value }
 }
 
 extension NSAccessibilityCustomAction {

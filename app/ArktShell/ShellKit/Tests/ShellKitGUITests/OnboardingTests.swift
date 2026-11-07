@@ -1,4 +1,6 @@
 import AppKit
+import ArcImport
+@testable import CoreBridge
 import EngineAPITestSupport
 import XCTest
 @testable import ShellUI
@@ -22,6 +24,8 @@ final class FakeOnboardingServices: OnboardingServices {
   var importSkipped = 0
   private var importContinuation: CheckedContinuation<Void, Never>?
   private(set) var importStarted = false
+  /// The browser data import the Import step hands off to; nil keeps the step's own import.
+  var makeImportSource: (@MainActor () -> any BrowserDataImportSource)?
   let sidebar: StubSidebar
 
   init(sidebar: StubSidebar, arcFound: Bool) {
@@ -38,6 +42,8 @@ final class FakeOnboardingServices: OnboardingServices {
       if fails { continuation.finish(throwing: CocoaError(.fileReadCorruptFile)) } else { continuation.finish() }
     }
   }
+
+  func makeBrowserDataImport() -> (any BrowserDataImportSource)? { makeImportSource?() }
 
   func importArcData() async -> OnboardingImportResult {
     importStarted = true
@@ -94,10 +100,43 @@ final class FoldWatchStage: OnboardingStage {
   func setVisible(_ visible: Bool) {}
 }
 
+/// Holds the onboarding's delayed work until the test runs it, so nothing waits on wall time.
+@MainActor
+final class ManualOnboardingSchedule {
+  private(set) var delays: [TimeInterval] = []
+  private var pending: [@MainActor () -> Void] = []
+  /// The overlay of the flow it was installed on; it outlives the controller until the fold ends.
+  private weak var view: OnboardingView?
+
+  /// Whether that flow runs under Reduce Motion: the system's setting, so a runner can have it on.
+  var reducesMotion: Bool { view?.appearanceModel.reduceMotion ?? false }
+
+  func install(on onboarding: OnboardingController) {
+    view = onboarding.view
+    onboarding.schedule = { [weak self] delay, work in
+      self?.delays.append(delay)
+      self?.pending.append(work)
+    }
+  }
+
+  /// Runs everything scheduled so far, as if every delay had passed, and clears `delays` with it, so each batch of
+  /// delays reads on its own.
+  func runAll() {
+    let work = pending
+    pending = []
+    delays = []
+    for item in work { item() }
+  }
+}
+
 /// The first run over a real shell window (onboarding spec sections 2, 6, 10 to 13): both branches to the browser,
 /// Skip setup, the Name field's Escape, the arrow rules, resume, and no "Arc" in anything VoiceOver reads.
 @MainActor
 final class OnboardingTests: XCTestCase {
+  /// The finish's reveal and browser handoff of every flow `present` opens: tests run them with `handOff()`, so no
+  /// test waits on the real 0.9 s delay.
+  private let handoff = ManualOnboardingSchedule()
+
   override func setUp() async throws {
     _ = NSApplication.shared
     NSApp.setActivationPolicy(.accessory)
@@ -112,12 +151,24 @@ final class OnboardingTests: XCTestCase {
 
   private func present(_ window: ShellWindowController, _ services: FakeOnboardingServices,
                        mode: OnboardingMode = .firstRun, resume: OnboardingFlow.Snapshot? = nil,
-                       extensions: Bool = false) -> OnboardingController {
+                       extensions: Bool = false, stage: (any OnboardingStage)? = nil) -> OnboardingController {
     let onboarding = window.presentOnboarding(
-      services: services, options: .init(mode: mode, includesExtensions: extensions, resume: resume))
+      services: services, options: .init(mode: mode, includesExtensions: extensions, resume: resume), stage: stage)
     onboarding.view.layoutSubtreeIfNeeded()
+    handoff.install(on: onboarding)
     spin(until: { onboarding.flow.conditions.arc != .checking })
     return onboarding
+  }
+
+  /// The finish scheduled its reveal and browser handoff: runs both as if their delays had passed, and checks the
+  /// window hands back to the browser. The overlay waits for them, never for wall time. Under Reduce Motion (the
+  /// system's, or a test's) the reveal is at once and the handoff after 50 ms.
+  private func handOff(_ window: ShellWindowController, file: StaticString = #filePath, line: UInt = #line) {
+    XCTAssertEqual(handoff.delays, handoff.reducesMotion ? [0, 0.05] : [0.65, 0.9],
+                   "the finish scheduled the reveal and the handoff", file: file, line: line)
+    XCTAssertTrue(window.isShowingOnboarding, "the browser waits for its delay", file: file, line: line)
+    handoff.runAll()
+    XCTAssertFalse(window.isShowingOnboarding, "the browser shows", file: file, line: line)
   }
 
   /// Runs the main run loop until `condition` holds (tasks on the main actor run meanwhile).
@@ -132,11 +183,7 @@ final class OnboardingTests: XCTestCase {
   private func pressPrimaryAndWait(_ onboarding: OnboardingController) {
     let before = onboarding.flow.step
     onboarding.performPrimary()
-    spin { onboarding.flow.step != before || !onboarding.view.isDescendant(of: onboarding.view.window?.contentView ?? NSView()) }
-  }
-
-  private func settle(_ seconds: TimeInterval = 0.05) {
-    RunLoop.main.run(until: Date().addingTimeInterval(seconds))
+    spin { onboarding.flow.step != before || onboarding.isFinished }
   }
 
   private func stepView(_ onboarding: OnboardingController) throws -> OnboardingStepView {
@@ -190,7 +237,8 @@ final class OnboardingTests: XCTestCase {
     let stub = StubSidebar()
     let window = makeWindow(stub)
     let services = FakeOnboardingServices(sidebar: stub, arcFound: true)
-    let onboarding = present(window, services)
+    let stage = LateFoldStage()
+    let onboarding = present(window, services, stage: stage)
     onboarding.performPrimary()                                           // Get started
     XCTAssertEqual(onboarding.flow.step, .importData)
     XCTAssertTrue(spin { onboarding.flow.importPhase == .ready })
@@ -238,8 +286,10 @@ final class OnboardingTests: XCTestCase {
     XCTAssertEqual(onboarding.flow.step, .done)
     XCTAssertTrue(onboarding.view.skipButton.isEnabled == false, "Done shows an empty footer")
     onboarding.performPrimary()                                           // Start browsing
-    XCTAssertTrue(spin(timeout: 3) { !window.isShowingOnboarding })
-    XCTAssertTrue(spin(timeout: 4) { onboarding.view.superview == nil }, "the overlay leaves once the field faded")
+    handOff(window)
+    XCTAssertNotNil(onboarding.view.superview, "the field is still folding")
+    stage.endFold()
+    XCTAssertNil(onboarding.view.superview, "the overlay leaves once the field faded")
     XCTAssertEqual(services.completed, 1)
     XCTAssertEqual(stub.spaceOrder, [imported], "no Space is added after an import")
     XCTAssertEqual(window.currentSpace, imported)
@@ -247,9 +297,91 @@ final class OnboardingTests: XCTestCase {
     guard case .tab(_, _, let title)? = stub.node(row) else { return XCTFail("a New Tab row") }
     XCTAssertEqual(title, "New Tab")
     XCTAssertEqual(window.rowState(for: row), .current)
-    XCTAssertTrue(spin { window.commandBar.isVisible }, "the command bar opens")
+    XCTAssertTrue(window.commandBar.isVisible, "the command bar opens")
     XCTAssertFalse(window.rootView.card.isHidden)
     window.commandBar.hide()
+    window.close()
+  }
+
+  // MARK: - Import hands off to the browser data import (#514)
+
+  /// Import now opens the consent in place of the step, in the Hero style; Not now returns to the step untouched; a
+  /// second Import runs to a result, and Continue returns to the step's Imported state. The footer stays.
+  func testImportHandsOffToTheHeroConsentAndReturnsToImported() throws {
+    let stub = StubSidebar()
+    let window = makeWindow(stub)
+    let services = FakeOnboardingServices(sidebar: stub, arcFound: true)
+    let importer = ScriptedProfileImporter()
+    services.makeImportSource = {
+      BrowserDataImportModel(coordinator: importer, root: URL(fileURLWithPath: "/nonexistent"), spaces: nil,
+                             locale: Locale(identifier: "en_US"))
+    }
+    let onboarding = present(window, services)
+    onboarding.performPrimary()                                           // Get started
+    XCTAssertTrue(spin { onboarding.flow.importPhase == .ready })
+    let step = try stepView(onboarding)
+    onboarding.performPrimary()                                           // Import now
+    let hero = try XCTUnwrap(onboarding.view.importHero, "the consent replaces the step in place")
+    XCTAssertTrue(step.isHidden)
+    XCTAssertFalse(services.importStarted, "the step no longer imports at once")
+    XCTAssertEqual(onboarding.flow.importPhase, .importing)
+    XCTAssertFalse(onboarding.view.backButton.isEnabled, "no Back while the import shows")
+    XCTAssertTrue(onboarding.view.skipButton.isEnabled, "Skip setup stays")
+    XCTAssertEqual(onboarding.view.progressLabel.text, "1 of 5", "the footer stays")
+    XCTAssertTrue(onboarding.view.subviews.contains(onboarding.stage.view), "the particle field stays")
+
+    XCTAssertTrue(spin { importer.consent != nil })
+    let counts = ProfileDataCounts(historyURLs: 100, historyVisits: 48_210, bookmarks: 0, cookies: 3_904, logins: 312, extensions: 14)
+    let answer = Task { @MainActor in await importer.consent?(counts) ?? nil }
+    XCTAssertTrue(spin { hero.source.state.phase == .consent })
+    XCTAssertEqual(hero.content.title.text, "Choose what comes over.")
+    XCTAssertEqual(hero.content.eyebrow.text, "Your browser data")
+    XCTAssertEqual(hero.content.groupViews.map { $0.heading.text }, ["Ready to import", "Needs your Mac password"])
+    XCTAssertEqual(hero.primaryButton.title, "Import")
+    XCTAssertEqual(hero.secondaryButton.title, "Not now")
+    XCTAssertEqual(hero.primaryButton.frame.height, 50, "the website's pills")
+    // 52 pt rows, 44 pt in a window under 700 pt (the runner's screen decides): the layout's own constant.
+    XCTAssertEqual(hero.content.rowViews[.history]?.preferredHeight, hero.content.style.rowHeight)
+    XCTAssertTrue([44, 52].contains(hero.content.style.rowHeight))
+    XCTAssertEqual(hero.content.rowViews[.history]?.valueText.text, "48,210")
+    XCTAssertNotNil(hero.content.groupViews[1].noticeView, "the Keychain line, inside the second group")
+    XCTAssertEqual(hero.primaryButton.accessibilityIdentifier(), AXID.BrowserDataImport.primary)
+    XCTAssertTrue(onboarding.view.accessibilityChildren()?.contains { ($0 as? NSView) === hero.content } == true)
+
+    onboarding.performEscape()                                            // Not now
+    XCTAssertTrue(spin { onboarding.view.importHero == nil })
+    XCTAssertEqual(onboarding.flow.importPhase, .ready, "Not now returns to the step as it was")
+    XCTAssertFalse(try stepView(onboarding).isHidden)
+    XCTAssertEqual(try stepView(onboarding).primaryButton?.isEnabled, true)
+    _ = Task { _ = await answer.value }
+    XCTAssertNotNil(hero.superview, "the hero stays for its fade")
+    XCTAssertEqual(handoff.delays, [0.22], "the hero leaves after its 200 ms fade")
+    handoff.runAll()
+    XCTAssertNil(hero.superview, "the hero leaves after its fade")
+
+    onboarding.performPrimary()                                           // Import now, again
+    let second = try XCTUnwrap(onboarding.view.importHero)
+    XCTAssertTrue(spin { importer.consent != nil })
+    let secondAnswer = Task { @MainActor in await importer.consent?(counts) ?? nil }
+    XCTAssertTrue(spin { second.source.state.phase == .consent })
+    second.primaryButton.performClick(nil)                                // Import
+    XCTAssertTrue(spin { second.content.title.text == "Bringing it over." })
+    XCTAssertTrue(second.content.primaryButton.isHidden, "Cancel is the only button while importing")
+    importer.send(.progress(.history, .writing(done: 100, total: 48_210)))
+    XCTAssertTrue(spin { second.content.rowViews[.history]?.valueText.text == "100 of 48,210" })
+    var summary = ProfileImportSummary()
+    summary.outcomes = [.history: .done(ImportItemCounts(written: 48_210)), .extensions: .done(ImportItemCounts(written: 14)),
+                        .cookies: .done(ImportItemCounts(written: 3_904)), .passwords: .done(ImportItemCounts(written: 312))]
+    importer.finish(summary)
+    XCTAssertTrue(spin { second.content.title.text == "Your setup is here." })
+    XCTAssertEqual(second.primaryButton.title, "Continue")
+    XCTAssertEqual(onboarding.flow.importPhase, .importing, "the step is not Imported until Continue")
+    second.primaryButton.performClick(nil)
+    XCTAssertTrue(spin { onboarding.flow.importPhase == .imported(skipped: 0) })
+    XCTAssertNil(onboarding.view.importHero)
+    XCTAssertEqual(try stepView(onboarding).primaryButton?.accessibilityIdentifier(), AXID.Onboarding.continueButton)
+    XCTAssertEqual(services.saved.last?.imported, true)
+    _ = secondAnswer
     window.close()
   }
 
@@ -319,13 +451,55 @@ final class OnboardingTests: XCTestCase {
     onboarding.performPrimary()
     try stepView(onboarding).swatches?.onSelect?(4)                       // Blossom previewed
     onboarding.view.onSkipSetup?()                                        // confirmed
-    XCTAssertTrue(spin { !window.isShowingOnboarding })
+    handOff(window)
     let space = try XCTUnwrap(stub.spaceOrder.first)
     XCTAssertEqual(stub.spaceOrder.count, 1)
     XCTAssertEqual(stub.space(space)?.title, "Space 1")
     XCTAssertEqual(stub.space(space)?.theme, SpaceThemeCatalog.defaultFamily.theme(onboarding.view.appearanceModel.flavor),
                    "a confirmed Skip setup drops the preview")
     XCTAssertEqual(services.completed, 1)
+    window.commandBar.hide()
+    window.close()
+  }
+
+  /// #469: the window has no engine window while the first run covers it (the engine window is made on the first
+  /// tab), so ending the first run is what opens the first one. Skip setup and Finish both must, exactly once.
+  func testSkipSetupOpensTheFirstEngineWindowOnce() throws {
+    let stub = StubSidebar()
+    let engine = InMemoryEngine()
+    let window = ShellWindowController(engine: engine, sidebar: stub)
+    window.window?.setFrame(NSRect(x: 0, y: 0, width: 1120, height: 720), display: false)
+    window.rootView.layoutSubtreeIfNeeded()
+    let services = FakeOnboardingServices(sidebar: stub, arcFound: false)
+    let onboarding = present(window, services)
+    XCTAssertTrue(engine.windowIDs.isEmpty, "the first run is shown before any engine window exists")
+    onboarding.confirmSkip = { answer in answer(true) }
+    onboarding.view.onSkipSetup?()
+    handOff(window)
+    XCTAssertEqual(engine.windowIDs.count, 1, "Skip setup opens the first engine window")
+    XCTAssertEqual(engine.tabIDs.count, 1)
+    window.commandBar.hide()
+    window.close()
+  }
+
+  func testFinishOpensTheFirstEngineWindowOnce() throws {
+    let stub = StubSidebar()
+    let engine = InMemoryEngine()
+    let window = ShellWindowController(engine: engine, sidebar: stub)
+    window.window?.setFrame(NSRect(x: 0, y: 0, width: 1120, height: 720), display: false)
+    window.rootView.layoutSubtreeIfNeeded()
+    let services = FakeOnboardingServices(sidebar: stub, arcFound: false)
+    let onboarding = present(window, services)
+    XCTAssertTrue(engine.windowIDs.isEmpty, "the first run is shown before any engine window exists")
+    var presses = 0
+    while !onboarding.isFinished, presses < 12 {
+      pressPrimaryAndWait(onboarding)
+      presses += 1
+    }
+    XCTAssertTrue(onboarding.isFinished, "the primary button walks the flow to its end")
+    handOff(window)
+    XCTAssertEqual(engine.windowIDs.count, 1, "Finish opens the first engine window")
+    XCTAssertEqual(engine.tabIDs.count, 1)
     window.commandBar.hide()
     window.close()
   }
@@ -341,11 +515,13 @@ final class OnboardingTests: XCTestCase {
     onboarding.performPrimary()
     XCTAssertTrue(spin { services.importStarted })
     onboarding.view.onSkipSetup?()
-    settle(0.2)
-    XCTAssertTrue(window.isShowingOnboarding, "the import finishes first")
+    XCTAssertTrue(handoff.delays.isEmpty, "the import finishes first")
+    XCTAssertFalse(onboarding.isFinished)
+    XCTAssertTrue(window.isShowingOnboarding)
     XCTAssertTrue(stub.spaceOrder.isEmpty)
     services.finishImport()
-    XCTAssertTrue(spin { !window.isShowingOnboarding })
+    XCTAssertTrue(spin { onboarding.isFinished }, "the finished import ends the first run")
+    handOff(window)
     XCTAssertEqual(stub.spaceOrder.count, 1, "only the imported Space")
     XCTAssertEqual(window.currentSpace, stub.spaceOrder.first)
     window.commandBar.hide()
@@ -369,7 +545,7 @@ final class OnboardingTests: XCTestCase {
     XCTAssertEqual(step.primaryButton?.accessibilityIdentifier(), AXID.Onboarding.tryAgain)
     XCTAssertEqual(step.secondaryButton?.accessibilityIdentifier(), AXID.Onboarding.startFresh)
     onboarding.view.onSkipSetup?()
-    XCTAssertTrue(spin { !window.isShowingOnboarding })
+    handOff(window)
     XCTAssertEqual(stub.spaceOrder.map { stub.space($0)?.title }, ["Space 1"])
     window.commandBar.hide()
     window.close()
@@ -476,7 +652,7 @@ final class OnboardingTests: XCTestCase {
     while onboarding.flow.step != .done { pressPrimaryAndWait(onboarding) }
     XCTAssertEqual(try stepView(onboarding).primaryButton?.title, "Back to browsing")
     onboarding.performPrimary()
-    XCTAssertTrue(spin { !window.isShowingOnboarding })
+    handOff(window)
     XCTAssertEqual(stub.children(of: .today(space)).count, before, "no new tab")
     XCTAssertFalse(window.commandBar.isVisible)
     XCTAssertTrue(services.saved.isEmpty && services.completed == 0)
@@ -565,6 +741,7 @@ final class OnboardingTests: XCTestCase {
     let onboarding = window.presentOnboarding(
       services: services, options: .init(mode: .firstRun, includesExtensions: false), stage: stage)
     onboarding.view.layoutSubtreeIfNeeded()
+    handoff.install(on: onboarding)
     spin { onboarding.flow.conditions.arc != .checking }
     var appearance = onboarding.view.appearanceModel
     appearance.reduceMotion = reduceMotion
@@ -572,10 +749,14 @@ final class OnboardingTests: XCTestCase {
     onboarding.performPrimary()                                           // Welcome to Make it yours
     onboarding.performEscape()                                            // Skip to Default browser
     XCTAssertEqual(onboarding.flow.step, .defaultBrowser)
-    settle(0.3)
     let footer: [NSView] = [onboarding.view.backButton, onboarding.view.progressLabel, onboarding.view.skipButton]
     let layers = try footer.map { try XCTUnwrap($0.layer) }
     XCTAssertEqual(layers.map(\.opacity), [1, 1, 1], "the whole footer shows before the finish")
+    // The step change fades the footer in, and the fold's fade starts from what is presented: the fade-in is run to
+    // its end by hand (and committed, so the presented value is the model's), so the fold starts from 1 without
+    // waiting on wall time.
+    for layer in layers { layer.removeAllAnimations() }
+    CATransaction.flush()
     let shownProgress = onboarding.view.progressLabel.text
     XCTAssertFalse(shownProgress.isEmpty)
     var seen: FooterAtFoldStart?
@@ -591,7 +772,8 @@ final class OnboardingTests: XCTestCase {
     onboarding.view.onSkipSetup?()
     let result = try XCTUnwrap(seen, "the fold began")
     XCTAssertEqual(result.progress, shownProgress, "the progress fades with its text, it does not blank first")
-    XCTAssertTrue(spin { !window.isShowingOnboarding })
+    XCTAssertEqual(handoff.reducesMotion, reduceMotion)
+    handOff(window)
     window.commandBar.hide()
     window.close()
     return result
@@ -634,14 +816,15 @@ final class OnboardingTests: XCTestCase {
     do {
       let onboarding = window.presentOnboarding(
         services: services, options: .init(mode: .firstRun, includesExtensions: false), stage: stage)
+      handoff.install(on: onboarding)
       spin { onboarding.flow.conditions.arc != .checking }
       onboarding.confirmSkip = { answer in answer(true) }
       onboarding.view.onSkipSetup?()                                      // confirmed on Welcome
       overlay = onboarding.view
       released = onboarding
     }
-    XCTAssertTrue(spin { !window.isShowingOnboarding }, "the browser shows")
-    XCTAssertTrue(spin { released == nil }, "the window let the controller go")
+    handOff(window)
+    XCTAssertNil(released, "the window let the controller go")
     XCTAssertNotNil(overlay.superview, "the field is still folding")
     stage.endFold()
     XCTAssertNil(overlay.superview, "the overlay leaves once the fold ended")

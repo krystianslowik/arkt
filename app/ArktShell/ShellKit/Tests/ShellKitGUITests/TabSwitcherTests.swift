@@ -3,6 +3,7 @@ import Carbon.HIToolbox
 import EngineAPI
 import EngineAPITestSupport
 import XCTest
+@testable import Motion
 @testable import ShellUI
 
 /// The Ctrl-Tab switcher on a real shell window (#103; design/tab-switcher): raw key events go through
@@ -312,6 +313,24 @@ final class TabSwitcherTests: XCTestCase {
     XCTAssertFalse(panel.rowViews[0].isAccessibilitySelected())
   }
 
+  /// Every highlight move speaks the highlighted row's label (#608), interrupting the previous one so a run of
+  /// Ctrl-Tab presses lands on the last row. Posted app-wide through the `announce` seam.
+  func testEachMoveAnnouncesTheHighlightedRow() throws {
+    var spoken: [(text: String, priority: NSAccessibilityPriorityLevel)] = []
+    switcher.announce = { spoken.append(($0, $1)) }
+    view([tabs[0], tabs[1], tabs[2], tabs[3]])
+    try ctrlTab()
+    XCTAssertEqual(spoken.map(\.text), ["Recent tabs, 3 tabs", "Tab 2, Work, 1 of 3"])
+    send(try key(kVK_Tab, .maskControl))
+    XCTAssertEqual(spoken.last?.text, "Tab 1, Work, 2 of 3")
+    XCTAssertEqual(spoken.last?.priority, .high)
+    send(try key(kVK_Tab, [.maskControl, .maskShift]))
+    XCTAssertEqual(spoken.last?.text, "Tab 2, Work, 1 of 3")
+    send(try key(kVK_ANSI_Grave, .maskControl))
+    XCTAssertEqual(spoken.last?.text, "Tab 0, Work, 3 of 3", "backwards wraps to the last row")
+    XCTAssertEqual(spoken.count, 5)
+  }
+
   // MARK: Motion
 
   /// Reduce Motion: the highlight jumps.
@@ -353,6 +372,88 @@ final class TabSwitcherTests: XCTestCase {
     XCTAssertGreaterThan(panel.rowViews[0].layer?.transform.m42 ?? 0, 0, "the row that took the place starts below")
     waitUntil("the rows settled") { !self.panel.isCollapsing }
     XCTAssertEqual(panel.rowViews[0].layer?.transform.m42 ?? -1, 0, accuracy: 0.01)
+  }
+
+  /// Where `title`'s row is on screen now: its slot plus the slide translation it presents.
+  private func presentedY(_ title: String) throws -> CGFloat {
+    let row = try XCTUnwrap(panel.rowViews.prefix(panel.rowCount).first { $0.titleField.stringValue == title })
+    return row.frame.minY + (row.layer?.transform.m42 ?? 0)
+  }
+
+  /// Ticks every running row slide to `time`.
+  private func stepCollapse(to time: CFTimeInterval) {
+    for driver in panel.collapseDrivers where driver.isRunning { driver.tick(at: time) }
+  }
+
+  /// A second W mid-collapse (#609): every row left continues from where it is on screen, with its velocity,
+  /// instead of jumping back a row and sliding again. The row above the closed one keeps its slot; the rows below it
+  /// take a slot up from where they are. The clock is frozen and the display links are off, so only `tick(at:)`
+  /// moves the rows, whatever the machine's speed.
+  func testASecondWMidCollapseContinuesFromWhereTheRowsAre() throws {
+    switcher.reduceMotion = { false }
+    controller.showWindow(nil)
+    var clock: CFTimeInterval = 100
+    panel.collapseClock = { clock }
+    panel.collapseDrivers.forEach { $0.drivesDisplayLink = false }
+    view(Array(tabs[0...5]))
+    try ctrlTab()
+    XCTAssertEqual(shownTitles(), ["Tab 4", "Tab 3", "Tab 2", "Tab 1", "Tab 0"])
+
+    send(try key(kVK_ANSI_W, .maskControl))                   // closes Tab 4; the four rows below slide up
+    XCTAssertEqual(shownTitles(), ["Tab 3", "Tab 2", "Tab 1", "Tab 0"])
+    clock = 100.03
+    stepCollapse(to: clock)
+    XCTAssertTrue(panel.isCollapsing)
+    send(try key(kVK_Tab, .maskControl))                      // the highlight onto Tab 2, itself mid-slide
+    XCTAssertEqual(switcher.session?.highlight, 1)
+    let titles = ["Tab 3", "Tab 1", "Tab 0"]
+    let before = try titles.map(presentedY)
+    let closedAt = try presentedY("Tab 2")
+    for (title, y) in zip(titles, before) {
+      let slot = try XCTUnwrap(shownTitles().firstIndex(of: title))
+      XCTAssertGreaterThan(y, CGFloat(slot) * TabSwitcherView.rowHeight, "\(title) is still below its slot")
+    }
+
+    send(try key(kVK_ANSI_W, .maskControl))                   // closes Tab 2 mid-collapse
+
+    XCTAssertEqual(shownTitles(), titles)
+    XCTAssertTrue(panel.isCollapsing)
+    for (title, y) in zip(titles, before) {
+      XCTAssertEqual(try presentedY(title), y, accuracy: 0.01, "\(title) starts from where it was on screen")
+    }
+    XCTAssertFalse(panel.ghost.isHidden)
+    XCTAssertEqual(panel.ghost.titleField.stringValue, "Tab 2")
+    XCTAssertEqual(panel.ghost.frame.minY, closedAt, accuracy: 0.01, "the closed row fades where it was on screen")
+
+    var last = before
+    for frame in 1...3 {
+      stepCollapse(to: clock + Double(frame) / 120)
+      let now = try titles.map(presentedY)
+      for (index, title) in titles.enumerated() {
+        XCTAssertLessThan(now[index], last[index], "\(title) keeps moving up on frame \(frame)")
+      }
+      last = now
+    }
+    stepCollapse(to: clock + 5)
+    XCTAssertFalse(panel.isCollapsing)
+    for (slot, title) in titles.enumerated() {
+      XCTAssertEqual(try presentedY(title), CGFloat(slot) * TabSwitcherView.rowHeight, accuracy: 0.01)
+    }
+  }
+
+  /// Reduce Motion: a second W mid-fade slides nothing; the rows sit in their slots and the moved ones fade in.
+  func testReduceMotionWTwiceSlidesNothing() throws {
+    controller.showWindow(nil)
+    view(Array(tabs[0...5]))
+    try ctrlTab()
+    send(try key(kVK_ANSI_W, .maskControl))
+    send(try key(kVK_ANSI_W, .maskControl))
+    XCTAssertEqual(shownTitles(), ["Tab 2", "Tab 1", "Tab 0"])
+    XCTAssertFalse(panel.isCollapsing)
+    for row in panel.rowViews.prefix(panel.rowCount) {
+      XCTAssertEqual(row.layer?.transform.m42 ?? -1, 0, "no slide")
+    }
+    XCTAssertNotNil(panel.rowViews[0].layer?.animation(forKey: "tabSwitcher.closeFade"), "the moved rows fade in")
   }
 }
 

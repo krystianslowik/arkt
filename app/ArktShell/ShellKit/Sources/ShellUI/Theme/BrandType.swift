@@ -72,6 +72,8 @@ public enum BrandType {
     case welcomeTitle, stepTitle, importTitle, nameField, countLarge, countRow
     case lede, welcomeLede, note, eyebrow, countLabel, countLabelLarge
     case button, quiet, progress, option, themeName, previewName, keyCap
+    /// The browser data import's Hero entry (#514): headline, row name, detail, count, status, note and progress line.
+    case dataTitle, dataRow, dataDetail, dataCount, dataStatus, dataNote, dataProgress
 
     public nonisolated func style(compact: Bool) -> Style {
       func display(_ size: CGFloat, _ compactSize: CGFloat, leading: CGFloat = 0.92) -> Style {
@@ -107,6 +109,15 @@ public enum BrandType {
       case .themeName: return text(.regular, 13)
       case .previewName: return text(.medium, 9)
       case .keyCap: return text(.demiBold, 30)
+      case .dataTitle: return display(56, 46)
+      case .dataRow: return text(.medium, compact ? 16 : 18)
+      case .dataDetail: return text(.regular, compact ? 13 : 14)
+      case .dataCount:
+        return Style(weight: .demiBold, size: compact ? 22 : 26, leading: nil, trackingEm: -0.02, uppercase: false,
+                     tabular: true)
+      case .dataStatus: return text(.regular, compact ? 16 : 18, tabular: true)
+      case .dataNote: return text(.regular, 15, leading: 1.45)
+      case .dataProgress: return text(.demiBold, 15)
       }
     }
   }

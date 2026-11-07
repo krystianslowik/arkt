@@ -85,14 +85,19 @@ extension ShellWindowController {
   // MARK: Engine tabs
 
   /// A tab the engine opened on its own in this window (`window.open`, a link with `target=_blank`,
-  /// `chrome.tabs.create`) becomes a Today tab in the current Space. Tabs this window created (origin `.client`) are
-  /// mapped by the call that created them. A tab the sidebar refuses is closed, so no live tab is left without a row.
+  /// `chrome.tabs.create`) becomes a Today tab in the current Space; in a blank or incognito window, a private page
+  /// (#559). Tabs this window created (origin `.client`) are mapped by the call that created them. A tab the sidebar
+  /// refuses is closed, so no live tab is left without a row.
   func engineDidCreateTab(_ tab: TabID) {
     guard let snapshot = engine.snapshot(of: tab), snapshot.origin == .engine,
           snapshot.window != nil, snapshot.window == engineWindow else { return }
     expectsEngineReactivation = false
     guard !isWindowCloseRequested else {                  // the window is going away: no row that would outlive it
       engine.closeTab(tab, mode: .skipUnloadHandlers)
+      return
+    }
+    if isPrivateWindow {                                  // #559: a page of its own, never a row on the shared sidebar
+      adoptPrivatePage(tab)
       return
     }
     if let opener = snapshot.opener, nodeByTab[opener] != nil || opener == peek.session?.tab {
@@ -122,7 +127,7 @@ extension ShellWindowController {
 
   private func addTodayRow(for tab: TabID, snapshot: TabSnapshot) {
     let url = snapshot.url ?? Self.blankPage
-    let title = snapshot.title.isEmpty ? (url.host() ?? url.absoluteString) : snapshot.title
+    let title = snapshot.title.isEmpty ? HostDisplay.savedTitle(for: url) : snapshot.title
     let node: NodeID
     do {
       guard let space = sidebarController.currentSpace ?? createFirstSpace() else {
@@ -179,8 +184,8 @@ extension ShellWindowController {
 
   /// The engine made `tab` its active tab. The shell follows (an extension's `chrome.tabs.update`, an engine tab
   /// opened in the foreground), except for the engine's own pick after the current tab closed: the shell has chosen
-  /// the successor, and the engine is told again.
-  func engineDidActivate(_ tab: TabID, node: NodeID) {
+  /// the successor, and the engine is told again. `follow` shows the tab: its row, or a private window's page.
+  func engineDidActivate(_ tab: TabID, follow: () -> Void) {
     guard let engineWindow, engine.latestActiveTab(in: engineWindow) == tab else { return }
     if tab == engineActiveTab {
       // An in-process engine can still report its automatic successor after this acknowledgement in the same
@@ -201,12 +206,13 @@ extension ShellWindowController {
       if let currentTab { activateEngineTab(currentTab) }
       return
     }
-    activate(node: node)
+    follow()
   }
 
   // MARK: Held closes (Decision 11)
 
-  /// Rows whose close the engine holds behind a leave-site prompt show their closing state.
+  /// Rows whose close the engine holds behind a leave-site prompt show their closing state. A blank or incognito
+  /// window's private page has no row (`nodeByTab`), so it is skipped here and never shows a closing state.
   func markHeldCloses(_ tabs: [TabID]) {
     for tab in tabs {
       guard let node = nodeByTab[tab], engine.snapshot(of: tab)?.isClosing == true else { continue }
@@ -264,6 +270,18 @@ extension ShellWindowController {
     return result
   }
 
+  /// Loaded tabs whose page plays media, and the split a playing pane belongs to (BH-076). Same rule as Clear
+  /// (`pagePlaysMedia`): the engine snapshot's `isAudible`, which stays true for a muted page that still plays.
+  /// Mute alone does not count. A page that is not loaded has no snapshot, so it is never exempt.
+  var nodesPlayingMedia: Set<NodeID> {
+    var result: Set<NodeID> = []
+    for node in tabsByNode.keys where pagePlaysMedia(node) {
+      result.insert(node)
+      if case .split(let split)? = sidebar.parent(of: node) { result.insert(split) }
+    }
+    return result
+  }
+
   // MARK: Commands (Decision 9)
 
   /// The commands the shell implements (week-3 results, W3-8 step 3): New Tab opens the command bar, Close Tab
@@ -275,6 +293,9 @@ extension ShellWindowController {
     case .closeTab: CommandClaim(isEnabled: currentNode != nil)
     case PendingEngineCommands.newWindow: CommandClaim(isEnabled: onNewWindow != nil)
     case .closeWindow: CommandClaim(isEnabled: window != nil)
+    case .find, .findNext, .findPrevious: claimFind(command)         // #134
+    case .downloads, .history:                                         // #132: the native Library
+      onShowLibrary.map { _ in CommandClaim(isEnabled: true) }
     default: nil
     }
   }
@@ -295,6 +316,12 @@ extension ShellWindowController {
       guard let window else { return false }
       window.performClose(nil)                            // windowShouldClose: the engine decides
       return true
+    case .find, .findNext, .findPrevious:
+      return performFind(command)
+    case .downloads, .history:
+      guard let onShowLibrary else { return false }
+      onShowLibrary(command == .downloads ? .downloads : .history)
+      return true
     default:
       return false
     }
@@ -302,25 +329,21 @@ extension ShellWindowController {
 
   // MARK: Extensions (Decision 10)
 
-  /// The Extensions control, only for an engine that runs extensions.
+  /// The Extensions control and its panel (#595), only for an engine that runs extensions.
   func wireExtensions() {
-    guard engine is any EngineExtensions else { return }
+    guard let extensions = engine as? any EngineExtensions else { return }
     let button = ExtensionsButton()
-    button.onRun = { [weak self] id in self?.runExtensionAction(id) }
+    let panel = ExtensionsPanelController(extensions: extensions, button: button) { [weak self] in self?.engineWindow }
+    panel.onManage = { [weak self] in self?.onManageExtensions?() }
+    panel.onBrowseWebStore = { [weak self] in self?.open(OnboardingController.Options.chromeWebStore, inNewTab: true) }
+    panel.onRemove = { [weak panel] action in panel?.presentRemoveSheet(for: action) }    // #720
     extensionsButton = button
+    extensionsPanel = panel
     sidebarController.view.extensionsButton = button
-    refreshExtensions()
   }
 
-  /// The window's actions; none before the engine window exists or after it closed.
+  /// The window's actions changed, or the engine window came or went: the open panel follows.
   func refreshExtensions() {
-    guard let button = extensionsButton, let extensions = engine as? any EngineExtensions else { return }
-    button.actions = engineWindow.map { extensions.extensionActions(in: $0) } ?? []
-  }
-
-  private func runExtensionAction(_ id: String) {
-    guard let engineWindow, let button = extensionsButton,
-          let extensions = engine as? any EngineExtensions else { return }
-    extensions.runExtensionAction(id, in: engineWindow, anchor: button)
+    extensionsPanel?.refresh()
   }
 }

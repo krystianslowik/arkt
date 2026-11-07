@@ -46,14 +46,45 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
   var preview: SettingsAppearancePreview?
   var peekCrossSiteSwitch: SettingsSwitch?
   var peekShiftSwitch: SettingsSwitch?
+  /// Settings > General > Warn before quitting (#487, BH-177).
+  var warnBeforeQuittingSwitch: SettingsSwitch?
   /// The lookup hotkey's switch and row (#354); the row's caption carries the registration answer.
   var littleArktHotKeySwitch: SettingsSwitch?
   var littleArktHotKeyRow: SettingsRowView?
+  /// Opt-Cmd-click into Little Arkt (#356, BH-132).
+  var littleArktClickSwitch: SettingsSwitch?
   var countFavoritesSwitch: SettingsSwitch?
   var ninthTabSwitch: SettingsSwitch?
   var importButton: ArchivePillButton?
+  /// Settings > Privacy > Crash reports (#129).
+  var crashReportsSwitch: SettingsSwitch?
+  var sendCrashReportButton: ArchivePillButton?
+  var sendCrashReportRow: SettingsRowView?
   let shortcutsSearch = ArchiveSearchField(frame: .zero)
   var shortcutSections: [ShortcutCatalog.Section] = []
+  /// Settings > General > Downloads (#132): the mode, the folder row and the Library row.
+  var downloadModeControl: SettingsSegmentedControl?
+  var downloadModeRow: SettingsRowView?
+  var downloadFolderRow: SettingsRowView?
+  /// Shows the folder panel and answers the chosen folder, nil when cancelled; tests replace it.
+  var downloadFolderPicker: @MainActor (NSWindow?, @escaping @MainActor (URL?) -> Void) -> Void = { window, done in
+    let panel = NSOpenPanel()
+    panel.canChooseFiles = false
+    panel.canChooseDirectories = true
+    panel.canCreateDirectories = true
+    panel.allowsMultipleSelection = false
+    panel.prompt = "Choose"
+    let finish: @MainActor (NSApplication.ModalResponse) -> Void = { response in
+      done(response == .OK ? panel.url : nil)
+    }
+    if let window { panel.beginSheetModal(for: window) { response in MainActor.assumeIsolated { finish(response) } } }
+    else { finish(panel.runModal()) }
+  }
+  /// Settings > Spaces and Profiles > Archive (#448): the two pop-ups, refreshed after Reset all settings.
+  var archiveTabsPopUp: SettingsPopUpButton?
+  var archiveLittleArktPopUp: SettingsPopUpButton?
+  /// The Reset all settings confirmation while it shows (#617).
+  var resetSheet: DialogSheet?
   /// Closure targets of the pills (an action's target is weak).
   var actionTargets: [NSObject] = []
 
@@ -389,9 +420,14 @@ extension SettingsWindowController: AppSettingsObserver {
   public func appSettingsDidChange(_ settings: AppSettings) {
     peekCrossSiteSwitch?.setOn(settings.peekLinks.opensCrossSiteLinks, animated: true)
     peekShiftSwitch?.setOn(settings.peekLinks.opensShiftClickedLinks, animated: true)
+    warnBeforeQuittingSwitch?.setOn(settings.warnsBeforeQuitting, animated: true)
     applyLittleArktHotKeyState()                    // #354
+    littleArktClickSwitch?.setOn(settings.opensLittleArktOnOptionCommandClick, animated: true)   // #356
     countFavoritesSwitch?.setOn(settings.tabNavigation.countsFavorites, animated: true)
     ninthTabSwitch?.setOn(settings.tabNavigation.ninthOpensNinth, animated: true)
+    crashReportsSwitch?.setOn(settings.sendsCrashReports, animated: true)
+    applySendCrashReportState()                     // #129
+    applyDownloadLocation()                         // #132
   }
 }
 

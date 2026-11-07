@@ -43,6 +43,32 @@ public enum AXID {
     public static let secondary = "dialog.secondary"
     public static let cancel = "dialog.cancel"
     public static let footerLink = "dialog.footerLink"
+    /// The prompt's text field (a page's `prompt()`); value: the text.
+    public static let input = "dialog.input"
+    /// The checkbox (the extension remove sheet's Report abuse); value: checked or not.
+    public static let checkbox = "dialog.checkbox"
+  }
+
+  /// The browser data import (#514): the sheet and the first run's Hero entry share these.
+  public enum BrowserDataImport {
+    /// Label: the title.
+    public static let root = "browserDataImport"
+    public static let primary = "browserDataImport.primary"
+    public static let secondary = "browserDataImport.secondary"
+    /// One checkbox or status row per type: `row` + "." + "spaces", "history", "bookmarks", "extensions", "cookies",
+    /// "passwords".
+    public static let row = "browserDataImport.row"
+    public static func row(_ kind: String) -> String { "\(row).\(kind)" }
+  }
+
+  /// The infobar row over the top of a tab's page (`InfobarRowView`); one per infobar, in order.
+  public enum Infobar {
+    /// Label: the message; role: group.
+    public static let root = "infobar"
+    public static let ok = "infobar.ok"
+    public static let cancel = "infobar.cancel"
+    public static let link = "infobar.link"
+    public static let close = "infobar.close"
   }
 
   /// The toast over the bottom of the content card (`ToastView`); absent while no toast shows.
@@ -64,7 +90,7 @@ public enum AXID {
     /// Value: the displayed host of the shown tab.
     public static let urlBar = "sidebar.urlBar"
     public static let newTab = "sidebar.newTab"
-    /// Shown only for an engine that runs extensions. Enabled: the window has extension actions.
+    /// Shown only for an engine that runs extensions. Opens the Extensions panel (`AXID.Extensions`).
     public static let extensions = "sidebar.extensions"
     public static let spaceDots = "sidebar.spaceDots"
     /// Label: Space title. Selected: current Space.
@@ -82,15 +108,19 @@ public enum AXID {
     public static let spaceCollapsePinned = "sidebar.spaceCollapsePinned"
     /// The current Space page's outline of pinned and Today rows (a proxy element, #269).
     public static let outline = "sidebar.outline"
-    /// Label: row title. Selected: row state is `current`.
+    /// Label: row title. Value: section and state, "Pinned, current, playing audio". Selected: row state is
+    /// `current`. Actions: press (activate), show menu (the context menu).
     public static let rowPinned = "sidebar.row.pinned"
-    /// Label: row title. Selected: row state is `current`.
+    /// Label: row title. Value: section and state, "Today, current". Selected: row state is `current`. Actions:
+    /// press (activate), show menu (the context menu).
     public static let rowToday = "sidebar.row.today"
-    /// Label: folder title.
+    /// Label: folder title. Value: section. Actions: press (open or close), show menu (the context menu).
     public static let rowFolder = "sidebar.row.folder"
     /// Label: joined pane titles. Selected: any pane of the split is `current`.
     public static let rowSplit = "sidebar.row.split"
     public static let divider = "sidebar.divider"
+    /// The Clear control on the divider above Today (#413). Label "Clear Today tabs"; present while not drawn.
+    public static let clearToday = "sidebar.clearToday"
     /// Present only while the row's close button is shown. Label: tooltip.
     public static let rowClose = "sidebar.row.close"
     /// A row's audio button (#364): mutes or unmutes the page.
@@ -100,7 +130,8 @@ public enum AXID {
   /// Favorites grid and tiles at the top of the sidebar (group U4b).
   public enum Favorites {
     public static let grid = "favorites.grid"
-    /// Label: title. Value: `loaded` or `unloaded`.
+    /// Label: title. Value: `loaded` or `unloaded`. Selected: the Favorite is current. Actions: press (activate),
+    /// show menu (the context menu).
     public static let tile = "favorites.tile"
     /// Present only while a loaded tile is hovered.
     public static let tileClose = "favorites.tile.close"
@@ -110,14 +141,32 @@ public enum AXID {
 
   /// Command bar panel, field, results table and result rows (group U4c).
   public enum CommandBar {
-    /// On the panel's content view (`CommandBarView`). Value: `open` while shown, `closed` while hidden and inert.
+    /// On the panel's content view (`CommandBarView`). Present while shown; absent while hidden and inert. No value
+    /// (#608: VoiceOver read the old "open" / "closed" one aloud).
     public static let root = "commandBar"
     public static let field = "commandBar.field"
     public static let results = "commandBar.results"
     /// Label: title. Selected: selection. Value: caption ("Switch to Tab", "Switch to Split View", "Open", "Search").
     public static let row = "commandBar.row"
-    public static let open = "open"
-    public static let closed = "closed"
+    /// Present only while a removable row is hovered (BH-109). Label: tooltip.
+    public static let rowRemove = "commandBar.row.remove"
+    /// The scope chip left of the field (BH-106 "Actions", BH-107 the engine name); absent in the normal scope.
+    public static let scope = "commandBar.scope"
+    /// The search-suggestion notice (BH-113); present until dismissed.
+    public static let notice = "commandBar.notice"
+    public static let noticeDismiss = "commandBar.notice.dismiss"
+    /// The filter pills' tab group (#371); each pill is `filter(_:)` with the pill's name ("All", "Tabs", "History",
+    /// "Actions"): `commandBar.filter.all`.
+    public static let filters = "commandBar.filters"
+    public static func filter(_ name: String) -> String { "commandBar.filter.\(name.lowercased())" }
+    /// The hint strip along the bottom (#371).
+    public static let hints = "commandBar.hints"
+    /// The Esc key cap at the right end of the field row; it closes the bar.
+    public static let escape = "commandBar.escape"
+    /// The preview column (#372). Label: "Preview, <title>".
+    public static let preview = "commandBar.preview"
+    public static let previewSplit = "commandBar.preview.split"
+    public static let previewPrimary = "commandBar.preview.primary"
   }
 
   /// Archive window, table, rows, search, filters, buttons and footer (group U4c, #111).
@@ -227,5 +276,7 @@ public enum AXID {
     public static let shortcutsSearch = "settings.shortcuts.search"
     /// Settings > Spaces and Profiles: a Space's row, by the Space's id.
     public static func spaceRow(_ id: String) -> String { "settings.spaces.space.\(id)" }
+    /// Settings > Advanced > Reset all settings: the sheet's Reset Settings button (#617).
+    public static let resetConfirm = "settings.advanced.resetConfirm"
   }
 }

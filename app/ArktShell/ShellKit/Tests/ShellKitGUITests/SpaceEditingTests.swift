@@ -291,7 +291,9 @@ final class SpaceEditingTests: XCTestCase {
     XCTAssertEqual(harness.source.space(harness.ids[0])?.theme, SpaceThemeCatalog.dusk)
     XCTAssertEqual(harness.saves, 1)
     XCTAssertNil(background.crossfadeAnimationForTesting)
-    let painted = background.baseColorsForTesting.flatMap { $0.components ?? [] }
+    // The layer holds the OKLab-expanded gradient (#381): its ends are the theme's stops.
+    let painted = [background.baseColorsForTesting.first, background.baseColorsForTesting.last]
+      .flatMap { $0?.components ?? [] }
     let expected = SpaceThemeCatalog.dusk.baseColors.flatMap { $0.cgColor.components ?? [] }
     XCTAssertEqual(painted.count, expected.count)
     for (got, want) in zip(painted, expected) {

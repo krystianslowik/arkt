@@ -45,6 +45,65 @@ struct InMemoryEngineContractTests {
   // Rule 17
   @Test func muteIsReportedOnce() async throws { try await EngineContract.muteIsReportedOnce(harness) }
   @Test func audibleStateIsReported() async throws { try await EngineContract.audibleStateIsReported(harness) }
+  // Rule 18
+  @Test func pageImageFitsTheCaps() async throws { try await EngineContract.pageImageFitsTheCaps(harness) }
+  @Test func pageImageOfAClosedTabIsNil() async throws { try await EngineContract.pageImageOfAClosedTabIsNil(harness) }
+  // Rule 19
+  @Test func dialogIsReportedAnsweredAndEndedOnce() async throws {
+    try await EngineContract.dialogIsReportedAnsweredAndEndedOnce(harness)
+  }
+  @Test func pendingDialogEndsBeforeItsTabCloses() async throws {
+    try await EngineContract.pendingDialogEndsBeforeItsTabCloses(harness)
+  }
+  @Test func hiddenTabEndsItsConfirmAndPrompt() async throws {
+    try await EngineContract.hiddenTabEndsItsConfirmAndPrompt(harness)
+  }
+  // Rule 20
+  @Test func permissionIsReportedAnsweredAndEndedOnce() async throws {
+    try await EngineContract.permissionIsReportedAnsweredAndEndedOnce(harness)
+  }
+  @Test func pendingPermissionEndsBeforeItsTabCloses() async throws {
+    try await EngineContract.pendingPermissionEndsBeforeItsTabCloses(harness)
+  }
+  @Test func navigationEndsItsPermission() async throws { try await EngineContract.navigationEndsItsPermission(harness) }
+  @Test func hiddenTabEndsItsPermissionAndAsksAgain() async throws {
+    try await EngineContract.hiddenTabEndsItsPermissionAndAsksAgain(harness)
+  }
+  // Rule 21
+  @Test func infobarIsReportedActedOnAndRemoved() async throws {
+    try await EngineContract.infobarIsReportedActedOnAndRemoved(harness)
+  }
+  @Test func infobarsStayWithTheirTabWhileHidden() async throws {
+    try await EngineContract.infobarsStayWithTheirTabWhileHidden(harness)
+  }
+  @Test func pendingInfobarsEndBeforeTheirTabCloses() async throws {
+    try await EngineContract.pendingInfobarsEndBeforeTheirTabCloses(harness)
+  }
+  // Rule 22
+  @Test func findCountsMatchesAndMovesTheOrdinal() async throws {
+    try await EngineContract.findCountsMatchesAndMovesTheOrdinal(harness)
+  }
+  @Test func stopFindingKeepsClearsOrActivatesTheMatch() async throws {
+    try await EngineContract.stopFindingKeepsClearsOrActivatesTheMatch(harness)
+  }
+  // Rule 23
+  @Test func hoveredLinkReportsItsTargetURL() async throws { try await EngineContract.hoveredLinkReportsItsTargetURL(harness) }
+  // Rule 24
+  @Test func downloadIsReportedProgressesAndCompletes() async throws {
+    try await EngineContract.downloadIsReportedProgressesAndCompletes(harness)
+  }
+  @Test func cancelEndsAnActiveDownloadOnce() async throws { try await EngineContract.cancelEndsAnActiveDownloadOnce(harness) }
+  @Test func removeForgetsADownloadAndKeepsItsFile() async throws {
+    try await EngineContract.removeForgetsADownloadAndKeepsItsFile(harness)
+  }
+  @Test func pauseHoldsTheBytesUntilResume() async throws { try await EngineContract.pauseHoldsTheBytesUntilResume(harness) }
+  @Test func interruptedDownloadRetriesAndReplacesItsRow() async throws {
+    try await EngineContract.interruptedDownloadRetriesAndReplacesItsRow(harness)
+  }
+  @Test func dangerousDownloadIsHeldUntilDecided() async throws {
+    try await EngineContract.dangerousDownloadIsHeldUntilDecided(harness)
+  }
+  @Test func savePreferenceDecidesTheFolder() async throws { try await EngineContract.savePreferenceDecidesTheFolder(harness) }
 
   /// A harness without engine drivers reports rules 13, 14, 16 and 17's audible check as not applicable, never as passed.
   @Test func missingDriversAreNotApplicable() async throws {
@@ -56,9 +115,19 @@ struct InMemoryEngineContractTests {
     await #expect(throws: ContractNotApplicable.self) { try await EngineContract.skipUnloadHandlersNeverHolds(bare) }
     await #expect(throws: ContractNotApplicable.self) { try await EngineContract.cancelledWindowCloseKeepsTheWindow(bare) }
     await #expect(throws: ContractNotApplicable.self) { try await EngineContract.audibleStateIsReported(bare) }
+    await #expect(throws: ContractNotApplicable.self) { try await EngineContract.pageImageFitsTheCaps(bare) }
+    await #expect(throws: ContractNotApplicable.self) { try await EngineContract.dialogIsReportedAnsweredAndEndedOnce(bare) }
+    await #expect(throws: ContractNotApplicable.self) {
+      try await EngineContract.permissionIsReportedAnsweredAndEndedOnce(bare)
+    }
+    await #expect(throws: ContractNotApplicable.self) { try await EngineContract.infobarIsReportedActedOnAndRemoved(bare) }
     await #expect(throws: ContractNotApplicable.self) {
       try await EngineContract.extensionWindowCloseReportsExtension(bare)
     }
+    await #expect(throws: ContractNotApplicable.self) {
+      try await EngineContract.downloadIsReportedProgressesAndCompletes(bare)
+    }
+    await #expect(throws: ContractNotApplicable.self) { try await EngineContract.dangerousDownloadIsHeldUntilDecided(bare) }
   }
 }
 

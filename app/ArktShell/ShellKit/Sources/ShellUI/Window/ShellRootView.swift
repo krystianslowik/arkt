@@ -63,7 +63,16 @@ public final class ShellRootView: NSView {
   /// The single card is growing from the last pane's frame into its own (#388).
   public var isCardReflowing: Bool { cardReflow != nil }
   private var cardReflow: (from: CGRect, distance: Double, progress: CGFloat)?
-  private lazy var cardReflowDriver = SpringDriver(reduceMotion: { [weak self] in self?.reduceMotion() ?? true })
+  /// The card reflow's clock; tests freeze it and step the driver themselves.
+  var cardReflowClock: @MainActor () -> CFTimeInterval = { CACurrentMediaTime() }
+  private(set) lazy var cardReflowDriver = SpringDriver(
+    now: { [weak self] in self?.cardReflowClock() ?? CACurrentMediaTime() },
+    reduceMotion: { [weak self] in self?.reduceMotion() ?? true })
+  /// Measures each card reflow ("card-reflow", #602).
+  let cardPacer = FramePacer()
+  private var cardPacerSession = 0
+  /// Pacing of the last finished card reflow.
+  public private(set) var lastCardPacing: FrameStats?
   /// The card's frame in the layout, kept for the reflow's frames between layout passes.
   private var cardTarget = CGRect.zero
 
@@ -107,8 +116,12 @@ public final class ShellRootView: NSView {
 
   public override var isFlipped: Bool { true }
 
+  /// Called at the end of each layout pass.
+  var onLayout: (@MainActor () -> Void)?
+
   public override func layout() {
     super.layout()
+    defer { onLayout?() }
     let l = ShellLayout.compute(bounds: bounds, sidebarWidth: sidebarWidth, sidebarVisible: sidebarVisible,
                                 metrics: metrics)
     CATransaction.begin()
@@ -116,7 +129,7 @@ public final class ShellRootView: NSView {
     themeBackground.frame = bounds
     if sidebarOverlay.frame != l.sidebarFrame { sidebarOverlay.frame = l.sidebarFrame }
     cardTarget = l.cardFrame
-    card.frame = presentedCardFrame
+    applyCardFrame()
     split.frame = l.cardFrame
     resizeHandle.frame = l.resizeHandleFrame
     CATransaction.commit()
@@ -142,6 +155,7 @@ public final class ShellRootView: NSView {
     let distance = SplitReflow.distance(from: [frame], to: [cardTarget])
     guard distance >= 0.5 else { return }
     cardReflow = (frame, distance, 0)
+    cardPacerSession = cardPacer.begin("card-reflow", in: self)
     applyCardFrame()
     cardReflowDriver.animate(in: self, from: 0, to: distance, initialVelocity: 0,
                              parameters: SplitReflow.parameters) { [weak self] value in
@@ -151,6 +165,7 @@ public final class ShellRootView: NSView {
     } completion: { [weak self] finished in
       guard finished, let self else { return }
       self.cardReflow = nil
+      self.endCardReflowPacing()
       self.applyCardFrame()
     }
   }
@@ -159,22 +174,30 @@ public final class ShellRootView: NSView {
   private func endCardReflow() {
     guard cardReflow != nil else { return }
     cardReflow = nil
+    endCardReflowPacing()
     cardReflowDriver.stop()
     applyCardFrame()
   }
 
-  private var presentedCardFrame: CGRect {
-    guard let cardReflow else { return cardTarget }
-    let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
-    return SplitReflow.frame(from: cardReflow.from, to: cardTarget, progress: cardReflow.progress, scale: scale)
+  private func endCardReflowPacing() {
+    if let stats = cardPacer.end(session: cardPacerSession) { lastCardPacing = stats }
   }
 
+  /// Where the card is drawn: its layout frame, or while it reflows, the part of it shown on its way there.
+  var presentedCardFrame: CGRect {
+    guard let cardReflow else { return cardTarget }
+    let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+    let spring = SplitReflow.frame(from: cardReflow.from, to: cardTarget, progress: cardReflow.progress, scale: scale)
+    return SplitReflow.drawnFrame(presenting: spring, in: cardTarget, flipped: isFlipped)
+  }
+
+  /// The card keeps its layout frame, so its page is resized once; while it reflows, its layer translation and
+  /// rounded mask draw it on its way there and are all that changes per spring frame (#602).
   private func applyCardFrame() {
-    let frame = presentedCardFrame
-    guard card.frame != frame else { return }
     CATransaction.begin()
     CATransaction.setDisableActions(true)
-    card.frame = frame
+    if card.frame != cardTarget { card.frame = cardTarget }
+    SplitReflow.present(card, in: cardReflow == nil ? nil : presentedCardFrame, cornerRadius: metrics.cardCornerRadius)
     CATransaction.commit()
   }
 

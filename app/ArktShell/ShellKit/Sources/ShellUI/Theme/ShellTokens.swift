@@ -25,6 +25,9 @@ public enum ShellTokens {
   /// The hover-revealed sidebar floating over the page (BH-004). Unlike the card it needs a shadow in dark too: its
   /// edge sits on page content, not on the theme. TODO(measure): RT-10.
   public static let sidebarOverlayShadow = TokenPair(light: .black(0.22), dark: .black(0.45))
+  /// The floating sidebar's lift: `sidebarOverlayShadow` at the reveal's blur, which the conceal clears too.
+  public static let sidebarOverlayLiftShadow = ShadowToken(color: sidebarOverlayShadow,
+                                                           radius: SidebarRevealMotion.shadowRadius, offsetY: 2)
   /// Icon-only (idle page dots, bottom-bar symbols, the hover close X): WCAG non-text 3:1 over every shipped
   /// Space theme and row fill. Raised from Arc's 0.30 / 0.45 (#72), and light from 0.48 to 0.49 for the Blossom
   /// family's sRGB pink stop (#310); worst cases are the close X on a hovered row over that stop (light) and on
@@ -52,13 +55,68 @@ public enum ShellTokens {
   public static let tabPreviousHovered = TokenPair(light: .white(0.50), dark: .p3(hex: 0xFAFBFF, alpha: 0.12))
   public static let tabPressed = TokenPair(light: .p3(hex: 0x0E0F10, alpha: 0.065), dark: .p3(hex: 0xFAFBFF, alpha: 0.065))
   public static let tabCurrentShadow = TokenPair(light: .black(0.20), dark: .black(0))
-  // Command bar (always dark surface, C5).
-  public static let commandBarSurface = RGBA.p3(hex: 0x1C1C20, alpha: 0.98)                 // TODO(measure)
-  public static let commandBarText = RGBA.white(0.80)
-  public static let commandBarSecondaryText = RGBA.white(0.33)
-  public static let commandBarDivider = RGBA.white(0.10)
-  public static let commandBarSelectedRow = RGBA.white(0.10)                                // TODO(measure)
-  public static let commandBarBorder = RGBA.white(0.10)
+  /// The lift under the current tab row, the current Favorite tile and the selected Archive row. Arc's geometry is
+  /// not known (#77); this is the one place to change it.
+  public static let rowLiftShadow = ShadowToken(color: tabCurrentShadow, radius: 2, offsetY: 1)
+  /// The content card's lift, which Little Arkt's flight carries too. Arc's geometry is not known (#77).
+  public static let cardLiftShadow = ShadowToken(color: cardShadow, radius: 3, offsetY: 1)
+  // Command bar, hybrid design (#371, design/command-bar/README.md): a glass bar in both appearances. Text pairs are
+  // measured against the opaque surface (`commandBarSurfaceOpaque`, the lightest and darkest fill the glass takes),
+  // not the blurred backdrop (`ShellTokensContrastTests`).
+  /// The glass fill laid over the blur. Translucent; Reduce Transparency draws `commandBarSurfaceOpaque` instead.
+  public static let commandBarSurface = TokenPair(light: .srgb(hex: 0xFDFCF9, alpha: 0.86),
+                                                  dark: .srgb(hex: 0x292C2A, alpha: 0.84))
+  public static let commandBarSurfaceOpaque = TokenPair(light: BrandTokens.Palette.porcelain,
+                                                        dark: .srgb(hex: 0x262927))
+  /// Query text, titles, the selected pill's count: the design's `--strong`.
+  public static let commandBarText = TokenPair(light: BrandTokens.Palette.graphite, dark: BrandTokens.Palette.porcelain)
+  /// Row titles at rest, the magnifier, key cap labels: `--ink-2`.
+  public static let commandBarSecondaryText = TokenPair(light: .srgb(hex: 0x202321, alpha: 0.72),
+                                                        dark: .srgb(hex: 0xFAF9F5, alpha: 0.72))
+  /// Host and path, trailing captions, group headers, the hint strip: `--ink-3`, raised from the prototype's .44 / .36
+  /// to 4.5:1 on the opaque surface and on every fill a row puts under it.
+  public static let commandBarTertiaryText = TokenPair(light: .srgb(hex: 0x202321, alpha: 0.68),
+                                                       dark: .srgb(hex: 0xFAF9F5, alpha: 0.62))
+  /// Hairlines between field, list and hint strip: `--hair`. Decorative.
+  public static let commandBarDivider = TokenPair(light: .srgb(hex: 0x202321, alpha: 0.09),
+                                                  dark: .srgb(hex: 0xFFFFFF, alpha: 0.07))
+  /// The 1 pt inner edge of the glass. Decorative.
+  public static let commandBarInnerEdge = TokenPair(light: .srgb(hex: 0xFFFFFF, alpha: 0.70),
+                                                    dark: .srgb(hex: 0xFFFFFF, alpha: 0.09))
+  /// The 0.5 pt outer edge. Decorative.
+  public static let commandBarBorder = TokenPair(light: .srgb(hex: 0x202321, alpha: 0.18),
+                                                 dark: .srgb(hex: 0x000000, alpha: 0.60))
+  /// The selected (and hovered) row's fill: `--sel`.
+  public static let commandBarSelectedRow = TokenPair(light: .srgb(hex: 0x202321, alpha: 0.07),
+                                                      dark: .srgb(hex: 0xFFFFFF, alpha: 0.10))
+  /// Key cap fill: `--kbd`.
+  public static let commandBarKeyCap = TokenPair(light: .srgb(hex: 0x202321, alpha: 0.055),
+                                                 dark: .srgb(hex: 0xFFFFFF, alpha: 0.07))
+  /// The scrim over the window behind the bar: black 28 % in dark; graphite 10 % in light, where the light screenshot
+  /// shows the page barely dimmed.
+  public static let commandBarScrim = TokenPair(light: .srgb(hex: 0x202321, alpha: 0.10),
+                                                dark: .srgb(hex: 0x0A0B0A, alpha: 0.28))
+  /// The pill capsule around the four filters: `--well`.
+  public static let commandBarPillWell = TokenPair(light: .srgb(hex: 0x202321, alpha: 0.06),
+                                                   dark: .srgb(hex: 0x000000, alpha: 0.22))
+  /// The selected pill: porcelain in dark, graphite in light, with `commandBarPillOnText` on it.
+  public static let commandBarPillOn = TokenPair(light: BrandTokens.Palette.graphite,
+                                                 dark: .srgb(hex: 0xFAF9F5, alpha: 0.92))
+  public static let commandBarPillOnText = TokenPair(light: BrandTokens.Palette.porcelain,
+                                                     dark: BrandTokens.Palette.graphite)
+  /// The selected row's tick and the caret: mustard fills, never text or a stroke.
+  public static let commandBarTick = BrandTokens.accent
+  /// The preview thumbnail's well until the image arrives (#372). The favicon or symbol sits on it.
+  public static let commandBarThumbnailWell = TokenPair(light: .srgb(hex: 0xFFFFFF), dark: .srgb(hex: 0x0F1110))
+  /// The open-tab dot beside the preview's meta line. The words already say "open"; the dot is a status mark.
+  public static let commandBarOpenDot = TokenPair(light: .srgb(hex: 0x3FB36D), dark: .srgb(hex: 0x3FB36D))
+  // Quick lookup bar (Little Arkt): the command bar's look before the hybrid design; always a dark surface.
+  public static let lookupSurface = RGBA.p3(hex: 0x1C1C20, alpha: 0.98)
+  public static let lookupText = RGBA.white(0.80)
+  public static let lookupSecondaryText = RGBA.white(0.33)
+  public static let lookupDivider = RGBA.white(0.10)
+  public static let lookupSelectedRow = RGBA.white(0.10)
+  public static let lookupBorder = RGBA.white(0.10)
   // Toasts (E3a): dark text on a light fill over light themes, light text on a dark fill over dark ones.
   public static let toastSurface = TokenPair(light: .white(0.96), dark: .p3(hex: 0x1C1C20, alpha: 0.96))  // TODO(measure)
   public static let toastText = TokenPair(light: .p3(hex: 0x0E0F10, alpha: 0.90), dark: .white(0.85))
@@ -94,6 +152,31 @@ public enum ShellTokens {
   /// graphite in dark, so it lifts off the window. Opaque; `primaryText` and `secondaryText` read on it
   /// (`ShellTokensContrastTests`).
   public static let themePopoverSurface = TokenPair(light: .srgb(hex: 0xFAF9F5), dark: .srgb(hex: 0x262927))
+  // Drag hint and focus ring (#641, #642, design/drag-hint-focus-ring/README.md): the ink tone, graphite where the
+  // text is dark and porcelain where it is light. Over a Space they resolve with the Space's text tone (the sidebar's
+  // appearance follows it); over the page card (the Split View drop zone) and on Settings, with the window's.
+  /// A drop target's fill: the sidebar row highlight, the Favorites band and the Split View zone.
+  public static let dragHint = TokenPair(light: .srgb(hex: 0x202321, alpha: 0.12),
+                                         dark: .srgb(hex: 0xFAF9F5, alpha: 0.12))
+  /// A drop target's 1 pt edge, inside its corner radius, and the sidebar's insert line.
+  public static let dragHintEdge = TokenPair(light: .srgb(hex: 0x202321, alpha: 0.45),
+                                             dark: .srgb(hex: 0xFAF9F5, alpha: 0.45))
+  /// The keyboard focus ring of the chrome and Settings: `BrandTokens.focusRing` at 85 %, `focusRingWidth` wide. 3:1
+  /// over every shipped Space and row fill and over `surfaceBrand` (`HintAndFocusTokensTests`).
+  public static let focusRing = TokenPair(light: .srgb(hex: 0x202321, alpha: 0.85),
+                                          dark: .srgb(hex: 0xFAF9F5, alpha: 0.85))
+  public static let focusRingWidth: CGFloat = 3
+  // Increase Contrast (#640, design/increase-contrast/README.md): fills stay as they are; each filled state of the
+  // main window's chrome gets a 1 pt edge, drawn as a layer border so nothing changes size.
+  /// The 1 pt edge under Increase Contrast. The one value for the whole shell: Settings, the Archive, the dialogs and
+  /// the toasts forward to it.
+  public static let increasedContrastEdge = TokenPair(light: .black(0.20), dark: .white(0.20))
+  public static let increasedContrastEdgeWidth: CGFloat = 1
+  /// The focused Split View pane's ring under Increase Contrast, outside the card: the ink tone, stronger in dark,
+  /// where a 1 pt edge at 20 % is too weak to tell which pane has focus.
+  public static let splitPaneFocusRing = TokenPair(light: .srgb(hex: 0x202321, alpha: 0.50),
+                                                   dark: .srgb(hex: 0xFAF9F5, alpha: 0.60))
+  public static let splitPaneFocusRingWidth: CGFloat = 2
   // Space theme background (C6).
   /// Texture overlay alpha at noiseFactor 1: the texture multiplies the gradient by `mix(1, texel, alpha)` with alpha
   /// the noiseFactor itself (parity estimate, PARITY(NEEDS-RUNTIME-CHECK)); each texture's strength is in its texels

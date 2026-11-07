@@ -12,11 +12,11 @@ struct SpaceThemeFamilyTests {
   @Test func stopsMatchTheSpec() {
     let expected: [(String, [UInt32], [UInt32])] = [
       ("Dune", [0xF7EED2, 0xEBD592], [0x3D3420, 0x1E1A10]),
-      ("Mist", [0xE0F2FB, 0xC5C6E2], [0x3A4158, 0x1C2030]),
+      ("Mist", [0xEEF1F4, 0xB0C4DA], [0x3A4158, 0x1C2030]),
       ("Paper", [0xF4F1EA, 0xE4DDD2], [0x3A3631, 0x211F1C]),
       ("Sage", [0xE6EDE3, 0xC4D3C0], [0x2F3B33, 0x171E1A]),
-      ("Blossom", [0xF2EAE4, 0xF29BBB], [0x4A2A3A, 0x1F1520]),
-      ("Indigo", [0xE4E2F4, 0xC9C3E8], [0x2D4468, 0x120F2E]),
+      ("Blossom", [0xF7EEF3, 0xDDB4D2], [0x4A2A3A, 0x1F1520]),
+      ("Indigo", [0xE4E2F4, 0xC9C3E8], [0x3C3B72, 0x1D1838]),
     ]
     for (family, (title, light, dark)) in zip(SpaceThemeCatalog.families, expected) {
       #expect(family.title == title)

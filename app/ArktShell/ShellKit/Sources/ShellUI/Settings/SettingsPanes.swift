@@ -22,7 +22,7 @@ extension SettingsWindowController {
     SettingsSectionView(title: title, body: SettingsGroupView(rows), note: note)
   }
 
-  private func identify(_ view: NSView, _ pane: SettingsPane, _ setting: String) {
+  func identify(_ view: NSView, _ pane: SettingsPane, _ setting: String) {
     let identifier = AXID.Settings.control(pane.rawValue, setting)
     if let control = view as? NSControl {
       control.setAccessibilityIdentifierWithCell(identifier)
@@ -40,14 +40,14 @@ extension SettingsWindowController {
     return control
   }
 
-  private func popUp(_ pane: SettingsPane, _ setting: String, _ items: [String], _ selected: String)
+  func popUp(_ pane: SettingsPane, _ setting: String, _ items: [String], _ selected: String)
     -> SettingsPopUpButton {
     let control = SettingsPopUpButton(items: items, selected: selected)
     identify(control, pane, setting)
     return control
   }
 
-  private func pill(_ pane: SettingsPane, _ setting: String, _ title: String, primary: Bool = false,
+  func pill(_ pane: SettingsPane, _ setting: String, _ title: String, primary: Bool = false,
                     small: Bool = false, action: @escaping @MainActor () -> Void) -> ArchivePillButton {
     let button = ArchivePillButton(style: primary ? .primary : .neutral, title: title,
                                    metrics: .init(height: small ? 24 : 28, fontSize: small ? 12 : 13,
@@ -61,13 +61,20 @@ extension SettingsWindowController {
     return button
   }
 
-  private func destructiveLink(_ pane: SettingsPane, _ setting: String, _ title: String) -> ArchiveLinkButton {
+  private func destructiveLink(_ pane: SettingsPane, _ setting: String, _ title: String,
+                               action: (@MainActor () -> Void)? = nil) -> ArchiveLinkButton {
     let link = ArchiveLinkButton(style: .destructive, title: title, fontSize: 13)
+    if let action {
+      let target = SettingsActionTarget(action)
+      actionTargets.append(target)               // targets are weak
+      link.target = target
+      link.action = #selector(SettingsActionTarget.fire(_:))
+    }
     identify(link, pane, setting)
     return link
   }
 
-  private func row(_ label: String, _ caption: String? = nil, _ controls: [NSView] = [], planned: Bool = false)
+  func row(_ label: String, _ caption: String? = nil, _ controls: [NSView] = [], planned: Bool = false)
     -> SettingsRowView {
     SettingsRowView(label: label, caption: caption, trailing: controls, planned: planned)
   }
@@ -90,20 +97,25 @@ extension SettingsWindowController {
     }
     peekCrossSiteSwitch = crossSite
     peekShiftSwitch = shift
+    let warnBeforeQuitting = toggle(.general, "warnBeforeQuitting", on: settings.warnsBeforeQuitting) { [weak self] on in
+      self?.settings.warnsBeforeQuitting = on
+    }
+    warnBeforeQuittingSwitch = warnBeforeQuitting
     return [
       section("Default browser", [browser]),
       section("Opening and quitting", [
         row("When Arkt opens", "Your Spaces, pinned tabs and Favorites are always kept.",
             [popUp(.general, "whenArktOpens", ["Restore last windows", "Open a new window"], "Restore last windows")],
             planned: true),
-        row("Warn before quitting", "Hold Command-Q to quit while a window is open.",
-            [toggle(.general, "warnBeforeQuitting", on: false)], planned: true),
+        row("Warn before quitting", "Hold Command-Q to quit while a window is open.", [warnBeforeQuitting]),
       ]),
       section("Links", [
         row(PeekLinkCopy.crossSite, PeekLinkCopy.crossSiteNote, [crossSite]),
         row(PeekLinkCopy.shiftClick, nil, [shift]),
         littleArktLookupRow(),                     // #354
+        littleArktClickRow(),                      // #356
       ]),
+      section("Downloads", downloadRows(), note: Self.downloadsNote),        // #132
       section("Updates", [
         // Decision 6: shown disabled and off until the release work (#128).
         row("Update Arkt automatically", "Arkt checks for updates once a day and installs them when you quit.",
@@ -193,7 +205,6 @@ extension SettingsWindowController {
     identify(newProfile.button, .spaces, "newProfile")
     let addRoute = SettingsAddRowView(title: "Add Route...", planned: true)
     identify(addRoute.button, .spaces, "addRoute")
-    let archiveOptions = ["1 hour", "6 hours", "12 hours", "24 hours", "7 days", "30 days", "Never"]
     var blocks: [SettingsBlockView] = []
     if !spaceRows.isEmpty {
       blocks.append(section("Spaces", spaceRows,
@@ -201,12 +212,7 @@ extension SettingsWindowController {
                               + "Choosing a profile for each Space is not available yet."))
     }
     blocks += [
-      section("Archive", [
-        row("Archive Today tabs after", "Tabs you haven\u{2019}t looked at for this long move to the Archive.",
-            [popUp(.spaces, "archiveTodayAfter", archiveOptions, "12 hours")], planned: true),
-        row("Archive Little Arkt windows after", nil,
-            [popUp(.spaces, "archiveLittleArktAfter", archiveOptions, "6 hours")], planned: true),
-      ]),
+      section("Archive", archiveRows()),
       section("Profiles", profiles + [newProfile],
               note: "Each profile keeps its own Favorites, history, cookies, passwords and extensions."),
       section("Link routing", [
@@ -216,6 +222,27 @@ extension SettingsWindowController {
       ]),
     ]
     return blocks
+  }
+
+  /// The pop-ups' titles, shortest first (BH-081; decision on #448: all seven, Never included).
+  public static let archiveAfterTitles = ["1 hour", "6 hours", "12 hours", "24 hours", "7 days", "30 days", "Never"]
+
+  /// "Archive Today tabs after" (the Default profile, BH-080, BH-081) and "Archive Little Arkt windows after"
+  /// (BH-137). Each choice applies at once; planned at the defaults when the app gives no `archiveRows`.
+  private func archiveRows() -> [SettingsBlockView] {
+    let rows = services.archiveRows
+    let tabs = popUp(.spaces, "archiveTodayAfter", Self.archiveAfterTitles, rows?.tabsAfter() ?? "12 hours")
+    tabs.onChange = { title in rows?.setTabsAfter(title) }
+    let littleArkt = popUp(.spaces, "archiveLittleArktAfter", Self.archiveAfterTitles,
+                           rows?.littleArktAfter() ?? "6 hours")
+    littleArkt.onChange = { title in rows?.setLittleArktAfter(title) }
+    archiveTabsPopUp = tabs
+    archiveLittleArktPopUp = littleArkt
+    return [
+      row("Archive Today tabs after", "Tabs you haven\u{2019}t looked at for this long move to the Archive.", [tabs],
+          planned: rows == nil),
+      row("Archive Little Arkt windows after", nil, [littleArkt], planned: rows == nil),
+    ]
   }
 
   // MARK: Appearance
@@ -398,6 +425,7 @@ extension SettingsWindowController {
             planned: true),
         row("Clear browsing data", "History, cookies and cached files, for a time range.", [clear], planned: true),
       ]),
+      crashReportsSection(),
     ]
   }
 
@@ -417,11 +445,6 @@ extension SettingsWindowController {
     let folderRow = row("Arkt\u{2019}s data folder", "The sidebar, the Archive and their backups.", [reveal])
     reveal.isEnabled = services.showDataFolder != nil
     return [
-      section("Downloads", [
-        row("Save downloads to", nil, [popUp(.advanced, "downloadsFolder", ["Downloads", "Other..."], "Downloads")],
-            planned: true),
-        row("Ask where to save each file", nil, [toggle(.advanced, "askWhereToSave", on: false)], planned: true),
-      ]),
       section("Pages", [
         row("Open Picture in Picture when you leave a video tab", nil,
             [toggle(.advanced, "autoPictureInPicture", on: true)], planned: true),
@@ -431,7 +454,7 @@ extension SettingsWindowController {
       section("Data", [importRow, folderRow]),
       section("Reset", [
         row("Reset all settings", "Your Spaces, tabs and the Archive stay as they are.",
-            [destructiveLink(.advanced, "resetAll", "Reset...")], planned: true),
+            [destructiveLink(.advanced, "resetAll", "Reset...") { [weak self] in self?.askToResetSettings() }]),
       ]),
     ]
   }

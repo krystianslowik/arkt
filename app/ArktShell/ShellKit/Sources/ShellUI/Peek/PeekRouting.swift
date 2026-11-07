@@ -51,12 +51,15 @@ public struct PeekLinkSettings: Equatable, Sendable {
 public enum PeekRouting {
   /// - A link inside the Peek navigates the Peek; Shift-click there opens a Today tab (one Peek per source tab).
   /// - Shift-click opens a Peek from any tab (BH-145, GS-027), a meeting link a Today tab.
-  /// - Command, Option and Control clicks are the engine's.
+  /// - Command, Option and Control clicks, and a middle-click (a background tab), are the engine's.
   /// - Without modifiers, a pinned tab or a Favorite opens a meeting link as a Today tab (BH-146) and a link to
   ///   another site in a Peek (BH-144, BH-056); a same-site link and every Today tab link navigate.
   public static func route(_ activation: EngineLinkActivation, section: PeekSourceSection,
                            settings: PeekLinkSettings = PeekLinkSettings()) -> LinkRoute {
     let modifiers = activation.modifiers
+    // A middle-click carries no modifier flags, only the background-tab disposition (BH-163): the engine's, like a
+    // Command-click.
+    if activation.disposition == .newBackgroundTab { return .navigate }
     if modifiers.contains(.shift), modifiers.isDisjoint(with: [.command, .option, .control]) {
       if section == .peek { return .newTab }
       guard settings.opensShiftClickedLinks else { return .navigate }

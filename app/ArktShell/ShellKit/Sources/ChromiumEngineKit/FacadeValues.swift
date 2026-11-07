@@ -13,6 +13,16 @@ extension CloseMode {
   }
 }
 
+extension FindStopAction {
+  var facade: ArktFindAction {
+    switch self {
+    case .clear: .clear
+    case .keep: .keep
+    case .activate: .activate
+    }
+  }
+}
+
 extension CloseReason {
   /// `ArktCloseReasonNone` never arrives on a `TabClosed` from the real facade; a close nobody claimed is the
   /// page's own (Decision 12's default).
@@ -70,6 +80,27 @@ extension HistoryEntry {
 extension ExtensionAction {
   @MainActor init(facade action: any ArktExtensionAction) {
     self.init(id: action.actionId, name: action.name, iconPNG: action.iconPNG, isEnabled: action.isEnabled)
+  }
+}
+
+extension DownloadItem {
+  /// The values of one facade snapshot. A total of 0 is "not said" (Chromium); an unknown state or reason round-trips
+  /// through `DownloadInterruptReason`.
+  @MainActor init(facade item: any ArktDownloadItem) {
+    let state: DownloadState
+    switch item.state {
+    case .inProgress: state = .inProgress
+    case .paused: state = .paused
+    case .complete: state = .complete
+    case .cancelled: state = .cancelled
+    case .interrupted: state = .interrupted(DownloadInterruptReason(rawValue: item.interruptReason))
+    @unknown default: state = .interrupted(.crash)
+    }
+    self.init(id: DownloadID(item.guid), url: item.url, filename: item.filename, targetPath: item.targetPath,
+              totalBytes: item.totalBytes > 0 ? item.totalBytes : nil, receivedBytes: item.receivedBytes,
+              state: state, dangerType: DownloadDangerType(rawValue: item.dangerType), mimeType: item.mimeType,
+              startTime: item.startTime, endTime: item.endTime, bytesPerSecond: item.bytesPerSecond,
+              canResume: item.canResume)
   }
 }
 

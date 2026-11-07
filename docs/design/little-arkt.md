@@ -42,7 +42,8 @@ Typeface: the system font (SF Pro), as everywhere in the shell.
 | Cmd-Opt-N anywhere (global hotkey, off by default, turned on in Settings) | Quick lookup bar on the current desktop, above full-screen apps; Return opens the result in a new Little Arkt window | BH-130, KB-045 |
 | Cmd-Opt-N with Arkt frontmost | Same, from the File menu ("New Little Arkt Window") | KB-044 |
 | Opt-Cmd-click a link (when enabled) | Little Arkt window | BH-132, GS-028 |
-| Opt-Cmd-click a sidebar tab (when enabled) | That tab moves into a Little Arkt window | BH-132 |
+| Opt-Cmd-click a Today tab in the sidebar (when enabled) | That tab moves into a Little Arkt window, with its page (no reload); the row leaves the sidebar without an Archive entry, and the page is archived when its Little Arkt window closes | BH-132, decided on #356 |
+| Opt-Cmd-click a pinned tab or a Favorite (when enabled) | Its page opens in a new Little Arkt window; the pin or Favorite stays where it is, as with a Peek | BH-132, decided on #356 |
 | `window.open` with features, extension popup windows | Little Arkt popup (below) | #123, decided 2026-10-25 |
 
 Settings (Settings > Links, final copy): "Links from other apps open in Little Arkt" (on), "Open Little Arkt when I
@@ -64,8 +65,8 @@ see Parity notes). Settings > Profiles: "Archive Little Arkts after:" with the s
 | Frame color | light `#FAF9F5`, dark `#202321` | `BrandTokens.surfaceBrand` |
 | Top bar | 40 pt, traffic lights at x 12, centered vertically | |
 | Host label | from x 80, 13 pt: lock glyph, then the host in `primaryText` semibold; the full URL in the tooltip | |
-| Copy Link | 26 pt icon button, `sidebarForeground`, hover fill `sidebarItemBackground` | |
-| Open in split button | 26 pt high, radius 8, 8 pt from the right edge; label 12 pt semibold; 10 pt Space swatch; chevron segment after a 1 pt divider (graphite 18 %) | `BrandTokens.accent`, `accentHighlight` (hover), `accentPressed`, `onAccent`; focus ring `BrandTokens.focusRing` |
+| Copy Link | 26 pt icon button, `sidebarForeground`, hover fill `sidebarItemBackground`; focus ring 3 pt outside it | `ShellTokens.focusRing` (#687) |
+| Open in split button | 26 pt high, radius 8, 8 pt from the right edge; label 12 pt semibold; 10 pt Space swatch; chevron segment after a 1 pt divider (graphite 18 %) | `BrandTokens.accent`, `accentHighlight` (hover), `accentPressed`, `onAccent`; focus ring `ShellTokens.focusRing`, 3 pt inside the focused segment (the split clips it), in the fill's text tone: graphite on mustard in both appearances, the window's tone on the quiet split (#687) |
 | Card | 10 pt continuous corners, hairline | `ShellMetrics.cardCornerRadius`, `ShellTokens.cardBorder`, `cardShadow` |
 | Inactive window | traffic lights gray; nothing else dims | system behavior |
 | Quick lookup bar | the command bar panel: 766 pt wide (narrower on small screens), 60 pt input, 50 pt rows, radius 12, at 34 % of the screen height; a "Little Arkt" tag before the input | `CommandBarGeometry`, `ShellTokens.commandBar*`; tag uses `accent` and `onAccent` |
@@ -270,8 +271,34 @@ as usual (Personal sample theme in light, Dev in dark).
   (`TYPE_POPUP` as `.page`, `TYPE_APP_POPUP` as `.extension`, both `isPopup`) with the requested bounds, a size-only
   request centered over the last active window; `EngineClient.moveTab(_:to:)` moves a tab between engine windows
   without a reload (`ArktTabHandle.move(to:)`); a page's `window.close()` arrives as `.windowClosed`.
-- Missing engine piece: an image snapshot of a tab's current frame for the Open in flight (#352). The request does
-  not carry the opener window yet.
+- The Open in flight (#352) takes its snapshot with `EngineClient.pageImage(of:_:)` and `.fullFrame` (#440), decoded
+  off the main actor. The engine reports no "first frame" for a page in its new window, so the snapshot's 0.1 s
+  crossfade starts on the next display frame after the page is mounted in the main card. Open in with no main window
+  open takes the no-flight path (the window it opens has no laid-out card to fly to). The Today row is in the sidebar
+  from the start of the flight and drawn by its clock; the old selection fades out on the room spring and the new
+  row's selection fades in with the row, then the selection moves to it when the page lands (#455). A current
+  Favorite has no outline row, so its tile's selection fill fades on that same room value; the favicon stays, and
+  the title is the tile's accessibility label, which is not faded (#465). The flying card carries the card shadow (#456, decided
+  2026-10-26: the prototype's lifted plate has `--card-shadow`; light only, none in dark where the token is clear). It
+  is a layer of its own under the card (the card's mask would clip it) with the main card's values (`cardShadow`,
+  blur 3, offset 1 pt down), the card's position, scale and opacity, so it fades with the landing's crossfade, and an
+  explicit `shadowPath` (no offscreen pass) rebuilt only when the card's size changed, in the same tick. Measured at
+  120 Hz frames under load: no frame cost beyond noise. Reduce Motion takes no flight, so no shadow; an aborted
+  flight removes it with the overlay. The layer shadow above stays the window's own appear and close. The popup
+  request does not carry the opener window yet.
+- JavaScript dialogs (#471): a Little Arkt window has its own `JavaScriptDialogPresenter` (the main window's type),
+  anchored to the shown page while the window is open, so `alert()`, `confirm()` and `prompt()` show as the panel of
+  docs/design/alerts-sheets-toasts.md, section 3.3. Open in releases the pending dialog when the fade or flight starts
+  and the main window adopts it before `moveTab` (the #467 pair); a flight or move that keeps the page gives it back.
+  Closing the window, or the page closing its popup, ends the dialog without an answer, as Chromium does when a tab
+  closes. How an unseen dialog is recovered: it is not, because none can exist. The engine has no query for pending
+  dialogs and replays nothing; the shell relies on event order instead. (1) A popup's window observer starts when the
+  window is announced (`adopt(engineWindow:)`), and the engine queues the popup's events in one FIFO, so a dialog
+  raised after the announcement is delivered to it; the in-memory engine and the scripted facade tests pin a dialog
+  raised right after `openEngineWindow`. (2) The one path that moves a tab into a Little Arkt window, Opt-Cmd-click on
+  a Today tab (#356), uses the same pair: the window that had the page releases its dialog and the Little Arkt window
+  adopts it before `moveTab`. Open in hands it back the same way. (3) A dialog the engine reports for a tab it no
+  longer lists is answered false by the engine itself, so a page's call never hangs.
 - Missing shell pieces: open-URL events and default-browser registration (#135); link routing (#113) for the
   destination; a global hotkey (`RegisterEventHotKey`, no Accessibility permission needed); the Archive's Little Arkt
   source and its threshold in auto-archive.
@@ -302,3 +329,7 @@ Motion keyframes, light and dark: `la-kf-appear-{40,90,160}ms`, `la-kf-promote-{
 `la-kf-nudge-{60,140}ms`, `la-kf-close-60ms`, `la-kf-interrupt-220ms`.
 
 Reduce Motion keyframes, light and dark: `la-rm-appear-100ms`, `la-rm-promote-{80,240}ms`.
+
+Focus ring (#687): the ink ring of [`design/drag-hint-focus-ring`](../../design/drag-hint-focus-ring/README.md). Screens of these
+controls, focused: [light](../../design/drag-hint-focus-ring/screens/drag-hint-focus-ring-controls-light.png),
+[dark](../../design/drag-hint-focus-ring/screens/drag-hint-focus-ring-controls-dark.png).

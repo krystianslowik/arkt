@@ -5,6 +5,6 @@ PRODUCT_SHORTNAME=Arkt
 PRODUCT_INSTALLER_FULLNAME=Arkt Installer
 PRODUCT_INSTALLER_SHORTNAME=Arkt Installer
 COPYRIGHT=Copyright @LASTCHANGE_YEAR@ Arkt. Portions copyright The Chromium Authors. All rights reserved.
-MAC_BUNDLE_ID=com.arkt.Arkt
+MAC_BUNDLE_ID=dev.arkt.Arkt
 MAC_CREATOR_CODE=Arkt
 MAC_TEAM_ID=

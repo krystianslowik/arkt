@@ -91,6 +91,14 @@ final class TestEvent: NSObject, ArktEngineEvent {
   var isActive = false
   var isAudible = false
   var isMuted = false
+  var dialog: (any ArktJavaScriptDialog)?
+  var permission: (any ArktPermissionRequest)?
+  var infobars: [any ArktInfobar]?
+  var findRequestId = 0
+  var findOrdinal = 0
+  var findCount = 0
+  var findIsFinal = false
+  var download: (any ArktDownloadItem)?
   init(_ kind: ArktEngineEventKind, tab: (any ArktTabHandle)?, browser: (any ArktBrowserHandle)?) {
     self.kind = kind; self.tab = tab; self.browser = browser
   }
@@ -164,6 +172,34 @@ final class TestTab: NSObject, ArktTabHandle {
     event.isMuted = muted
     owner?.engine.record(event)
   }
+  /// The find (#134): the calls as received, and one final reply of 1 of 1 per non-empty text.
+  private(set) var finds: [(text: String, forward: Bool, matchCase: Bool)] = []
+  private(set) var stops: [ArktFindAction] = []
+  func findInPage(text: String, forward: Bool, matchCase: Bool) {
+    finds.append((text, forward, matchCase))
+    let event = TestEvent(.findResult, tab: self, browser: owner)
+    event.findRequestId = text.isEmpty ? 0 : finds.count
+    event.findOrdinal = text.isEmpty ? 0 : 1
+    event.findCount = text.isEmpty ? 0 : 1
+    event.findIsFinal = true
+    owner?.engine.record(event)
+  }
+  func stopFinding(action: ArktFindAction) { stops.append(action) }
+  /// Reports the link under the pointer (#114).
+  func hover(_ url: URL?) {
+    let event = TestEvent(.targetURLChanged, tab: self, browser: owner)
+    event.url = url
+    owner?.engine.record(event)
+  }
+  /// A copy of the current frame (#370, #352): a 2 x 1 pixel PNG stand-in at scale 1, or nil with no URL.
+  private(set) var copyRequests: [NSSize] = []
+  func copyFrame(maxPixelSize: NSSize, completion: @escaping (Data?, NSSize, CGFloat) -> Void) {
+    copyRequests.append(maxPixelSize)
+    let hasFrame = url != nil
+    Task { @MainActor in
+      completion(hasFrame ? Data("png".utf8) : nil, hasFrame ? NSSize(width: 2, height: 1) : .zero, hasFrame ? 1 : 0)
+    }
+  }
   func duplicate() -> (any ArktTabHandle)? {
     guard let owner else { return nil }
     let copy = owner.insertTab(url: url, active: false, opener: self, origin: .client)
@@ -223,6 +259,69 @@ final class TestBrowser: NSObject, ArktBrowserHandle {
     for tab in tabList { remove(tab, reason: .windowClosing) }
     engine.closeBrowser(self)
   }
+}
+
+/// An import record as the shell writes it (#512): the value is lent as bytes, never handed over as an object.
+final class TestImportCookie: NSObject, ArktImportCookie {
+  let hostKey = ".example.com"
+  let name = "session"
+  let path = "/"
+  let expires = Date(timeIntervalSince1970: 2_000_000_000)
+  let creation: Date? = nil
+  let lastAccess: Date? = Date(timeIntervalSince1970: 1_000)
+  let isSecure = true
+  let isHTTPOnly = true
+  let sameSite = 1
+  let priority = 2
+  let sourceScheme = 2
+  let sourcePort = -1
+  let partitionKey = ""
+  let value: [UInt8]
+  init(value: String) { self.value = Array(value.utf8) }
+  func withValueBytes(_ body: (UnsafeRawPointer, UInt) -> Void) {
+    value.withUnsafeBytes { body($0.baseAddress!, UInt($0.count)) }
+  }
+}
+
+final class TestImportLogin: NSObject, ArktImportLogin {
+  let originURL = "https://example.com/login"
+  let actionURL: String? = nil
+  let signonRealm = "https://example.com/"
+  let username = "user"
+  let dateCreated: Date? = nil
+  let dateLastUsed: Date? = nil
+  let password: [UInt8]
+  init(password: String) { self.password = Array(password.utf8) }
+  func withPasswordBytes(_ body: (UnsafeRawPointer, UInt) -> Void) {
+    password.withUnsafeBytes { body($0.baseAddress!, UInt($0.count)) }
+  }
+}
+
+final class TestImportResult: NSObject, ArktImportResult {
+  let written: Int
+  let skipped: Int
+  let failed: Int
+  let failureReason: String?
+  let lastVisitTime: Date?
+  init(written: Int, skipped: Int, failed: Int, failureReason: String?, lastVisitTime: Date? = nil) {
+    self.written = written; self.skipped = skipped; self.failed = failed; self.failureReason = failureReason
+    self.lastVisitTime = lastVisitTime
+  }
+}
+
+final class TestImportHistoryEntry: NSObject, ArktImportHistoryEntry {
+  let url = "https://example.com/"
+  let title = "Example"
+  let visitTimes = [Date(timeIntervalSince1970: 10), Date(timeIntervalSince1970: 20)]
+  let visitTransitions: [NSNumber] = [1, 0]
+}
+
+final class TestImportBookmark: NSObject, ArktImportBookmark {
+  let url = "https://example.com/"
+  let title = "Example"
+  let guid: String? = "00000000-0000-4000-8000-000000000001"
+  let dateAdded: Date? = nil
+  let folderPath = ["Reading", "Later"]
 }
 
 /// A facade that records events and delivers them as one batch on `flush()`, as the real facade does from a posted
@@ -292,6 +391,60 @@ final class TestEngine: NSObject, ArktEngine {
   }
 
   func answerDialog(in tab: any ArktTabHandle, accept: Bool) -> Bool { false }
+
+  // Downloads (#132): a list the tests fill, and the commands and prefs the shell sets.
+  var downloads: [any ArktDownloadItem] = []
+  private(set) var downloadCommands: [(command: ArktDownloadCommand, guid: String)] = []
+  private(set) var startedDownloads: [URL] = []
+  var downloadPromptsForLocation = false
+  var downloadDirectory = URL(fileURLWithPath: "/tmp/arkt-abi-downloads")
+  let defaultDownloadDirectory = URL(fileURLWithPath: "/tmp/arkt-abi-default")
+  var downloadDestinationHandler: ((String, URL, @escaping (URL?) -> Void) -> Void)?
+  func perform(download command: ArktDownloadCommand, on guid: String) {
+    downloadCommands.append((command, guid))
+  }
+  func startDownload(from url: URL) { startedDownloads.append(url) }
+
+  private(set) var importedValues: [String] = []
+  private(set) var importedHistoryVisits = 0
+  private(set) var importedBookmarkPaths: [[String]] = []
+
+  func importHistory(
+    _ entries: [any ArktImportHistoryEntry], after: Date?, completion: @escaping (any ArktImportResult) -> Void
+  ) {
+    importedHistoryVisits += entries.reduce(0) { $0 + $1.visitTimes.count }
+    completion(TestImportResult(
+      written: 1, skipped: 1, failed: 0, failureReason: nil, lastVisitTime: entries.first?.visitTimes.last))
+  }
+
+  func installExtensions(_ ids: [String], completion: @escaping ([any ArktExtensionInstallResult]) -> Void) {
+    completion([])
+  }
+
+  func cancelExtensionInstalls() {}
+
+  func importBookmarks(_ bookmarks: [any ArktImportBookmark], completion: @escaping (any ArktImportResult) -> Void) {
+    importedBookmarkPaths += bookmarks.map(\.folderPath)
+    completion(TestImportResult(written: bookmarks.count, skipped: 0, failed: 0, failureReason: nil))
+  }
+
+  func importCookies(_ cookies: [any ArktImportCookie], completion: @escaping (any ArktImportResult) -> Void) {
+    for cookie in cookies {
+      cookie.withValueBytes { bytes, count in
+        importedValues.append(String(decoding: UnsafeRawBufferPointer(start: bytes, count: Int(count)), as: UTF8.self))
+      }
+    }
+    completion(TestImportResult(written: cookies.count, skipped: 0, failed: 0, failureReason: nil))
+  }
+
+  func importPasswords(_ logins: [any ArktImportLogin], completion: @escaping (any ArktImportResult) -> Void) {
+    for login in logins {
+      login.withPasswordBytes { bytes, count in
+        importedValues.append(String(decoding: UnsafeRawBufferPointer(start: bytes, count: Int(count)), as: UTF8.self))
+      }
+    }
+    completion(TestImportResult(written: 0, skipped: 0, failed: logins.count, failureReason: "refused: 1\n"))
+  }
 }
 
 /// The app's embedder, as `ArktShellEmbedder` will be: found by name, never linked by the engine.
@@ -558,8 +711,21 @@ struct ConformanceTests {
     #expect([ArktTabOrigin.client, .engine].map(\.rawValue) == [0, 1])
     #expect([ArktEngineEventKind.tabCreated, .tabClosed, .activeTabChanged, .closeCancelled, .urlChanged,
              .titleChanged, .faviconChanged, .loadingChanged, .historyChanged, .tabReplaced, .tabMoved,
-             .windowOpened, .windowClosed, .extensionActionsChanged, .audibleChanged, .mutedChanged].map(\.rawValue)
-      == Array(0...15))
+             .windowOpened, .windowClosed, .extensionActionsChanged, .audibleChanged, .mutedChanged,
+             .dialogRequested, .dialogEnded, .permissionRequested, .permissionEnded, .infobarsChanged,
+             .findResult, .targetURLChanged, .downloadCreated, .downloadUpdated, .downloadRemoved].map(\.rawValue)
+      == Array(0...25))
+    #expect([ArktDownloadState.inProgress, .paused, .complete, .cancelled, .interrupted].map(\.rawValue)
+      == Array(0...4))
+    #expect([ArktDownloadCommand.cancel, .pause, .resume, .open, .showInFinder, .retry, .keepDangerous,
+             .discardDangerous, .remove].map(\.rawValue) == Array(0...8))
+    #expect([ArktFindAction.clear, .keep, .activate].map(\.rawValue) == [0, 1, 2])
+    #expect([ArktInfobarKind.other, .debugger, .automation, .reload].map(\.rawValue) == Array(0...3))
+    #expect([ArktInfobarAction.ok, .cancel, .link, .messageLink, .close].map(\.rawValue) == Array(0...4))
+    #expect([ArktPermissionKind.other, .geolocation, .notifications, .camera, .microphone].map(\.rawValue)
+      == Array(0...4))
+    #expect([ArktPermissionChoice.allow, .allowThisTime, .block, .dismiss].map(\.rawValue) == Array(0...3))
+    #expect([ArktDialogKind.alert, .confirm, .prompt].map(\.rawValue) == [0, 1, 2])
     #expect([ArktWindowRequestKind.extension, .page, .reopen, .startupURL].map(\.rawValue) == Array(0...3))
     #expect([ArktLinkDecision.navigate, .cancel].map(\.rawValue) == [0, 1])
   }
@@ -603,5 +769,278 @@ struct MuteABITests {
     let events = try #require(batches.last)
     #expect(events.map(\.kind) == [.mutedChanged])
     #expect(events.first?.isMuted == true && events.first?.tab === tab)
+  }
+}
+
+/// Find in page and link hover (#134, #114): the calls and the plain values of the two events are part of the ABI.
+@MainActor
+struct FindABITests {
+  @Test func findAndStopReachTheHandleAndRepliesCarryPlainValues() throws {
+    let engine = TestEngine()
+    var batches: [[any ArktEngineEvent]] = []
+    let token = engine.addEventSink { batches.append($0) }
+    defer { engine.removeEventSink(token) }
+    let browser = engine.createBrowser(host: TestWindowHost())
+    let tab = try #require(browser.createTab(url: nil, active: true) as? TestTab)
+    engine.flush()
+
+    tab.findInPage(text: "needle", forward: false, matchCase: true)
+    tab.stopFinding(action: .keep)
+    engine.flush()
+
+    #expect(tab.finds.count == 1 && tab.finds[0].text == "needle" && !tab.finds[0].forward && tab.finds[0].matchCase)
+    #expect(tab.stops == [.keep])
+    let reply = try #require(batches.last?.first)
+    #expect(reply.kind == .findResult && reply.tab === tab)
+    #expect(reply.findRequestId == 1 && reply.findOrdinal == 1 && reply.findCount == 1 && reply.findIsFinal)
+  }
+
+  @Test func targetURLEventCarriesTheURLOrNilOnLeave() throws {
+    let engine = TestEngine()
+    var batches: [[any ArktEngineEvent]] = []
+    let token = engine.addEventSink { batches.append($0) }
+    defer { engine.removeEventSink(token) }
+    let browser = engine.createBrowser(host: TestWindowHost())
+    let tab = try #require(browser.createTab(url: nil, active: true) as? TestTab)
+    engine.flush()
+
+    let link = URL(string: "https://example.com/next")!
+    tab.hover(link)
+    engine.flush()
+    tab.hover(nil)
+    engine.flush()
+
+    let events = batches.suffix(2).compactMap(\.first)
+    #expect(events.map(\.kind) == [.targetURLChanged, .targetURLChanged])
+    #expect(events.map(\.url) == [link, nil])
+  }
+}
+
+/// The frame copy seam (#370, #352): an asynchronous completion with the PNG, its pixel size and scale, and the cap
+/// passed through as given.
+@MainActor
+struct FrameCopyABITests {
+  @Test func copyFrameAnswersLaterWithTheFrame() async throws {
+    let engine = TestEngine()
+    let browser = engine.createBrowser(host: TestWindowHost())
+    let tab = browser.createTab(url: URL(string: "arkt-test://page/Frame"), active: true)
+    var answered = false
+    let result: (Data?, NSSize, CGFloat) = await withCheckedContinuation { continuation in
+      tab.copyFrame(maxPixelSize: NSSize(width: 600, height: 360)) { png, size, scale in
+        answered = true
+        continuation.resume(returning: (png, size, scale))
+      }
+      #expect(!answered, "the completion runs later, never inside the call")
+    }
+    #expect(result.0 == Data("png".utf8))
+    #expect(result.1 == NSSize(width: 2, height: 1))
+    #expect(result.2 == 1)
+    #expect((tab as? TestTab)?.copyRequests == [NSSize(width: 600, height: 360)])
+  }
+}
+
+/// JavaScript dialogs (#400): the event carries the dialog, the dialog carries the engine's strings and takes one
+/// answer, and an answer after the end is refused.
+@MainActor
+struct JavaScriptDialogABITests {
+  final class Dialog: NSObject, ArktJavaScriptDialog {
+    let kind: ArktDialogKind = .prompt
+    let tab: any ArktTabHandle
+    let title = "example.com says"
+    let message = "Name?"
+    let defaultPromptText: String? = "Ada"
+    let acceptTitle = "OK"
+    let cancelTitle: String? = "Cancel"
+    private(set) var isEnded = false
+    private(set) var answers: [(Bool, String?)] = []
+    init(tab: any ArktTabHandle) { self.tab = tab }
+    func respond(accepted: Bool, userInput: String?) -> Bool {
+      guard !isEnded else { return false }
+      isEnded = true
+      answers.append((accepted, userInput))
+      return true
+    }
+  }
+
+  @Test func theEventCarriesTheDialogAndItTakesOneAnswer() throws {
+    let engine = TestEngine()
+    let browser = engine.createBrowser(host: TestWindowHost())
+    let tab = browser.createTab(url: nil, active: true)
+    let dialog = Dialog(tab: tab)
+    let event = TestEvent(.dialogRequested, tab: tab, browser: browser)
+    event.dialog = dialog
+
+    let carried = try #require(event.dialog)
+    #expect(carried.kind == .prompt && carried.title == "example.com says" && carried.message == "Name?")
+    #expect(carried.defaultPromptText == "Ada" && carried.acceptTitle == "OK" && carried.cancelTitle == "Cancel")
+    #expect(carried.tab === tab)
+    #expect(carried.respond(accepted: true, userInput: "Grace"))
+    #expect(!carried.respond(accepted: false, userInput: nil), "the answer after the end is refused")
+    #expect(carried.isEnded && dialog.answers.count == 1 && dialog.answers.first?.1 == "Grace")
+  }
+}
+
+/// Permission requests (#400): the event carries the request, the request carries the engine's strings and takes one
+/// answer, and an answer after the end is refused.
+@MainActor
+struct PermissionRequestABITests {
+  final class Request: NSObject, ArktPermissionRequest {
+    let tab: any ArktTabHandle
+    let origin = "example.com"
+    let kinds: [NSNumber] = [NSNumber(value: ArktPermissionKind.geolocation.rawValue)]
+    let title = "example.com wants to"
+    let items = ["Know your location"]
+    let allowTitle = "Allow while visiting the site"
+    let allowThisTimeTitle: String? = "Allow this time"
+    let blockTitle = "Never allow"
+    private(set) var isEnded = false
+    private(set) var choices: [ArktPermissionChoice] = []
+    init(tab: any ArktTabHandle) { self.tab = tab }
+    func respond(choice: ArktPermissionChoice) -> Bool {
+      guard !isEnded else { return false }
+      isEnded = true
+      choices.append(choice)
+      return true
+    }
+  }
+
+  @Test func theEventCarriesTheRequestAndItTakesOneAnswer() throws {
+    let engine = TestEngine()
+    let browser = engine.createBrowser(host: TestWindowHost())
+    let tab = browser.createTab(url: nil, active: true)
+    let request = Request(tab: tab)
+    let event = TestEvent(.permissionRequested, tab: tab, browser: browser)
+    event.permission = request
+
+    let carried = try #require(event.permission)
+    #expect(carried.origin == "example.com" && carried.title == "example.com wants to")
+    #expect(carried.kinds == [1] && carried.items == ["Know your location"])
+    #expect(carried.allowTitle == "Allow while visiting the site" && carried.allowThisTimeTitle == "Allow this time")
+    #expect(carried.blockTitle == "Never allow" && carried.tab === tab)
+    #expect(carried.respond(choice: .allowThisTime))
+    #expect(!carried.respond(choice: .block), "the answer after the end is refused")
+    #expect(carried.isEnded && request.choices == [.allowThisTime])
+  }
+}
+
+/// Downloads (#132): the event carries one plain snapshot, the commands go by guid, and the prefs and the destination
+/// handler are plain properties.
+@MainActor
+struct DownloadABITests {
+  final class Item: NSObject, ArktDownloadItem {
+    let guid = "00000000-0000-4000-8000-0000000000d1"
+    let url = URL(string: "https://files.test/Report.bin")!
+    let filename = "Report.bin"
+    let targetPath: URL? = URL(fileURLWithPath: "/tmp/Report.bin")
+    let totalBytes: Int64 = 4_000
+    let receivedBytes: Int64 = 1_000
+    let state = ArktDownloadState.interrupted
+    let interruptReason = 22
+    let dangerType = 0
+    let mimeType = "application/octet-stream"
+    let startTime = Date(timeIntervalSince1970: 10)
+    let endTime: Date? = nil
+    let bytesPerSecond: Int64 = 0
+    let canResume = true
+  }
+
+  @Test func theEventCarriesTheSnapshotAndNoTab() throws {
+    let event = TestEvent(.downloadCreated, tab: nil, browser: nil)
+    event.download = Item()
+    let carried = try #require(event.download)
+    #expect(event.tab == nil && event.browser == nil)
+    #expect(carried.guid.hasSuffix("d1") && carried.filename == "Report.bin" && carried.totalBytes == 4_000)
+    #expect(carried.state == .interrupted && carried.interruptReason == 22 && carried.canResume)
+    #expect(TestEvent(.infobarsChanged, tab: nil, browser: nil).download == nil)
+  }
+
+  @Test func commandsGoByGuidAndThePrefsAreProperties() {
+    let engine = TestEngine()
+    engine.perform(download: .retry, on: "guid")
+    engine.startDownload(from: URL(string: "https://files.test/a.zip")!)
+    #expect(engine.downloadCommands.map(\.command) == [.retry] && engine.downloadCommands.map(\.guid) == ["guid"])
+    #expect(engine.startedDownloads == [URL(string: "https://files.test/a.zip")!])
+    engine.downloadPromptsForLocation = true
+    engine.downloadDirectory = URL(fileURLWithPath: "/tmp/elsewhere")
+    #expect(engine.downloadPromptsForLocation && engine.downloadDirectory.lastPathComponent == "elsewhere")
+    var answered: URL?
+    engine.downloadDestinationHandler = { name, directory, answer in answer(directory.appending(path: name)) }
+    engine.downloadDestinationHandler?("a.zip", URL(fileURLWithPath: "/tmp"), { answered = $0 })
+    #expect(answered?.path == "/tmp/a.zip")
+  }
+}
+
+/// Infobars (#400): the event carries the tab's list, an infobar carries the engine's strings and takes actions until it
+/// is gone, and a gone infobar refuses them.
+@MainActor
+struct InfobarABITests {
+  final class Infobar: NSObject, ArktInfobar {
+    let infobarId: UInt = 7
+    let tab: any ArktTabHandle
+    let kind = ArktInfobarKind.debugger
+    let message = "\"Page Inspector\" started debugging this browser"
+    let messageLinkRanges: [NSValue] = [NSValue(range: NSRange(location: 1, length: 14))]
+    let linkTitle: String? = nil
+    let linkAccessibilityLabel: String? = nil
+    let linkBeforeButtons = false
+    let okTitle: String? = "Cancel"
+    let okTooltip: String? = nil
+    let okEnabled = true
+    let cancelTitle: String? = nil
+    let cancelTooltip: String? = nil
+    let cancelEnabled = true
+    let closeAccessibilityLabel: String? = "Close"
+    let iconPNG: Data? = nil
+    private(set) var isEnded = false
+    private(set) var actions: [(ArktInfobarAction, UInt)] = []
+    init(tab: any ArktTabHandle) { self.tab = tab }
+    func act(_ action: ArktInfobarAction, linkIndex: UInt) -> Bool {
+      guard !isEnded else { return false }
+      actions.append((action, linkIndex))
+      isEnded = action == .ok
+      return true
+    }
+  }
+
+  @Test func theEventCarriesTheListAndAnInfobarTakesActionsUntilItIsGone() throws {
+    let engine = TestEngine()
+    let browser = engine.createBrowser(host: TestWindowHost())
+    let tab = browser.createTab(url: nil, active: true)
+    let infobar = Infobar(tab: tab)
+    let event = TestEvent(.infobarsChanged, tab: tab, browser: browser)
+    event.infobars = [infobar]
+
+    let carried = try #require(event.infobars?.first)
+    #expect(event.infobars?.count == 1 && carried.infobarId == 7 && carried.tab === tab)
+    #expect(carried.kind == .debugger && carried.okTitle == "Cancel" && carried.cancelTitle == nil)
+    #expect(carried.messageLinkRanges.map(\.rangeValue) == [NSRange(location: 1, length: 14)])
+    #expect(carried.closeAccessibilityLabel == "Close")
+    #expect(carried.act(.messageLink, linkIndex: 0))
+    #expect(carried.act(.ok, linkIndex: 0))
+    #expect(!carried.act(.close, linkIndex: 0), "an action after the end is refused")
+    #expect(infobar.actions.map(\.0) == [.messageLink, .ok])
+  }
+
+  @Test func importRecordsLendTheirBytesAndTheFacadeAnswersWithCounts() {
+    let engine = TestEngine()
+    var cookieResult: (any ArktImportResult)?
+    engine.importCookies([TestImportCookie(value: "cookie-secret")]) { cookieResult = $0 }
+    var loginResult: (any ArktImportResult)?
+    engine.importPasswords([TestImportLogin(password: "login-secret")]) { loginResult = $0 }
+    #expect(engine.importedValues == ["cookie-secret", "login-secret"])
+    #expect(cookieResult.map { ($0.written, $0.skipped, $0.failed, $0.failureReason) }.map { $0 == (1, 0, 0, nil) } ?? false)
+    #expect(loginResult?.failed == 1 && loginResult?.failureReason == "refused: 1\n")
+  }
+
+  @Test func historyAndBookmarkRecordsReachTheFacadeAndTheAnswerCarriesTheNewestVisit() {
+    let engine = TestEngine()
+    var historyResult: (any ArktImportResult)?
+    engine.importHistory([TestImportHistoryEntry()], after: nil) { historyResult = $0 }
+    var bookmarkResult: (any ArktImportResult)?
+    engine.importBookmarks([TestImportBookmark()]) { bookmarkResult = $0 }
+    #expect(engine.importedHistoryVisits == 2)
+    #expect(engine.importedBookmarkPaths == [["Reading", "Later"]])
+    #expect(historyResult?.lastVisitTime == Date(timeIntervalSince1970: 20))
+    #expect(bookmarkResult?.lastVisitTime == nil && bookmarkResult?.written == 1)
   }
 }

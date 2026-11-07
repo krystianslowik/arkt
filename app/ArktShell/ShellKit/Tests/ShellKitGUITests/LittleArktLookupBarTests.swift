@@ -46,7 +46,8 @@ final class LittleArktLookupBarTests: XCTestCase {
 
   // MARK: Menu
 
-  /// File > New Little Arkt Window on Cmd-Opt-N (KB-044), in the File menu after New Window.
+  /// File > New Little Arkt Window on Cmd-Opt-N (KB-044), in the File menu after New Window. Incognito and Blank
+  /// Window sit between them (#487).
   func testFileMenuHasNewLittleArktWindowOnOptionCommandN() throws {
     _ = NSApplication.shared
     let commands = AppCommands()
@@ -58,7 +59,7 @@ final class LittleArktLookupBarTests: XCTestCase {
     XCTAssertEqual(item.action, #selector(AppCommands.newLittleArktWindow(_:)))
     XCTAssertNotNil(item.target, "targets the app's commands, so the engine's AppController never sees it")
     let newWindow = try XCTUnwrap(file.items.firstIndex { $0.title == "New Window" })
-    XCTAssertEqual(file.items.firstIndex(of: item), newWindow + 1)
+    XCTAssertEqual(file.items.firstIndex(of: item), newWindow + 3)
   }
 
   // MARK: Bar
@@ -138,6 +139,50 @@ final class LittleArktLookupBarTests: XCTestCase {
     bar.commit()
     XCTAssertEqual(switched, node)
     XCTAssertFalse(bar.isVisible)
+  }
+
+  /// Up / Down keep focus in the field, so VoiceOver hears the newly selected row (#608), the same words as the command
+  /// bar's rows; a pointer hover selects without speaking.
+  func testArrowMovesAnnounceTheSelectedRowAndHoverDoesNot() throws {
+    let bar = makeBar()
+    var spoken: [(text: String, priority: NSAccessibilityPriorityLevel)] = []
+    bar.announce = { spoken.append(($0, $1)) }
+    bar.openTabsProvider = {
+      (1...3).map { CommandBarResults.OpenTab(node: NodeID(), title: "Notes \($0)",
+                                              url: URL(string: "https://notes\($0).example")!) }
+    }
+    bar.show(on: try XCTUnwrap(NSScreen.main))
+    bar.setQueryForTesting("Notes")
+    let count = bar.results.count
+    XCTAssertGreaterThanOrEqual(count, 3)
+    XCTAssertTrue(spoken.isEmpty, "typing selects the first row without a row announcement")
+    func move(_ action: Selector) -> Bool {
+      bar.control(bar.barView.field, textView: NSTextView(frame: .zero), doCommandBy: action)
+    }
+    XCTAssertTrue(move(#selector(NSResponder.moveDown(_:))))
+    XCTAssertEqual(spoken.last?.text, bar.results[1].accessibilityLabel(position: 2, of: count))
+    XCTAssertEqual(spoken.last?.priority, .high)
+    XCTAssertTrue(move(#selector(NSResponder.moveUp(_:))))
+    XCTAssertTrue(move(#selector(NSResponder.moveUp(_:))))
+    XCTAssertEqual(spoken.last?.text, bar.results[count - 1].accessibilityLabel(position: count, of: count),
+                   "wraps to the last row")
+    XCTAssertEqual(spoken.count, 3)
+    bar.barView.onHoverRow?(0)
+    XCTAssertEqual(bar.barView.table.selectedRow, 0)
+    XCTAssertEqual(spoken.count, 3, "a pointer hover selects without speaking")
+  }
+
+  /// The bar's root carries no "open" / "closed" value for VoiceOver to read (#608): a hidden bar is simply absent
+  /// from the accessibility tree.
+  func testTheRootHasNoSpokenStateValue() throws {
+    let bar = makeBar()
+    XCTAssertNil(bar.barView.accessibilityValue())
+    XCTAssertEqual(bar.panel.accessibilityChildren()?.count, 0, "hidden: nothing in the tree")
+    bar.show(on: try XCTUnwrap(NSScreen.main))
+    XCTAssertNil(bar.barView.accessibilityValue())
+    XCTAssertFalse(bar.panel.accessibilityChildren()?.isEmpty ?? true, "shown: the bar is in the tree")
+    bar.hide()
+    XCTAssertNil(bar.barView.accessibilityValue())
   }
 
   // MARK: The Little Arkt window

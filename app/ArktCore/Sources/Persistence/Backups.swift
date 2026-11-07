@@ -6,6 +6,9 @@ import Synchronization
 /// Where Arkt keeps its database. App code uses `applicationSupport()`; tests pass a temp directory.
 public struct DatabaseLocation: Hashable, Sendable {
   public static let backupsKept = 5
+  /// The product's folder under `~/Library/Application Support`. The engine's default user-data-dir (`CrProductDirName`
+  /// `Arkt/Engine` in a product build) lives inside it, next to the database.
+  public static let productFolderName = "Arkt"
 
   public let directory: URL
   public init(directory: URL) { self.directory = directory }
@@ -17,7 +20,7 @@ public struct DatabaseLocation: Hashable, Sendable {
   public static func applicationSupport() throws -> DatabaseLocation {
     let base = try FileManager.default.url(
       for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-    return DatabaseLocation(directory: base.appendingPathComponent("Arkt", isDirectory: true))
+    return DatabaseLocation(directory: base.appendingPathComponent(productFolderName, isDirectory: true))
   }
 }
 

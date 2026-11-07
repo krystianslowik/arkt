@@ -15,6 +15,7 @@ extension ShellWindowController {
     }
     sidebarController.onThemeCreatorChange = { [weak self] open in
       self?.rootView.themeBackground.crossfadeSpring = open ? SpringPreset.firm.parameters : nil
+      if !open { self?.focusPageIfKeyboardIsFree() }
     }
     // The creator's pad field and texture previews, built off the main thread before anyone opens it.
     ThemeCreatorImages.prepare(scale: window?.backingScaleFactor ?? 2)

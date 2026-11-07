@@ -36,10 +36,10 @@ final class ThemePadView: NSView {
     field.contentsGravity = .resize
     innerShadow.fillRule = .evenOdd
     innerShadow.fillColor = CGColor.black
-    innerShadow.shadowColor = CGColor.black
-    innerShadow.shadowOpacity = 0.12
-    innerShadow.shadowRadius = 7
-    innerShadow.shadowOffset = CGSize(width: 0, height: 3)
+    innerShadow.shadowColor = ThemeCreatorTokens.padInnerShadow.color.light.cgColor
+    innerShadow.shadowOpacity = 1
+    innerShadow.shadowRadius = ThemeCreatorTokens.padInnerShadow.radius
+    innerShadow.shadowOffset = ThemeCreatorTokens.padInnerShadow.flippedOffset
     innerShadow.mask = innerShadowMask
     edge.cornerRadius = ThemeCreatorMetrics.padRadius
     edge.borderWidth = 0.5
@@ -232,13 +232,14 @@ final class ThemeDotView: ThemeFocusableView {
     layer?.masksToBounds = false
     let size = ThemeCreatorMetrics.dot
     let frame = CGRect(x: (side - size) / 2, y: (side - size) / 2, width: size, height: size)
-    for (shadow, offset, radius, opacity) in [(restShadow, 2.0, 4.0, Float(0.35)), (liftShadow, 8.0, 11.0, 0.38)] {
+    let tokens = [(restShadow, ThemeCreatorTokens.dotRestShadow), (liftShadow, ThemeCreatorTokens.dotLiftShadow)]
+    for (shadow, token) in tokens {
       shadow.frame = frame
       shadow.cornerRadius = size / 2
-      shadow.shadowColor = CGColor.black
-      shadow.shadowOpacity = opacity
-      shadow.shadowRadius = radius
-      shadow.shadowOffset = CGSize(width: 0, height: offset)
+      shadow.shadowColor = token.color.light.cgColor
+      shadow.shadowOpacity = 1
+      shadow.shadowRadius = token.radius
+      shadow.shadowOffset = token.flippedOffset
       shadow.shadowPath = CGPath(ellipseIn: CGRect(origin: .zero, size: frame.size), transform: nil)
       layer?.addSublayer(shadow)
     }
@@ -252,6 +253,7 @@ final class ThemeDotView: ThemeFocusableView {
     setAccessibilityRole(.slider)
     setAccessibilityLabel("Colour \(index + 1)")
     setAccessibilityIdentifier(AXID.ThemeCreator.dot)
+    applyFocusRingFlavor(.light)
   }
 
   @available(*, unavailable)
@@ -266,6 +268,11 @@ final class ThemeDotView: ThemeFocusableView {
   }
 
   override var focusRingRect: NSRect { disc.frame }
+
+  /// The dot sits on the user's colours, so its ring hugs the dot's white edge in graphite, whatever the appearance.
+  override func applyFocusRingFlavor(_ flavor: ThemeFlavor) {
+    keyboardFocusRing.flavor = .light
+  }
 
   // Pointer events belong to the pad.
   override func hitTest(_ point: NSPoint) -> NSView? { nil }

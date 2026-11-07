@@ -61,6 +61,20 @@ void MaybeAddLinkActivationThrottle(
 bool ShouldDropLinkOpenedFromTab(content::WebContents* source,
                                  const content::OpenURLParams& params);
 
+// Receives WebContentsDelegate::UpdateTargetURL for a tab's contents (#114): the
+// URL of the link under the pointer, or an empty URL when the pointer left it.
+using TargetURLObserver =
+    base::RepeatingCallback<void(content::WebContents*, const GURL&)>;
+
+// Set by the engine facade when it starts; a null callback drops every report.
+void SetTargetURLObserver(TargetURLObserver observer);
+
+// Called from BrowserWebContentsDelegate::UpdateTargetURL (patch 0010, #114)
+// before it looks for a status bubble. Arkt windows have none (their
+// GetStatusBubbles is empty, and the Views bubble code casts every bubble to
+// StatusBubbleViews), so this call is the only place the report is seen.
+void NotifyTargetURLChanged(content::WebContents* source, const GURL& url);
+
 }  // namespace arkt
 
 #endif  // ARKT_BROWSER_ARKT_LINK_ACTIVATION_H_

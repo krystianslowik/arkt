@@ -16,6 +16,32 @@ public final class AppSettings {
     public static let switchToNinthSidebarItemEnabled = "switchToNinthSidebarItemEnabled"
     /// Arc's key for the system-wide Little Arkt hotkey (BH-131, KB-045).
     public static let globalLittleBrowserHotkeyEnabled = "globalLittleBrowserHotkeyEnabled"
+    /// Arc's key for Opt-Cmd-click into Little Arkt (BH-132, #356).
+    public static let optionCommandClickLittleArcEntryPointEnabled = "optionCommandClickLittleArcEntryPointEnabled"
+    /// Settings > Privacy > Send crash reports (#129). The app reads both crash keys straight from the defaults when a
+    /// crash is captured, so they are public.
+    public static let sendsCrashReports = "crashReportsEnabled"
+    /// Settings > General > Warn before quitting (#487, BH-177). Off: Cmd-Q quits without asking.
+    public static let shouldWarnBeforeQuitting = "shouldWarnBeforeQuitting"
+    /// The launch's one-time "Send a report?" was answered (Send, Don't Send or Always Send): never asked again.
+    public static let crashReportAskAnswered = "crashReportAskAnswered"
+    /// Settings > General > Downloads (#132, BH-182): "Ask Where to Save", and the folder for "Save to Folder" as a path.
+    public static let downloadsAskWhereToSave = "downloadsAskWhereToSave"
+    public static let downloadsFolder = "downloadsFolder"
+    /// The Library section last shown (BH-181).
+    public static let libraryLastSection = "libraryLastSection"
+
+    /// The preferences the panes edit, the Toolbar's and the Peek switches' keys included: what Reset all settings
+    /// (#617) removes. Not here: window state (`lastPane`, `windowTopLeft`, `libraryLastSection`) and the one-time
+    /// crash ask (`crashReportAskAnswered`), which are state, not preferences (docs/design/settings.md, section 2).
+    /// A new pane setting must be added both here and in the test helper `changeEveryPreference`
+    /// (`AppSettingsTests`), or the reset and its tests miss it.
+    @MainActor public static let preferences = [
+      excludeFavoritesInSwitchToNthTab, switchToNinthSidebarItemEnabled, globalLittleBrowserHotkeyEnabled,
+      optionCommandClickLittleArcEntryPointEnabled, sendsCrashReports, shouldWarnBeforeQuitting,
+      downloadsAskWhereToSave, downloadsFolder, PeekLinkSettings.crossSiteKey, PeekLinkSettings.shiftClickKey,
+      ToolbarSetting.defaultsKey, ToolbarSetting.showsFullURLDefaultsKey,
+    ]
   }
 
   /// Show Toolbar and Show the full URL: the instance every window observes.
@@ -82,6 +108,49 @@ public final class AppSettings {
     }
   }
 
+  /// Settings > Links: "Open Little Arkt when clicking on links with ⌥⌘ held" (BH-132, GS-028, #356). On by default:
+  /// Arc's default is unknown (RT-23); Arkt's is a design call (docs/design/little-arkt.md, Parity notes). Also gates
+  /// Opt-Cmd-click on a sidebar tab.
+  public var opensLittleArktOnOptionCommandClick: Bool {
+    get { bool(Key.optionCommandClickLittleArcEntryPointEnabled, default: true) }
+    set {
+      guard newValue != opensLittleArktOnOptionCommandClick else { return }
+      set(newValue, Key.optionCommandClickLittleArcEntryPointEnabled)
+      notifyObservers()
+    }
+  }
+
+  /// Settings > General > Warn before quitting (BH-177). Off by default: Cmd-Q quits without asking.
+  public var warnsBeforeQuitting: Bool {
+    get { bool(Key.shouldWarnBeforeQuitting, default: false) }
+    set {
+      guard newValue != warnsBeforeQuitting else { return }
+      set(newValue, Key.shouldWarnBeforeQuitting)
+      notifyObservers()
+    }
+  }
+
+  /// Settings > Privacy > Send crash reports (#129): keep a stripped report of each crash on this Mac, so Send Crash
+  /// Report can open it as a GitHub issue. Off by default; one switch for the app and, later, the engine.
+  public var sendsCrashReports: Bool {
+    get { bool(Key.sendsCrashReports, default: false) }
+    set {
+      guard newValue != sendsCrashReports else { return }
+      set(newValue, Key.sendsCrashReports)
+      notifyObservers()
+    }
+  }
+
+  /// The one-time ask after the first crash was answered. Never reset by the app.
+  public var crashReportAskAnswered: Bool {
+    get { bool(Key.crashReportAskAnswered, default: false) }
+    set {
+      guard newValue != crashReportAskAnswered else { return }
+      set(newValue, Key.crashReportAskAnswered)
+      notifyObservers()
+    }
+  }
+
   /// Another app holds the combination. Runtime state of the registration, never persisted: Settings shows
   /// "⌥⌘N is used by another app." under the switch while it is on.
   public private(set) var littleArktHotKeyTaken = false
@@ -91,6 +160,27 @@ public final class AppSettings {
     guard taken != littleArktHotKeyTaken else { return }
     littleArktHotKeyTaken = taken
     notifyObservers()
+  }
+
+  /// Settings > General > Downloads (#132, BH-182): ask for each file, or save to a folder. Applied to the engine by
+  /// `DownloadsModel`.
+  public var downloadLocation: DownloadLocationSetting {
+    get {
+      DownloadLocationSetting(asksWhereToSave: bool(Key.downloadsAskWhereToSave, default: false),
+                              folder: string(Key.downloadsFolder).flatMap { $0.isEmpty ? nil : URL(filePath: $0, directoryHint: .isDirectory) })
+    }
+    set {
+      guard newValue != downloadLocation else { return }
+      set(newValue.asksWhereToSave, Key.downloadsAskWhereToSave)
+      set(newValue.folder?.path(percentEncoded: false) ?? "", Key.downloadsFolder)
+      notifyObservers()
+    }
+  }
+
+  /// The Library section that was open last, so it reopens there (BH-181). Window state: observers are not told.
+  public var libraryLastSection: LibrarySection {
+    get { string(Key.libraryLastSection).flatMap(LibrarySection.init(rawValue:)) ?? .downloads }
+    set { set(newValue.rawValue, Key.libraryLastSection) }
   }
 
   /// The pane Settings shows when it opens. Window state, so observers are not told.
@@ -104,6 +194,23 @@ public final class AppSettings {
   public var windowTopLeft: CGPoint? {
     get { string(Key.windowTopLeft).flatMap { $0.isEmpty ? nil : NSPointFromString($0) } }
     set { set(newValue.map { NSStringFromPoint($0) } as Any? ?? "", Key.windowTopLeft) }
+  }
+
+  // MARK: Reset
+
+  /// Reset all settings (#617): every key in `Key.preferences` is removed, so each value reads its default again, and
+  /// observers hear one change. Only those keys: the rest of the suite (window sessions, sidebar state, notices) and
+  /// window state stay. The Toolbar is reset through its own properties, so its observers hear it too.
+  public func resetToDefaults() {
+    for key in Key.preferences {
+      if let defaults { defaults.removeObject(forKey: key) } else { memory[key] = nil }
+    }
+    toolbar.isVisible = false
+    toolbar.showsFullURL = true
+    // The Toolbar's setters wrote its defaults back; remove them so a later default applies, as for the others.
+    defaults?.removeObject(forKey: ToolbarSetting.defaultsKey)
+    defaults?.removeObject(forKey: ToolbarSetting.showsFullURLDefaultsKey)
+    notifyObservers()
   }
 
   // MARK: Observers

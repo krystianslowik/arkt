@@ -28,9 +28,9 @@
   --command-secondary: rgba(255,255,255,.33);
   --command-divider: rgba(255,255,255,.10);
   --command-selected: rgba(255,255,255,.10);
-  --theme-a: #F2EAE4; --theme-b: #F29BBB;          /* Personal sample theme */
-  --work-a: #E0F2FB; --work-b: #C5C6E2;            /* Work sample theme */
-  --dev-a: #2D4468; --dev-b: #120F2E;              /* Dev sample theme */
+  --theme-a: #F7EEF3; --theme-b: #DDB4D2;          /* Personal sample theme */
+  --work-a: #EEF1F4; --work-b: #B0C4DA;            /* Work sample theme */
+  --dev-a: #3C3B72; --dev-b: #1D1838;              /* Dev sample theme */
   /* BrandTokens */
   --surface-brand: #FAF9F5;                        /* surfaceBrand: Little Arkt frame (proposed use) */
   --accent: #E9B520; --accent-hi: #F3CA3D; --accent-pressed: #DCA319; --on-accent: #202321;
@@ -59,7 +59,7 @@
   --card-border: rgba(255,255,255,.20);
   --card-shadow: none;
   --divider: rgba(255,255,255,.075);
-  --theme-a: #2D4468; --theme-b: #120F2E;
+  --theme-a: #3C3B72; --theme-b: #1D1838;
   --surface-brand: #202321;
   --focus-ring: #E9B520;
   --la-window-shadow: 0 22px 60px rgba(0,0,0,.6), 0 0 0 .5px rgba(255,255,255,.16);
@@ -156,7 +156,7 @@ body.shot #desk { inset: 0; }
 .open button { border: 0; background: transparent; color: var(--on-accent); font-weight: 600; font-size: 12px; padding: 0 10px; display: flex; align-items: center; gap: 6px; transition: background-color 140ms ease, transform 140ms var(--ease-out); }
 .open button + button { padding: 0 6px; border-left: 1px solid rgba(32,35,33,.18); }
 .open button svg { width: 10px; height: 10px; }
-.open .sw { width: 10px; height: 10px; border-radius: 3px; box-shadow: inset 0 0 0 .5px rgba(0,0,0,.25); background: linear-gradient(135deg, #F2EAE4, #F29BBB); }
+.open .sw { width: 10px; height: 10px; border-radius: 3px; box-shadow: inset 0 0 0 .5px rgba(0,0,0,.25); background: linear-gradient(135deg, #F7EEF3, #DDB4D2); }
 @media (hover: hover) and (pointer: fine) { .open button:hover { background: var(--accent-hi); } }
 .open button:active, .open button.pressed { background: var(--accent-pressed); }
 .open button:active { transform: scale(.97); }
@@ -347,9 +347,9 @@ body.shot #desk { inset: 0; }
 
   <div class="menu" id="chooser" role="menu" aria-label="Open in">
     <div class="h">Open in</div>
-    <div class="it sel"><span class="sw" style="background:linear-gradient(135deg,#F2EAE4,#F29BBB)"></span>Personal<kbd>&#8984;O</kbd></div>
-    <div class="it"><span class="sw" style="background:linear-gradient(135deg,#E0F2FB,#C5C6E2)"></span>Work</div>
-    <div class="it"><span class="sw" style="background:linear-gradient(135deg,#2D4468,#120F2E)"></span>Dev</div>
+    <div class="it sel"><span class="sw" style="background:linear-gradient(135deg,#F7EEF3,#DDB4D2)"></span>Personal<kbd>&#8984;O</kbd></div>
+    <div class="it"><span class="sw" style="background:linear-gradient(135deg,#EEF1F4,#B0C4DA)"></span>Work</div>
+    <div class="it"><span class="sw" style="background:linear-gradient(135deg,#3C3B72,#1D1838)"></span>Dev</div>
     <div class="sep"></div>
     <div class="it">Open in New Window</div>
     <div class="sep"></div>
@@ -515,7 +515,7 @@ const STATES = {
   idle() { reset(); focusLittle(); },
   hover() { reset(); focusLittle(); lw.classList.add("showtip"); $("bOpen").classList.add("pressed"); },
   chooser() { reset(); focusLittle(); stage.dataset.show = "chooser"; placeMenu(); },
-  profile() { reset(); focusLittle(); stage.dataset.show = "sheet"; $("openLabel").textContent = "Open in Work"; $("openSw").style.background = "linear-gradient(135deg,#E0F2FB,#C5C6E2)"; },
+  profile() { reset(); focusLittle(); stage.dataset.show = "sheet"; $("openLabel").textContent = "Open in Work"; $("openSw").style.background = "linear-gradient(135deg,#EEF1F4,#B0C4DA)"; },
   lookup() { reset(); win.set({ o: 0 }); $("lp").classList.remove("clicked"); stage.dataset.show = "look"; $("chat").classList.add("inactive"); $("appName").textContent = "Chat"; },
   multiple() {
     reset(); focusLittle();

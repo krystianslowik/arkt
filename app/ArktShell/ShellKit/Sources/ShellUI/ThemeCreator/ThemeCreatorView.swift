@@ -207,6 +207,9 @@ final class ThemeCreatorView: NSView {
       titleLabel.textColor = ShellTokens.primaryText.resolve(flavor).nsColor()
       for label in [textureLabel, opacityLabel] { label.textColor = ShellTokens.secondaryText.resolve(flavor).nsColor() }
       for slider in [amountSlider, opacitySlider] { slider.applyColors(flavor) }
+      for control in [countButton, swatches, amountSlider, opacitySlider] as [ThemeFocusableView] {
+        control.applyFocusRingFlavor(flavor)
+      }
     }
     let stored = model.theme.baseColors
     let dotColors = model.dots.map(\.color)

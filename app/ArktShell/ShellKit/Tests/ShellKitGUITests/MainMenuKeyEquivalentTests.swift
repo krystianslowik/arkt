@@ -8,14 +8,21 @@ import XCTest
 @MainActor
 final class AppCommands: NSObject {
   @objc func newWindow(_ sender: Any?) {}
+  @objc func newBlankWindow(_ sender: Any?) {}
+  @objc func newIncognitoWindow(_ sender: Any?) {}
   @objc func newLittleArktWindow(_ sender: Any?) {}
   @objc func showSettings(_ sender: Any?) {}
   @objc func importFromArc(_ sender: Any?) {}
   @objc func showArchive(_ sender: Any?) {}
+  @objc func showLibrary(_ sender: Any?) {}
   @objc func clearArchive(_ sender: Any?) {}
   @objc func showWelcome(_ sender: Any?) {}
   let undoRouter = ReopenUndoRouter()
+  let reopenRouter = ReopenClosedRouter(windows: { nil })
 }
+
+/// The real Window menu takes the commands object as its delegate (the Little Arkt section, #356).
+extension AppCommands: NSMenuDelegate {}
 
 /// `CommandBarPanel.sendEvent` takes Cmd-Return and Opt-Return before anything else in the panel (KB-085). That
 /// hides no menu action only while no menu item binds those keys, so the real main menu is built and checked.
@@ -68,6 +75,19 @@ final class MainMenuKeyEquivalentTests: XCTestCase {
   }
 
   /// #118 (KB-013 to KB-016): the copy-link items sit in the Edit menu with Arc's keys.
+  /// BH-196 (#404): the one-off tip names Copy URL's key as the menu binds it.
+  func testTheCopyURLTipNamesTheMenusKey() throws {
+    let item = try XCTUnwrap(allItems().first { $0.action == #selector(ShellWindowController.copyCurrentURL(_:)) })
+    let flags = item.keyEquivalentModifierMask
+    var keys = ""
+    if flags.contains(.control) { keys += "\u{2303}" }
+    if flags.contains(.option) { keys += "\u{2325}" }
+    if flags.contains(.shift) { keys += "\u{21E7}" }
+    if flags.contains(.command) { keys += "\u{2318}" }
+    keys += item.keyEquivalent.uppercased()
+    XCTAssertEqual(CopyLinkEducation.toast.text, "Copy links faster by pressing \(keys)")
+  }
+
   func testCopyLinkItemsSitInTheEditMenuWithArcsKeys() throws {
     _ = NSApplication.shared
     let edit = try XCTUnwrap(MainMenu.make(commands: AppCommands()).menu.items.first { $0.title == "Edit" }?.submenu)
@@ -153,6 +173,33 @@ final class MainMenuKeyEquivalentTests: XCTestCase {
     }
   }
 
+  /// #497: whatever the active keyboard layout, a key press that a menu item without Cmd takes (Space 1 ... 9, the
+  /// Split View items) is reserved. Every key code is tried with Ctrl and Ctrl-Shift, so the digit row and the
+  /// punctuation keys are covered on the layout the test runs under (US, AZERTY, QWERTZ ...): ReservedKeys must be
+  /// a superset of what the menu matches, or a focused page swallows the key.
+  func testEveryMenuKeyWithoutCommandIsReservedOnTheActiveLayout() throws {
+    // Ctrl-Space (Reveal Current Tab, KB-036) is not a Space or Split View item and is outside this check.
+    let items = allItems().filter {
+      !$0.keyEquivalent.isEmpty && $0.keyEquivalent != " " && !$0.keyEquivalentModifierMask.contains(.command)
+    }
+    XCTAssertGreaterThanOrEqual(items.count, 9 + 8, "the Space and Split View items carry keys")
+    let source = CGEventSource(stateID: .privateState)
+    var matched = 0
+    for keyCode in 0..<128 {
+      for flags in [CGEventFlags.maskControl, [.maskControl, .maskShift]] {
+        guard let cg = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(keyCode), keyDown: true) else { continue }
+        cg.flags = flags
+        guard let event = NSEvent(cgEvent: cg) else { continue }
+        for item in items where Self.matches(item, event) {
+          matched += 1
+          XCTAssertTrue(ReservedKeys.arkt.matches(event),
+                        "\(item.title): key \(keyCode) types \(event.charactersIgnoringModifiers ?? "")")
+        }
+      }
+    }
+    XCTAssertGreaterThan(matched, 0, "some key on this layout reaches a Space or Split View item")
+  }
+
   /// Whether `item`'s key equivalent alone takes `event`: a one-item menu with the same key, aimed at a probe.
   static func matches(_ item: NSMenuItem, _ event: NSEvent) -> Bool {
     let probe = KeyProbe()
@@ -233,8 +280,8 @@ final class MainMenuInventoryTests: XCTestCase {
 
   func testAppLevelItemsHaveExplicitTargets() throws {
     let toApp: [(String, Selector)] = [
-      ("About Arkt Shell", #selector(NSApplication.orderFrontStandardAboutPanel(_:))),
-      ("Hide Arkt Shell", #selector(NSApplication.hide(_:))),
+      ("About Arkt", #selector(NSApplication.orderFrontStandardAboutPanel(_:))),
+      ("Hide Arkt", #selector(NSApplication.hide(_:))),
       ("Hide Others", #selector(NSApplication.hideOtherApplications(_:))),
       ("Show All", #selector(NSApplication.unhideAllApplications(_:))),
       ("Bring All to Front", #selector(NSApplication.arrangeInFront(_:))),
@@ -246,9 +293,12 @@ final class MainMenuInventoryTests: XCTestCase {
     }
     let toCommands: [(String, Selector)] = [
       ("New Window", #selector(AppCommands.newWindow(_:))),
+      ("New Incognito Window", #selector(AppCommands.newIncognitoWindow(_:))),
+      ("New Blank Window", #selector(AppCommands.newBlankWindow(_:))),
       ("Settings...", #selector(AppCommands.showSettings(_:))),
       ("Import Browser Data...", #selector(AppCommands.importFromArc(_:))),
       ("Show Archive", #selector(AppCommands.showArchive(_:))),
+      ("Show Library", #selector(AppCommands.showLibrary(_:))),            // KB-065, #132
       ("Clear Archive...", #selector(AppCommands.clearArchive(_:))),   // KB-043, unbound
     ]
     for (title, action) in toCommands {
@@ -265,6 +315,13 @@ final class MainMenuInventoryTests: XCTestCase {
     XCTAssertEqual(undo.action, #selector(ReopenUndoRouter.undo(_:)))
     XCTAssertEqual(undo.keyEquivalent, "z")
     XCTAssertEqual(undo.keyEquivalentModifierMask, .command)
+  }
+
+  /// File > Reopen Closed Tab goes to its router, so it works with no key window too (#355).
+  func testReopenClosedTabTargetsItsRouter() throws {
+    let reopen = try item("Reopen Closed Tab")
+    XCTAssertTrue(reopen.target === commands.reopenRouter)
+    XCTAssertEqual(reopen.action, #selector(ShellWindowController.reopenClosedTab(_:)))
   }
 
   /// AppController answers these at the end of the responder chain with Chromium's behaviour.
@@ -328,6 +385,8 @@ final class MainMenuInventoryTests: XCTestCase {
     let expected: [(String, Selector, String, NSEvent.ModifierFlags)] = [
       ("New Tab", #selector(ShellWindowController.newTab(_:)), "t", .command),
       ("New Window", #selector(AppCommands.newWindow(_:)), "n", .command),
+      ("New Incognito Window", #selector(AppCommands.newIncognitoWindow(_:)), "n", [.command, .shift]),
+      ("New Blank Window", #selector(AppCommands.newBlankWindow(_:)), "n", [.command, .control]),
       ("Open Command Bar", #selector(ShellWindowController.openLocation(_:)), "l", .command),
       ("Archive Tab", #selector(ShellWindowController.closeTab(_:)), "w", .command),
       ("Reopen Closed Tab", #selector(ShellWindowController.reopenClosedTab(_:)), "t", [.command, .shift]),   // KB-010
@@ -338,6 +397,8 @@ final class MainMenuInventoryTests: XCTestCase {
       ("Zoom", #selector(NSWindow.performZoom(_:)), "", []),
       ("Jump to Selection", #selector(NSResponder.centerSelectionInVisibleArea(_:)), "j", .command),
       ("Settings...", #selector(AppCommands.showSettings(_:)), ",", .command),
+      ("Show Archive", #selector(AppCommands.showArchive(_:)), "", []),
+      ("Show Library", #selector(AppCommands.showLibrary(_:)), "l", [.command, .shift]),             // KB-065, #132
     ]
     for (title, action, key, modifiers) in expected {
       let item = try item(title)
@@ -356,7 +417,9 @@ final class MainMenuInventoryTests: XCTestCase {
       (kVK_ANSI_W, .maskCommand, "Archive Tab"),
       (kVK_ANSI_W, [.maskCommand, .maskShift], "Close Window"),
       (kVK_ANSI_N, .maskCommand, "New Window"),
-      (kVK_ANSI_Q, .maskCommand, "Quit Arkt Shell"),
+      (kVK_ANSI_N, [.maskCommand, .maskShift], "New Incognito Window"),
+      (kVK_ANSI_N, [.maskCommand, .maskControl], "New Blank Window"),
+      (kVK_ANSI_Q, .maskCommand, "Quit Arkt"),
       (kVK_RightArrow, [.maskCommand, .maskAlternate], "Next Space"),
       (kVK_LeftArrow, [.maskCommand, .maskAlternate], "Previous Space"),
       (kVK_ANSI_D, .maskCommand, "Pin Tab"),                                    // KB-012 (#108)
@@ -481,5 +544,25 @@ final class MainMenuInventoryTests: XCTestCase {
       menu.items.flatMap { [$0.title] + ($0.submenu.map(walk) ?? []) }
     }
     for title in walk(built.menu) { XCTAssertNil(title.firstMatch(of: word), title) }
+  }
+
+  /// The Dock menu without Little Arkt windows: New Window, then New Little Arkt Window with its key (#356).
+  func testTheDockMenuEndsWithNewWindowAndNewLittleArktWindow() throws {
+    _ = NSApplication.shared
+    let commands = AppCommands()
+    let menu = MainMenu.dockMenu(commands: commands, littleArkts: nil)
+    XCTAssertEqual(menu.items.map(\.title), ["New Window", "New Little Arkt Window"])
+    let little = try XCTUnwrap(menu.items.last)
+    XCTAssertEqual(little.keyEquivalent, "n")
+    XCTAssertEqual(little.keyEquivalentModifierMask, [.command, .option])
+    XCTAssertTrue(menu.items.allSatisfy { $0.target === commands })
+  }
+
+  /// The Window menu's delegate rebuilds its Little Arkt section when it opens (#356).
+  func testTheWindowMenuHasTheCommandsAsItsDelegate() {
+    _ = NSApplication.shared
+    let commands = AppCommands()
+    let built = MainMenu.make(commands: commands)
+    XCTAssertTrue(built.windows.delegate === commands)
   }
 }

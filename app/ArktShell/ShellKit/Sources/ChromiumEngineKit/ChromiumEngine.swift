@@ -24,7 +24,7 @@ import EngineAPI
 /// returns a handle that is inserted later). Nothing here runs a modal or a nested loop, and batch handling makes no
 /// assumption that the shell is idle (Decision 3).
 @MainActor
-public final class ChromiumEngine: EngineClient, EngineExtensions {
+public final class ChromiumEngine: EngineClient, EngineExtensions, EngineDownloads {
   struct TabRecord {
     let handle: any ArktTabHandle
     /// Fields from events. `isClosing` and `wouldHoldClose` are overlaid from the handle in `snapshot(of:)`.
@@ -62,6 +62,14 @@ public final class ChromiumEngine: EngineClient, EngineExtensions {
 
   let facade: any ArktEngine
   let hub = EngineEventHub()
+  /// Downloads (#132, `ChromiumEngine+Downloads.swift`): the list kept from the facade's download events, and the
+  /// shell's save-location choice, pushed to the profile's download prefs.
+  var downloadTable: [DownloadID: DownloadItem] = [:]
+  var downloadOrder: [DownloadID] = []
+  public var downloadSavePreference: DownloadSavePreference {
+    didSet { applySavePreference(downloadSavePreference) }
+  }
+  public var downloadDestinationChooser: DownloadDestinationChooser?
   private var sinkToken: (any NSObjectProtocol)?
 
   public internal(set) var tabIDs: [TabID] = []
@@ -85,14 +93,51 @@ public final class ChromiumEngine: EngineClient, EngineExtensions {
   /// The window that last got `createWindow`, `createTab(url:in:)` or an activation (contract rule 15).
   var recentWindow: EngineWindowID?
 
+  /// A JavaScript dialog the shell has been told about and nothing has ended yet (#400, contract rule 19).
+  struct PendingDialog {
+    let id: DialogID
+    let tab: TabID
+    let handle: any ArktJavaScriptDialog
+  }
+  var pendingDialogs: [DialogID: PendingDialog] = [:]
+  var dialogByHandle: [ObjectIdentifier: DialogID] = [:]
+
+  /// A permission request the shell has been told about and nothing has ended yet (#400, contract rule 20).
+  struct PendingPermission {
+    let id: PermissionRequestID
+    let tab: TabID
+    let handle: any ArktPermissionRequest
+  }
+  var pendingPermissions: [PermissionRequestID: PendingPermission] = [:]
+  var permissionByHandle: [ObjectIdentifier: PermissionRequestID] = [:]
+
+  /// An infobar the shell has been told about and the facade has not dropped from its tab's list (#400, contract rule
+  /// 21). The list per tab is in the engine's order.
+  struct PendingInfobar {
+    let id: InfobarID
+    let tab: TabID
+    let handle: any ArktInfobar
+  }
+  var infobarHandles: [InfobarID: PendingInfobar] = [:]
+  var infobarIDByHandle: [ObjectIdentifier: InfobarID] = [:]
+  var infobarsByTab: [TabID: [InfobarID]] = [:]
+
   /// Builds the shell window for a window the engine creates on its own (Decision 2). Must not call the engine; the
   /// window is usable after its `.windowOpened`.
   public var windowHostProvider: EngineWindowHostProvider?
 
   init(facade: any ArktEngine) {
     self.facade = facade
+    downloadSavePreference = facade.downloadPromptsForLocation ? .ask : .folder(facade.downloadDirectory)
+    // `didSet` does not run in init: the persisted `.ask` still needs its panel handler.
+    if downloadSavePreference == .ask { installDestinationHandler() }
     sinkToken = facade.addEventSink { [weak self] batch in
       self?.receive(batch)
+    }
+    // Downloads the profile held before this engine listened (found at launch, or started meanwhile).
+    for item in facade.downloads.map(DownloadItem.init(facade:)) where downloadTable[item.id] == nil {
+      downloadTable[item.id] = item
+      downloadOrder.append(item.id)
     }
   }
 
@@ -198,6 +243,15 @@ public final class ChromiumEngine: EngineClient, EngineExtensions {
   /// The facade mutes the contents (`WebContents::SetAudioMuted`); its `MutedChanged` updates the snapshot.
   public func setMuted(_ id: TabID, muted: Bool) { tabs[id]?.handle.setMuted(muted) }
 
+  /// The facade runs `FindTabHelper::StartFinding`; its replies arrive as `FindResult` events (#134).
+  public func findInPage(_ id: TabID, text: String, forward: Bool, matchCase: Bool) {
+    tabs[id]?.handle.findInPage(text: text, forward: forward, matchCase: matchCase)
+  }
+
+  public func stopFinding(_ id: TabID, action: FindStopAction) {
+    tabs[id]?.handle.stopFinding(action: action.facade)
+  }
+
   public func observe(_ handler: @escaping @MainActor (EngineEvent) -> Void) -> EngineObservation {
     hub.add(handler)
   }
@@ -276,6 +330,7 @@ public final class ChromiumEngine: EngineClient, EngineExtensions {
     return adapter
   }
 
+  /// `isOffTheRecord` stays false: the facade's request does not carry it yet (#705).
   func engineRequest(from request: any ArktWindowRequest) -> EngineWindowRequest {
     EngineWindowRequest(
       kind: EngineWindowRequestKind(facade: request.kind),
@@ -322,6 +377,10 @@ public final class ChromiumEngine: EngineClient, EngineExtensions {
   }
 
   func removeTab(_ id: TabID) {
+    guard tabs[id] != nil else { return }
+    endDialogs(of: id)             // contract rule 19: before the tab's `.tabClosed`
+    endPermissions(of: id)         // contract rule 20: likewise
+    endInfobars(of: id)            // contract rule 21: the list empties before the tab closes
     guard let record = tabs.removeValue(forKey: id) else { return }
     tabIDs.removeAll { $0 == id }
     tabByHandle[ObjectIdentifier(record.handle)] = nil

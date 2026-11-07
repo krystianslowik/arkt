@@ -75,6 +75,8 @@ public final class ArchiveCoordinator {
   private let store: any ArchiveStoring
   private let now: @MainActor () -> Date
   private let flushTimeout: Duration
+  /// False only in tests: `flushBlocking` then waits for the write instead of racing `flushTimeout`.
+  private let blockingFlushIsBounded: Bool
   private let sleep: Sleep
 
   /// Store operations in the order they must reach the store; only the writer sends them.
@@ -84,6 +86,9 @@ public final class ArchiveCoordinator {
   /// The latest archived entries, oldest first, for Reopen Closed Tab (#110, BH-074): a reopen puts a row back from
   /// here without reading the store.
   private var recent: [ArchivedItem] = []
+  /// Little Arkt entries this run archived and has not taken out of the archive since (#355): Reopen Closed Tab on a
+  /// Little Arkt window takes its entry back by id, however many other items were archived meanwhile.
+  private var littleArktIDs: Set<NodeID> = []
   /// How many archived entries `restoreRecent` can bring back. [I]
   nonisolated public static let recentLimit = 50
   /// Ids this coordinator may have left in the store: sent in an add, or named by a remove that failed. A
@@ -104,12 +109,14 @@ public final class ArchiveCoordinator {
     store: any ArchiveStoring,
     now: @escaping @MainActor () -> Date = { Date() },
     flushTimeout: Duration = ArchiveCoordinator.defaultFlushTimeout,
+    blockingFlushIsBounded: Bool = true,
     sleep: @escaping Sleep = { try await Task.sleep(for: $0) }
   ) {
     self.source = source
     self.store = store
     self.now = now
     self.flushTimeout = flushTimeout
+    self.blockingFlushIsBounded = blockingFlushIsBounded
     self.sleep = sleep
   }
 
@@ -173,17 +180,49 @@ public final class ArchiveCoordinator {
     let fallback = fallbackSpace.flatMap { sidebar.spaces[$0] == nil ? nil : $0 } ?? sidebar.spaceOrder.first
     guard let fallback else { throw RestoreError.noSpaceForRestore }
     let restored = try source.restore(item, fallbackSpace: fallback)
-    restoredIDs.insert(item.id)
-    recent.removeAll { $0.id == item.id }
-    let wasPending = dropUnsentAdds(of: item.id)
+    withdraw(item.id)
+    return restored
+  }
+
+  /// Takes entry `id` out of the archive (the store side of a restore): marks it restored, forgets it for a reopen,
+  /// and queues its removal from the store, unless it was pending and never sent (see the type comment).
+  private func withdraw(_ id: NodeID) {
+    restoredIDs.insert(id)
+    littleArktIDs.remove(id)                                // a restored Little Arkt page is a row now
+    recent.removeAll { $0.id == id }
+    let wasPending = dropUnsentAdds(of: id)
     // Queued whenever a store call may have written the entry: a failed add may still have landed, and an extra
     // remove is harmless.
-    if !wasPending || mayBeStored.contains(item.id) {
-      outbox.append(.remove([item.id]))
+    if !wasPending || mayBeStored.contains(id) {
+      outbox.append(.remove([id]))
       startWriter(delayFirst: false)
     }
     if wasPending { onPendingItemsChange?() }
-    return restored
+  }
+
+  // MARK: - Little Arkt (#355)
+
+  /// A Little Arkt page closed by the user (BH-138, KB-080) or by the idle timer (BH-137): one tab entry under the
+  /// Little Arkt source, with no section, queued for the store like any other archive. The page has no sidebar row,
+  /// so the sidebar does not change. A restore from the Archive puts it at the top of Today (`Archiver.restore`).
+  @discardableResult
+  public func archiveLittleArkt(url: URL, title: String, reason: ArchiveReason) -> ArchivedItem {
+    let date = now()
+    let item = ArchivedItem(reason: reason, archivedAt: date, source: .littleArc,
+                            snapshot: NodeSnapshot(kind: .tab(TabItem(url: url, title: title)), createdAt: date))
+    littleArktIDs.insert(item.id)
+    enqueue([item])
+    return item
+  }
+
+  /// Reopen Closed Tab on a Little Arkt window: the page comes back in a window, not as a row, so its entry leaves
+  /// the archive without a sidebar insert. False when `id` is not a Little Arkt entry this run archived, or it was
+  /// restored from the Archive (the page is a Today row now) or taken back since: the caller then does not reopen it.
+  @discardableResult
+  public func takeBackLittleArkt(_ id: NodeID) -> Bool {
+    guard littleArktIDs.remove(id) != nil, !restoredIDs.contains(id) else { return false }
+    withdraw(id)
+    return true
   }
 
   /// Reopen Closed Tab (#110, BH-074): restores the entry archived as `id` a moment ago, as `restore` does. Nil when it
@@ -256,7 +295,7 @@ public final class ArchiveCoordinator {
       }
     }
     let call = submit { store in await Self.send(operations, to: store) }
-    let sent = BlockingFlush.run(timeout: flushTimeout) { await call.value } ?? false
+    let sent = BlockingFlush.run(timeout: blockingFlushIsBounded ? flushTimeout : nil) { await call.value } ?? false
     if sent, writer == nil {
       outbox.removeAll()
       onPendingItemsChange?()

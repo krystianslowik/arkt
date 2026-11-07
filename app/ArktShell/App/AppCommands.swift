@@ -10,17 +10,32 @@ final class AppCommands: NSObject {
   /// Edit > Undo's target (menu targets are weak): Cmd-Z reopens a closed tab or Peek unless text is being edited
   /// (#346, KB-011).
   let undoRouter = ReopenUndoRouter()
+  /// File > Reopen Closed Tab's target: the key window's reopen, else the last closed Little Arkt window (#355).
+  private(set) lazy var reopenRouter = ReopenClosedRouter { [weak self] in self?.session?.windows }
 
   private var session: AppSession? { composition?.session }
 
   /// File > New Window (Cmd-N, KB-005): a window on the same Spaces, without a page until the user picks one.
   @objc func newWindow(_ sender: Any?) { session?.windows.openWindow(opensFirstTab: false) }
 
+  /// File > New Blank Window (Ctrl-Cmd-N, KB-006, BH-170): the same window, with no sidebar items.
+  @objc func newBlankWindow(_ sender: Any?) {
+    guard let window = session?.windows.openWindow(opensFirstTab: false) else { return }
+    window.makeBlank()
+  }
+
+  /// File > New Incognito Window (Cmd-Shift-N, KB-007, BH-174): the same window, labeled only in the sidebar.
+  /// A visit from it is not written to the shared sidebar.
+  @objc func newIncognitoWindow(_ sender: Any?) {
+    guard let window = session?.windows.openWindow(opensFirstTab: false) else { return }
+    window.makeIncognito()
+  }
+
   /// File > New Little Arkt Window (Cmd-Opt-N, KB-044): the quick lookup bar; Return opens the result in a new Little
   /// Arkt window. The same bar as the system-wide hotkey (KB-045).
   @objc func newLittleArktWindow(_ sender: Any?) { session?.showLittleArktLookup() }
 
-  /// Arkt Shell > Settings... (Cmd-, KB-066): opens the Settings window, or brings it forward (#307).
+  /// Arkt > Settings... (Cmd-, KB-066): opens the Settings window, or brings it forward (#307).
   @objc func showSettings(_ sender: Any?) { session?.showSettings() }
 
   /// File > Import from Arc... (E4c).
@@ -29,11 +44,21 @@ final class AppCommands: NSObject {
   /// Window > Show Archive (E5c, unbound by default, KB-043).
   @objc func showArchive(_ sender: Any?) { session?.showArchive() }
 
+  /// Window > Show Library (Cmd-Shift-L, KB-065, #132): the Library on the section used last.
+  @objc func showLibrary(_ sender: Any?) { session?.showLibrary() }
+
   /// Window > Clear Archive... (BH-087, unbound, KB-043): fronts the Archive window and asks there.
   @objc func clearArchive(_ sender: Any?) { session?.clearArchive() }
 
   /// Help > Welcome to Arkt (onboarding spec, section 12): the first run again over the frontmost window.
   @objc func showWelcome(_ sender: Any?) { session?.showWelcome() }
+}
+
+/// The Window menu's Little Arkt section (#356): rebuilt each time the menu opens, from the open Little Arkt windows.
+extension AppCommands: NSMenuDelegate {
+  func menuNeedsUpdate(_ menu: NSMenu) {
+    session?.windows.littleArktMenus.updateWindowMenu(menu)
+  }
 }
 
 extension AppCommands: NSMenuItemValidation {

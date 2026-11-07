@@ -1,6 +1,6 @@
 import EngineAPI
 
-/// Every check of the shared engine contract (rules 1-17), so the XCTest and Swift Testing suites and the in-app
+/// Every check of the shared engine contract (rules 1-26), so the XCTest and Swift Testing suites and the in-app
 /// runner (W3-9) run the same list. `ChromiumEngineContractTests.everyContractCheckIsListed` keeps it complete.
 public enum ContractCheck: String, CaseIterable, Sendable {
   // Rules 1-10
@@ -16,8 +16,35 @@ public enum ContractCheck: String, CaseIterable, Sendable {
   case skipUnloadHandlersNeverHolds, cancelledWindowCloseKeepsTheWindow
   // Rule 17
   case muteIsReportedOnce, audibleStateIsReported
+  // Rule 18
+  case pageImageFitsTheCaps, pageImageOfAClosedTabIsNil
+  // Rule 19
+  case dialogIsReportedAnsweredAndEndedOnce, pendingDialogEndsBeforeItsTabCloses, hiddenTabEndsItsConfirmAndPrompt
+  // Rule 20
+  case permissionIsReportedAnsweredAndEndedOnce, pendingPermissionEndsBeforeItsTabCloses, navigationEndsItsPermission
+  case hiddenTabEndsItsPermissionAndAsksAgain
+  // Rule 21
+  case infobarIsReportedActedOnAndRemoved, infobarsStayWithTheirTabWhileHidden, pendingInfobarsEndBeforeTheirTabCloses
+  // Rule 22
+  case findCountsMatchesAndMovesTheOrdinal, stopFindingKeepsClearsOrActivatesTheMatch
+  // Rule 23
+  case hoveredLinkReportsItsTargetURL
+  // Rule 24
+  case downloadIsReportedProgressesAndCompletes, cancelEndsAnActiveDownloadOnce
+  case removeForgetsADownloadAndKeepsItsFile, pauseHoldsTheBytesUntilResume
+  case interruptedDownloadRetriesAndReplacesItsRow, dangerousDownloadIsHeldUntilDecided
+  case savePreferenceDecidesTheFolder
+  // Rule 25 (#576)
+  case zoomStepIsReportedOnceAndNothingAtTheEnds, crashedTabStaysListed, reloadRecoversACrashedTabOnce
+  // Rule 26 (#582)
+  case pageInfoNamesTheSiteItShows, permissionChangeIsReadBackAndResetRestoresTheDefault
+  case permissionChangeRaisesTheReloadInfobarOnce
 
-  /// The contract rule (1-17) the check belongs to, as numbered in `EngineContract`'s documentation.
+  /// The checks the Chromium engine runs: rule 25 waits for the facade's tab state seams (#577) and rule 26 for its
+  /// page info seam (#583), which add them here.
+  public static var chromiumChecks: [ContractCheck] { allCases.filter { $0.rule < 25 } }
+
+  /// The contract rule (1-26) the check belongs to, as numbered in `EngineContract`'s documentation.
   public var rule: Int {
     switch self {
     case .createdTabIsListedAndAnnounced, .tabIDsKeepCreationOrder: 1
@@ -39,6 +66,22 @@ public enum ContractCheck: String, CaseIterable, Sendable {
     case .windowlessCreateTabLandsInMostRecentlyActiveWindow: 15
     case .heldCloseKeepsTheTabUntilAnswered, .skipUnloadHandlersNeverHolds, .cancelledWindowCloseKeepsTheWindow: 16
     case .muteIsReportedOnce, .audibleStateIsReported: 17
+    case .pageImageFitsTheCaps, .pageImageOfAClosedTabIsNil: 18
+    case .dialogIsReportedAnsweredAndEndedOnce, .pendingDialogEndsBeforeItsTabCloses,
+         .hiddenTabEndsItsConfirmAndPrompt: 19
+    case .permissionIsReportedAnsweredAndEndedOnce, .pendingPermissionEndsBeforeItsTabCloses,
+         .navigationEndsItsPermission, .hiddenTabEndsItsPermissionAndAsksAgain: 20
+    case .infobarIsReportedActedOnAndRemoved, .infobarsStayWithTheirTabWhileHidden,
+         .pendingInfobarsEndBeforeTheirTabCloses: 21
+    case .findCountsMatchesAndMovesTheOrdinal, .stopFindingKeepsClearsOrActivatesTheMatch: 22
+    case .hoveredLinkReportsItsTargetURL: 23
+    case .downloadIsReportedProgressesAndCompletes, .cancelEndsAnActiveDownloadOnce,
+         .removeForgetsADownloadAndKeepsItsFile, .pauseHoldsTheBytesUntilResume,
+         .interruptedDownloadRetriesAndReplacesItsRow, .dangerousDownloadIsHeldUntilDecided,
+         .savePreferenceDecidesTheFolder: 24
+    case .zoomStepIsReportedOnceAndNothingAtTheEnds, .crashedTabStaysListed, .reloadRecoversACrashedTabOnce: 25
+    case .pageInfoNamesTheSiteItShows, .permissionChangeIsReadBackAndResetRestoresTheDefault,
+         .permissionChangeRaisesTheReloadInfobarOnce: 26
     }
   }
 
@@ -75,6 +118,41 @@ public enum ContractCheck: String, CaseIterable, Sendable {
     case .cancelledWindowCloseKeepsTheWindow: try await EngineContract.cancelledWindowCloseKeepsTheWindow(h)
     case .muteIsReportedOnce: try await EngineContract.muteIsReportedOnce(h)
     case .audibleStateIsReported: try await EngineContract.audibleStateIsReported(h)
+    case .pageImageFitsTheCaps: try await EngineContract.pageImageFitsTheCaps(h)
+    case .pageImageOfAClosedTabIsNil: try await EngineContract.pageImageOfAClosedTabIsNil(h)
+    case .dialogIsReportedAnsweredAndEndedOnce: try await EngineContract.dialogIsReportedAnsweredAndEndedOnce(h)
+    case .pendingDialogEndsBeforeItsTabCloses: try await EngineContract.pendingDialogEndsBeforeItsTabCloses(h)
+    case .hiddenTabEndsItsConfirmAndPrompt: try await EngineContract.hiddenTabEndsItsConfirmAndPrompt(h)
+    case .permissionIsReportedAnsweredAndEndedOnce:
+      try await EngineContract.permissionIsReportedAnsweredAndEndedOnce(h)
+    case .pendingPermissionEndsBeforeItsTabCloses: try await EngineContract.pendingPermissionEndsBeforeItsTabCloses(h)
+    case .navigationEndsItsPermission: try await EngineContract.navigationEndsItsPermission(h)
+    case .hiddenTabEndsItsPermissionAndAsksAgain: try await EngineContract.hiddenTabEndsItsPermissionAndAsksAgain(h)
+    case .infobarIsReportedActedOnAndRemoved: try await EngineContract.infobarIsReportedActedOnAndRemoved(h)
+    case .infobarsStayWithTheirTabWhileHidden: try await EngineContract.infobarsStayWithTheirTabWhileHidden(h)
+    case .pendingInfobarsEndBeforeTheirTabCloses: try await EngineContract.pendingInfobarsEndBeforeTheirTabCloses(h)
+    case .findCountsMatchesAndMovesTheOrdinal: try await EngineContract.findCountsMatchesAndMovesTheOrdinal(h)
+    case .stopFindingKeepsClearsOrActivatesTheMatch:
+      try await EngineContract.stopFindingKeepsClearsOrActivatesTheMatch(h)
+    case .hoveredLinkReportsItsTargetURL: try await EngineContract.hoveredLinkReportsItsTargetURL(h)
+    case .downloadIsReportedProgressesAndCompletes:
+      try await EngineContract.downloadIsReportedProgressesAndCompletes(h)
+    case .cancelEndsAnActiveDownloadOnce: try await EngineContract.cancelEndsAnActiveDownloadOnce(h)
+    case .removeForgetsADownloadAndKeepsItsFile: try await EngineContract.removeForgetsADownloadAndKeepsItsFile(h)
+    case .pauseHoldsTheBytesUntilResume: try await EngineContract.pauseHoldsTheBytesUntilResume(h)
+    case .interruptedDownloadRetriesAndReplacesItsRow:
+      try await EngineContract.interruptedDownloadRetriesAndReplacesItsRow(h)
+    case .dangerousDownloadIsHeldUntilDecided: try await EngineContract.dangerousDownloadIsHeldUntilDecided(h)
+    case .savePreferenceDecidesTheFolder: try await EngineContract.savePreferenceDecidesTheFolder(h)
+    case .zoomStepIsReportedOnceAndNothingAtTheEnds:
+      try await EngineContract.zoomStepIsReportedOnceAndNothingAtTheEnds(h)
+    case .crashedTabStaysListed: try await EngineContract.crashedTabStaysListed(h)
+    case .reloadRecoversACrashedTabOnce: try await EngineContract.reloadRecoversACrashedTabOnce(h)
+    case .pageInfoNamesTheSiteItShows: try await EngineContract.pageInfoNamesTheSiteItShows(h)
+    case .permissionChangeIsReadBackAndResetRestoresTheDefault:
+      try await EngineContract.permissionChangeIsReadBackAndResetRestoresTheDefault(h)
+    case .permissionChangeRaisesTheReloadInfobarOnce:
+      try await EngineContract.permissionChangeRaisesTheReloadInfobarOnce(h)
     }
   }
 }

@@ -12,9 +12,6 @@ struct ArchiveCoordinatorTests {
   private static let url = URL(string: "https://a.example")!
   /// Distinct from the first backoff (1 s), so the tests can tell the two sleeps apart.
   private static let flushTimeout: Duration = .milliseconds(700)
-  /// For blocking-flush tests that expect the write to land: a wall-clock bound, so it must stay far above how long a
-  /// busy test run can keep the global executor from starting the store call.
-  private static let blockingFlushTimeout: Duration = .seconds(10)
 
   /// A source with one Space ("Work") holding a pinned tab and Today tabs `today` (top first), a store, a sleeper
   /// and the coordinator over them, plus every change and `onDidChange` the source reports.
@@ -32,7 +29,10 @@ struct ArchiveCoordinatorTests {
     var didChangeCount = 0
     private var observation: SidebarObservation?
 
-    init(todayTabs: Int = 2, withSpace: Bool = true, flushTimeout: Duration = ArchiveCoordinatorTests.flushTimeout) throws {
+    init(
+      todayTabs: Int = 2, withSpace: Bool = true, flushTimeout: Duration = ArchiveCoordinatorTests.flushTimeout,
+      blockingFlushIsBounded: Bool = true
+    ) throws {
       let source = ModelSidebarSource(now: { ArchiveCoordinatorTests.now })
       self.source = source
       let clock = TestClock(ArchiveCoordinatorTests.now)
@@ -49,7 +49,7 @@ struct ArchiveCoordinatorTests {
       }
       coordinator = ArchiveCoordinator(
         source: source, store: store, now: { clock.now },
-        flushTimeout: flushTimeout, sleep: sleeper.sleep)
+        flushTimeout: flushTimeout, blockingFlushIsBounded: blockingFlushIsBounded, sleep: sleeper.sleep)
       observation = source.observe { [unowned self] in self.changes.append($0) }
       source.onDidChange = { [unowned self] _ in self.didChangeCount += 1 }
     }
@@ -276,7 +276,7 @@ struct ArchiveCoordinatorTests {
   // MARK: - Blocking flush (#298: SIGTERM quit start, the main thread blocks right after)
 
   @Test func flushBlockingWritesTheOutboxWhileTheMainActorWaits() async throws {
-    let harness = try Harness(todayTabs: 2, flushTimeout: Self.blockingFlushTimeout)
+    let harness = try Harness(todayTabs: 2, blockingFlushIsBounded: false)
     let items = harness.coordinator.archive([harness.today[0], harness.today[1]], reason: .manual)
 
     #expect(harness.coordinator.flushBlocking())  // synchronous: the writer task never got the main actor
@@ -289,6 +289,15 @@ struct ArchiveCoordinatorTests {
 
     await harness.drain()  // the writer sends the same add again: a harmless `.replace`
     #expect(Set(await harness.store.stored.values) == Set(items))
+  }
+
+  @Test func unboundedFlushBlockingWaitsForTheWriteEvenWhenItOutlastsFlushTimeout() async throws {
+    // A 1 ns flushTimeout would expire before any store call could land; the unbounded wait ignores it.
+    let harness = try Harness(flushTimeout: .nanoseconds(1), blockingFlushIsBounded: false)
+    let items = harness.coordinator.archive([harness.today[0]], reason: .manual)
+
+    #expect(harness.coordinator.flushBlocking())
+    #expect(await harness.store.stored[items[0].id] == items[0])
   }
 
   @Test func flushBlockingWithNothingPendingReturnsTrue() throws {
@@ -322,7 +331,7 @@ struct ArchiveCoordinatorTests {
   }
 
   @Test func flushBlockingSendsAfterTheAddInFlight() async throws {
-    let harness = try Harness(todayTabs: 2, flushTimeout: Self.blockingFlushTimeout)
+    let harness = try Harness(todayTabs: 2, blockingFlushIsBounded: false)
     await harness.store.holdAdds()
     let first = harness.coordinator.archive([harness.today[0]], reason: .manual)
     await eventually { await harness.store.addCalls.count == 1 }  // in flight, held by the store
@@ -343,7 +352,7 @@ struct ArchiveCoordinatorTests {
   }
 
   @Test func flushBlockingDropsAFailingRemoveSoItCannotHoldBackAnAdd() async throws {
-    let harness = try Harness(flushTimeout: Self.blockingFlushTimeout)
+    let harness = try Harness(blockingFlushIsBounded: false)
     let item = try #require(harness.coordinator.archive([harness.today[0]], reason: .manual).first)
     await harness.drain()
     await harness.store.setFailsRemoves(true)
@@ -763,6 +772,90 @@ struct ArchiveCoordinatorTests {
     let coordinator = ArchiveCoordinator(source: source, store: FakeArchiveStore(), now: { now })
 
     #expect(coordinator.runAutoArchive(startedAt: .distantPast, settings: settings, exempt: []).isEmpty)
+  }
+
+  // MARK: - Little Arkt (#355)
+
+  @Test func aLittleArktPageIsArchivedUnderTheLittleArktSourceWithoutTouchingTheSidebar() async throws {  // BH-138
+    let harness = try Harness(todayTabs: 1)
+    let page = URL(string: "https://little.example/page")!
+
+    let item = harness.coordinator.archiveLittleArkt(url: page, title: "Little", reason: .manual)
+
+    #expect(item.source == .littleArc)
+    #expect(item.section == nil)
+    #expect(item.reason == .manual)
+    #expect(item.url == page)
+    #expect(item.title == "Little")
+    #expect(item.archivedAt == Self.now)
+    #expect(harness.source.sidebar.nodes[item.id] == nil, "a Little Arkt page has no row")
+    #expect(harness.source.children(of: .today(harness.space)) == harness.today)
+    #expect(harness.changes.isEmpty)
+    #expect(harness.coordinator.pendingItems == [item])
+    await harness.drain()
+    #expect(await harness.store.addCalls == [.init(ids: [item.id], policy: .replace)])
+  }
+
+  @Test func takingBackALittleArktEntryRemovesItFromTheStoreAndInsertsNoRow() async throws {
+    let harness = try Harness(todayTabs: 1)
+    let item = harness.coordinator.archiveLittleArkt(url: Self.url, title: "Little", reason: .auto)
+    await harness.drain()
+
+    #expect(harness.coordinator.takeBackLittleArkt(item.id))
+
+    #expect(harness.source.sidebar.nodes[item.id] == nil)
+    #expect(harness.source.children(of: .today(harness.space)) == harness.today)
+    await harness.drain()
+    #expect(await harness.store.removeCalls == [[item.id]])
+    #expect(await harness.store.stored[item.id] == nil)
+    #expect(!harness.coordinator.takeBackLittleArkt(item.id), "a second take-back does nothing")
+    #expect(!harness.coordinator.takeBackLittleArkt(UUID()))
+  }
+
+  @Test func aLittleArktEntryIsTakenBackAfterManyOtherArchives() async throws {
+    let harness = try Harness(todayTabs: ArchiveCoordinator.recentLimit + 5)
+    let item = harness.coordinator.archiveLittleArkt(url: Self.url, title: "Little", reason: .manual)
+    for id in harness.today { harness.coordinator.archive([id], reason: .manual) }   // past the reopen limit
+    await harness.drain()
+
+    #expect(harness.coordinator.takeBackLittleArkt(item.id))
+
+    await harness.drain()
+    #expect(await harness.store.removeCalls == [[item.id]])
+    #expect(harness.source.sidebar.nodes[item.id] == nil)
+  }
+
+  @Test func aLittleArktEntryRestoredFromTheArchiveIsNotTakenBack() async throws {
+    let harness = try Harness(todayTabs: 0)
+    let item = harness.coordinator.archiveLittleArkt(url: Self.url, title: "Little", reason: .manual)
+    await harness.drain()
+    _ = try #require(try harness.coordinator.restore(item, fallbackSpace: harness.space))
+    #expect(harness.source.children(of: .today(harness.space)) == [item.id], "the page is a Today row now")
+    await harness.drain()
+    #expect(await harness.store.removeCalls == [[item.id]])
+
+    #expect(!harness.coordinator.takeBackLittleArkt(item.id), "no reopen of a page that is already a row")
+
+    harness.coordinator.archive([item.id], reason: .manual)          // the row closed again: a Today entry
+    #expect(!harness.coordinator.takeBackLittleArkt(item.id), "a Today entry is never taken back as a window")
+    await harness.drain()
+    #expect(await harness.store.removeCalls == [[item.id]])
+  }
+
+  @Test func takingBackAnUnsentLittleArktEntryOnlyDropsItFromTheOutbox() async throws {
+    let harness = try Harness(todayTabs: 0)
+    await harness.store.holdAdds()
+    let first = harness.coordinator.archiveLittleArkt(url: Self.url, title: "A", reason: .manual)
+    await eventually { await harness.store.addCalls.count == 1 }          // in flight
+    let second = harness.coordinator.archiveLittleArkt(url: Self.url, title: "B", reason: .manual)  // queued
+
+    #expect(harness.coordinator.takeBackLittleArkt(second.id))
+
+    #expect(harness.coordinator.pendingItems == [first])
+    await harness.store.releaseAdds()
+    await harness.drain()
+    #expect(await harness.store.removeCalls.isEmpty)
+    #expect(await harness.store.addCalls.map(\.ids) == [[first.id]])
   }
 }
 

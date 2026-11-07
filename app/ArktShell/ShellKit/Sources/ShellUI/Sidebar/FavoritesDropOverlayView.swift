@@ -30,7 +30,7 @@ public final class FavoritesDropOverlayView: NSView {
     registerForDraggedTypes([.sidebarNode])
     highlightLayer.cornerRadius = FavoritesLayout.tileCornerRadius
     highlightLayer.cornerCurve = .continuous
-    highlightLayer.borderWidth = 2
+    highlightLayer.borderWidth = 1
     highlightLayer.isHidden = true
     layer?.addSublayer(highlightLayer)
   }
@@ -87,12 +87,12 @@ public final class FavoritesDropOverlayView: NSView {
     CATransaction.commit()
   }
 
-  /// The accent color resolved for the current appearance, read when the highlight appears.
-  private func applyColors() {
-    effectiveAppearance.performAsCurrentDrawingAppearance {
-      highlightLayer.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.18).cgColor
-      highlightLayer.borderColor = NSColor.controlAccentColor.withAlphaComponent(0.6).cgColor
-    }
+  /// The drag hint in the Space's text tone (#641), read when the highlight appears: the overlay sits in the sidebar,
+  /// whose appearance follows that tone.
+  func applyColors() {
+    let flavor = ThemeFlavor(appearance: effectiveAppearance)
+    highlightLayer.backgroundColor = ShellTokens.dragHint.resolve(flavor).cgColor
+    highlightLayer.borderColor = ShellTokens.dragHintEdge.resolve(flavor).cgColor
   }
 
   // MARK: NSDraggingDestination

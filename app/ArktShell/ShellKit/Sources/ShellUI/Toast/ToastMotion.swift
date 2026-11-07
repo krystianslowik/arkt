@@ -16,7 +16,7 @@ enum ToastMotion {
   }
 
   /// Strong ease-out, as the Peek's Reduce Motion fade. A new instance each time: the class is not Sendable.
-  static var easeOut: CAMediaTimingFunction { CAMediaTimingFunction(controlPoints: 0.23, 1, 0.32, 1) }
+  static var easeOut: CAMediaTimingFunction { MotionCurve.strongEaseOut.timingFunction }
 
   static func enter(reduceMotion: Bool) -> Step {
     reduceMotion ? Step(offset: 0, scale: 1, spring: nil, fadeDuration: 0.15)

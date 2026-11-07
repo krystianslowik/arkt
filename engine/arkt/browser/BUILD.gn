@@ -1,3 +1,5 @@
+import("//testing/test.gni")
+
 # Lets //arkt/browser create normal browser windows. Dependency-free on
 # purpose: //chrome/browser/ui/views/frame:browser_window_factory depends on it
 # (patch 0004), and depending on //arkt/browser there would be a GN cycle.
@@ -76,12 +78,16 @@ source_set("browser") {
 # Arkt's native browser window and its parts (week 2).
 source_set("window") {
   sources = [
+    "arkt_autofill_bubble_handler.cc",
+    "arkt_autofill_bubble_handler.h",
     "arkt_browser_window.h",
     "arkt_browser_window.mm",
     "arkt_browser_window_parts.h",
     "arkt_browser_window_parts.mm",
     "arkt_dialog_sheet.h",
     "arkt_dialog_sheet.mm",
+    "arkt_extension_batch_install.h",
+    "arkt_extension_batch_install.mm",
     "arkt_extension_calls.cc",
     "arkt_extension_calls.h",
     "arkt_extension_dialogs.h",
@@ -96,6 +102,8 @@ source_set("window") {
     "arkt_infobar_view.mm",
     "arkt_infobars.h",
     "arkt_infobars.mm",
+    "arkt_javascript_dialog.h",
+    "arkt_javascript_dialog.mm",
     "arkt_permission_prompt.h",
     "arkt_permission_prompt.mm",
     "arkt_placeholder_window_host.h",
@@ -117,8 +125,11 @@ source_set("window") {
     "//chrome/app:command_ids",
     "//chrome/app:generated_resources",
     "//chrome/browser/extensions",
+    "//chrome/browser/permissions/system",
     "//chrome/browser/profiles:profile",
     "//chrome/browser/themes",
+    "//chrome/browser/ui/autofill",
+    "//chrome/browser/ui/autofill/payments",
     "//chrome/browser/ui:browser_command_controller",
     "//chrome/browser/ui:browser_commands",
     "//chrome/browser/ui:browser_init_state",
@@ -132,6 +143,7 @@ source_set("window") {
     "//chrome/browser/ui/extensions:extension_popup_types",
     "//chrome/browser/ui/find_bar",
     "//chrome/browser/ui/fullscreen",
+    "//chrome/browser/ui/javascript_dialogs",
     "//chrome/browser/ui/location_bar",
     "//chrome/browser/ui/side_panel",
     "//chrome/browser/ui/tabs:tab_strip",
@@ -139,6 +151,7 @@ source_set("window") {
     "//chrome/browser/ui/views:bubble_anchor_util_views",
     "//chrome/browser/ui/views/new_tab_footer",
     "//chrome/common:constants",
+    "//components/autofill/core/browser",
     "//components/bookmarks/common",
     "//components/constrained_window",
     "//components/content_settings/core/common",
@@ -150,6 +163,7 @@ source_set("window") {
     "//components/prefs",
     "//components/search",
     "//components/sessions",
+    "//components/signin/public/base:signin_buildflags",
     "//components/strings",
     "//components/tabs:public",
     "//components/web_modal",
@@ -171,5 +185,16 @@ source_set("window") {
   frameworks = [
     "AppKit.framework",
     "QuartzCore.framework",
+  ]
+}
+
+# Upstream unit tests that cover Arkt patches, linked on their own so a check
+# does not need all of components_unittests. Defined in this file because GN
+# loads it from //chrome/browser. Run with a --gtest_filter, for example
+# HistorySyncBridgeTest.* for the history sync patch.
+test("arkt_patch_unittests") {
+  deps = [
+    "//base/test:run_all_unittests",
+    "//components/history/core/browser:unit_tests",
   ]
 }

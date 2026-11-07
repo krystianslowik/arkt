@@ -24,7 +24,8 @@ public enum SidebarLocation: Hashable, Sendable {
 public struct SpaceThemeInfo: Equatable, Sendable {
   /// Gradient stops, top-left to bottom-right (Track B: `SpaceTheme.baseColors`).
   public var baseColors: [RGBA]
-  /// Arc's second gradient layer (Track B: `SpaceTheme.overlayColors`). Not rendered yet.
+  /// Arc's second gradient layer (Track B: `SpaceTheme.overlayColors`), drawn above the base
+  /// gradient (#381). Each color's alpha is its strength; `ThemeContrast.drawn` multiplies in `opacity`.
   public var overlayColors: [RGBA]
   /// Tiled overlay texture: "grain", "sand", "denim" or "tweed" (Track B: `SpaceTheme.texture`); see `ThemeTexture`.
   public var texture: String?
@@ -210,6 +211,10 @@ public protocol SidebarSource: AnyObject {
   @discardableResult func duplicateNode(_ id: NodeID) throws -> NodeID
   /// New Folder (KB-040, BH-094): an empty folder at `index` (clamped; nil appends). Emits `.structure`.
   @discardableResult func addFolder(title: String, in location: SidebarLocation, at index: Int?) throws -> NodeID
+  /// Removes `id` and its subtree without archiving it (#356: a Today tab moved into Little Arkt keeps its page, which
+  /// is archived when its Little Arkt window closes). A pane leaves its split as a closed pane does. Emits
+  /// `.structure` for the location it was in; an unknown id changes nothing. Closing a row goes through the Archive.
+  func removeNode(_ id: NodeID)
 
   /// Moves a node to `location` at `index` (measured before removal, clamped). Emits `.structure` for every
   /// location whose child order changed. Throws `SidebarMoveError.favoritesFull` when the destination is a full

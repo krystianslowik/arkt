@@ -22,6 +22,7 @@ final class LittleArktWindow: NSWindow {
     backgroundColor = .clear
     isMovableByWindowBackground = false              // the top bar and the frame drag the window
     tabbingMode = .disallowed
+    isExcludedFromWindowsMenu = true                 // the Window menu lists it under Little Arkt's heading (#356)
     isReleasedWhenClosed = false
     minSize = LittleArktLayout.minimumSize
     animationBehavior = .none                        // the content's own springs are the motion
@@ -109,8 +110,12 @@ final class LittleArktRootView: NSView {
 
   override var wantsUpdateLayer: Bool { true }
 
+  /// Called after each layout pass (the JavaScript dialog panel retries a page view that arrived with it).
+  var onLayout: (@MainActor () -> Void)?
+
   override func layout() {
     super.layout()
+    defer { onLayout?() }
     frameView.frame = bounds
     frameView.subviews.first { $0 is LittleArktFrameDragView }?.frame = bounds
     topBar.frame = LittleArktLayout.topBarFrame(in: bounds)
@@ -164,6 +169,12 @@ public final class LittleArktEngineHost: EngineWindowHosting {
     default:
       return false
     }
+  }
+
+  /// An Esc the page did not use stops the page while it loads, unless another Esc owner of the window is open
+  /// (KB-055, #757).
+  public func handleUnhandledKeyDown(_ event: NSEvent, in tab: TabID?) -> Bool {
+    controller?.stopLoadingOnEscape(event, in: tab) ?? false
   }
 
   func dispatch(_ command: EngineCommand, disposition: EngineDisposition) {

@@ -1,4 +1,7 @@
 import AppKit
+import struct ArcImport.ArcCookie
+import struct ArcImport.BookmarkRecord
+import struct ArcImport.ArcLogin
 import EngineAPI
 
 /// Pure in-memory engine for tests and previews. Loads complete only when `finishLoad` is called,
@@ -8,7 +11,28 @@ import EngineAPI
 /// (`engineCreateTab`, `engineCloseTab`, `engineCloseWindow`, `engineActivate`, `holdClose`, `answerDialog`,
 /// `openEngineWindow`, `setExtensionActions`) stand in for what a page, an extension or the user does in a real engine.
 @MainActor
-public final class InMemoryEngine: EngineClient, EngineExtensions {
+public final class InMemoryEngine: EngineClient, EngineExtensions, EngineImporting, EngineDownloads {
+  /// What `importCookies` and `importPasswords` received, deduped as the engine does (#512). No profile is written.
+  public private(set) var imports = ImportRecording()
+
+  public func importCookies(_ batch: [ArcCookie]) async -> ImportWriteResult { imports.record(batch) }
+  public func importPasswords(_ batch: [ArcLogin]) async -> ImportWriteResult { imports.record(batch) }
+  public func importHistory(_ batch: [ImportedHistoryEntry], after watermark: Date?) async -> ImportWriteResult {
+    imports.record(batch, after: watermark)
+  }
+  public func importBookmarks(_ batch: [BookmarkRecord]) async -> ImportWriteResult { imports.record(batch) }
+  /// Pretend Web Store ids the stub reports as "not available from the Web Store" (#513).
+  public var unavailableExtensionIDs: Set<String> = []
+  /// Each newly installed id is reported as `.installed` with `.browserImport` (named by its id), as an install the
+  /// user did not start from the Web Store (#594).
+  public func installExtensionResults(ids: [String]) async -> [ExtensionInstallResult]? {
+    let results = imports.record(extensions: ids, unavailable: unavailableExtensionIDs)
+    for result in results ?? [] where result.outcome == .installed {
+      installExtension(InstalledExtension(id: result.id, name: result.id, source: .browserImport))
+    }
+    return results
+  }
+
   /// A close waiting on a leave-site dialog.
   private enum HeldClose {
     /// One tab, closed by the client or the engine, with the reason it will report.
@@ -17,11 +41,11 @@ public final class InMemoryEngine: EngineClient, EngineExtensions {
     case window(EngineWindowID, WindowCloseReason)
   }
 
-  private var snapshots: [TabID: TabSnapshot] = [:]
+  var snapshots: [TabID: TabSnapshot] = [:]
   private var views: [TabID: NSView] = [:]
   /// Per-tab history: entries behind and ahead of the current one (nearest last on each stack).
   private var history: [TabID: (back: [HistoryEntry], forward: [HistoryEntry])] = [:]
-  private let hub = EngineEventHub()
+  let hub = EngineEventHub()
   public private(set) var tabIDs: [TabID] = []
 
   public private(set) var windowIDs: [EngineWindowID] = []
@@ -29,7 +53,33 @@ public final class InMemoryEngine: EngineClient, EngineExtensions {
   private var activeTabs: [EngineWindowID: TabID] = [:]
   private var lastActiveWindow: EngineWindowID?
   private var heldCloses: [TabID: HeldClose] = [:]
-  private var actions: [EngineWindowID: [ExtensionAction]] = [:]
+  var actions: [EngineWindowID: [ExtensionAction]] = [:]
+  /// Find sessions, the page selection and the hovered link of the tabs that have them (rules 22, 23).
+  var finds: [TabID: FindSession] = [:]
+  var pageSelections: [TabID: String] = [:]
+  var hoveredLinks: [TabID: URL] = [:]
+  var findRequestCounter = 0
+  /// Downloads (rule 24): the list, what each started from (for Retry), the preference and the places files go. The
+  /// default folder is a fresh temporary folder, so a test never writes to the real Downloads folder.
+  var downloadItems: [DownloadItem] = []
+  var downloadSpecs: [DownloadID: DownloadSpec] = [:]
+  public var downloadSavePreference: DownloadSavePreference = .ask
+  public var downloadDestinationChooser: DownloadDestinationChooser?
+  public let downloadDefaultFolder: URL
+  /// The clock for a download's start and end time.
+  public var downloadClock: @MainActor () -> Date = { Date() }
+  public internal(set) var openedDownloads: [DownloadID] = []
+  public internal(set) var revealedDownloads: [DownloadID] = []
+  /// The crashed-session prompt's state (#576, InMemoryEngine+TabState.swift).
+  public let crashedSession = InMemorySessionRecovery()
+  /// Page info (#582, InMemoryEngine+PageInfo.swift): each origin's permission exceptions, the connections and site
+  /// data tests set, and each `openSiteSettings` call.
+  var siteExceptions: [String: [SitePermissionKind: PermissionSetting]] = [:]
+  var connectionOverrides: [TabID: (connection: PageConnection, certificate: CertificateSummary?)] = [:]
+  var siteDataByOrigin: [String: SiteData?] = [:]
+  /// Tabs whose page info changed a setting since their panel last closed: each gets the reload infobar on close.
+  var pendingReloads: Set<TabID> = []
+  public internal(set) var openedSiteSettings: [(origin: String, tab: TabID)] = []
 
   /// Builds hosts for `openEngineWindow(_:)`, as the app's provider does for a real engine.
   public var windowHostProvider: EngineWindowHostProvider?
@@ -38,8 +88,27 @@ public final class InMemoryEngine: EngineClient, EngineExtensions {
                                               window: EngineWindowID)] = []
   /// Actions run through `runExtensionAction`, in order.
   public private(set) var ranExtensionActions: [(id: String, window: EngineWindowID, anchor: NSView)] = []
+  /// Extension pins, commands and context commands (#591; `InMemoryEngine+Extensions.swift`). Pins are profile-wide:
+  /// one order for every window, kept when windows close.
+  public internal(set) var pinnedExtensionIDs: [String] = []
+  /// Extensions the engine has seen, through `setExtensionActions` or `installExtension`. Only these can be pinned; a
+  /// driver action's `isPinned` seeds the pin the first time its extension is seen.
+  var knownExtensionIDs: Set<String> = []
+  public internal(set) var extensionCommands: [ExtensionCommand] = []
+  /// Global shortcuts another application or the system holds: `.global` with one of these is rejected.
+  public var heldGlobalShortcuts: Set<ExtensionShortcut> = []
+  /// Calls to `uninstallExtension`, in order, known ids or not (#720).
+  public internal(set) var uninstalledExtensions: [ExtensionUninstall] = []
+  /// Context menu commands run through `performExtensionContextCommand`, in order.
+  public internal(set) var performedExtensionContextCommands: [(command: EngineMenuCommand, actionID: String,
+                                                                window: EngineWindowID)] = []
 
-  public init() {}
+  /// `downloadFolder`: where downloads go by default; a new temporary folder when nil.
+  public init(downloadFolder: URL? = nil) {
+    downloadDefaultFolder = downloadFolder
+      ?? FileManager.default.temporaryDirectory.appending(path: "arkt-in-memory-downloads-\(UUID().uuidString)")
+    downloadSavePreference = .folder(downloadDefaultFolder)
+  }
 
   // MARK: - Tabs
 
@@ -137,6 +206,7 @@ public final class InMemoryEngine: EngineClient, EngineExtensions {
     guard let moved = snapshots[id], !moved.isClosing, let source = moved.window, source != window,
           windowIDs.contains(window) else { return }
     if activeTabs[source] == id { activeTabs[source] = nil }
+    endFindForMove(of: id)
     snapshots[id]?.window = window
     snapshots[id]?.isActive = false
     tabIDs.removeAll { $0 == id }
@@ -161,11 +231,248 @@ public final class InMemoryEngine: EngineClient, EngineExtensions {
 
   public func reload(_ id: TabID) {
     guard let current = snapshots[id], current.url != nil, !current.isLoading else { return }
+    prepareForLoad(id)              // #576: a crashed tab recovers
     snapshots[id]?.isLoading = true
     hub.emit(.loadingChanged(id, isLoading: true))
   }
 
   public func snapshot(of id: TabID) -> TabSnapshot? { snapshots[id] }
+
+  // MARK: - JavaScript dialogs (#400, contract rule 19)
+
+  /// The pending dialog of each tab, with the host it names in its title.
+  private var pendingDialogs: [TabID: JavaScriptDialog] = [:]
+  /// Answers the shell gave, in order: what the page's `alert()`, `confirm()` or `prompt()` would return, and Leave
+  /// (true) or Stay (false) for a leave-site prompt.
+  public private(set) var dialogAnswers: [(id: DialogID, accepted: Bool, userInput: String?)] = []
+  /// A held close raises a `.beforeUnload` dialog for the shell to draw (#584), as Chromium will once the engine
+  /// reports it (#585). A window close or a quit holding several tabs prompts one tab at a time: the held tab is
+  /// activated first (the shown tab, if it holds), and the next one is activated and prompted only after Leave.
+  /// Off by default: the close is then held with `isClosing` alone, as Chromium keeping its own leave-site dialog,
+  /// and only `answerDialog` ends it.
+  public var reportsLeaveSiteDialogs = false
+
+  /// Test driver: the page raises an `alert()`, `confirm()` or `prompt()`. Ends the tab's pending dialog first.
+  /// Nil for an unknown or closed tab. The strings are Chromium's: "host says", OK, Cancel (an alert has OK only).
+  /// A leave-site prompt comes from a held close instead (`reportsLeaveSiteDialogs`), never from here.
+  @discardableResult
+  public func raiseDialog(in tab: TabID, kind: JavaScriptDialog.Kind, message: String,
+                          defaultPromptText: String? = nil) -> DialogID? {
+    precondition(kind != .beforeUnload, "a leave-site prompt comes from a held close (reportsLeaveSiteDialogs)")
+    guard let current = snapshots[tab], !current.isClosing else { return nil }
+    endDialog(of: tab)
+    let dialog = JavaScriptDialog(
+      id: DialogID(), tab: tab, kind: kind, title: "\(current.url?.host() ?? "This page") says", message: message,
+      defaultPromptText: kind == .prompt ? (defaultPromptText ?? "") : nil, acceptTitle: "OK",
+      cancelTitle: kind == .alert ? nil : "Cancel")
+    pendingDialogs[tab] = dialog
+    hub.emit(.dialogRequested(dialog))
+    return dialog.id
+  }
+
+  public func respond(to dialog: DialogID, accepted: Bool, userInput: String?) {
+    guard let pending = pendingDialogs.first(where: { $0.value.id == dialog }) else { return }
+    dialogAnswers.append((dialog, accepted, userInput))
+    if pending.value.kind == .beforeUnload {
+      answerDialog(pending.key, accept: accepted)       // ends the dialog, then closes or cancels
+    } else {
+      endDialog(of: pending.key)
+    }
+  }
+
+  /// Chromium answers a hidden tab's `confirm()` or `prompt()` false or null (`kTabHidden`); an `alert()` stays
+  /// pending, and so does a leave-site prompt, whose close stays held.
+  private func endHiddenDialog(of tab: TabID) {
+    guard let kind = pendingDialogs[tab]?.kind, kind == .confirm || kind == .prompt else { return }
+    endDialog(of: tab)
+  }
+
+  /// Raises the leave-site prompt of a tab whose close was just held, with Chromium's strings.
+  private func raiseLeaveSiteDialog(in tab: TabID) {
+    guard reportsLeaveSiteDialogs else { return }
+    endDialog(of: tab)
+    let dialog = JavaScriptDialog(id: DialogID(), tab: tab, kind: .beforeUnload, title: "Leave site?",
+                                  message: "Changes you made may not be saved.", defaultPromptText: nil,
+                                  acceptTitle: "Leave", cancelTitle: "Stay")
+    pendingDialogs[tab] = dialog
+    hub.emit(.dialogRequested(dialog))
+  }
+
+  /// Reports the end of the tab's pending dialog, if any.
+  private func endDialog(of tab: TabID) {
+    guard let dialog = pendingDialogs.removeValue(forKey: tab) else { return }
+    hub.emit(.dialogEnded(tab, dialog.id))
+  }
+
+  // MARK: - Permission requests (#400, contract rule 20)
+
+  /// What a site asked for and has not had answered; the prompt for it shows while the tab is shown.
+  private var permissionAsks: [TabID: [PermissionKind]] = [:]
+  private var pendingPermissions: [TabID: PermissionRequest] = [:]
+  /// Answers the shell gave, in order: what the site's call would have been told.
+  public private(set) var permissionAnswers: [(id: PermissionRequestID, choice: PermissionChoice)] = []
+
+  /// Test driver: the page asks for `kinds`. Replaces the tab's earlier ask. The prompt shows at once when the tab is
+  /// shown (active in its window, or in none); otherwise it shows when the tab becomes active. Nil for an unknown or
+  /// closed tab; else the request's id when shown, and a fresh id's request later.
+  @discardableResult
+  public func askPermission(in tab: TabID, kinds: [PermissionKind]) -> PermissionRequestID? {
+    guard let current = snapshots[tab], !current.isClosing else { return nil }
+    withdrawPermission(in: tab)
+    permissionAsks[tab] = kinds
+    return showPermission(of: tab)
+  }
+
+  /// The site withdraws its ask (or a navigation or the tab closing drops it): the prompt ends and the ask is gone.
+  public func withdrawPermission(in tab: TabID) {
+    permissionAsks[tab] = nil
+    endPermissionPrompt(of: tab)
+  }
+
+  public func respond(toPermission request: PermissionRequestID, choice: PermissionChoice) {
+    guard let tab = pendingPermissions.first(where: { $0.value.id == request })?.key else { return }
+    permissionAnswers.append((request, choice))
+    permissionAsks[tab] = nil
+    endPermissionPrompt(of: tab)
+  }
+
+  /// The strings Chromium's bubble uses for a kind; the one-visit answers exist when every kind can be granted for a
+  /// visit (location, camera, microphone).
+  private static func permissionPhrase(_ kind: PermissionKind) -> String {
+    switch kind {
+    case .geolocation: "Know your location"
+    case .notifications: "Show notifications"
+    case .camera: "Use your camera"
+    case .microphone: "Use your microphone"
+    case .other: "Use a permission"
+    }
+  }
+
+  private func showPermission(of tab: TabID) -> PermissionRequestID? {
+    guard let kinds = permissionAsks[tab], pendingPermissions[tab] == nil, let current = snapshots[tab],
+          current.window == nil || current.isActive else { return nil }
+    let host = current.url?.host() ?? "This page"
+    let oneTime = !kinds.contains { $0 == .notifications || $0 == .other }
+    let request = PermissionRequest(
+      id: PermissionRequestID(), tab: tab, origin: host, kinds: kinds, title: "\(host) wants to",
+      items: kinds.map(Self.permissionPhrase), allowTitle: oneTime ? "Allow while visiting the site" : "Allow",
+      allowThisTimeTitle: oneTime ? "Allow this time" : nil, blockTitle: oneTime ? "Never allow" : "Block")
+    pendingPermissions[tab] = request
+    hub.emit(.permissionRequested(request))
+    return request.id
+  }
+
+  /// Reports the end of the tab's prompt, if any. The ask itself stays unless the caller dropped it.
+  private func endPermissionPrompt(of tab: TabID) {
+    guard let request = pendingPermissions.removeValue(forKey: tab) else { return }
+    hub.emit(.permissionEnded(tab, request.id))
+  }
+
+  // MARK: - Infobars (#400, contract rule 21)
+
+  /// The infobars of each tab in the order the engine shows them. Infobars belong to the tab: they stay while it is
+  /// hidden or moved to another window.
+  var infobars: [TabID: [Infobar]] = [:]
+  /// What the shell did on infobars, in order: what the engine's delegates would have been told. A link keeps the
+  /// infobar (a delegate whose `LinkClicked` returns false); the other actions remove it.
+  public private(set) var infobarActions: [(id: InfobarID, action: InfobarAction)] = []
+
+  /// Test driver: the engine adds an infobar to `tab` with OK and Cancel buttons (nil titles: none) and a close
+  /// button. Reports the tab's new list. Nil for an unknown or closed tab.
+  @discardableResult
+  public func raiseInfobar(in tab: TabID, message: String, kind: InfobarKind = .other, okTitle: String? = "OK",
+                           cancelTitle: String? = "Cancel", isCloseable: Bool = true) -> InfobarID? {
+    guard let current = snapshots[tab], !current.isClosing else { return nil }
+    let infobar = Infobar(
+      id: InfobarID(), tab: tab, kind: kind, message: message, ok: okTitle.map { InfobarButton(title: $0) },
+      cancel: cancelTitle.map { InfobarButton(title: $0) }, closeLabel: isCloseable ? "Close" : nil)
+    infobars[tab, default: []].append(infobar)
+    hub.emit(.infobarsChanged(tab, infobars[tab] ?? []))
+    return infobar.id
+  }
+
+  /// The engine drops the infobar (a navigation expired it, the page's extension detached). Nothing is reported for an
+  /// infobar that is already gone.
+  public func removeInfobar(_ id: InfobarID) {
+    guard let tab = infobars.first(where: { $0.value.contains { $0.id == id } })?.key else { return }
+    infobars[tab]?.removeAll { $0.id == id }
+    hub.emit(.infobarsChanged(tab, infobars[tab] ?? []))
+  }
+
+  public func act(on infobar: InfobarID, action: InfobarAction) {
+    guard infobars.values.contains(where: { $0.contains { $0.id == infobar } }) else { return }
+    infobarActions.append((infobar, action))
+    let reloads = action == .ok && infobars.values.joined().first { $0.id == infobar }?.kind == .reload
+    let tab = infobars.first(where: { $0.value.contains { $0.id == infobar } })?.key
+    switch action {
+    case .link, .messageLink: break
+    case .ok, .cancel, .close: removeInfobar(infobar)
+    }
+    if reloads, let tab { reload(tab) }          // the reload infobar's Reload (#582), as Chromium's delegate does
+  }
+
+  /// The tab's infobars go with it, reported before its `.tabClosed`.
+  private func dropInfobars(of tab: TabID) {
+    guard let list = infobars.removeValue(forKey: tab), !list.isEmpty else { return }
+    hub.emit(.infobarsChanged(tab, []))
+  }
+
+  // MARK: - Selection (#404, BH-193)
+
+  /// The page selection per tab, set by `setSelectedText`; a new document drops it.
+  private var selections: [TabID: String] = [:]
+
+  public func selectedText(of id: TabID) -> String? {
+    snapshots[id] == nil ? nil : selections[id]
+  }
+
+  /// Test driver: the user selected `text` in the tab's page; nil or empty clears the selection.
+  public func setSelectedText(_ id: TabID, _ text: String?) {
+    guard snapshots[id] != nil else { return }
+    selections[id] = text.flatMap { $0.isEmpty ? nil : $0 }
+  }
+
+  // MARK: - Page images (#370, #352, contract rule 18)
+
+  /// The size of an in-memory page's frame: a 600 x 360 pt page at 2x.
+  public static let framePixelSize = PixelSize(width: 1200, height: 720)
+  /// Tabs whose frame cannot be copied (`setFrameAvailable`), as a hidden-and-evicted or discarded tab.
+  private var framesUnavailable: Set<TabID> = []
+  /// Test hook: runs after the frame is copied and before the image is returned, as page events can arrive while a
+  /// real engine encodes.
+  public var beforePageImageReturns: (@MainActor () -> Void)?
+
+  /// A deterministic image per URL (a fill derived from it), so tests need no engine: nil for an unknown or closed
+  /// tab, one without a URL, and one whose frame is unavailable.
+  public func pageImage(of id: TabID, _ request: PageImageRequest) async -> PageImage? {
+    guard let url = snapshots[id]?.url, !framesUnavailable.contains(id),
+          let frame = Self.syntheticFrame(for: url) else { return nil }
+    let image = await PageImageEncoder.encode(frame, scale: 2, request)
+    beforePageImageReturns?()
+    return snapshots[id] == nil ? nil : image
+  }
+
+  /// Test driver: the tab has (true) or has no (false) frame to copy; the tab itself does not change.
+  public func setFrameAvailable(_ id: TabID, _ available: Bool) {
+    if available { framesUnavailable.remove(id) } else { framesUnavailable.insert(id) }
+  }
+
+  private static func syntheticFrame(for url: URL) -> CGImage? {
+    var hash: UInt64 = 0xCBF2_9CE4_8422_2325
+    for byte in url.absoluteString.utf8 { hash = (hash ^ UInt64(byte)) &* 0x100_0000_01B3 }
+    let size = framePixelSize
+    guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+          let context = CGContext(data: nil, width: size.width, height: size.height, bitsPerComponent: 8,
+                                  bytesPerRow: 0, space: space,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue
+                                    | CGBitmapInfo.byteOrder32Little.rawValue) else { return nil }
+    let channel = { (shift: UInt64) in Double((hash >> shift) & 0xFF) / 255 }
+    context.setFillColor(red: channel(0), green: channel(8), blue: channel(16), alpha: 1)
+    context.fill(CGRect(x: 0, y: 0, width: size.width, height: size.height))
+    context.setFillColor(red: channel(24), green: channel(32), blue: channel(40), alpha: 1)
+    context.fill(CGRect(x: 0, y: size.height - 120, width: size.width, height: 120))
+    return context.makeImage()
+  }
 
   public func contentView(for id: TabID) -> NSView? {
     guard snapshots[id] != nil else { return nil }
@@ -207,6 +514,7 @@ public final class InMemoryEngine: EngineClient, EngineExtensions {
     let holding = tabs.filter { snapshots[$0]?.wouldHoldClose == true }
     guard holding.isEmpty else {
       for tab in holding { hold(tab, .window(id, reason)) }
+      promptNextHeldTab(in: id)
       return
     }
     finishWindowClose(id, reason: reason)
@@ -230,7 +538,7 @@ public final class InMemoryEngine: EngineClient, EngineExtensions {
 
   // MARK: - Extensions
 
-  public func extensionActions(in window: EngineWindowID) -> [ExtensionAction] { actions[window] ?? [] }
+  public func extensionActions(in window: EngineWindowID) -> [ExtensionAction] { inPinOrder(actions[window] ?? []) }
 
   public func runExtensionAction(_ id: String, in window: EngineWindowID, anchor: NSView) {
     guard actions[window]?.contains(where: { $0.id == id }) == true else { return }
@@ -293,6 +601,14 @@ public final class InMemoryEngine: EngineClient, EngineExtensions {
     closeWindow(id, reason: reason)
   }
 
+  /// Test driver: the engine ends the window at once with `reason`, unload processing skipped and any leave-site
+  /// prompt in it left unanswered (Chromium quitting while a prompt is up).
+  public func engineEndWindow(_ id: EngineWindowID, reason: WindowCloseReason) {
+    guard windowIDs.contains(id) else { return }
+    for tab in tabs(in: id) { heldCloses[tab] = nil }
+    finishWindowClose(id, reason: reason)
+  }
+
   /// Test driver: the engine activates the tab (an extension's `chrome.tabs.update`).
   public func engineActivate(_ id: TabID) { setActive(id) }
 
@@ -325,12 +641,15 @@ public final class InMemoryEngine: EngineClient, EngineExtensions {
     snapshots[id]?.wouldHoldClose = true
   }
 
-  /// Test driver: answers the tab's leave-site dialog. False when no close is held there. Accepting the last held
-  /// tab of a closing window closes the window; cancelling any of them cancels the window close and reports
-  /// `.closeCancelled` for every tab of the window that was closing.
+  /// Test driver: answers the tab's leave-site dialog, as the user would in Chromium's own dialog; the shell's panel
+  /// answers through `respond(to:)`, which comes here. False when no close is held there. A reported leave-site
+  /// dialog ends first. Accepting the last held tab of a closing window closes the window; cancelling any of them
+  /// cancels the window close and reports `.closeCancelled` for every tab of the window that was closing, each after
+  /// the end of its own prompt.
   @discardableResult
   public func answerDialog(_ id: TabID, accept: Bool) -> Bool {
     guard let held = heldCloses.removeValue(forKey: id) else { return false }
+    endDialog(of: id)
     switch (held, accept) {
     case (.tab(let reason), true):
       removeTab(id, reason: reason)
@@ -339,10 +658,11 @@ public final class InMemoryEngine: EngineClient, EngineExtensions {
       hub.emit(.closeCancelled(id))
     case (.window(let window, let reason), true):
       let waiting = heldCloses.values.contains { if case .window(window, _) = $0 { true } else { false } }
-      if !waiting { finishWindowClose(window, reason: reason) }
+      if waiting { promptNextHeldTab(in: window) } else { finishWindowClose(window, reason: reason) }
     case (.window(let window, _), false):
       for tab in tabs(in: window) where snapshots[tab]?.isClosing == true {
         heldCloses[tab] = nil
+        endDialog(of: tab)
         snapshots[tab]?.isClosing = false
         hub.emit(.closeCancelled(tab))
       }
@@ -365,6 +685,7 @@ public final class InMemoryEngine: EngineClient, EngineExtensions {
   /// Test driver: the window's extension actions changed.
   public func setExtensionActions(_ list: [ExtensionAction], in window: EngineWindowID) {
     guard windowIDs.contains(window) else { return }
+    seedPins(from: list)
     actions[window] = list
     hub.emit(.extensionActionsChanged(window))
   }
@@ -388,6 +709,11 @@ public final class InMemoryEngine: EngineClient, EngineExtensions {
   }
 
   private func load(_ id: TabID, _ url: URL, title: String?, previous: TabSnapshot) {
+    prepareForLoad(id)              // #576: a crashed tab recovers, HTML fullscreen ends
+    endDialog(of: id)       // Chromium closes the dialog when a navigation starts
+    withdrawPermission(in: id)      // and drops the site's ask
+    endFindAndHover(of: id)         // and the page's find and hover go with the old document
+    selections[id] = nil            // and its selection
     snapshots[id]?.url = url
     if let title, !title.isEmpty { snapshots[id]?.title = title }
     snapshots[id]?.isLoading = true
@@ -416,21 +742,48 @@ public final class InMemoryEngine: EngineClient, EngineExtensions {
     lastActiveWindow = window
     let previous = activeTabs[window]
     guard previous != id else { return }
-    if let previous { snapshots[previous]?.isActive = false }
+    if let previous {
+      snapshots[previous]?.isActive = false
+      endHiddenDialog(of: previous)
+      endPermissionPrompt(of: previous)         // the ask stays pending; the tab asks again when shown
+    }
     snapshots[id]?.isActive = true
     activeTabs[window] = id
     hub.emit(.activeTabChanged(id))
+    _ = showPermission(of: id)
   }
 
+  /// Holds the tab's close. A tab's own close prompts at once; a window's close prompts its tabs one at a time
+  /// (`promptNextHeldTab`).
   private func hold(_ id: TabID, _ close: HeldClose) {
     heldCloses[id] = close
     snapshots[id]?.isClosing = true
+    if case .tab = close { raiseLeaveSiteDialog(in: id) }
+  }
+
+  /// Prompts the next tab whose window close is held and not yet answered, as Chromium does: one prompt at a time,
+  /// on a shown tab. The window's active tab goes first when it holds; another is activated before its prompt.
+  private func promptNextHeldTab(in window: EngineWindowID) {
+    guard reportsLeaveSiteDialogs else { return }
+    let held = tabs(in: window).filter { if case .window(window, _)? = heldCloses[$0] { true } else { false } }
+    guard !held.contains(where: { pendingDialogs[$0]?.kind == .beforeUnload }) else { return }
+    let active = activeTabs[window]
+    guard let next = held.first(where: { $0 == active }) ?? held.first else { return }
+    setActive(next)
+    raiseLeaveSiteDialog(in: next)
   }
 
   /// Removes the tab and reports it. A window's active tab is replaced by its right neighbour, else its left one,
   /// unless the whole window is closing.
   private func removeTab(_ id: TabID, reason: CloseReason, reactivate: Bool = true) {
+    framesUnavailable.remove(id)
     guard let removed = snapshots[id] else { return }
+    endDialog(of: id)
+    withdrawPermission(in: id)
+    dropInfobars(of: id)
+    finds[id] = nil
+    pageSelections[id] = nil
+    hoveredLinks[id] = nil
     var successor: TabID?
     if let window = removed.window, activeTabs[window] == id {
       activeTabs[window] = nil
@@ -449,6 +802,9 @@ public final class InMemoryEngine: EngineClient, EngineExtensions {
     views[id] = nil
     history[id] = nil
     heldCloses[id] = nil
+    connectionOverrides[id] = nil
+    pendingReloads.remove(id)
+    selections[id] = nil
     hub.emit(.tabClosed(id, reason: reason))
     if let successor { setActive(successor) }
   }

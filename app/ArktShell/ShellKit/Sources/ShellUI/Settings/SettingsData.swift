@@ -14,12 +14,48 @@ public struct SettingsServices {
   public var importBrowserData: @MainActor () -> Void = {}
   /// Reveals Arkt's data folder in the Finder (the recovery toast's Show Files); the row is disabled while nil.
   public var showDataFolder: (@MainActor () -> Void)?
+  /// Crash reports kept on this Mac (#129). Cached by the app; the pane never waits on disk.
+  public var crashReportCount: @MainActor () -> Int = { 0 }
+  /// Send Crash Report: opens the newest kept report as a prefilled GitHub issue in the browser.
+  public var sendCrashReport: @MainActor () -> Void = {}
   /// The menu Settings > Shortcuts lists.
   public var shortcutsMenu: @MainActor () -> NSMenu? = { NSApp.mainMenu }
   /// The Spaces, in sidebar order.
   public var spaces: @MainActor () -> [SettingsSpaceSummary] = { [] }
+  /// The system Downloads folder, what the Downloads pop-up calls "Downloads" (#132).
+  public var downloadsFolder: URL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+    ?? FileManager.default.temporaryDirectory
+  /// The same action as Window > Show Library; the row is disabled while nil (#132).
+  public var openLibrary: (@MainActor () -> Void)?
+  /// Settings > Spaces and Profiles > Archive (#448); both rows stay planned while nil.
+  public var archiveRows: SettingsArchiveRows?
 
   public init() {}
+}
+
+/// The two Archive rows' values as the pop-ups' titles ("12 hours", "Never"; `SettingsWindowController
+/// .archiveAfterTitles`). The app maps them to the stored thresholds; ShellUI needs no core module.
+@MainActor
+public struct SettingsArchiveRows {
+  /// "Archive Today tabs after": the Default profile's value until a profile detail pane exists (#448 decision).
+  public var tabsAfter: @MainActor () -> String
+  public var setTabsAfter: @MainActor (String) -> Void
+  /// "Archive Little Arkt windows after": one value for the app (BH-137).
+  public var littleArktAfter: @MainActor () -> String
+  public var setLittleArktAfter: @MainActor (String) -> Void
+  /// Reset all settings (#617): both rows back to their defaults; the window reads the new titles afterwards.
+  public var reset: @MainActor () -> Void
+
+  public init(tabsAfter: @escaping @MainActor () -> String, setTabsAfter: @escaping @MainActor (String) -> Void,
+              littleArktAfter: @escaping @MainActor () -> String,
+              setLittleArktAfter: @escaping @MainActor (String) -> Void,
+              reset: @escaping @MainActor () -> Void = {}) {
+    self.tabsAfter = tabsAfter
+    self.setTabsAfter = setTabsAfter
+    self.littleArktAfter = littleArktAfter
+    self.setLittleArktAfter = setLittleArktAfter
+    self.reset = reset
+  }
 }
 
 /// One Space as Settings > Spaces and Profiles lists it: its theme swatch, name, counts and profile.

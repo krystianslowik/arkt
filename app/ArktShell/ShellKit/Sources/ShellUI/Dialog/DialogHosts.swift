@@ -29,6 +29,8 @@ public final class DialogSheet: NSWindowController {
     window.contentView = view
     window.initialFirstResponder = view.initialFocus
     window.onEscape = { [weak self] in self?.view.escape() ?? false }
+    // AppKit keeps the sheet role; the subrole makes VoiceOver read an alert dialog, as `DialogAlert` does.
+    window.setAccessibilitySubrole(.dialog)
     window.setAccessibilityLabel(content.title)
     view.onAnswer = { [weak self] answer in self?.finish(answer) }
   }
@@ -44,6 +46,17 @@ public final class DialogSheet: NSWindowController {
     guard let window else { return }
     parent.beginSheet(window) { _ in }
     window.makeFirstResponder(view.initialFocus)
+  }
+
+  /// Whether the content's checkbox is checked now; read it in `onAnswer`.
+  public var isCheckboxOn: Bool { view.isCheckboxOn }
+
+  /// Closes the sheet without an answer: what it asked about went away. `onAnswer` is not called.
+  public func dismiss() {
+    onAnswer = nil
+    guard let window else { return }
+    window.sheetParent?.endSheet(window)
+    window.orderOut(nil)
   }
 
   private func finish(_ answer: DialogContent.Answer) {
@@ -171,21 +184,55 @@ public final class DialogAlert {
 // MARK: - Anchored panel
 
 /// A non-activating child panel whose top-leading corner sits 12 pt inside `anchor` (the content card or the focused
-/// pane), so the prompt points at the page that asked. It never takes focus from the page unless clicked; Escape
-/// answers Cancel only while it is key. In: scale 0.97 and 4 pt from above to rest on `firmFast` from its top-leading
-/// corner, opacity over 0.16 s; out: 0.10 s fade, instant when the keyboard answered (Reduce Motion: fades only).
+/// pane), or hangs from its top edge, so the prompt points at the page that asked. It never takes focus from the page
+/// unless clicked; Escape answers Cancel only while it is key. In: scale 0.97 and 4 pt from above to rest on
+/// `firmFast` from its top-leading corner, opacity over 0.16 s; out: 0.10 s fade, instant when the keyboard answered
+/// (Reduce Motion: fades only). A page's dialog also dims the page under it (`dimmedPage`, #693): the dim fades in
+/// with the panel, fades out over 0.10 s whenever the panel goes (even at once), and never moves.
 @MainActor
 public final class DialogPanel {
   public static let anchorInset: CGFloat = 12
+
+  /// Where the panel sits on its anchor.
+  public enum Attachment: Equatable, Sendable {
+    /// Its top-leading corner `anchorInset` inside the anchor, all corners rounded.
+    case inset
+    /// Hung from the anchor's top edge, `anchorInset` from its leading edge, only the bottom corners rounded: every
+    /// page dialog (#584, #693, design/extensions `surf-dialog`).
+    case topEdge
+  }
+
   public let panel: NSPanel
+  public let attachment: Attachment
   let view: DialogSheetView
   let container: NSView
   public var onAnswer: (@MainActor (DialogContent.Answer) -> Void)?
+  /// Escape closed a dialog whose content `escapeDismisses`: no answer, the panel leaves at once.
+  public var onDismiss: (@MainActor () -> Void)?
   var reduceMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+  /// The time the input protection reads (seconds); tests inject it.
+  var clock: @MainActor () -> TimeInterval {
+    get { view.clock }
+    set { view.clock = newValue }
+  }
+  /// Whether the panel is really visible: shown, not occluded, its parent visible. Tests inject it.
+  var isOnScreen: (@MainActor () -> Bool)?
+  /// The panel has been visible with a usable anchor since it last went invisible.
+  private var wasOnScreen = false
+  private var anchorIsUsable = false
+  /// When the entrance ends on `clock`; the input protection counts from the later of that and the panel appearing.
+  private var entranceEnds: TimeInterval = 0
   /// The last answer came from a key (Return, Escape): the panel leaves at once.
   private var keyboardAnswer = false
+  /// The page view the panel dims while it is up (#693); nil dims nothing (a permission prompt). Set before `show`.
+  weak var dimmedPage: NSView?
+  /// How long the dim takes to leave when the panel goes. Tests set 0 to end it at once.
+  var dimExitDuration: CFTimeInterval = PageDimView.exitDuration
+  /// The dim over the page while the panel is up (#693).
+  private(set) var pageDim: PageDimView?
 
-  public init(content: DialogContent) {
+  public init(content: DialogContent, attachment: Attachment = .inset) {
+    self.attachment = attachment
     view = DialogSheetView(content: content, insets: .panel)
     let height = view.layoutContent(width: content.width)
     let size = NSSize(width: content.width, height: height)
@@ -201,6 +248,9 @@ public final class DialogPanel {
     container.wantsLayer = true
     container.layer?.cornerRadius = DialogMetrics.panelCornerRadius
     container.layer?.cornerCurve = .continuous
+    if attachment == .topEdge {
+      container.layer?.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]   // the bottom ones (not flipped)
+    }
     container.layer?.masksToBounds = true
     container.layer?.borderWidth = 0.5
     view.frame = container.bounds
@@ -213,24 +263,87 @@ public final class DialogPanel {
       return self?.view.escape() ?? false
     }
     view.onAnswer = { [weak self] answer in self?.finish(answer) }
+    view.onDismiss = { [weak self] in self?.finishDismissed() }
     container.layer?.borderColor = AlertTokens.overlayEdge.resolve(view.archiveFlavor).cgColor
   }
 
   public var content: DialogContent { view.content }
 
-  /// The panel's frame for `anchor` (screen coordinates): top-leading corner `anchorInset` inside it.
+  /// The panel's frame for `anchor` (screen coordinates): top-leading corner `anchorInset` inside it, or on its top
+  /// edge for `.topEdge`.
   public func frame(anchoredTo anchor: NSRect) -> NSRect {
     let size = panel.frame.size
-    return NSRect(x: anchor.minX + Self.anchorInset, y: anchor.maxY - Self.anchorInset - size.height,
-                  width: size.width, height: size.height)
+    let top = attachment == .topEdge ? anchor.maxY : anchor.maxY - Self.anchorInset
+    return NSRect(x: anchor.minX + Self.anchorInset, y: top - size.height, width: size.width, height: size.height)
   }
 
-  /// Shows the panel over `parent`, anchored to `anchor` (screen coordinates), without taking focus. VoiceOver hears
-  /// its title.
-  public func show(over parent: NSWindow, anchoredTo anchor: NSRect) {
+  /// The text in the prompt's field; nil when the content has none.
+  public var inputText: String? { view.inputText }
+
+  /// Gives the panel `width` and the height its content needs at that width, keeping the origin (`reposition` then
+  /// puts the top-leading corner back). Instant, no animation. Nothing happens at the width it already has.
+  public func resize(width: CGFloat) {
+    guard width != panel.frame.width else { return }
+    let size = NSSize(width: width, height: view.layoutContent(width: width))
+    panel.setContentSize(size)
+    // The window's own resize may lay the sheet out at the old bounds first; set it to the new size and lay it out
+    // again, so the content matches the frame whenever the next display pass comes.
+    container.frame = NSRect(origin: .zero, size: size)
+    view.frame = container.bounds
+    _ = view.layoutContent(width: width)
+  }
+
+  /// Moves the panel to `anchor` (screen coordinates) again, when the page it points at moved or resized.
+  public func reposition(anchoredTo anchor: NSRect) {
+    anchorIsUsable = !anchor.isEmpty
+    if anchorIsUsable {
+      panel.setFrame(frame(anchoredTo: anchor), display: true)
+      pageDim?.place(screenFrame: anchor)
+    }
+    updateVisibility()
+  }
+
+  private var panelIsOnScreen: Bool {
+    panel.isVisible && panel.occlusionState.contains(.visible) && (panel.parent?.isVisible ?? true)
+  }
+
+  /// Re-reads whether the panel is on screen. The input protection (`content.inputProtection`) runs from the moment
+  /// it goes from not visible to visible, after the entrance, and holds while it is not: a click meant for the page
+  /// must not answer a prompt that has only just appeared, or one that appeared where the user could not see it.
+  func updateVisibility() {
+    let visible = anchorIsUsable && (isOnScreen?() ?? panelIsOnScreen)
+    if visible, !wasOnScreen {
+      view.beginInputProtection(after: entranceEnds - clock())
+    } else if !visible {
+      view.holdInputProtection()
+    }
+    wasOnScreen = visible
+  }
+
+  /// Shows the panel over `parent`, anchored to `anchor` (screen coordinates). It takes no focus unless
+  /// `takesFocus` (a page's dialog, which blocks the page: the answer keys go to it). VoiceOver hears its title.
+  public func show(over parent: NSWindow, anchoredTo anchor: NSRect, takesFocus: Bool = false) {
+    anchorIsUsable = !anchor.isEmpty
+    wasOnScreen = false
+    view.holdInputProtection()
     panel.setFrame(frame(anchoredTo: anchor), display: false)
     parent.addChildWindow(panel, ordered: .above)
     panel.orderFront(nil)
+    let step = DialogMotion.panelIn(reduceMotion: reduceMotion())
+    entranceEnds = clock() + (reduceMotion() ? 0 : step.fadeDuration)
+    if let page = dimmedPage, anchorIsUsable {
+      // Opacity only, with the panel's fade, under Reduce Motion too: the dim says the page waits, it never moves. A
+      // dim still leaving the page (the dialog before this one) comes back instead of a second one.
+      let dim = PageDimView.existing(over: page) ?? PageDimView(page: page)
+      dim.place(screenFrame: anchor)
+      dim.enter(duration: step.fadeDuration)
+      pageDim = dim
+    }
+    updateVisibility()
+    if takesFocus {
+      panel.makeKey()
+      panel.makeFirstResponder(view.initialFocus)            // a field starts editing with its text selected
+    }
     enter()
     NSAccessibility.post(element: panel, notification: .announcementRequested, userInfo: [
       .announcement: content.title, .priority: NSAccessibilityPriorityLevel.high.rawValue,
@@ -254,12 +367,17 @@ public final class DialogPanel {
     layer.add(DialogAlert.spring(spring, from: start), forKey: "dialogTransform")
   }
 
-  /// Takes the panel down: a 0.10 s fade, or at once when `keyboard` (or Reduce Motion).
+  /// Takes the panel down: a 0.10 s fade, or at once when `keyboard` (or Reduce Motion). Its page dim always fades
+  /// out over `dimExitDuration`.
   public func close(keyboard: Bool) {
+    pageDim?.leave(duration: dimExitDuration)
+    pageDim = nil
     let duration = DialogMotion.panelOut(keyboard: keyboard, reduceMotion: reduceMotion())
     guard duration > 0, let layer = container.layer else { return remove() }
     CATransaction.begin()
-    CATransaction.setCompletionBlock { [weak self] in MainActor.assumeIsolated { self?.remove() } }
+    // The window, not `self`: the owner lets go of this object at the answer, and the fade must still take it down.
+    let window = panel
+    CATransaction.setCompletionBlock { MainActor.assumeIsolated { Self.remove(window) } }
     let fade = CABasicAnimation(keyPath: "opacity")
     fade.fromValue = layer.presentation()?.opacity ?? 1
     fade.toValue = 0
@@ -270,9 +388,11 @@ public final class DialogPanel {
     CATransaction.commit()
   }
 
-  private func remove() {
-    panel.parent?.removeChildWindow(panel)
-    panel.orderOut(nil)
+  private func remove() { Self.remove(panel) }
+
+  private static func remove(_ window: NSPanel) {
+    window.parent?.removeChildWindow(window)
+    window.orderOut(nil)
   }
 
   private func finish(_ answer: DialogContent.Answer) {
@@ -280,7 +400,17 @@ public final class DialogPanel {
     keyboardAnswer = false
     let callback = onAnswer
     onAnswer = nil
+    onDismiss = nil
     close(keyboard: keyboard)
     callback?(answer)
+  }
+
+  private func finishDismissed() {
+    keyboardAnswer = false
+    let callback = onDismiss
+    onAnswer = nil
+    onDismiss = nil
+    close(keyboard: true)
+    callback?()
   }
 }

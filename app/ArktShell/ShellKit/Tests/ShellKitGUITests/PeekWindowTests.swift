@@ -240,6 +240,25 @@ final class PeekWindowTests: XCTestCase {
     harness.controller.close()
   }
 
+  /// KB-055 (#614): Esc stops a loading page only when no Peek is on screen. The Peek takes the first Esc; one that
+  /// comes while the card is still closing (the Peek declines it) stops nothing either, though its page is loading.
+  func testAPeekKeepsEscBeforeStopEvenWhileClosing() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar, steppedMotion: true)
+    let session = try openPeek(harness, world)
+    XCTAssertEqual(harness.engine.snapshot(of: session.tab)?.isLoading, true, "fixture: the Peek page is loading")
+    XCTAssertEqual(harness.controller.engineWindow.flatMap { harness.engine.latestActiveTab(in: $0) }, session.tab,
+                   "fixture: the Peek page is the window's active tab, the one Stop acts on")
+    XCTAssertTrue(harness.engine.simulateUnhandledKeyDown(try Self.key(53), in: session.tab))
+    XCTAssertEqual(harness.peek.session?.phase, .closing)
+    XCTAssertFalse(harness.engine.simulateUnhandledKeyDown(try Self.key(53), in: session.tab), "Esc while closing")
+    XCTAssertFalse(harness.engine.simulateUnhandledKeyDown(try Self.key(53), in: session.source), "Esc from the source")
+    XCTAssertFalse(harness.engine.executedCommands.contains { $0.command == .stop })
+    harness.settle()
+    XCTAssertNil(harness.peek.session)
+    harness.controller.close()
+  }
+
   /// Every transition is interruptible: an Esc during the open closes from where the card is.
   func testAnEscDuringTheOpenRetargetsTheClose() throws {
     let world = try Self.makeWorld()
@@ -785,9 +804,9 @@ final class PeekWindowTests: XCTestCase {
     harness.controller.close()
   }
 
-  /// The controls take keyboard focus and draw AppKit's focus ring, which only a keyboard focus shows; the ring
-  /// follows the circle (the system ring, never a mustard stroke).
-  func testThePeekControlsUseTheSystemFocusRingOnlyForKeyboardFocus() throws {
+  /// The controls take keyboard focus and draw the chrome's ink ring (#687), which only a keyboard focus shows; the
+  /// ring follows the circle (never the system ring, never a mustard stroke).
+  func testThePeekControlsUseTheInkFocusRingOnlyForKeyboardFocus() throws {
     let world = try Self.makeWorld()
     let harness = Harness(world.sidebar)
     _ = try openPeek(harness, world)
@@ -795,12 +814,15 @@ final class PeekWindowTests: XCTestCase {
     let overlay = try XCTUnwrap(harness.peek.overlay)
     let window = try XCTUnwrap(harness.controller.window)
     for control in overlay.controls {
-      XCTAssertEqual(control.focusRingType, .default, "the system focus ring")
-      XCTAssertEqual(control.focusRingMaskBounds, control.bounds, "the ring follows the circle")
+      XCTAssertEqual(control.focusRingType, .none, "not the system focus ring")
+      XCTAssertEqual(control.keyboardFocusRing.frame, control.bounds.insetBy(dx: -3, dy: -3), "outside the circle")
+      XCTAssertEqual(control.keyboardFocusRing.cornerRadius, PeekLayout.controlSize / 2 + 3, "follows the circle")
+      XCTAssertTrue(control.keyboardFocusRing.isHidden, "no ring without keyboard focus")
       XCTAssertTrue(control.acceptsFirstResponder)
     }
     XCTAssertTrue(window.makeFirstResponder(overlay.closeButton), "Tab reaches Close")
     XCTAssertTrue(window.firstResponder === overlay.closeButton)
+    XCTAssertTrue(overlay.closeButton.keyboardFocusRing.isFocused, "the ring follows the keyboard")
     harness.controller.close()
   }
 
@@ -938,6 +960,27 @@ final class PeekWindowTests: XCTestCase {
 
     waitUntil("a row for the foreground tab") { harness.controller.nodeByTab[opened] != nil }
     XCTAssertNil(harness.peek.session)
+    harness.controller.close()
+  }
+
+  /// A Command-click and a middle-click (no flags, background-tab disposition) in a pinned tab are the engine's: the
+  /// window answers navigate, no Peek opens, and the background tab that follows is a Today row that is not selected
+  /// (BH-162, BH-163).
+  func testCommandAndMiddleClicksOpenBackgroundTodayTabs() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    harness.controller.activate(node: world.pinned)
+    let pinned = try XCTUnwrap(harness.tab(world.pinned))
+    let window = try XCTUnwrap(harness.controller.engineWindow)
+
+    for (modifiers, label) in [(EngineLinkModifiers.command, "Command-click"), ([], "middle-click")] {
+      XCTAssertEqual(try harness.click(Self.atlas, in: world.pinned, modifiers: modifiers,
+                                       disposition: .newBackgroundTab), .navigate, label)
+      let opened = harness.engine.engineCreateTab(url: Self.atlas, in: window, opener: pinned, active: false)
+      waitUntil("a row for the \(label) tab") { harness.controller.nodeByTab[opened] != nil }
+      XCTAssertNil(harness.peek.session, label)
+      XCTAssertEqual(harness.controller.currentTab, pinned, "\(label) keeps the page in front")
+    }
     harness.controller.close()
   }
 

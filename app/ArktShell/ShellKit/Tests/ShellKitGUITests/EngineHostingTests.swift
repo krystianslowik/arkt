@@ -595,26 +595,28 @@ final class ExtensionsControlTests: XCTestCase {
     NSApp.setActivationPolicy(.accessory)
   }
 
-  func testTheControlListsTheWindowsActionsAndRunsOneAnchoredToItself() throws {
+  func testTheControlOpensTheExtensionsPanelWithTheWindowsActions() throws {
     let world = try EngineWorld.make()
     let harness = EngineHarnessWindow(world.sidebar)
     let button = try XCTUnwrap(harness.controller.extensionsButton)
     XCTAssertTrue(button.isDescendant(of: harness.controller.sidebarController.view))
-    XCTAssertFalse(button.isEnabled, "no actions yet")
+    XCTAssertTrue(button.isEnabled, "the panel shows the empty state, so the control always opens it")
     let window = try XCTUnwrap(harness.controller.engineWindow)
 
     harness.engine.setExtensionActions([ExtensionAction(id: "a", name: "Alpha"),
                                         ExtensionAction(id: "b", name: "Beta", isEnabled: false)], in: window)
 
-    XCTAssertTrue(button.isEnabled)
-    let menu = button.makeMenu()
-    XCTAssertEqual(menu.items.map(\.title), ["Alpha", "Beta"])
-    XCTAssertEqual(menu.items.map(\.isEnabled), [true, false])
-    button.runItem(menu.items[0])
+    let panel = try XCTUnwrap(harness.controller.extensionsPanel)
+    button.performClick(nil)
+    defer { panel.hide(keyboard: true) }
+    let view = try XCTUnwrap(panel.contentView)
+    XCTAssertEqual(view.displayedRowIDs, ["a", "b"])
+    let alpha = try XCTUnwrap(view.row(for: "a"))
+    alpha.runButton.performClick(nil)
     let ran = harness.engine.ranExtensionActions
     XCTAssertEqual(ran.map(\.id), ["a"])
     XCTAssertEqual(ran.map(\.window), [window])
-    XCTAssertTrue(ran.first?.anchor === button)
+    XCTAssertTrue(ran.first?.anchor === alpha)
   }
 
   func testTheControlIsLaidOutLeftOfNewTab() throws {
@@ -633,6 +635,7 @@ final class ExtensionsControlTests: XCTestCase {
     let source = ModelSidebarSource(sidebar: world.sidebar, now: { EngineWorld.now })
     let controller = ShellWindowController(engine: PlainEngine(), sidebar: source)
     XCTAssertNil(controller.extensionsButton)
+    XCTAssertNil(controller.extensionsPanel)
     XCTAssertNil(controller.sidebarController.view.extensionsButton)
   }
 }

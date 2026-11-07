@@ -1,4 +1,5 @@
 import AppKit
+import EngineAPI
 import XCTest
 @testable import ShellUI
 
@@ -40,6 +41,41 @@ final class DialogTests: XCTestCase {
     XCTAssertTrue(view.initialFocus === tryAgain, "focus starts on the default button")
     XCTAssertEqual(view.accessibilityRole(), .group)
     XCTAssertEqual(view.accessibilityLabel(), "Arkt couldn't open its data")
+  }
+
+  /// The crash report ask (#129) in its sheet: Send is the mustard Return default on the trailing edge, Always Send
+  /// and Don't Send neutral to its left in that order, all inside the 420 pt width, nothing clipped.
+  func testTheCrashReportAskLaysOutThreeAnswers() throws {
+    let view = DialogSheetView(content: .crashReportAsk, insets: .sheet)
+    let height = view.layoutContent(width: 420)
+    view.frame = NSRect(x: 0, y: 0, width: 420, height: height)
+    let send = view.primaryButton
+    let always = try XCTUnwrap(view.secondaryButton)
+    let dont = try XCTUnwrap(view.cancelButton)
+    XCTAssertEqual(send.style, .primary)
+    XCTAssertEqual(send.keyEquivalent, "\r")
+    XCTAssertEqual(send.frame.maxX, 400)
+    XCTAssertEqual(always.frame.maxX, send.frame.minX - 8)
+    XCTAssertEqual(dont.frame.maxX, always.frame.minX - 8)
+    XCTAssertGreaterThanOrEqual(dont.frame.minX, 20, "the row fits the sheet")
+    XCTAssertEqual(view.paragraphFields.count, 2)
+    for field in view.paragraphFields {
+      XCTAssertLessThanOrEqual(field.frame.maxX, 400)
+      XCTAssertLessThanOrEqual(field.frame.maxY, send.frame.minY)
+    }
+    XCTAssertEqual(view.titleField.stringValue, "Arkt quit unexpectedly. Send a report?")
+    XCTAssertTrue(view.initialFocus === send)
+  }
+
+  /// Each answer reports itself once: Send primary, Always Send secondary, Don't Send cancel (Escape).
+  func testTheCrashReportAskAnswers() {
+    let view = DialogSheetView(content: .crashReportAsk)
+    var answers: [DialogContent.Answer] = []
+    view.onAnswer = { answers.append($0) }
+    view.primaryButton.performClick(nil)
+    view.secondaryButton?.performClick(nil)
+    view.cancelButton?.performClick(nil)
+    XCTAssertEqual(answers, [.primary, .secondary, .cancel])
   }
 
   /// A 32 pt icon sits beside the title (5 pt lower), and the body is indented 44 under it.
@@ -99,6 +135,59 @@ final class DialogTests: XCTestCase {
     XCTAssertNil(alert.answer, "Escape does not answer the launch alert")
     alert.view.primaryButton.performClick(nil)
     XCTAssertEqual(alert.answer, .primary)
+  }
+
+  /// Every sheet on `DialogSheet` (#728): Delete Space, Clear Archive, the dangerous download, the extension remove
+  /// sheet and the crash report ask. Each window keeps AppKit's role (a window, then a sheet while it hangs from its
+  /// parent) and reports the dialog subrole throughout, so VoiceOver reads an alert dialog. The title, the description
+  /// and the reading order (title, subtitle, body, checkbox, footer link, then the answers) stay as they were, and
+  /// focus starts where it did.
+  func testEverySheetIsADialogThatReadsTitleThenBodyThenAnswers() throws {
+    let space = SpaceRemovalPrompt(space: UUID(), title: "Work", hasItems: true)
+      .dialogContent(pinnedTabs: 3, todayTabs: 3,
+                     theme: SpaceThemeInfo(baseColors: [.srgb(hex: 0x3B82F6)], isDark: false), icon: nil)
+    let download = DownloadItem(url: URL(string: "https://files.example/a.zip")!, filename: "a.zip",
+                                dangerType: .dangerousFile)
+    let sheets: [(name: String, sheet: DialogSheet)] = [
+      ("Delete Space", DialogSheet(content: space)),
+      ("Clear Archive", ArchiveClearSheet(count: 12, hiddenByFilters: true).sheet),
+      ("Dangerous download", DownloadDangerSheet(item: download, folderName: "Downloads").sheet),
+      ("Extension remove", ExtensionRemoveSheet(action: ExtensionAction(id: "a", name: "A")).sheet),
+      ("Crash report ask", DialogSheet(content: .crashReportAsk)),
+      ("Reset settings", DialogSheet(content: SettingsWindowController.resetSettingsContent)),
+    ]
+    let parent = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 700, height: 500), styleMask: [.titled],
+                          backing: .buffered, defer: false)
+    parent.isReleasedWhenClosed = false
+    defer { parent.close() }
+    for (name, sheet) in sheets {
+      let window = try XCTUnwrap(sheet.window, name)
+      let view = sheet.view
+      let content = sheet.content
+      XCTAssertEqual(window.accessibilityRole(), .window, name)
+      XCTAssertEqual(window.accessibilitySubrole(), .dialog, name)
+      XCTAssertEqual(window.accessibilityLabel(), content.title, name)
+      sheet.begin(on: parent)
+      XCTAssertTrue(parent.attachedSheet === window, name)
+      XCTAssertEqual(window.accessibilityRole(), .sheet, "\(name): AppKit's sheet role while it hangs from its parent")
+      XCTAssertEqual(window.accessibilitySubrole(), .dialog, "\(name): the subrole while it is a sheet")
+      XCTAssertEqual(window.accessibilityLabel(), content.title, name)
+      XCTAssertEqual(view.accessibilityRole(), .group, name)
+      XCTAssertEqual(view.accessibilityLabel(), content.title, name)
+      XCTAssertEqual(view.accessibilityHelp(), content.accessibilityDescription, name)
+      XCTAssertEqual(view.titleField.stringValue, content.title, name)
+      // Reading order: the subviews in the order VoiceOver walks them.
+      let reading: [NSView] = [view.titleField, view.subtitleField, view.bodyScroll].compactMap { $0 }
+        + (view.bodyScroll == nil ? view.paragraphFields : [])
+        + [view.checkboxButton, view.footerLinkButton, view.cancelButton, view.secondaryButton,
+           view.primaryButton].compactMap { $0 }
+      let indices = try reading.map { part in try XCTUnwrap(view.subviews.firstIndex { $0 === part }, name) }
+      XCTAssertEqual(indices, indices.sorted(), "\(name): title, then body, then the answers")
+      XCTAssertEqual(view.paragraphFields.map(\.stringValue), content.paragraphs.map(\.text), name)
+      XCTAssertTrue(window.firstResponder === view.initialFocus, "\(name): focus starts where it did")
+      sheet.dismiss()
+      XCTAssertNil(parent.attachedSheet, name)
+    }
   }
 
   /// The anchored panel: top-leading corner 12 pt inside the anchor, a non-activating child of the window, 12 pt

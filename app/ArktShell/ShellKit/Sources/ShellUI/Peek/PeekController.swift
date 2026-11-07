@@ -1,5 +1,6 @@
 import AppKit
 import EngineAPI
+import Motion
 import os
 
 /// One open Peek: a tab with no sidebar row (BH-152) shown over the tab it came from.
@@ -83,6 +84,10 @@ public final class PeekController {
   private var sourceNode: NodeID?
   /// How long after a close starts the "Peek closed" toast comes in (the motion table: after 140 ms). Tests set 0.
   var closedToastDelay: TimeInterval = 0.14
+  /// Runs the "Peek closed" toast after `closedToastDelay`. Tests replace it to run the toast by hand.
+  var scheduleClosedToast: @MainActor (TimeInterval, @escaping @MainActor @Sendable () -> Void) -> Void = { delay, show in
+    DispatchQueue.main.asyncAfter(deadline: .now() + delay) { show() }
+  }
   /// Bumped by every close and reopen; a toast scheduled by a close shows only if nothing happened since.
   private var closeGeneration = 0
 
@@ -263,6 +268,7 @@ public final class PeekController {
     moveAccessibilityFocus(page)
     refreshAccessibility()
     shell.refreshAddress()
+    shell.refreshCrashedTabs()                                  // #683: a page that crashed while hidden
     let title = shell.engine.snapshot(of: tab)?.title ?? ""
     announce(title.isEmpty ? "Peek opened" : "Peek opened, \(title)", overlay.card)
     return true
@@ -398,7 +404,7 @@ public final class PeekController {
   private func showClosedToast() {
     closeGeneration += 1
     let generation = closeGeneration
-    DispatchQueue.main.asyncAfter(deadline: .now() + closedToastDelay) { [weak self] in
+    scheduleClosedToast(closedToastDelay) { [weak self] in
       guard let self, self.closeGeneration == generation, self.session == nil || self.isClosing else { return }
       self.shell.toasts.show(Self.closedToast) { [weak self] in self?.shell.reopenClosed() }
     }
@@ -422,6 +428,7 @@ public final class PeekController {
     if let page = shell.engine.contentView(for: session.tab) { moveAccessibilityFocus(page) }
     hideSourceFromAccessibility()
     shell.refreshAddress()
+    shell.refreshCrashedTabs()                                  // #683: a crash or a recovery during the close
     return true
   }
 
@@ -667,8 +674,8 @@ public final class PeekController {
     let fade = CABasicAnimation(keyPath: "opacity")
     fade.fromValue = 0
     fade.toValue = 1
-    fade.duration = 0.20
-    fade.timingFunction = CAMediaTimingFunction(controlPoints: 0.23, 1, 0.32, 1)
+    fade.duration = FadeDuration.slow
+    fade.timingFunction = MotionCurve.strongEaseOut.timingFunction
     layer.add(fade, forKey: "peekFadeIn")
   }
 
@@ -682,7 +689,7 @@ public final class PeekController {
   private func pageInfo(_ session: PeekSession) -> (URL, String) {
     let snapshot = shell.engine.snapshot(of: session.tab)
     let url = snapshot?.url ?? session.url
-    let title = snapshot.map(\.title).flatMap { $0.isEmpty ? nil : $0 } ?? (url.host() ?? url.absoluteString)
+    let title = snapshot.map(\.title).flatMap { $0.isEmpty ? nil : $0 } ?? HostDisplay.savedTitle(for: url)
     return (url, title)
   }
 
@@ -756,7 +763,7 @@ public final class PeekController {
     guard let space = node.flatMap({ shell.sidebar.spaceID(containing: $0) }) ?? shell.currentSpace else { return }
     if session != nil { teardown(closingTab: true) }
     do {
-      let created = try shell.sidebar.addTab(url: url, title: url.host() ?? url.absoluteString, in: .today(space),
+      let created = try shell.sidebar.addTab(url: url, title: HostDisplay.savedTitle(for: url), in: .today(space),
                                              at: 0)
       shell.activate(node: created)
     } catch {

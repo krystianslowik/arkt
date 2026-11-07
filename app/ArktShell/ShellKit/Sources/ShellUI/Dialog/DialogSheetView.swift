@@ -1,7 +1,7 @@
 import AppKit
 
 /// Draws a `DialogContent` (docs/design/alerts-sheets-toasts.md, section 3.2) on the porcelain (graphite in dark)
-/// surface, following the system appearance: icon, title, subtitle, body paragraphs, a recessed list, then the footer
+/// surface, following the system appearance: icon, title, subtitle, body paragraphs, a recessed list, a checkbox, then the footer
 /// link at the leading edge and the pills at the trailing edge (cancel, secondary, primary). Frames are set directly;
 /// `fittingHeight` lays it out top down. The hosts (`DialogSheet`, `DialogPanel`, `DialogAlert`) size their window
 /// from it and wire the answers.
@@ -22,6 +22,7 @@ final class DialogSheetView: NSView {
   static let iconGap: CGFloat = 12
   static let paragraphGap: CGFloat = 12
   static let footerGap: CGFloat = 20
+  static let stackedGap: CGFloat = 16
   static let buttonGap: CGFloat = 8
   static let bodyLineHeight: CGFloat = 19      // 13 pt at 1.45
   static let listMaxHeight: CGFloat = 260
@@ -32,7 +33,14 @@ final class DialogSheetView: NSView {
   let titleField = NSTextField(wrappingLabelWithString: "")
   let subtitleField: NSTextField?
   let paragraphFields: [NSTextField]
+  /// The paragraphs inside a scroll view, when the content caps the body's height.
+  let bodyScroll: NSScrollView?
+  private let bodyContainer = FlippedView()
+  /// The prompt's field, when the content has one.
+  let inputView: DialogInputView?
   let listField: DialogListView?
+  /// The content's checkbox (Report abuse), under the body.
+  let checkboxButton: NSButton?
   let footerLinkButton: ArchiveLinkButton?
   let primaryButton: ArchivePillButton
   let secondaryButton: ArchivePillButton?
@@ -41,6 +49,11 @@ final class DialogSheetView: NSView {
   var onAnswer: (@MainActor (DialogContent.Answer) -> Void)?
   /// Called when the footer link is pressed (the dialog stays).
   var onFooterLink: (@MainActor () -> Void)?
+  /// Called when Escape closes a dialog whose content `escapeDismisses`.
+  var onDismiss: (@MainActor () -> Void)?
+  /// The time the input protection reads (seconds); tests inject it.
+  var clock: @MainActor () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
+  private var protectedUntil: TimeInterval?
 
   init(content: DialogContent, insets: Insets = .sheet) {
     self.content = content
@@ -49,9 +62,19 @@ final class DialogSheetView: NSView {
       ? Self.stackedIconSize : Self.besideIconSize)
     subtitleField = content.subtitle.map { NSTextField(wrappingLabelWithString: $0) }
     paragraphFields = content.paragraphs.map { NSTextField(wrappingLabelWithString: $0.text) }
+    bodyScroll = content.bodyMaxHeight == nil ? nil : NSScrollView()
+    inputView = content.input.map { DialogInputView(input: $0) }
     listField = content.listItems.isEmpty ? nil : DialogListView(heading: content.listHeading, items: content.listItems)
-    footerLinkButton = content.footerLink.map { ArchiveLinkButton(style: .secondary, title: $0, fontSize: 13) }
-    primaryButton = ArchivePillButton(style: content.isDestructive ? .destructive : .primary,
+    checkboxButton = content.checkbox.map { box in
+      let button = NSButton(checkboxWithTitle: box.title, target: nil, action: nil)
+      button.state = box.isOn ? .on : .off
+      return button
+    }
+    footerLinkButton = content.footerLink.map {
+      ArchiveLinkButton(style: content.footerLinkIsDestructive ? .destructive : .secondary, title: $0, fontSize: 13)
+    }
+    primaryButton = ArchivePillButton(style: content.isDestructive ? .destructive
+                                        : content.neutralPrimary ? .neutral : .primary,
                                       title: content.primaryTitle, metrics: .dialog)
     secondaryButton = content.secondaryTitle.map { ArchivePillButton(style: .neutral, title: $0, metrics: .dialog) }
     cancelButton = content.cancelTitle.map { ArchivePillButton(style: .neutral, title: $0, metrics: .dialog) }
@@ -81,15 +104,35 @@ final class DialogSheetView: NSView {
     if let iconView { addSubview(iconView) }
     titleField.stringValue = content.title
     titleField.font = .systemFont(ofSize: 15, weight: .semibold)
+    if content.titleMaxLines > 0 {
+      titleField.maximumNumberOfLines = content.titleMaxLines
+      titleField.cell?.truncatesLastVisibleLine = true
+    }
     subtitleField?.font = .systemFont(ofSize: 12)
     for (field, paragraph) in zip(paragraphFields, content.paragraphs) {
       field.attributedStringValue = Self.body(paragraph.text)
     }
     for field in [titleField] + [subtitleField].compactMap({ $0 }) + paragraphFields {
       field.isSelectable = false
-      addSubview(field)
+      if bodyScroll == nil || field === titleField || field === subtitleField { addSubview(field) }
     }
+    if let bodyScroll {
+      for field in paragraphFields { bodyContainer.addSubview(field) }
+      bodyScroll.documentView = bodyContainer
+      bodyScroll.drawsBackground = false
+      bodyScroll.hasVerticalScroller = true
+      bodyScroll.autohidesScrollers = true
+      bodyScroll.scrollerStyle = .overlay
+      bodyScroll.borderType = .noBorder
+      addSubview(bodyScroll)
+    }
+    if let inputView { addSubview(inputView) }
     if let listField { addSubview(listField) }
+    if let checkboxButton {
+      checkboxButton.font = .systemFont(ofSize: 13)
+      checkboxButton.setAccessibilityIdentifier(AXID.Dialog.checkbox)
+      addSubview(checkboxButton)
+    }
     if let footerLinkButton {
       footerLinkButton.target = self
       footerLinkButton.action = #selector(footerLinkPressed(_:))
@@ -122,7 +165,9 @@ final class DialogSheetView: NSView {
     secondaryButton?.setAccessibilityIdentifierWithCell(AXID.Dialog.secondary)
     footerLinkButton?.setAccessibilityIdentifierWithCell(AXID.Dialog.footerLink)
     // Tab cycles footer link, then the buttons in order.
-    let loop: [NSView] = [footerLinkButton, cancelButton, secondaryButton, primaryButton].compactMap { $0 }
+    let loop: [NSView] = [inputView?.field, checkboxButton, footerLinkButton, cancelButton, secondaryButton,
+                          primaryButton]
+      .compactMap { $0 }
     for (index, view) in loop.enumerated() { view.nextKeyView = loop[(index + 1) % loop.count] }
     setAccessibilityElement(true)
     setAccessibilityRole(.group)
@@ -132,9 +177,10 @@ final class DialogSheetView: NSView {
     restyle()
   }
 
-  /// Where focus starts: the default button when there is one, otherwise Cancel (section 9).
+  /// Where focus starts: the prompt's field when there is one, else the default button, otherwise Cancel (section 9).
   var initialFocus: NSView {
-    switch content.defaultButton {
+    if let field = inputView?.field { return field }
+    return switch content.defaultButton {
     case .primary: primaryButton
     case .cancel, .none: cancelButton ?? primaryButton
     }
@@ -158,6 +204,11 @@ final class DialogSheetView: NSView {
       text.addAttribute(.foregroundColor, value: color.nsColor(), range: NSRange(location: 0, length: text.length))
       field.attributedStringValue = text
     }
+    if let checkboxButton {
+      checkboxButton.attributedTitle = NSAttributedString(string: checkboxButton.title, attributes: [
+        .font: NSFont.systemFont(ofSize: 13), .foregroundColor: ShellTokens.primaryText.resolve(flavor).nsColor(),
+      ])
+    }
   }
 
   // MARK: - Layout
@@ -180,24 +231,56 @@ final class DialogSheetView: NSView {
     let textWidth = max(0, width - textX - side)
     let besideIcon = iconView != nil && content.iconPlacement == .beside
     y += besideIcon ? 5 : 0
-    y = place(titleField, x: textX, y: y, width: textWidth)
+    y = place(titleField, x: textX, y: y, width: textWidth, maxLines: content.titleMaxLines)
     if let subtitleField { y = place(subtitleField, x: textX, y: y + 3, width: textWidth) }
-    for (index, field) in paragraphFields.enumerated() {
-      y = place(field, x: textX, y: y + (index == 0 ? 10 : Self.paragraphGap), width: textWidth)
+    if let bodyScroll, let maxHeight = content.bodyMaxHeight {
+      // Fields stack inside the scroll view's document; the view shows at most `maxHeight` of them.
+      var inner: CGFloat = 0
+      for (index, field) in paragraphFields.enumerated() {
+        inner = place(field, x: 0, y: inner + (index == 0 ? 0 : Self.paragraphGap), width: textWidth)
+      }
+      bodyContainer.frame = NSRect(x: 0, y: 0, width: textWidth, height: inner)
+      bodyScroll.frame = NSRect(x: textX, y: y + 10, width: textWidth, height: min(inner, maxHeight))
+      y = bodyScroll.frame.maxY
+    } else {
+      for (index, field) in paragraphFields.enumerated() {
+        y = place(field, x: textX, y: y + (index == 0 ? 10 : Self.paragraphGap), width: textWidth)
+      }
+    }
+    if let inputView {
+      inputView.frame = NSRect(x: textX, y: y + Self.paragraphGap, width: textWidth, height: DialogInputView.height)
+      y = inputView.frame.maxY
     }
     if let listField {
       let height = min(listField.fittingHeight(width: textWidth), Self.listMaxHeight)
       listField.frame = NSRect(x: textX, y: y + Self.paragraphGap, width: textWidth, height: height)
       y = listField.frame.maxY
     }
+    if let checkboxButton {
+      // 12 below the text, at the text's leading edge (the prototype's `.chk`).
+      let size = checkboxButton.intrinsicContentSize
+      checkboxButton.frame = NSRect(x: textX, y: y + Self.paragraphGap, width: min(ceil(size.width), textWidth),
+                                    height: ceil(size.height))
+      y = checkboxButton.frame.maxY
+    }
     if besideIcon, let iconView { y = max(y, iconView.frame.maxY) }
-    y += Self.footerGap
     let height = DialogMetrics.buttonHeight
-    var right = width - side
-    for button in [primaryButton, secondaryButton, cancelButton].compactMap({ $0 }) {
-      let buttonWidth = ceil(button.intrinsicContentSize.width)
-      button.frame = NSRect(x: right - buttonWidth, y: y, width: buttonWidth, height: height)
-      right = button.frame.minX - Self.buttonGap
+    if content.stackedButtons {
+      // Full-width pills, primary first, 8 apart and 16 above (section 3.2).
+      y += Self.stackedGap
+      for button in [primaryButton, secondaryButton, cancelButton].compactMap({ $0 }) {
+        button.frame = NSRect(x: side, y: y, width: max(0, width - 2 * side), height: height)
+        y += height + Self.buttonGap
+      }
+      y -= Self.buttonGap + height
+    } else {
+      y += Self.footerGap
+      var right = width - side
+      for button in [primaryButton, secondaryButton, cancelButton].compactMap({ $0 }) {
+        let buttonWidth = ceil(button.intrinsicContentSize.width)
+        button.frame = NSRect(x: right - buttonWidth, y: y, width: buttonWidth, height: height)
+        right = button.frame.minX - Self.buttonGap
+      }
     }
     if let footerLinkButton {
       footerLinkButton.sizeToFit()
@@ -208,8 +291,9 @@ final class DialogSheetView: NSView {
     return y + height + side
   }
 
-  private func place(_ field: NSTextField, x: CGFloat, y: CGFloat, width: CGFloat) -> CGFloat {
-    let height = ceil(field.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: width, height: 1000)).height ?? 18)
+  private func place(_ field: NSTextField, x: CGFloat, y: CGFloat, width: CGFloat, maxLines: Int = 0) -> CGFloat {
+    var height = ceil(field.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: width, height: 1000)).height ?? 18)
+    if maxLines > 0 { height = min(height, Self.cellHeight(lines: maxLines, font: field.font)) }
     field.frame = NSRect(x: x, y: y, width: width, height: height)
     return y + height
   }
@@ -219,18 +303,114 @@ final class DialogSheetView: NSView {
     _ = layoutContent(width: bounds.width)
   }
 
+  /// A wrapping label cell's height for `lines` lines of `font`, so a capped title draws its last line truncated instead
+  /// of clipping it. Measured once per font and line count.
+  private static var cellHeights: [String: CGFloat] = [:]
+
+  private static func cellHeight(lines: Int, font: NSFont?) -> CGFloat {
+    let key = "\(font?.fontName ?? "")-\(font?.pointSize ?? 0)-\(lines)"
+    if let height = cellHeights[key] { return height }
+    let probe = NSTextField(wrappingLabelWithString: Array(repeating: "X", count: lines).joined(separator: "\n"))
+    probe.font = font
+    let height = ceil(probe.cell?.cellSize(forBounds: NSRect(x: 0, y: 0, width: 1000, height: 1000)).height ?? 18)
+    cellHeights[key] = height
+    return height
+  }
+
+  /// Whether the checkbox is checked now; false without one.
+  var isCheckboxOn: Bool { checkboxButton?.state == .on }
+
+  /// What the prompt's field holds now; nil without a field.
+  var inputText: String? { inputView?.field.stringValue }
+
   // MARK: - Answers
 
-  @objc func primaryPressed(_ sender: Any?) { onAnswer?(.primary) }
-  @objc func secondaryPressed(_ sender: Any?) { onAnswer?(.secondary) }
-  @objc func cancelPressed(_ sender: Any?) { onAnswer?(.cancel) }
+  /// Starts the input protection (`content.inputProtection`): until it has run out, button presses and Return answer
+  /// nothing. Called when the dialog is really on screen; `delay` is the entrance still to run, which the 0.5 s follows.
+  func beginInputProtection(after delay: TimeInterval = 0) {
+    protectedUntil = content.inputProtection > 0 ? clock() + max(0, delay) + content.inputProtection : nil
+  }
+
+  /// Ignores presses until `beginInputProtection` runs again: the dialog is placed but not visible (no layout yet,
+  /// occluded, another Space, minimized). A dialog without input protection is never held.
+  func holdInputProtection() {
+    if content.inputProtection > 0 { protectedUntil = .infinity }
+  }
+
+  /// Whether presses are ignored now.
+  var isInputProtected: Bool {
+    guard let protectedUntil else { return false }
+    return clock() < protectedUntil
+  }
+
+  @objc func primaryPressed(_ sender: Any?) { if !isInputProtected { onAnswer?(.primary) } }
+  @objc func secondaryPressed(_ sender: Any?) { if !isInputProtected { onAnswer?(.secondary) } }
+  @objc func cancelPressed(_ sender: Any?) { if !isInputProtected { onAnswer?(.cancel) } }
   @objc func footerLinkPressed(_ sender: Any?) { onFooterLink?() }
 
-  /// Escape: Cancel when the dialog has one and Escape answers it. True when handled.
+  /// Escape: closes a dialog that `escapeDismisses` without an answer; else Cancel when the dialog has one and Escape
+  /// answers it. True when handled.
   func escape() -> Bool {
+    if content.escapeDismisses {
+      onDismiss?()
+      return true
+    }
     guard content.escapeAnswersCancel else { return false }
     onAnswer?(.cancel)
     return true
+  }
+}
+
+/// A flipped container, so stacked fields keep a top-down origin.
+final class FlippedView: NSView {
+  override var isFlipped: Bool { true }
+}
+
+/// The prompt's field: a recessed rounded field (the Archive's `listField`, radius 8) holding a plain text field.
+@MainActor
+final class DialogInputView: NSView {
+  static let height: CGFloat = 28
+  let field = NSTextField(string: "")
+
+  init(input: DialogContent.Input) {
+    super.init(frame: .zero)
+    wantsLayer = true
+    layer?.cornerRadius = 8
+    layer?.cornerCurve = .continuous
+    field.stringValue = input.text
+    field.isBordered = false
+    field.isBezeled = false
+    field.drawsBackground = false
+    field.focusRingType = .none
+    field.font = .systemFont(ofSize: 13)
+    field.lineBreakMode = .byTruncatingTail
+    field.cell?.usesSingleLineMode = true
+    field.setAccessibilityLabel(input.accessibilityLabel)
+    field.setAccessibilityIdentifier(AXID.Dialog.input)
+    addSubview(field)
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+  override var isFlipped: Bool { true }
+  override var wantsUpdateLayer: Bool { true }
+
+  override func updateLayer() {
+    layer?.backgroundColor = ArchiveTokens.listField.resolve(archiveFlavor).cgColor
+    field.textColor = ShellTokens.primaryText.resolve(archiveFlavor).nsColor()
+  }
+
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    needsDisplay = true
+  }
+
+  override func layout() {
+    super.layout()
+    let height = ceil(field.intrinsicContentSize.height)
+    field.frame = NSRect(x: 10, y: ((bounds.height - height) / 2).rounded(), width: max(0, bounds.width - 20),
+                         height: height)
   }
 }
 
@@ -247,9 +427,12 @@ enum DialogMetrics {
 @MainActor
 final class DialogIconView: NSView {
   let icon: DialogContent.Icon
+  /// The decoded `.image` icon, decoded once here rather than on every draw.
+  private let image: NSImage?
 
   init(icon: DialogContent.Icon, size: CGFloat) {
     self.icon = icon
+    if case .image(let data) = icon { image = NSImage(data: data) } else { image = nil }
     super.init(frame: NSRect(x: 0, y: 0, width: size, height: size))
     wantsLayer = true
     setAccessibilityElement(false)
@@ -266,6 +449,20 @@ final class DialogIconView: NSView {
       return
     case .appIcon:
       NSApp.applicationIconImage?.draw(in: bounds)
+    case .image:
+      NSGraphicsContext.saveGraphicsState()
+      NSBezierPath(roundedRect: bounds, xRadius: 8, yRadius: 8).addClip()
+      image?.draw(in: bounds)
+      NSGraphicsContext.restoreGraphicsState()
+    case .symbol(let name):
+      let flavor = archiveFlavor
+      let path = NSBezierPath(roundedRect: bounds, xRadius: 8, yRadius: 8)
+      ShellTokens.sidebarItemHovered.resolve(flavor).nsColor().setFill()
+      path.fill()
+      let side = bounds.width * 0.56
+      SymbolImageCache.shared.symbol(name, box: side, weight: .medium, color: ShellTokens.primaryText.resolve(flavor),
+                                     scale: shellBackingScale)
+        .draw(in: NSRect(x: bounds.midX - side / 2, y: bounds.midY - side / 2, width: side, height: side))
     case .spaceSwatch(let colors, let isDark, let mark):
       let path = NSBezierPath(roundedRect: bounds, xRadius: 8, yRadius: 8)
       let stops = colors.isEmpty ? [ShellTokens.sidebarItemHovered.resolve(isDark ? .dark : .light)] : colors

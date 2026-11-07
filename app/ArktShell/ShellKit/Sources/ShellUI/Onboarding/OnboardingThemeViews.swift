@@ -202,10 +202,10 @@ final class SpacePreviewView: NSView {
     gradient.borderColor = NSColor.black.withAlphaComponent(0.08).cgColor
     layer?.addSublayer(gradient)
     for sublayer in dots + favorites + rows + [nameLayer, page] { gradient.addSublayer(sublayer) }
-    layer?.shadowColor = NSColor.black.cgColor
-    layer?.shadowOpacity = 0.45
-    layer?.shadowRadius = 24
-    layer?.shadowOffset = CGSize(width: 0, height: -14)
+    layer?.shadowColor = BrandTokens.spacePreviewShadow.color.light.cgColor
+    layer?.shadowOpacity = 1
+    layer?.shadowRadius = BrandTokens.spacePreviewShadow.radius
+    layer?.shadowOffset = BrandTokens.spacePreviewShadow.unflippedOffset
     setAccessibilityElement(false)
   }
 

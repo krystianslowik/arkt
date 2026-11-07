@@ -6,7 +6,8 @@ description: Use when reviewing an Arkt pull request, or preparing your own for 
 # Arkt pull request review
 
 Review in two passes. The base checklist is `CONTRIBUTING.md`, section 6, "Reviewer checklist"; this skill adds the
-bug classes found in past pull requests. Do not approve from the description alone.
+bug classes found in past pull requests. Do not approve from the description alone. Do not request changes for merge
+order, overlap or soft dependencies; those are settled under "Decide or ask" in `arkt-issue-loop`.
 
 ## 0. Gate: read before judging
 

@@ -50,6 +50,54 @@ final class SplitPaneCloseTests: XCTestCase {
     return view
   }
 
+  /// A page that counts how often its size changes: an engine page resizes its renderer on each one (#602).
+  private final class SizeCountingPage: NSView {
+    private(set) var sizeChanges = 0
+
+    override func setFrameSize(_ newSize: NSSize) {
+      if newSize != frame.size { sizeChanges += 1 }
+      super.setFrameSize(newSize)
+    }
+  }
+
+  private func countingPage() -> SizeCountingPage {
+    let view = SizeCountingPage(frame: .zero)
+    view.wantsLayer = true
+    return view
+  }
+
+  /// Where a card is drawn, in its superview's coordinates: its layer's bounds, or while it moves the rounded mask that
+  /// crops it, through its translation (#602).
+  private func onScreen(_ card: ContentCardView) throws -> CGRect {
+    let layer = try XCTUnwrap(card.layer)
+    let transform = layer.transform
+    XCTAssertTrue(transform.m11 == 1 && transform.m22 == 1 && transform.m33 == 1, "never scaled")
+    let superview = try XCTUnwrap(card.superview)
+    let drawn = card.convert(layer.mask?.frame ?? card.bounds, to: superview)
+      .offsetBy(dx: transform.m41, dy: transform.m42)
+    if let superlayer = layer.superlayer {                 // in a window on screen: Core Animation agrees
+      assertEqual(layer.convert(layer.mask?.frame ?? layer.bounds, to: superlayer), drawn, "layer space")
+    }
+    return drawn
+  }
+
+  /// At rest: no translation and no mask left on any shown card, drawn at its real frame.
+  private func assertAtRest(_ cards: [ContentCardView], file: StaticString = #filePath, line: UInt = #line) throws {
+    for card in cards {
+      let layer = try XCTUnwrap(card.layer)
+      XCTAssertTrue(CATransform3DIsIdentity(layer.transform), "transform left", file: file, line: line)
+      XCTAssertNil(layer.mask, "mask left", file: file, line: line)
+      assertEqual(try onScreen(card), card.frame, "drawn at its frame", file: file, line: line)
+    }
+  }
+
+  private func assertEqual(_ a: CGRect, _ b: CGRect, _ message: String = "",
+                           file: StaticString = #filePath, line: UInt = #line) {
+    for (x, y) in [(a.minX, b.minX), (a.minY, b.minY), (a.width, b.width), (a.height, b.height)] {
+      XCTAssertEqual(x, y, accuracy: 1e-6, "\(a) != \(b) \(message)", file: file, line: line)
+    }
+  }
+
   private func show(_ container: SplitContainerView, _ panes: [NSView?], animated: Bool = false) {
     container.show(panes: panes, axis: .sideBySide,
                    factors: Array(repeating: 1 / Double(panes.count), count: panes.count), animated: animated)
@@ -114,9 +162,11 @@ final class SplitPaneCloseTests: XCTestCase {
     let button = try XCTUnwrap(container.paneCards[0].closeButton)
     XCTAssertTrue(button.becomeFirstResponder())
     XCTAssertTrue(button.isRevealed)
+    XCTAssertTrue(button.keyboardFocusRing.isFocused, "the ShellTokens.focusRing ring (#642)")
     XCTAssertTrue(button.resignFirstResponder())
     XCTAssertFalse(button.isRevealed)
-    XCTAssertEqual(button.focusRingType, .default, "the system focus ring")
+    XCTAssertTrue(button.keyboardFocusRing.isHidden)
+    XCTAssertEqual(button.focusRingType, .none, "not the system focus ring")
   }
 
   func testClickingTheCloseButtonAsksToCloseItsPane() throws {
@@ -219,26 +269,763 @@ final class SplitPaneCloseTests: XCTestCase {
     XCTAssertEqual(container.paneCount, 2)
     XCTAssertEqual(container.liveFactors, [0.5, 0.5])
     XCTAssertTrue(container.paneCards[1].contentView === c)
-    XCTAssertEqual(container.paneCards[1].frame, cFrame, "c starts in its old place, not in card 1's")
-    XCTAssertEqual(container.paneCards[0].frame, aFrame)
+    assertEqual(try onScreen(container.paneCards[1]), cFrame, "c starts in its old place, not in card 1's")
+    assertEqual(try onScreen(container.paneCards[0]), aFrame)
     XCTAssertNil(container.layer?.animation(forKey: SplitReflow.fadeKey))
 
     waitUntil("the reflow settles") { !container.isReflowing }
     XCTAssertEqual(container.paneCards[0].frame, NSRect(x: 0, y: 0, width: 500, height: 600))
     XCTAssertEqual(container.paneCards[1].frame, NSRect(x: 510, y: 0, width: 500, height: 600))
     XCTAssertEqual(container.dividers[0].frame, NSRect(x: 500, y: 0, width: 10, height: 600))
+    for card in container.paneCards { assertEqual(try onScreen(card), card.frame, "at rest, no transform left") }
+  }
+
+  /// #602: a reflow sets each pane's real frame once, when it starts, so an engine page resizes its renderer once;
+  /// every spring frame after that only moves the cards' layers. The driver is stepped by hand on a frozen clock.
+  func testReflowResizesEachPageOnceAndMovesOnlyLayersPerFrame() throws {
+    let container = makeContainer(reduceMotion: false)
+    container.reflowClock = { 100 }
+    container.reflowDriver.drivesDisplayLink = false
+    let (a, b, c) = (countingPage(), countingPage(), countingPage())
+    show(container, [a, b, c])
+    let (aBefore, cBefore) = (container.paneCards[0].frame, container.paneCards[2].frame)
+
+    show(container, [a, c], animated: true)
+
+    XCTAssertTrue(container.isReflowing)
+    let targets = [NSRect(x: 0, y: 0, width: 500, height: 600), NSRect(x: 510, y: 0, width: 500, height: 600)]
+    XCTAssertEqual(container.paneCards.map(\.frame), targets, "the real frames take the layout at once")
+    assertEqual(try onScreen(container.paneCards[0]), aBefore, "a is still drawn where it was")
+    assertEqual(try onScreen(container.paneCards[1]), cBefore, "c is still drawn where it was")
+    let sizeChanges = [a.sizeChanges, c.sizeChanges]
+
+    for time in [100.02, 100.04, 100.06, 100.08] {
+      container.reflowDriver.tick(at: time)
+      container.needsLayout = true
+      container.layoutSubtreeIfNeeded()                    // a layout pass mid-flight keeps the presented frames
+      XCTAssertTrue(container.isReflowing)
+      XCTAssertEqual(container.paneCards.map(\.frame), targets, "no frame change at \(time)")
+      let c = try onScreen(container.paneCards[1])
+      XCTAssertLessThan(c.minX, cBefore.minX, "c moved at \(time)")
+      XCTAssertGreaterThan(c.minX, targets[1].minX, "c not there yet at \(time)")
+      XCTAssertEqual(c.maxX, targets[1].maxX, accuracy: 1e-6, "its trailing edge stays")
+      XCTAssertGreaterThan(try onScreen(container.paneCards[0]).width, aBefore.width - 1e-6)
+    }
+    XCTAssertEqual([a.sizeChanges, c.sizeChanges], sizeChanges, "no page resized per frame")
+
+    container.reflowDriver.tick(at: 105)
+
+    XCTAssertFalse(container.isReflowing)
+    XCTAssertEqual(container.paneCards.map(\.frame), targets)
+    try assertAtRest(container.paneCards)
+    XCTAssertEqual([a.sizeChanges, c.sizeChanges], sizeChanges, "no page resized at rest either")
+  }
+
+  /// #602, stacked panes in the smallest window a split allows: the same, top to bottom.
+  func testStackedReflowMovesOnlyLayersPerFrame() throws {
+    let height = SplitLayout.minimumPaneLength * 3 + 20
+    let container = makeContainer(width: 400, reduceMotion: false)
+    container.setFrameSize(NSSize(width: 400, height: height))
+    container.reflowClock = { 100 }
+    container.reflowDriver.drivesDisplayLink = false
+    let (a, b, c) = (countingPage(), countingPage(), countingPage())
+    container.show(panes: [a, b, c], axis: .stacked, factors: [1, 1, 1].map { $0 / 3 })
+    container.layoutSubtreeIfNeeded()
+
+    container.show(panes: [a, c], axis: .stacked, factors: [0.5, 0.5], animated: true)
+    container.layoutSubtreeIfNeeded()
+
+    XCTAssertTrue(container.isReflowing)
+    let targets = container.paneCards.map(\.frame)
+    let sizeChanges = [a.sizeChanges, c.sizeChanges]
+    for time in [100.02, 100.05, 100.08] {
+      container.reflowDriver.tick(at: time)
+      XCTAssertEqual(container.paneCards.map(\.frame), targets, "no frame change at \(time)")
+      for (card, presented) in zip(container.paneCards, container.presentedPaneFrames) {
+        assertEqual(try onScreen(card), presented, "at \(time)")
+      }
+      XCTAssertNotEqual(container.presentedPaneFrames, targets, "still moving at \(time)")
+    }
+    XCTAssertEqual([a.sizeChanges, c.sizeChanges], sizeChanges, "no page resized per frame")
+    container.reflowDriver.tick(at: 105)
+    XCTAssertFalse(container.isReflowing)
+    try assertAtRest(container.paneCards)
+  }
+
+  /// A divider drag that takes over a reflow puts every card at rest at once, even when the pointer never moves.
+  func testDividerDragWithoutAMoveLeavesNoReflowBehind() throws {
+    let container = makeContainer(reduceMotion: false)
+    container.reflowClock = { 100 }
+    container.reflowDriver.drivesDisplayLink = false
+    let (a, b, c) = (page(), page(), page())
+    show(container, [a, b, c])
+    show(container, [a, c], animated: true)
+    container.reflowDriver.tick(at: 100.04)
+    XCTAssertNotNil(container.paneCards[1].layer?.mask, "moving")
+
+    container.dividers[0].beginDrag()
+    container.dividers[0].endDrag()
+
+    XCTAssertFalse(container.isReflowing)
+    XCTAssertEqual(container.paneCards.map(\.frame),
+                   [NSRect(x: 0, y: 0, width: 500, height: 600), NSRect(x: 510, y: 0, width: 500, height: 600)])
+    try assertAtRest(container.paneCards)
+    XCTAssertEqual(container.dividers[0].frame, NSRect(x: 500, y: 0, width: 10, height: 600))
+  }
+
+  /// A page that records the mouse-downs it gets.
+  private final class ClickRecordingPage: NSView {
+    private(set) var mouseDowns = 0
+    /// Each scroll event's phase and momentum phase, in order.
+    private(set) var scrolls: [(phase: NSEvent.Phase, momentum: NSEvent.Phase)] = []
+    /// Each right mouse-down and -up, with its location in the container's window.
+    private(set) var rightMouseDowns: [NSPoint] = []
+    private(set) var rightMouseUps = 0
+    /// Each mouse-down's location in the container's window and its modifier flags.
+    private(set) var mouseDownEvents: [(location: NSPoint, flags: NSEvent.ModifierFlags)] = []
+    private(set) var mouseDraggeds = 0
+    private(set) var mouseUps = 0
+    override func mouseDown(with event: NSEvent) {
+      mouseDowns += 1
+      mouseDownEvents.append((event.locationInWindow, event.modifierFlags))
+    }
+    override func mouseDragged(with event: NSEvent) { mouseDraggeds += 1 }
+    override func mouseUp(with event: NSEvent) { mouseUps += 1 }
+    override func scrollWheel(with event: NSEvent) { scrolls.append((event.phase, event.momentumPhase)) }
+    override func rightMouseDown(with event: NSEvent) { rightMouseDowns.append(event.locationInWindow) }
+    override func rightMouseUp(with event: NSEvent) { rightMouseUps += 1 }
+  }
+
+  /// Clicks at `point` (in `view`'s coordinates) the way the pointer does: the mouse-up is queued first, so a control
+  /// that tracks the mouse (the close button) finds it, and if nothing tracked it, it is sent after the mouse-down.
+  /// A key window gets the events through `sendEvent`; the test runner's app is usually not active (and must not be
+  /// activated over the user's apps), so otherwise the mouse-down goes where a key window sends it: to the view its
+  /// content view hit-tests at the location.
+  private func click(at point: NSPoint, in view: NSView) throws {
+    let window = try XCTUnwrap(view.window)
+    let location = view.convert(point, to: nil)
+    func event(_ type: NSEvent.EventType) throws -> NSEvent {
+      try XCTUnwrap(NSEvent.mouseEvent(
+        with: type, location: location, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+        windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+    }
+    NSApp.postEvent(try event(.leftMouseUp), atStart: false)
+    let down = try event(.leftMouseDown)
+    if window.isKeyWindow {
+      window.sendEvent(down)
+    } else {
+      let content = try XCTUnwrap(window.contentView)
+      let target = try XCTUnwrap(content.hitTest(content.superview?.convert(location, from: nil) ?? location))
+      target.mouseDown(with: down)
+    }
+    if let up = NSApp.nextEvent(matching: .leftMouseUp, until: .distantPast, inMode: .default, dequeue: true) {
+      window.sendEvent(up)
+    }
+  }
+
+  /// A key window on screen with the container mid-reflow on a frozen clock, for clicks sent through the window.
+  private func makeClickableContainer() -> SplitContainerView {
+    let container = makeContainer(onScreen: true, reduceMotion: false)
+    container.window?.makeKeyAndOrderFront(nil)
+    container.reflowClock = { 100 }
+    container.reflowDriver.drivesDisplayLink = false
+    return container
+  }
+
+  /// Shows pane `index`'s close button (as a hover does) and returns where it is drawn, in the container.
+  private func drawnCloseButtonCenter(_ container: SplitContainerView, pane index: Int) throws -> NSPoint {
+    let card = container.paneCards[index]
+    let button = try XCTUnwrap(card.closeButton)
+    button.reducesMotion = { true }
+    try hover(card, entered: true)
+    XCTAssertTrue(button.isRevealed)
+    let real = card.convert(NSPoint(x: button.frame.midX, y: button.frame.midY), to: container)
+    let cardMove = try XCTUnwrap(card.layer).transform
+    let buttonMove = try XCTUnwrap(button.layer).transform
+    XCTAssertEqual(buttonMove.m42, 0)
+    return NSPoint(x: real.x + cardMove.m41 + buttonMove.m41, y: real.y + cardMove.m42)
+  }
+
+  /// Mid-flight, a click on a close button where it is drawn closes that pane, though AppKit would place the click by
+  /// the card's real frame. Pane c shrinks while it moves right (a pane is added before it), so its X moves with it.
+  func testClickOnADrawnCloseButtonMidFlightClosesThatPane() throws {
+    let container = makeClickableContainer()
+    let (a, b, c) = (ClickRecordingPage(), ClickRecordingPage(), ClickRecordingPage())
+    show(container, [a, c])
+    var requests: [Int] = []
+    container.onCloseRequest = { requests.append($0) }
+    show(container, [a, b, c], animated: true)
+    container.reflowDriver.tick(at: 100.06)
+    XCTAssertTrue(container.isReflowing)
+    let drawn = try onScreen(container.paneCards[2])
+    XCTAssertNotEqual(drawn.minX, container.paneCards[2].frame.minX, "drawn away from its real frame")
+    let x = try drawnCloseButtonCenter(container, pane: 2)
+    XCTAssertTrue(drawn.contains(x), "the X is in view")
+    XCTAssertNil(container.paneIndex(forMouseDownAt: x), "a click on the X focuses no pane")
+
+    try click(at: x, in: container)
+
+    XCTAssertEqual(requests, [2])
+    XCTAssertEqual(c.mouseDowns, 0)
+  }
+
+  /// A growing pane is cropped at its trailing edge; its close button moves in with that edge (its layer only), so it
+  /// stays in view and clickable mid-flight.
+  func testCloseButtonOfAGrowingPaneStaysInViewAndClickableMidFlight() throws {
+    let container = makeClickableContainer()
+    let (a, b, c) = (ClickRecordingPage(), ClickRecordingPage(), ClickRecordingPage())
+    show(container, [a, b, c])
+    var requests: [Int] = []
+    container.onCloseRequest = { requests.append($0) }
+    show(container, [a, c], animated: true)
+    container.reflowDriver.tick(at: 100.06)
+    for index in 0..<2 {
+      let card = container.paneCards[index]
+      let drawn = try onScreen(card)
+      XCTAssertLessThan(drawn.width, card.frame.width, "pane \(index) is growing")
+      let x = try drawnCloseButtonCenter(container, pane: index)
+      XCTAssertTrue(drawn.contains(x), "pane \(index)'s X is in view")
+      XCTAssertEqual(drawn.maxX - x.x, card.frame.maxX - card.convert(
+        NSPoint(x: try XCTUnwrap(card.closeButton).frame.midX, y: 0), to: container).x, accuracy: 1e-6,
+        "same inset from the drawn trailing edge as at rest")
+    }
+
+    try click(at: try drawnCloseButtonCenter(container, pane: 1), in: container)
+
+    XCTAssertEqual(requests, [1])
+    container.reflowDriver.tick(at: 105)
+    for card in container.paneCards {
+      XCTAssertTrue(CATransform3DIsIdentity(try XCTUnwrap(card.closeButton?.layer).transform), "at rest")
+    }
+  }
+
+  /// Mid-flight, a click elsewhere on a drawn pane focuses that pane and does not reach its page, whose view would
+  /// place the click by its real frame.
+  func testClickOnADrawnPaneMidFlightFocusesItWithoutReachingThePage() throws {
+    let container = makeClickableContainer()
+    let (a, b, c) = (ClickRecordingPage(), ClickRecordingPage(), ClickRecordingPage())
+    show(container, [a, b, c])
+    var focusRequests: [Int] = []
+    container.onFocusRequest = { focusRequests.append($0) }
+    show(container, [a, c], animated: true)
+    container.reflowDriver.tick(at: 100.06)
+    let drawn = try onScreen(container.paneCards[1])
+
+    try click(at: NSPoint(x: drawn.minX + 20, y: drawn.midY), in: container)
+
+    XCTAssertEqual(focusRequests, [1])
+    XCTAssertEqual(c.mouseDowns, 0)
+    XCTAssertEqual(a.mouseDowns, 0)
+  }
+
+  // MARK: Scroll and right-click mid-flight (#677)
+
+  /// A trackpad scroll event at `point` (in `view`) with CGEvent's phase values (1 began, 2 changed, 4 ended, 128 may
+  /// begin; momentum 1 began, 2 changed, 3 ended). Built from a CGEvent, it has no window, so its window location is
+  /// the CG location flipped on the main screen; it is placed there so the window location is `point`'s.
+  private func scrollEvent(at point: NSPoint, in view: NSView, phase: Int64, momentum: Int64 = 0,
+                           continuous: Bool = true) throws -> NSEvent {
+    let location = view.convert(point, to: nil)
+    let cg = try XCTUnwrap(CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2,
+                                   wheel1: -4, wheel2: 0, wheel3: 0))
+    cg.setIntegerValueField(.scrollWheelEventIsContinuous, value: continuous ? 1 : 0)
+    cg.setIntegerValueField(.scrollWheelEventScrollPhase, value: phase)
+    cg.setIntegerValueField(.scrollWheelEventMomentumPhase, value: momentum)
+    cg.location = CGPoint(x: location.x, y: try XCTUnwrap(NSScreen.screens.first).frame.maxY - location.y)
+    let event = try XCTUnwrap(NSEvent(cgEvent: cg))
+    XCTAssertEqual(event.locationInWindow.x, location.x, accuracy: 1e-3)
+    XCTAssertEqual(event.locationInWindow.y, location.y, accuracy: 1e-3)
+    return event
+  }
+
+  /// The view AppKit sends a scroll gesture at `point` (in the container) to: the one its window's content view
+  /// hit-tests when the gesture begins. The gesture's later events stay on that view, wherever the pointer is.
+  private func scrollTarget(at point: NSPoint, in container: SplitContainerView) throws -> NSView {
+    let content = try XCTUnwrap(container.window?.contentView)
+    let location = container.convert(point, to: nil)
+    return try XCTUnwrap(content.hitTest(content.superview?.convert(location, from: nil) ?? location))
+  }
+
+  /// Three panes, the middle one closed: mid-flight, pane 1 (page c) is drawn growing in from where pane 2 was, away
+  /// from its real frame, and the container takes every event on it (#602). The point is near its drawn leading edge.
+  /// Frozen clock, stepped by hand.
+  private func midFlightOnADrawnPane() throws
+    -> (SplitContainerView, a: ClickRecordingPage, c: ClickRecordingPage, point: NSPoint) {
+    let container = makeClickableContainer()
+    let (a, b, c) = (ClickRecordingPage(), ClickRecordingPage(), ClickRecordingPage())
+    show(container, [a, b, c])
+    show(container, [a, c], animated: true)
+    container.reflowDriver.tick(at: 100.06)
+    XCTAssertTrue(container.isReflowing)
+    let drawn = try onScreen(container.paneCards[1])
+    XCTAssertGreaterThan(drawn.minX - container.paneCards[1].frame.minX, 20, "drawn away from its real frame")
+    let point = NSPoint(x: drawn.minX + 20, y: drawn.midY)
+    XCTAssertEqual(container.paneIndex(forMouseDownAt: point), 1, "drawn over pane 1")
+    XCTAssertTrue(try scrollTarget(at: point, in: container) === container, "taken by the container")
+    return (container, a, c, point)
+  }
+
+  /// A trackpad scroll that begins on a drawn pane mid-flight reaches that pane's page, not nobody.
+  func testScrollThatBeginsMidFlightReachesTheDrawnPanesPage() throws {
+    let (container, a, c, point) = try midFlightOnADrawnPane()
+    let target = try scrollTarget(at: point, in: container)
+
+    target.scrollWheel(with: try scrollEvent(at: point, in: container, phase: 1))
+    target.scrollWheel(with: try scrollEvent(at: point, in: container, phase: 2))
+
+    XCTAssertEqual(c.scrolls.map(\.phase), [.began, .changed])
+    XCTAssertTrue(a.scrolls.isEmpty)
+  }
+
+  /// A page that does not take a scroll and passes it up its responder chain, as WebKit does with one it cannot use.
+  private final class PassingScrollPage: NSView {
+    private(set) var scrolls = 0
+    override func scrollWheel(with event: NSEvent) {
+      scrolls += 1
+      super.scrollWheel(with: event)
+    }
+  }
+
+  /// A scroll forwarded mid-flight that its page passes up comes back through the container and goes on up from there,
+  /// once; it is not forwarded round again. A closed pane's placeholder, which takes no scroll, does the same.
+  func testForwardedScrollThatThePagePassesUpIsNotForwardedAgain() throws {
+    let container = makeClickableContainer()
+    let (a, b, c) = (PassingScrollPage(), PassingScrollPage(), PassingScrollPage())
+    show(container, [a, b, c])
+    show(container, [a, c], animated: true)
+    container.reflowDriver.tick(at: 100.06)
+    let drawn = try onScreen(container.paneCards[1])
+    let onPage = NSPoint(x: drawn.minX + 20, y: drawn.midY)
+
+    container.scrollWheel(with: try scrollEvent(at: onPage, in: container, phase: 1))
+
+    XCTAssertEqual(c.scrolls, 1)
+    XCTAssertEqual(a.scrolls, 0)
+    container.reflowDriver.tick(at: 105)
+    show(container, [a, nil, c], animated: true)          // the placeholder starts at its frame, c moves right
+    container.reflowDriver.tick(at: 100.06)
+    XCTAssertTrue(container.isReflowing)
+    let placeholder = container.paneCards[1].frame
+    let onPlaceholder = NSPoint(x: placeholder.minX + 20, y: placeholder.midY)
+    XCTAssertEqual(container.paneIndex(forMouseDownAt: onPlaceholder), 1)
+
+    container.scrollWheel(with: try scrollEvent(at: onPlaceholder, in: container, phase: 1))
+
+    XCTAssertEqual(c.scrolls, 1)
+  }
+
+  /// A mouse wheel click (no phase) mid-flight reaches the drawn pane's page.
+  func testWheelClickMidFlightReachesTheDrawnPanesPage() throws {
+    let (container, a, c, point) = try midFlightOnADrawnPane()
+
+    try scrollTarget(at: point, in: container)
+      .scrollWheel(with: try scrollEvent(at: point, in: container, phase: 0, continuous: false))
+
+    XCTAssertEqual(c.scrolls.count, 1)
+    XCTAssertTrue(a.scrolls.isEmpty)
+  }
+
+  /// AppKit keeps a gesture on the view it began on: the rest of a scroll that began mid-flight, momentum included,
+  /// still reaches the same page after the reflow has ended (the scroll ends it, #716). A gesture that begins at rest
+  /// is not forwarded.
+  func testScrollGestureThatBeganMidFlightStaysOnItsPageAfterTheReflowSettles() throws {
+    let (container, a, c, point) = try midFlightOnADrawnPane()
+    let target = try scrollTarget(at: point, in: container)
+    target.scrollWheel(with: try scrollEvent(at: point, in: container, phase: 1))
+
+    container.reflowDriver.tick(at: 105)
+    XCTAssertFalse(container.isReflowing)
+    for (phase, momentum) in [(2, 0), (4, 0), (0, 1), (0, 2), (0, 3)] as [(Int64, Int64)] {
+      target.scrollWheel(with: try scrollEvent(at: point, in: container, phase: phase, momentum: momentum))
+    }
+
+    XCTAssertEqual(c.scrolls.map(\.phase), [.began, .changed, .ended, [], [], []])
+    XCTAssertEqual(c.scrolls.map(\.momentum), [[], [], [], .began, .changed, .ended])
+    XCTAssertTrue(a.scrolls.isEmpty)
+    container.scrollWheel(with: try scrollEvent(at: point, in: container, phase: 1))
+    container.scrollWheel(with: try scrollEvent(at: point, in: container, phase: 2))
+    XCTAssertEqual(c.scrolls.count, 6, "a began at rest sent to the container is not forwarded to the old target")
+  }
+
+  /// A touch-down (may begin) mid-flight picks the page and ends the reflow (#716); the began that follows at rest,
+  /// and the rest of that gesture, still reach it.
+  func testScrollThatMayBeginMidFlightAndBeginsAtRestStaysOnItsPage() throws {
+    let (container, a, c, point) = try midFlightOnADrawnPane()
+    let target = try scrollTarget(at: point, in: container)
+    target.scrollWheel(with: try scrollEvent(at: point, in: container, phase: 128))
+
+    container.reflowDriver.tick(at: 105)
+    XCTAssertFalse(container.isReflowing)
+    for phase in [1, 2, 4] as [Int64] {
+      target.scrollWheel(with: try scrollEvent(at: point, in: container, phase: phase))
+    }
+
+    XCTAssertEqual(c.scrolls.map(\.phase), [.mayBegin, .began, .changed, .ended])
+    XCTAssertTrue(a.scrolls.isEmpty)
+  }
+
+  /// A page with two nested scrollers, as a web page with a scrollable column along its edge: a 30-point one at its
+  /// leading edge and one filling the rest. Each records the window location of the scrolls it gets.
+  private final class NestedScrollersPage: NSView {
+    final class Scroller: NSView {
+      private(set) var scrolls: [NSPoint] = []
+      override func scrollWheel(with event: NSEvent) { scrolls.append(event.locationInWindow) }
+    }
+    let edge = Scroller()
+    let body = Scroller()
+
+    override init(frame frameRect: NSRect) {
+      super.init(frame: frameRect)
+      addSubview(edge)
+      addSubview(body)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func setFrameSize(_ newSize: NSSize) {
+      super.setFrameSize(newSize)
+      edge.frame = NSRect(x: 0, y: 0, width: 30, height: newSize.height)
+      body.frame = NSRect(x: 30, y: 0, width: max(0, newSize.width - 30), height: newSize.height)
+    }
+  }
+
+  /// Three panes, the middle one closed, pane 1 showing `page`: mid-flight (frozen clock, stepped by hand) it is drawn
+  /// growing in from where pane 2 was, away from its real frame.
+  private func midFlight(showing page: NSView) throws -> (SplitContainerView, a: ClickRecordingPage) {
+    let container = makeClickableContainer()
+    let (a, b) = (ClickRecordingPage(), ClickRecordingPage())
+    show(container, [a, b, page])
+    show(container, [a, page], animated: true)
+    container.reflowDriver.tick(at: 100.06)
+    XCTAssertTrue(container.isReflowing)
+    return (container, a)
+  }
+
+  /// A scroll that begins on a drawn pane mid-flight reaches the nested scroller drawn under the pointer, and that
+  /// scroller is also the one the event's own location points at, which is where an engine page places it (#716). A
+  /// scroll event cannot be moved, so the reflow ends at rest first and the pane is drawn at its real frame.
+  func testScrollThatBeginsMidFlightReachesTheNestedScrollerItsLocationPointsAt() throws {
+    let c = NestedScrollersPage()
+    let (container, a) = try midFlight(showing: c)
+    let card = container.paneCards[1]
+    let drawn = try onScreen(card)
+    let shift = drawn.minX - card.frame.minX
+    XCTAssertGreaterThan(shift, 20, "drawn away from its real frame")
+    let point = NSPoint(x: drawn.minX + 20, y: drawn.midY)
+    let drawnSpot = c.edge.convert(NSPoint(x: point.x - shift, y: point.y), from: container)
+    XCTAssertTrue(c.edge.bounds.contains(drawnSpot), "mid-flight the edge scroller is drawn under the pointer")
+    let target = try scrollTarget(at: point, in: container)
+    XCTAssertTrue(target === container, "taken by the container")
+
+    target.scrollWheel(with: try scrollEvent(at: point, in: container, phase: 1))
+    target.scrollWheel(with: try scrollEvent(at: point, in: container, phase: 2))
+
+    XCTAssertFalse(container.isReflowing)
+    try assertAtRest(container.paneCards)
+    XCTAssertTrue(try scrollTarget(at: point, in: container) === c.body, "drawn under the pointer at rest")
+    XCTAssertEqual(c.body.scrolls.count, 2)
+    XCTAssertTrue(c.edge.scrolls.isEmpty)
+    for location in c.body.scrolls {
+      XCTAssertTrue(c.body.bounds.contains(c.body.convert(location, from: nil)), "its own location is on it")
+    }
+    XCTAssertTrue(a.scrolls.isEmpty)
+  }
+
+  /// A mouse wheel click mid-flight ends the reflow the same way and reaches the scroller its location points at.
+  func testWheelClickMidFlightReachesTheNestedScrollerItsLocationPointsAt() throws {
+    let c = NestedScrollersPage()
+    let (container, _) = try midFlight(showing: c)
+    let drawn = try onScreen(container.paneCards[1])
+    let point = NSPoint(x: drawn.minX + 20, y: drawn.midY)
+
+    try scrollTarget(at: point, in: container)
+      .scrollWheel(with: try scrollEvent(at: point, in: container, phase: 0, continuous: false))
+
+    XCTAssertFalse(container.isReflowing)
+    XCTAssertTrue(c.edge.scrolls.isEmpty)
+    let location = try XCTUnwrap(c.body.scrolls.first)
+    XCTAssertTrue(c.body.bounds.contains(c.body.convert(location, from: nil)), "its own location is on it")
+  }
+
+  /// A scroll mid-flight off every drawn pane (in the gap a moving pane leaves) does not cut the reflow short.
+  func testScrollMidFlightOffTheDrawnPanesKeepsTheReflowRunning() throws {
+    let c = ClickRecordingPage()
+    let (container, a) = try midFlight(showing: c)
+    let leading = try onScreen(container.paneCards[0])
+    let trailing = try onScreen(container.paneCards[1])
+    XCTAssertGreaterThan(trailing.minX - leading.maxX, 4)
+    let gap = NSPoint(x: trailing.minX - 2, y: trailing.midY)
+    XCTAssertNil(container.paneIndex(forMouseDownAt: gap))
+
+    container.scrollWheel(with: try scrollEvent(at: gap, in: container, phase: 1))
+
+    XCTAssertTrue(container.isReflowing)
+    XCTAssertTrue(a.scrolls.isEmpty)
+    XCTAssertTrue(c.scrolls.isEmpty)
+  }
+
+  /// A right-click on a drawn pane mid-flight ends the reflow at rest first, then reaches that pane's page at the spot
+  /// it was drawn under the pointer, now at its real frame; the mouse-up follows it there.
+  func testRightClickMidFlightEndsTheReflowAndReachesTheDrawnPanesPage() throws {
+    let (container, a, c, point) = try midFlightOnADrawnPane()
+    let card = container.paneCards[1]
+    let shift = try onScreen(card).minX - card.frame.minX
+    let window = try XCTUnwrap(container.window)
+    let location = container.convert(point, to: nil)
+    func event(_ type: NSEvent.EventType) throws -> NSEvent {
+      try XCTUnwrap(NSEvent.mouseEvent(
+        with: type, location: location, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+        windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+    }
+    let target = try scrollTarget(at: point, in: container)
+
+    target.rightMouseDown(with: try event(.rightMouseDown))
+
+    XCTAssertFalse(container.isReflowing)
+    try assertAtRest(container.paneCards)
+    XCTAssertEqual(c.rightMouseDowns.count, 1)
+    XCTAssertTrue(a.rightMouseDowns.isEmpty)
+    let atRest = container.convert(try XCTUnwrap(c.rightMouseDowns.first), from: nil)
+    XCTAssertEqual(atRest.x, point.x - shift, accuracy: 1e-6, "the same spot of the page")
+    XCTAssertEqual(atRest.y, point.y, accuracy: 1e-6)
+    target.rightMouseUp(with: try event(.rightMouseUp))
+    XCTAssertEqual(c.rightMouseUps, 1)
+    XCTAssertEqual(a.rightMouseUps, 0)
+  }
+
+  /// A context menu's own loop can take the mouse-up of a right-click forwarded mid-flight; the next right-click does
+  /// not send its mouse-up to that old page.
+  func testRightClickWhoseMouseUpWasTakenLeavesNoStaleTarget() throws {
+    let (container, _, c, point) = try midFlightOnADrawnPane()
+    let window = try XCTUnwrap(container.window)
+    func event(_ type: NSEvent.EventType, at point: NSPoint) throws -> NSEvent {
+      try XCTUnwrap(NSEvent.mouseEvent(
+        with: type, location: container.convert(point, to: nil), modifierFlags: [], timestamp: 0,
+        windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+    }
+    container.rightMouseDown(with: try event(.rightMouseDown, at: point))
+    XCTAssertEqual(c.rightMouseDowns.count, 1)
+
+    let gap = container.dividers[0].frame
+    let inGap = NSPoint(x: gap.midX, y: gap.midY)
+    container.rightMouseDown(with: try event(.rightMouseDown, at: inGap))
+    container.rightMouseUp(with: try event(.rightMouseUp, at: inGap))
+
+    XCTAssertEqual(c.rightMouseDowns.count, 1)
+    XCTAssertEqual(c.rightMouseUps, 0)
+  }
+
+  // MARK: Control-click mid-flight (#715)
+
+  /// A left mouse event at `point` (in `container`) with `flags`, for the container's window. The events of one click
+  /// share their event number, as the mouse-down and mouse-up of a real click do; each click has its own.
+  private func mouseEvent(_ type: NSEvent.EventType, at point: NSPoint, in container: SplitContainerView,
+                          flags: NSEvent.ModifierFlags = .control, number: Int = 1) throws -> NSEvent {
+    let window = try XCTUnwrap(container.window)
+    return try XCTUnwrap(NSEvent.mouseEvent(
+      with: type, location: container.convert(point, to: nil), modifierFlags: flags, timestamp: 0,
+      windowNumber: window.windowNumber, context: nil, eventNumber: number, clickCount: 1, pressure: 1))
+  }
+
+  /// AppKit turns a Control-click into a context menu only for a hit view that gives one from `menu(for:)`; the
+  /// container gives none mid-flight, so its mouse-down runs. (This checks the container only, not the page's menu.)
+  func testControlClickMidFlightIsNotTurnedIntoAMenuOfTheContainer() throws {
+    let (container, _, _, point) = try midFlightOnADrawnPane()
+
+    XCTAssertNil(container.menu(for: try mouseEvent(.leftMouseDown, at: point, in: container)))
+  }
+
+  /// A Control-click on a drawn pane mid-flight is a secondary click, like a right-click: it ends the reflow at rest
+  /// first, then reaches that pane's page at the spot it was drawn under the pointer, with Control still set, so the
+  /// page opens its context menu; the drag and mouse-up follow it there. It does not focus the pane as a click does.
+  func testControlClickMidFlightEndsTheReflowAndReachesTheDrawnPanesPage() throws {
+    let (container, a, c, point) = try midFlightOnADrawnPane()
+    var focusRequests: [Int] = []
+    container.onFocusRequest = { focusRequests.append($0) }
+    let card = container.paneCards[1]
+    let shift = try onScreen(card).minX - card.frame.minX
+    let target = try scrollTarget(at: point, in: container)
+
+    target.mouseDown(with: try mouseEvent(.leftMouseDown, at: point, in: container))
+
+    XCTAssertFalse(container.isReflowing)
+    try assertAtRest(container.paneCards)
+    XCTAssertEqual(c.mouseDownEvents.count, 1)
+    XCTAssertEqual(a.mouseDowns, 0)
+    XCTAssertEqual(focusRequests, [])
+    let down = try XCTUnwrap(c.mouseDownEvents.first)
+    XCTAssertTrue(down.flags.contains(.control))
+    let atRest = container.convert(down.location, from: nil)
+    XCTAssertEqual(atRest.x, point.x - shift, accuracy: 1e-6, "the same spot of the page")
+    XCTAssertEqual(atRest.y, point.y, accuracy: 1e-6)
+    target.mouseDragged(with: try mouseEvent(.leftMouseDragged, at: point, in: container))
+    target.mouseUp(with: try mouseEvent(.leftMouseUp, at: point, in: container))
+    XCTAssertEqual(c.mouseDraggeds, 1)
+    XCTAssertEqual(c.mouseUps, 1)
+    XCTAssertEqual(a.mouseUps, 0)
+  }
+
+  /// A context menu's own loop can take the mouse-up of a Control-click forwarded mid-flight; the next click does not
+  /// send its drag or mouse-up to that old page.
+  func testControlClickWhoseMouseUpWasTakenLeavesNoStaleTarget() throws {
+    let (container, _, c, point) = try midFlightOnADrawnPane()
+    container.mouseDown(with: try mouseEvent(.leftMouseDown, at: point, in: container))
+    XCTAssertEqual(c.mouseDowns, 1)
+
+    let gap = container.dividers[0].frame
+    let inGap = NSPoint(x: gap.midX, y: gap.midY)
+    container.mouseDown(with: try mouseEvent(.leftMouseDown, at: inGap, in: container, flags: [], number: 2))
+    container.mouseDragged(with: try mouseEvent(.leftMouseDragged, at: inGap, in: container, flags: [], number: 2))
+    container.mouseUp(with: try mouseEvent(.leftMouseUp, at: inGap, in: container, flags: [], number: 2))
+
+    XCTAssertEqual(c.mouseDowns, 1)
+    XCTAssertEqual(c.mouseDraggeds, 0)
+    XCTAssertEqual(c.mouseUps, 0)
+  }
+
+  /// The view of type `T` in `view`'s subtree.
+  private func descendant<T: NSView>(_ type: T.Type, in view: NSView) -> T? {
+    for subview in view.subviews {
+      if let match = subview as? T ?? descendant(type, in: subview) { return match }
+    }
+    return nil
+  }
+
+  /// A context menu's loop took the mouse-up of a Control-click forwarded mid-flight; then a click on a closed pane's
+  /// placeholder ("Reopen page"), whose mouse-down never reaches the container: its drag and mouse-up do not go on
+  /// up to the old page.
+  func testClickOnAPlaceholderAfterAControlClickWhoseMouseUpWasTakenDoesNotReachTheOldPage() throws {
+    let (container, a, c, point) = try midFlightOnADrawnPane()
+    container.mouseDown(with: try mouseEvent(.leftMouseDown, at: point, in: container))
+    XCTAssertEqual(c.mouseDowns, 1)
+    show(container, [a, nil, c])
+    let placeholder = try XCTUnwrap(descendant(SplitPanePlaceholderView.self, in: container.paneCards[1]))
+    var reopenRequests: [Int] = []
+    container.onFocusRequest = { reopenRequests.append($0) }
+    let center = placeholder.convert(NSPoint(x: placeholder.bounds.midX, y: placeholder.bounds.midY), to: container)
+
+    placeholder.mouseDown(with: try mouseEvent(.leftMouseDown, at: center, in: container, flags: [], number: 2))
+    placeholder.mouseDragged(with: try mouseEvent(.leftMouseDragged, at: center, in: container, flags: [], number: 2))
+    placeholder.mouseUp(with: try mouseEvent(.leftMouseUp, at: center, in: container, flags: [], number: 2))
+
+    XCTAssertEqual(reopenRequests, [1], "the placeholder took its click")
+    XCTAssertEqual(c.mouseDraggeds, 0)
+    XCTAssertEqual(c.mouseUps, 0)
+    XCTAssertEqual(a.mouseUps, 0)
+  }
+
+  /// The drag and mouse-up of another click, which reach the container from a view that took that click's mouse-down,
+  /// do not go to the page a Control-click was forwarded to: they carry another event number.
+  func testDragAndMouseUpOfAnotherClickDoNotReachTheControlClickedPage() throws {
+    let (container, _, c, point) = try midFlightOnADrawnPane()
+    container.mouseDown(with: try mouseEvent(.leftMouseDown, at: point, in: container))
+    XCTAssertEqual(c.mouseDowns, 1)
+
+    container.mouseDragged(with: try mouseEvent(.leftMouseDragged, at: point, in: container, flags: [], number: 2))
+    container.mouseUp(with: try mouseEvent(.leftMouseUp, at: point, in: container, flags: [], number: 2))
+
+    XCTAssertEqual(c.mouseDraggeds, 0)
+    XCTAssertEqual(c.mouseUps, 0)
+  }
+
+  /// A responder that records the drags and mouse-ups passed up to it.
+  private final class RecordingResponder: NSResponder {
+    private(set) var passedUp = 0
+    override func mouseDragged(with event: NSEvent) { passedUp += 1 }
+    override func mouseUp(with event: NSEvent) { passedUp += 1 }
+  }
+
+  /// A closed pane's placeholder takes its click whole: its drag and mouse-up do not go on up its responder chain.
+  func testPlaceholderDoesNotPassItsDragOrMouseUpUp() throws {
+    let container = makeClickableContainer()
+    show(container, [ClickRecordingPage(), nil])
+    let placeholder = try XCTUnwrap(descendant(SplitPanePlaceholderView.self, in: container.paneCards[1]))
+    let next = RecordingResponder()
+    placeholder.nextResponder = next
+    let center = placeholder.convert(NSPoint(x: placeholder.bounds.midX, y: placeholder.bounds.midY), to: container)
+
+    placeholder.mouseDragged(with: try mouseEvent(.leftMouseDragged, at: center, in: container, flags: []))
+    placeholder.mouseUp(with: try mouseEvent(.leftMouseUp, at: center, in: container, flags: []))
+
+    XCTAssertEqual(next.passedUp, 0)
+  }
+
+  /// A page that does not take a mouse-down and passes it up its responder chain.
+  private final class PassingClickPage: NSView {
+    private(set) var mouseDowns = 0
+    override func mouseDown(with event: NSEvent) {
+      mouseDowns += 1
+      super.mouseDown(with: event)
+    }
+  }
+
+  /// A Control-click forwarded mid-flight that its page passes up comes back through the container and goes on up from
+  /// there, once; it is not forwarded round again and focuses no pane.
+  func testForwardedControlClickThatThePagePassesUpIsNotForwardedAgain() throws {
+    let container = makeClickableContainer()
+    let (a, b, c) = (PassingClickPage(), PassingClickPage(), PassingClickPage())
+    show(container, [a, b, c])
+    var focusRequests: [Int] = []
+    container.onFocusRequest = { focusRequests.append($0) }
+    show(container, [a, c], animated: true)
+    container.reflowDriver.tick(at: 100.06)
+    let drawn = try onScreen(container.paneCards[1])
+    let point = NSPoint(x: drawn.minX + 20, y: drawn.midY)
+
+    container.mouseDown(with: try mouseEvent(.leftMouseDown, at: point, in: container))
+
+    XCTAssertEqual(c.mouseDowns, 1)
+    XCTAssertEqual(a.mouseDowns, 0)
+    XCTAssertEqual(focusRequests, [])
+  }
+
+  /// A Control-click on a drawn close button mid-flight closes that pane, as a Control-click on the button does at
+  /// rest (it has no menu); the page does not get it.
+  func testControlClickOnADrawnCloseButtonMidFlightClosesThatPane() throws {
+    let container = makeClickableContainer()
+    let (a, b, c) = (ClickRecordingPage(), ClickRecordingPage(), ClickRecordingPage())
+    show(container, [a, c])
+    var requests: [Int] = []
+    container.onCloseRequest = { requests.append($0) }
+    show(container, [a, b, c], animated: true)
+    container.reflowDriver.tick(at: 100.06)
+    let x = try drawnCloseButtonCenter(container, pane: 2)
+
+    container.mouseDown(with: try mouseEvent(.leftMouseDown, at: x, in: container))
+
+    XCTAssertEqual(requests, [2])
+    XCTAssertEqual(c.mouseDowns, 0)
+  }
+
+  /// #602: each reflow is measured on its own pacing session, "split-reflow", ended when it settles.
+  func testReflowIsMeasuredAsASplitReflowPacingSession() throws {
+    let container = makeContainer(onScreen: true, reduceMotion: false)
+    container.reflowClock = { 100 }
+    container.reflowDriver.drivesDisplayLink = false
+    let (a, b, c) = (page(), page(), page())
+    show(container, [a, b, c])
+
+    show(container, [a, c], animated: true)
+    XCTAssertTrue(container.pacer.isRunning)
+    XCTAssertEqual(container.pacer.label, "split-reflow")
+    container.reflowDriver.tick(at: 105)
+
+    XCTAssertFalse(container.pacer.isRunning)
+    XCTAssertNotNil(container.lastPacing)
   }
 
   /// A second close mid-flight starts from the frames on screen, not from the layout either close left. The clock is
   /// frozen and the driver stepped by hand, so the frame caught mid-flight does not depend on the machine's speed.
   func testInterruptedReflowContinuesFromTheFramesOnScreen() throws {
-    let container = makeContainer(onScreen: true, reduceMotion: false)
+    let container = makeContainer(reduceMotion: false)
     container.reflowClock = { 100 }
+    container.reflowDriver.drivesDisplayLink = false
     let (a, b, c) = (page(), page(), page())
     show(container, [a, b, c])
     show(container, [a, c], animated: true)
     container.reflowDriver.tick(at: 100.06)
-    let cOnScreen = container.paneCards[1].frame
+    let cOnScreen = try onScreen(container.paneCards[1])
     XCTAssertTrue(container.isReflowing)
     XCTAssertLessThan(cOnScreen.minX, 680, "moved from its old place")
     XCTAssertGreaterThan(cOnScreen.minX, 510, "not there yet")
@@ -246,9 +1033,11 @@ final class SplitPaneCloseTests: XCTestCase {
     show(container, [c], animated: true)
 
     XCTAssertTrue(container.isReflowing)
-    XCTAssertEqual(container.paneCards[0].frame, cOnScreen)
-    waitUntil("the second reflow settles") { !container.isReflowing }
+    assertEqual(try onScreen(container.paneCards[0]), cOnScreen)
+    container.reflowDriver.tick(at: 105)
+    XCTAssertFalse(container.isReflowing)
     XCTAssertEqual(container.paneCards[0].frame, NSRect(x: 0, y: 0, width: 1010, height: 600))
+    assertEqual(try onScreen(container.paneCards[0]), NSRect(x: 0, y: 0, width: 1010, height: 600))
   }
 
   /// A plain show (switching splits, adding a pane) never animates, and ends a running reflow at the layout.
@@ -424,11 +1213,95 @@ final class SplitPaneCloseTests: XCTestCase {
 
     let card = harness.controller.rootView.card
     try PacingEnvironment.requireCaught(harness.controller.rootView.isCardReflowing
-                                          && card.frame.width < harness.split.frame.width,
+                                          && (try onScreen(card)).width < harness.split.frame.width,
                                         "the card growing from the pane")
-    XCTAssertGreaterThanOrEqual(card.frame.width, paneFrame.width)
+    XCTAssertGreaterThanOrEqual(try onScreen(card).width, paneFrame.width - 1e-6)
     waitUntil("the card settles") { !harness.controller.rootView.isCardReflowing }
     XCTAssertEqual(card.frame, harness.split.frame)
+    assertEqual(try onScreen(card), harness.split.frame)
+    harness.controller.close()
+  }
+
+  /// #602: the card takes its layout frame once, when its reflow starts; each spring frame only moves its layer, from
+  /// the pane's frame to its own. Measured on a "card-reflow" pacing session. Stepped by hand on a frozen clock.
+  func testCardReflowResizesThePageOnceAndMovesOnlyItsLayerPerFrame() throws {
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800), styleMask: [.titled],
+                          backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    windows.append(window)
+    let root = ShellRootView()
+    root.reduceMotion = { false }
+    root.cardReflowClock = { 100 }
+    root.cardReflowDriver.drivesDisplayLink = false
+    window.contentView = root
+    root.layoutSubtreeIfNeeded()
+    let page = countingPage()
+    root.card.setContent(page)
+    root.layoutSubtreeIfNeeded()
+    let target = root.card.frame
+    // The lower right quarter, as the last pane of a stacked split would be: both axes move.
+    let from = CGRect(x: target.minX + target.width / 2 + 5, y: target.minY + target.height / 2 + 5,
+                      width: target.width / 2 - 5, height: target.height / 2 - 5)
+
+    root.reflowCard(from: from)
+
+    XCTAssertTrue(root.isCardReflowing)
+    XCTAssertEqual(root.card.frame, target, "the real frame stays the layout's")
+    assertEqual(try onScreen(root.card), from, "drawn where the pane was")
+    XCTAssertEqual(root.cardPacer.label, "card-reflow")
+    XCTAssertTrue(root.cardPacer.isRunning)
+    let sizeChanges = page.sizeChanges
+    for time in [100.02, 100.05, 100.08] {
+      root.cardReflowDriver.tick(at: time)
+      root.needsLayout = true
+      root.layoutSubtreeIfNeeded()
+      XCTAssertEqual(root.card.frame, target, "no frame change at \(time)")
+      let drawn = try onScreen(root.card)
+      XCTAssertLessThan(drawn.minX, from.minX, "growing at \(time)")
+      XCTAssertGreaterThan(drawn.minX, target.minX, "not there yet at \(time)")
+      XCTAssertLessThan(drawn.minY, from.minY, "flipped root: the top edge rises at \(time)")
+      XCTAssertGreaterThan(drawn.minY, target.minY)
+      XCTAssertEqual(drawn.maxX, target.maxX, accuracy: 1e-6)
+      XCTAssertEqual(drawn.maxY, target.maxY, accuracy: 1e-6)
+      assertEqual(drawn, root.presentedCardFrame)
+    }
+    XCTAssertEqual(page.sizeChanges, sizeChanges, "no page resized per frame")
+
+    root.cardReflowDriver.tick(at: 105)
+
+    XCTAssertFalse(root.isCardReflowing)
+    try assertAtRest([root.card])
+    XCTAssertEqual(root.card.frame, target)
+    XCTAssertFalse(root.cardPacer.isRunning)
+    XCTAssertNotNil(root.lastCardPacing)
+    XCTAssertEqual(page.sizeChanges, sizeChanges)
+  }
+
+  /// A close during a running reflow grows the card from where the last pane is drawn, not from its real frame.
+  func testCardGrowsFromTheDrawnPaneWhenTheSplitEndsMidReflow() throws {
+    let world = try Self.makeWorld(panes: 3)
+    let harness = Harness(world.sidebar, reduceMotion: false)
+    harness.controller.window?.orderFrontRegardless()
+    let root = harness.controller.rootView
+    harness.split.reflowClock = { 100 }
+    harness.split.reflowDriver.drivesDisplayLink = false
+    root.cardReflowClock = { 100 }
+    root.cardReflowDriver.drivesDisplayLink = false
+    harness.controller.activate(node: world.panes[0])
+
+    try harness.clickClose(2)
+    waitUntil("the split shrinks to 2 panes") { harness.split.paneCount == 2 }
+    harness.split.reflowDriver.tick(at: 100.06)
+    XCTAssertTrue(harness.split.isReflowing)
+    let paneDrawn = root.convert(harness.split.presentedPaneFrames[0], from: harness.split)
+    let paneReal = root.convert(harness.split.paneCards[0].frame, from: harness.split)
+    XCTAssertNotEqual(paneDrawn, paneReal, "pane 0 is drawn on its way")
+
+    try harness.clickClose(1)
+    waitUntil("the split ends") { !root.showsSplit }
+
+    XCTAssertTrue(root.isCardReflowing)
+    assertEqual(try onScreen(root.card), paneDrawn, "the card starts where the pane was drawn")
     harness.controller.close()
   }
 

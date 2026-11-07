@@ -14,11 +14,6 @@ import Foundation
 private typealias ChromeMainFunction =
     @convention(c) (Int32, UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>) -> Int32
 
-/// Switches every engine launch gets unless the caller passed them. The shell
-/// creates the windows once it is ready, so Chromium opens none at startup and
-/// restores no session (Decision 2).
-private let engineSwitches = ["--no-startup-window"]
-
 private func engineFail(_ message: String) -> Never {
     FileHandle.standardError.write(Data("ARKT engine shell: \(message)\n".utf8))
     exit(1)
@@ -45,12 +40,18 @@ func engineMain() -> Never {
     // references the class, which keeps dead stripping from dropping it.
     // The engine-lane probes (--arkt-reentrancy-probe, --arkt-embedder-fail)
     // keep the stand-in shell; every other launch runs the Arkt shell.
+    // Distribution has no probes (ARKT_TEST_SWITCHES is the Engine configuration's only).
+    #if ARKT_TEST_SWITCHES
     if StandInShell.isRequested {
         ChromiumEmbedding.install(StandInShell.shared)
     } else {
         ChromiumShell.shared.installMenuAfterLaunch()
         ChromiumEmbedding.install(ChromiumShell.shared)
     }
+    #else
+    ChromiumShell.shared.installMenuAfterLaunch()
+    ChromiumEmbedding.install(ChromiumShell.shared)
+    #endif
 
     let path = engineFrameworkPath()
     FileHandle.standardError.write(Data("ARKT engine shell: dlopen \(path)\n".utf8))
@@ -62,10 +63,14 @@ func engineMain() -> Never {
     }
     let chromeMain = unsafeBitCast(symbol, to: ChromeMainFunction.self)
 
-    var arguments = CommandLine.arguments
-    for engineSwitch in engineSwitches where !arguments.contains(engineSwitch) {
-        arguments.append(engineSwitch)
-    }
+    // The switches every engine launch gets (no startup window, profile kept loaded): EngineLaunchArguments.
+    #if ARKT_TEST_SWITCHES
+    let arguments = EngineLaunchArguments.applying(to: CommandLine.arguments)
+    #else
+    // The shipped app never passes a test switch (--arkt-engine-test-api and the rest) on to the framework.
+    let arguments = EngineLaunchArguments.applying(
+        to: EngineLaunchArguments.strippingTestSwitches(CommandLine.arguments))
+    #endif
     // Chromium keeps argv for the life of the process; the copies are never freed.
     let argv = UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>.allocate(capacity: arguments.count + 1)
     for (index, argument) in arguments.enumerated() {

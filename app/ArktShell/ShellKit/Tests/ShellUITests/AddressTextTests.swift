@@ -27,6 +27,17 @@ struct AddressTextTests {
     #expect(AddressText.host(URL(string: "about:blank")) == "about:blank")
   }
 
+  /// Both bars follow the shared host display rule (#697): a real internationalized host in Unicode, a look-alike
+  /// encoded, the rest of the address untouched.
+  @Test func anInternationalizedHostFollowsTheSharedRule() {
+    #expect(AddressText.host(URL(string: "https://www.xn--mnchen-3ya.de/plan")) == "m\u{00FC}nchen.de")
+    #expect(AddressText.host(URL(string: "https://xn--80ak6aa92e.com/")) == "xn--80ak6aa92e.com")
+    #expect(AddressText.host(URL(string: "https://%D0%B0pple.com/")) == "xn--pple-43d.com",
+            "a percent-encoded look-alike is not decoded into Unicode")
+    #expect(AddressText.full(URL(string: "https://xn--mnchen-3ya.de/plan?q=1")) == "https://m\u{00FC}nchen.de/plan?q=1")
+    #expect(AddressText.full(URL(string: "https://xn--pple-43d.com/login")) == "https://xn--pple-43d.com/login")
+  }
+
   @Test func fullIsTheAbsoluteString() {
     #expect(AddressText.full(URL(string: "https://www.example.com/a?q=1")) == "https://www.example.com/a?q=1")
     #expect(AddressText.full(nil) == "")

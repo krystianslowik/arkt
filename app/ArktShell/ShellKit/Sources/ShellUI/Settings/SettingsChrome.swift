@@ -12,13 +12,18 @@ public final class SettingsPaneItemView: NSView {
   let pane: SettingsPane
   var onSelect: (@MainActor (SettingsPane) -> Void)?
   public private(set) var isSelected = false
-  private let plate = CALayer()
+  private let plate = ShadowPathLayer()
   private let hoverFill = CALayer()
   private let content = CALayer()
   private let glyph = CALayer()
   private let label = CATextLayer()
   private var hovering = false
   private var tracking: NSTrackingArea?
+  /// `ShellTokens.focusRing` around the item while it has keyboard focus (#642).
+  /// Raised while shown: the next item is only `paneItemGap` (2 pt) away, closer than the ring's width.
+  private(set) lazy var keyboardFocusRing = KeyboardFocusRingView.attach(outside: self,
+                                                                         radius: SettingsMetrics.paneItemRadius,
+                                                                         raisesHost: true)
 
   init(pane: SettingsPane) {
     self.pane = pane
@@ -29,8 +34,8 @@ public final class SettingsPaneItemView: NSView {
       fill.cornerRadius = SettingsMetrics.paneItemRadius
       fill.cornerCurve = .continuous
     }
-    plate.shadowOffset = CGSize(width: 0, height: -1)
-    plate.shadowRadius = 1.5
+    plate.shadowOffset = SettingsTokens.paneItemPlateShadow.unflippedOffset
+    plate.shadowRadius = SettingsTokens.paneItemPlateShadow.radius
     plate.opacity = 0
     label.alignmentMode = .center
     content.addSublayer(glyph)
@@ -38,7 +43,7 @@ public final class SettingsPaneItemView: NSView {
     layer?.addSublayer(hoverFill)
     layer?.addSublayer(plate)
     layer?.addSublayer(content)
-    focusRingType = .default
+    focusRingType = .none
     setAccessibilityElement(true)
     setAccessibilityRole(.radioButton)
     setAccessibilityLabel(pane.label)
@@ -95,12 +100,17 @@ public final class SettingsPaneItemView: NSView {
     super.keyDown(with: event)
   }
 
-  override public func drawFocusRingMask() {
-    NSBezierPath(roundedRect: bounds, xRadius: SettingsMetrics.paneItemRadius,
-                 yRadius: SettingsMetrics.paneItemRadius).fill()
+  override public func becomeFirstResponder() -> Bool {
+    let became = super.becomeFirstResponder()
+    if became { keyboardFocusRing.setFocused(true) }
+    return became
   }
 
-  override public var focusRingMaskBounds: NSRect { bounds }
+  override public func resignFirstResponder() -> Bool {
+    let resigned = super.resignFirstResponder()
+    if resigned { keyboardFocusRing.setFocused(false) }
+    return resigned
+  }
 
   // MARK: Pointer
 
@@ -164,7 +174,9 @@ public final class SettingsPaneItemView: NSView {
       hoverFill.backgroundColor = hovering && !isSelected
         ? ShellTokens.sidebarItemBackground.resolve(flavor).cgColor : nil
       plate.backgroundColor = ShellTokens.tabCurrent.resolve(flavor).cgColor
-      plate.shadowOpacity = flavor == .light ? Float(ShellTokens.tabCurrentShadow.light.alpha) * 0.5 : 0
+      let plateShadow = SettingsTokens.paneItemPlateShadow.color.resolve(flavor)
+      plate.shadowColor = plateShadow.cgColor
+      plate.shadowOpacity = plateShadow.alpha > 0 ? 1 : 0
       plate.borderWidth = increase && flavor == .dark ? 1 : 0
       plate.borderColor = SettingsTokens.separatorIncreasedContrast.resolve(flavor).cgColor
       let font = NSFont.systemFont(ofSize: 11, weight: .medium)

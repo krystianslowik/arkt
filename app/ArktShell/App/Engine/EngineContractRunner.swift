@@ -1,4 +1,4 @@
-#if ARKT_CHROMIUM_ENGINE
+#if ARKT_CHROMIUM_ENGINE && ARKT_TEST_SWITCHES
 import AppKit
 import ChromiumEngineKit
 import EngineAPI
@@ -8,7 +8,7 @@ import EngineAPITestSupport
 /// `--arkt-engine-contract` and `--arkt-engine-test-api` (plus the tabs probe extension loaded with
 /// `--load-extension`); the shell's session is not started. Every check gets a fresh `ChromiumEngine` from
 /// `ChromiumEmbedding.makeEngine()`, its own windows, and pages from a loopback server. Prints one
-/// `ARKT_CONTRACT` line per check and per rule, then exits: 0 when all 17 rules pass, 1 when any check fails or
+/// `ARKT_CONTRACT` line per check and per rule, then exits: 0 when all 18 rules pass, 1 when any check fails or
 /// reports not applicable, 2 when the runner cannot start.
 ///
 /// The switch is a Chromium-style switch, not `-ArktEngineContract YES` as the plan wrote it: Chromium reads every
@@ -22,7 +22,7 @@ final class EngineContractRunner {
   /// A name that is not a check, or an empty list, is an error: a typo must never run nothing and pass.
   static func selectedChecks() throws -> [ContractCheck] {
     guard let argument = CommandLine.arguments.first(where: { $0.hasPrefix(switchName + "=") }) else {
-      return ContractCheck.allCases
+      return ContractCheck.chromiumChecks
     }
     let names = argument.dropFirst(switchName.count + 1).split(separator: ",").map(String.init)
     let unknown = names.filter { ContractCheck(rawValue: $0) == nil }
@@ -119,6 +119,11 @@ final class EngineContractRunner {
       let elapsed = started.duration(to: .now).components
       let ms = elapsed.seconds * 1000 + elapsed.attoseconds / 1_000_000_000_000_000
       print("ARKT_CONTRACT rule \(check.rule) \(check.rawValue) \(outcome) (\(ms) ms)")
+      if check == .pageImageFitsTheCaps, let (image, duration) = EngineContract.lastPageImageMeasurement {
+        // The engine smoke's size and time (#370): sizes only, never the page.
+        let took = duration.components.seconds * 1000 + duration.components.attoseconds / 1_000_000_000_000_000
+        print("ARKT_CONTRACT page image \(image) in \(took) ms")
+      }
     }
     let rules = Set(checks.map(\.rule)).sorted()
     for rule in rules {
@@ -217,8 +222,36 @@ final class EngineContractRunner {
         let action = "const r = await chrome.runtime.sendMessage({ arktRemoveWindow: t.windowId }); "
           + "if (r !== \"ok\") throw new Error(String(r))"
         try await probeTab(engine, tab, action: action)
-      }
+      },
+      showPage: { [unowned self] engine, id in
+        // The window's active tab is mounted already (`LoadLog`); mounting again makes sure the page is on screen.
+        mount(id, of: try chromium(engine))
+      },
+      findPage: { [unowned self] occurrences, link in
+        serial += 1
+        return server.findPage(occurrences: occurrences, link: link, serial: serial)
+      },
+      selectedText: { [unowned self] engine, id in
+        let value = try await chromium(engine).evaluateScript("window.getSelection().toString()", in: id,
+                                                              userGesture: false)
+        guard case .string(let text)? = value else { throw RunnerError("selection answered \(String(describing: value))") }
+        return text
+      },
+      hoverLink: { [unowned self] engine, id in try await movePointer(engine, id, overLink: true) },
+      leaveLink: { [unowned self] engine, id in try await movePointer(engine, id, overLink: false) }
     )
+  }
+
+  /// Puts the pointer over the page's `#link`, or takes it away, as the renderer reports it: focusing a link makes Blink
+  /// send the same `UpdateTargetURL` a hover does (Chromium's own `WebContentsImplBrowserTest.UpdateTargetURL` drives it
+  /// this way), and blurring it clears the URL. Blink ignores mouse events for a window that is not key, and the runner
+  /// never activates its app (it would take the keyboard from whatever the developer is using), so a synthetic pointer
+  /// cannot reach the page here.
+  private func movePointer(_ engine: any EngineClient, _ id: TabID, overLink: Bool) async throws {
+    let call = overLink ? "focus" : "blur"
+    let answer = try await chromium(engine).evaluateScript("document.getElementById('link').\(call)(); true", in: id,
+                                                           userGesture: false)
+    guard answer == .bool(true) else { throw RunnerError("link \(call) answered \(String(describing: answer))") }
   }
 
   private func makeHost() -> RunnerWindowHost {
@@ -349,7 +382,7 @@ private final class LoadLog {
 
 /// A plain window per engine window, shown without activating the app, with the active tab mounted in its card.
 @MainActor
-private final class RunnerWindowHost: EngineWindowHosting {
+final class RunnerWindowHost: EngineWindowHosting {
   let window: NSWindow
   let cardView: NSView
   var forward: EngineCommandForwarding?

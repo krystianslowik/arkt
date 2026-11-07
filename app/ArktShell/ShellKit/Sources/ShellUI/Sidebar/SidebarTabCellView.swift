@@ -1,4 +1,6 @@
 import AppKit
+import Carbon.HIToolbox
+import Motion
 
 /// Favicon (16 pt at x 10), title (14 pt medium at x 34), the audio button of a page that plays or is muted (#364)
 /// and the hover close (X) button at the trailing edge (GS-043). Frames set in `layout()`; no constraints.
@@ -63,7 +65,6 @@ public final class SidebarTabCellView: NSTableCellView, NSTextFieldDelegate {
       let alpha: CGFloat = isClosing ? Self.closingAlpha : 1
       titleField.alphaValue = alpha
       faviconView.alphaValue = alpha
-      setAccessibilityValue(isClosing ? "Closing" : nil)
     }
     titleField.stringValue = title
     titleField.textColor = ShellTokens.primaryText.resolve(flavor).nsColor()
@@ -265,14 +266,44 @@ public final class SidebarTabCellView: NSTableCellView, NSTextFieldDelegate {
   }
 }
 
-/// The hairline between pinned tabs and Today.
+/// The hairline between pinned tabs and Today, with the Clear control at its trailing end (#413,
+/// design/clear-today-tabs): drawn while the pointer is over the sidebar, when the line ends 8 pt before it.
 @MainActor
 public final class SidebarDividerView: NSView {
   public static let reuseIdentifier = NSUserInterfaceItemIdentifier("SidebarDividerView")
+  /// Gap from the line's end to the Clear control.
+  static let clearGap: CGFloat = 8
+  /// The control's trailing edge sits this far past the line's inset.
+  static let clearOutset: CGFloat = 2
+
   private let line = CALayer()
+  /// "Clear": always in the accessibility tree, drawn only while `setClearShown(true, ...)`.
+  public let clearButton = TodayClearButton()
+  /// The control was pressed.
+  var onClear: (@MainActor () -> Void)?
+  /// The control took or lost the keyboard focus.
+  var onFocusChange: (@MainActor () -> Void)? {
+    get { clearButton.onFocusChange }
+    set { clearButton.onFocusChange = newValue }
+  }
+  /// Tab or Shift-Tab (false: back to the rows) or Esc (true: back to the page) on the focused control.
+  var onKeyboardLeave: (@MainActor (_ escape: Bool) -> Void)? {
+    get { clearButton.onKeyboardLeave }
+    set { clearButton.onKeyboardLeave = newValue }
+  }
+  private(set) var isClearShown = false
 
   public var flavor: ThemeFlavor = .light {
-    didSet { needsDisplay = true }
+    didSet {
+      clearButton.flavor = flavor
+      needsDisplay = true
+    }
+  }
+
+  /// False with no Today rows: the control takes no press and VoiceOver reads it as dimmed.
+  var isClearEnabled: Bool {
+    get { clearButton.isEnabled }
+    set { clearButton.isEnabled = newValue }
   }
 
   public override init(frame frameRect: NSRect) {
@@ -283,6 +314,10 @@ public final class SidebarDividerView: NSView {
     setAccessibilityElement(true)
     setAccessibilityRole(.splitter)
     setAccessibilityIdentifier(AXID.Sidebar.divider)
+    clearButton.target = self
+    clearButton.action = #selector(clearPressed(_:))
+    clearButton.alphaValue = 0
+    addSubview(clearButton)
   }
 
   public override func accessibilityParent() -> Any? {
@@ -292,20 +327,184 @@ public final class SidebarDividerView: NSView {
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+  @objc private func clearPressed(_ sender: Any?) { onClear?() }
+
+  /// Fades the control in or out (the hover close's 0.12 s ease-out, Reduce Motion too: it is an opacity change) and
+  /// moves the line's end with it. Never hides the control from the accessibility tree.
+  func setClearShown(_ shown: Bool, animated: Bool) {
+    guard shown != isClearShown else { return }
+    isClearShown = shown
+    let target: CGFloat = shown ? 1 : 0
+    if animated, window != nil {
+      NSAnimationContext.runAnimationGroup { context in
+        context.duration = SidebarMetrics.closeButtonFadeDuration
+        context.timingFunction = MotionCurve.strongEaseOut.timingFunction
+        context.allowsImplicitAnimation = true
+        clearButton.animator().alphaValue = target
+      }
+    } else {
+      clearButton.alphaValue = target
+    }
+    layoutLine(animated: animated && window != nil)
+  }
+
+  /// The line's frame now (for tests).
+  var lineFrame: CGRect { line.frame }
+
   public override var wantsUpdateLayer: Bool { true }
 
   public override func updateLayer() {
-    CATransaction.begin()
-    CATransaction.setDisableActions(true)
     line.backgroundColor = ShellTokens.sidebarDivider.resolve(flavor).cgColor
+    layoutLine(animated: false)
+  }
+
+  private func layoutLine(animated: Bool) {
+    CATransaction.begin()
+    if animated {
+      CATransaction.setAnimationDuration(SidebarMetrics.closeButtonFadeDuration)
+      CATransaction.setAnimationTimingFunction(MotionCurve.strongEaseOut.timingFunction)
+    } else {
+      CATransaction.setDisableActions(true)
+    }
     let scale = window?.backingScaleFactor ?? 2
+    let end = isClearShown ? clearButton.frame.minX - Self.clearGap : bounds.width - SidebarMetrics.faviconLeading
     line.frame = CGRect(x: SidebarMetrics.faviconLeading, y: (bounds.height / 2).rounded(),
-                        width: max(0, bounds.width - 2 * SidebarMetrics.faviconLeading), height: 1 / scale)
+                        width: max(0, end - SidebarMetrics.faviconLeading), height: 1 / scale)
     CATransaction.commit()
   }
 
   public override func layout() {
     super.layout()
+    let size = clearButton.intrinsicContentSize
+    clearButton.frame = NSRect(x: bounds.width - SidebarMetrics.faviconLeading + Self.clearOutset - size.width,
+                               y: ((bounds.height - size.height) / 2).rounded(), width: size.width, height: size.height)
+    needsDisplay = true
+    layoutLine(animated: false)
+  }
+}
+
+/// The Clear control on the divider above Today (#413): "Clear", 12 pt semibold, secondary text on the sidebar item
+/// fill (radius 6, padding 1 x 6). Hovered, the fill is the item's hover fill; pressed, the title is primary text.
+@MainActor
+public final class TodayClearButton: NSButton {
+  static let fontSize: CGFloat = 12
+  static let paddingX: CGFloat = 6
+  static let paddingY: CGFloat = 1
+  static let cornerRadius: CGFloat = 6
+
+  var flavor: ThemeFlavor = .light { didSet { refresh() } }
+  private(set) var isHovered = false { didSet { if isHovered != oldValue { refresh() } } }
+  private var hoverArea: NSTrackingArea?
+  /// Tab from a focused sidebar row reaches it (#413); while it has the focus it is drawn with the system ring.
+  private(set) var hasKeyboardFocus = false
+  var onFocusChange: (@MainActor () -> Void)?
+  var onKeyboardLeave: (@MainActor (_ escape: Bool) -> Void)?
+
+  public override init(frame frameRect: NSRect) {
+    super.init(frame: frameRect)
+    isBordered = false
+    bezelStyle = .regularSquare
+    setButtonType(.momentaryChange)
+    title = "Clear"
+    wantsLayer = true
+    layer?.cornerRadius = Self.cornerRadius
+    autoresizingMask = []
+    setAccessibilityLabel("Clear Today tabs")
+    setAccessibilityHelp("Moves the tabs under Today to the Archive")
+    setAccessibilityIdentifier(AXID.Sidebar.clearToday)
+    focusRingType = .exterior
+    refresh()
+  }
+
+  /// Reachable with Tab from the sidebar's focused row whatever the system's keyboard navigation setting: the
+  /// sidebar runs its own keyboard focus (Ctrl-Space, BH-019).
+  public override var acceptsFirstResponder: Bool { isEnabled }
+  public override var canBecomeKeyView: Bool { isEnabled }
+
+  public override func becomeFirstResponder() -> Bool {
+    let became = super.becomeFirstResponder()
+    if became {
+      hasKeyboardFocus = true
+      onFocusChange?()
+    }
+    return became
+  }
+
+  public override func resignFirstResponder() -> Bool {
+    let resigned = super.resignFirstResponder()
+    if resigned, hasKeyboardFocus {
+      hasKeyboardFocus = false
+      onFocusChange?()
+    }
+    return resigned
+  }
+
+  /// Return and Space press it; Tab and Shift-Tab go back to the rows, Esc to the page.
+  public override func keyDown(with event: NSEvent) {
+    switch Int(event.keyCode) {
+    case kVK_Return, kVK_ANSI_KeypadEnter, kVK_Space: performClick(nil)
+    case kVK_Tab: onKeyboardLeave?(false)
+    case kVK_Escape: onKeyboardLeave?(true)
+    default: super.keyDown(with: event)
+    }
+  }
+
+  public override func drawFocusRingMask() {
+    NSBezierPath(roundedRect: bounds, xRadius: Self.cornerRadius, yRadius: Self.cornerRadius).fill()
+  }
+
+  public override var focusRingMaskBounds: NSRect { bounds }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+  /// The divider row's proxy is the parent, as for the tab cells' children.
+  public override func accessibilityParent() -> Any? {
+    var ancestor = superview
+    while let view = ancestor, !(view is SidebarOutlineView) { ancestor = view.superview }
+    if let outline = ancestor as? SidebarOutlineView, let divider = superview,
+       let proxy = outline.axProxyRow(hosting: divider) {
+      return proxy
+    }
+    return super.accessibilityParent()
+  }
+
+  public override var intrinsicContentSize: NSSize {
+    let text = attributedTitle.size()
+    return NSSize(width: (text.width + 2 * Self.paddingX).rounded(.up),
+                  height: (text.height + 2 * Self.paddingY).rounded(.up))
+  }
+
+  public override var isHighlighted: Bool {
+    didSet { if isHighlighted != oldValue { refresh() } }
+  }
+
+  public override func updateTrackingAreas() {
+    super.updateTrackingAreas()
+    if let hoverArea { removeTrackingArea(hoverArea) }
+    let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                              owner: self)
+    addTrackingArea(area)
+    hoverArea = area
+  }
+
+  public override func mouseEntered(with event: NSEvent) { isHovered = true }
+  public override func mouseExited(with event: NSEvent) { isHovered = false }
+
+  public override var wantsUpdateLayer: Bool { true }
+
+  public override func updateLayer() {
+    let fill = isHovered ? ShellTokens.sidebarItemHovered : ShellTokens.sidebarItemBackground
+    layer?.backgroundColor = fill.resolve(flavor).cgColor
+  }
+
+  /// The title in its colour for the pressed state, and the fill for the hover state.
+  private func refresh() {
+    let ink = isHighlighted ? ShellTokens.primaryText : ShellTokens.secondaryText
+    attributedTitle = NSAttributedString(string: "Clear", attributes: [
+      .font: NSFont.systemFont(ofSize: Self.fontSize, weight: .semibold),
+      .foregroundColor: ink.resolve(flavor).nsColor(),
+    ])
     needsDisplay = true
   }
 }
@@ -320,8 +519,7 @@ enum SidebarGlyphs {
 
   static func letter(for title: String, url: URL?, flavor: ThemeFlavor, size: CGFloat, scale: CGFloat,
                      cache: SymbolImageCache = .shared) -> NSImage {
-    let source = url?.host().map { $0.hasPrefix("www.") ? String($0.dropFirst(4)) : $0 } ?? title
-    let letter = source.first.map { String($0).uppercased() } ?? "?"
+    let letter = letterText(title: title, url: url)
     let fill = letterFill.resolve(flavor)
     let ink = letterInk.resolve(flavor)
     return cache.bitmap(key: "letter-\(letter)-\(flavor)", size: size, scale: scale) { rect in
@@ -336,6 +534,13 @@ enum SidebarGlyphs {
       let textSize = text.size()
       text.draw(at: NSPoint(x: rect.midX - textSize.width / 2, y: rect.midY - textSize.height / 2))
     }
+  }
+
+  /// The tile's letter: the first of the host as the address bar writes it (`HostDisplay`, #732), less a leading
+  /// "www.", so a look-alike's tile reads "X" for its `xn--` form; else the title's first; else "?".
+  static func letterText(title: String, url: URL?) -> String {
+    let source = url.flatMap(HostDisplay.host(of:)).map { $0.hasPrefix("www.") ? String($0.dropFirst(4)) : $0 } ?? title
+    return source.first.map { String($0).uppercased() } ?? "?"
   }
 
   /// The audio button's glyph (#364): `symbol` in the X's color, a little larger than the X.

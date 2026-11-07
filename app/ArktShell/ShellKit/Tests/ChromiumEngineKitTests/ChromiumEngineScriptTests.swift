@@ -29,6 +29,51 @@ struct ChromiumEngineScriptTests {
     try #require(engine.windows[id]?.browser as? ScriptedBrowser)
   }
 
+  // MARK: Parked duplicates (#380)
+
+  /// A duplicate is a parked copy: it carries the page and its history, never takes the window's active tab, and
+  /// loads only when it is shown (activated). The facade keeps it outside the tab strip, so extensions never see it.
+  @Test func duplicateIsParkedUntilItIsShown() async throws {
+    let (engine, window, _) = makeEngine()
+    let first = URL(string: "arkt-test://alpha.test/First")!
+    let second = URL(string: "arkt-test://alpha.test/Second")!
+    let id = engine.createTab(url: first, in: window)
+    try scriptedTab(engine, id).finishLoad()
+    engine.navigate(id, to: second)
+    try scriptedTab(engine, id).finishLoad()
+    try await delivered()
+
+    let copy = try #require(engine.duplicateTab(id))
+    try await delivered()
+    let parked = try #require(engine.snapshot(of: copy))
+    #expect(parked.url == second && parked.canGoBack && !parked.isLoading, "the copy holds the page without loading")
+    #expect(!parked.isActive && engine.snapshot(of: id)?.isActive == true, "the copy never displaces the active tab")
+    #expect(engine.activeTab(in: window) == id)
+    #expect(engine.history(of: copy)?.back.map(\.url) == [first], "the copy keeps the back and forward history")
+
+    engine.activateTab(copy)
+    try await delivered()
+    #expect(engine.snapshot(of: copy)?.isActive == true && engine.activeTab(in: window) == copy)
+    #expect(engine.snapshot(of: copy)?.isLoading == true, "shown, the copy loads")
+  }
+
+  /// A parked copy ends with its window and is never shown into a closing one (#380).
+  @Test func parkedCopyEndsWithItsWindowAndIsNotShownAfterwards() async throws {
+    let (engine, window, _) = makeEngine()
+    let recorder = EventRecorder(engine)
+    let id = engine.createTab(url: URL(string: "arkt-test://alpha.test/First")!, in: window)
+    try scriptedTab(engine, id).finishLoad()
+    let copy = try #require(engine.duplicateTab(id))
+    try await delivered()
+    engine.closeWindow(window)
+    try await delivered()
+    #expect(engine.snapshot(of: copy) == nil)
+    #expect(recorder.events(for: copy).last == .tabClosed(copy, reason: .windowClosing))
+    engine.activateTab(copy)
+    try await delivered()
+    #expect(engine.snapshot(of: copy) == nil && engine.activeTab(in: window) == nil)
+  }
+
   // MARK: Batches
 
   @Test func titleRecordedAfterLoadEndIsDeliveredBeforeIt() async throws {

@@ -76,6 +76,27 @@ final class AXProxyRowsTests: XCTestCase {
     return try list.map { try XCTUnwrap($0 as? AXProxyRow, file: file, line: line) }
   }
 
+  /// Press and show menu are offered only by a table whose owner handles them (#607); the command bar results have
+  /// no handlers, so their rows refuse both selectors and both actions.
+  func testRowsOfATableWithoutPressOrMenuHandlersRefuseBoth() throws {
+    let fixture = makeFixture(rowCount: 3)
+    let press = #selector(NSAccessibilityProtocol.accessibilityPerformPress)
+    let showMenu = #selector(NSAccessibilityProtocol.accessibilityPerformShowMenu)
+    let row = try XCTUnwrap(try childRows(fixture.element).first)
+    XCTAssertFalse(row.isAccessibilitySelectorAllowed(press))
+    XCTAssertFalse(row.isAccessibilitySelectorAllowed(showMenu))
+    XCTAssertFalse(row.accessibilityPerformPress())
+    XCTAssertFalse(row.accessibilityPerformShowMenu())
+
+    var pressed: [Int] = []
+    fixture.table.axProxyRows.performPress = { pressed.append($0); return true }
+    XCTAssertTrue(row.isAccessibilitySelectorAllowed(press), "a handler turns press on")
+    XCTAssertFalse(row.isAccessibilitySelectorAllowed(showMenu), "and only press")
+    XCTAssertTrue(row.accessibilityPerformPress())
+    XCTAssertEqual(pressed, [0])
+    fixture.window.close()
+  }
+
   func testRowsWithoutRowViewsReportTheModelsLabelAndValue() throws {
     let fixture = makeFixture(rowCount: 40)
     let table = fixture.table
@@ -198,7 +219,8 @@ final class AXProxyRowsTests: XCTestCase {
 
     let rows = try childRows(element)
     XCTAssertGreaterThanOrEqual(rows.count, 2)
-    XCTAssertEqual(rows.map { $0.accessibilityLabel() }, bar.results.map(\.title))
+    let expectedLabels = bar.results.enumerated().map { $0.element.accessibilityLabel(position: $0.offset + 1, of: bar.results.count) }
+    XCTAssertEqual(rows.map { $0.accessibilityLabel() }, expectedLabels, "title, host, kind, k of n (#371)")
     XCTAssertEqual(rows.map { $0.accessibilityValue() as? String }, bar.results.map(\.accessibilityCaption))
     XCTAssertEqual(rows.map { $0.accessibilityIdentifier() }, Array(repeating: AXID.CommandBar.row, count: rows.count))
 
@@ -211,8 +233,9 @@ final class AXProxyRowsTests: XCTestCase {
 
     bar.setQueryForTesting("example.org/synthetic")
     let requeried = try childRows(element)
-    XCTAssertEqual(requeried.map { $0.accessibilityLabel() }, bar.results.map(\.title))
-    XCTAssertEqual(requeried.first?.accessibilityLabel(), "example.org/synthetic")
+    let requeriedLabels = bar.results.enumerated().map { $0.element.accessibilityLabel(position: $0.offset + 1, of: bar.results.count) }
+    XCTAssertEqual(requeried.map { $0.accessibilityLabel() }, requeriedLabels)
+    XCTAssertTrue(requeried.first?.accessibilityLabel()?.hasPrefix("example.org/synthetic, ") == true)
 
     bar.hide(restoreFocus: false)
     controller.close()

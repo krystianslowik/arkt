@@ -64,6 +64,9 @@ final class AppOnboardingServices: OnboardingServices {
     return await session.arcFiles.isAvailable()
   }
 
+  /// The sidebar count the Import step already shows, so the consent reuses it instead of counting again (#514).
+  private var knownCounts: OnboardingCounts?
+
   func countArcData() -> AsyncThrowingStream<OnboardingCounts, any Error> {
     guard let files = session?.arcFiles else {
       return AsyncThrowingStream { $0.finish(throwing: CancellationError()) }
@@ -73,8 +76,10 @@ final class AppOnboardingServices: OnboardingServices {
       let task = Task {
         do {
           for try await counts in source {
-            continuation.yield(OnboardingCounts(spaces: counts.spaces, pinnedTabs: counts.pinnedTabs,
-                                                favorites: counts.favorites, folders: counts.folders))
+            let update = OnboardingCounts(spaces: counts.spaces, pinnedTabs: counts.pinnedTabs,
+                                          favorites: counts.favorites, folders: counts.folders)
+            knownCounts = update
+            continuation.yield(update)
           }
           continuation.finish()
         } catch {
@@ -84,6 +89,11 @@ final class AppOnboardingServices: OnboardingServices {
       }
       continuation.onTermination = { _ in task.cancel() }
     }
+  }
+
+  func makeBrowserDataImport() -> (any BrowserDataImportSource)? {
+    let known = knownCounts.map { SpacesAndTabsCount(items: $0.pinnedTabs + $0.favorites, spaces: $0.spaces) }
+    return session?.makeBrowserDataImport(knownSidebar: known)
   }
 
   func importArcData() async -> OnboardingImportResult {
@@ -119,7 +129,10 @@ extension AppSession {
     if EnvironmentOverrides(environment: ProcessInfo.processInfo.environment).skipsOnboarding { return }
     if AppEnvironment.smokePhase != nil { return }
     #endif
-    guard onboardingRecord.showsAutomatically(profileHasSpaces: !window.isShowingEmptyState),
+    // The profile's Spaces, read from the shared source: a blank or incognito window draws none of them.
+    let sidebar = window.sidebarController
+    let profileHasSpaces = sidebar.source.spaceOrder.contains { sidebar.source.space($0)?.profile == sidebar.profile }
+    guard onboardingRecord.showsAutomatically(profileHasSpaces: profileHasSpaces),
           !windows.controllers.contains(where: \.isShowingOnboarding) else { return }
     presentOnboarding(on: window, mode: .firstRun, resume: onboardingRecord.progress)
   }
@@ -145,12 +158,8 @@ extension AppSession {
   }
 
   /// A link from another app (FakeEngine; the Chromium engine opens them itself): a new Today tab in the primary
-  /// window.
+  /// window. The routing is `ShellWindowSet.openFromOtherApp`, which the ShellKit tests drive.
   func openFromOtherApp(_ urls: [URL]) {
-    let window = windows.primary ?? windows.openWindow()
-    window.showWindow(nil)
-    for url in urls where ["http", "https"].contains(url.scheme?.lowercased() ?? "") || url.isFileURL {
-      window.openFromOtherApp(url)
-    }
+    windows.openFromOtherApp(urls)
   }
 }

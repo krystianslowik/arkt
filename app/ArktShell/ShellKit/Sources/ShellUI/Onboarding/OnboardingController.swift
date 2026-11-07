@@ -17,6 +17,9 @@ public protocol OnboardingServices: AnyObject {
   func checkArc() async -> Bool
   /// The read-only count pass: cumulative counts as it walks the data.
   func countArcData() -> AsyncThrowingStream<OnboardingCounts, any Error>
+  /// The browser data import the Import step hands off to (#514): Import opens its consent in place of the step, and
+  /// finishing returns to the step's Imported state. nil: the step imports at once through `importArcData`.
+  func makeBrowserDataImport() -> (any BrowserDataImportSource)?
   /// Imports, without the summary alert.
   func importArcData() async -> OnboardingImportResult
   /// Arkt opens http and https links now.
@@ -27,6 +30,10 @@ public protocol OnboardingServices: AnyObject {
   func saveProgress(_ snapshot: OnboardingFlow.Snapshot)
   /// Start browsing or a confirmed Skip setup: `onboardingCompletedVersion` is written and the saved step cleared.
   func markCompleted()
+}
+
+extension OnboardingServices {
+  public func makeBrowserDataImport() -> (any BrowserDataImportSource)? { nil }
 }
 
 /// Runs the first run (or Help > Welcome to Arkt) over one window: the flow model, the step views, the stage, the
@@ -71,6 +78,11 @@ public final class OnboardingController {
   public var onFinish: (@MainActor () -> Void)?
   /// Test seam: runs instead of the `NSAlert` sheet; answer true to confirm Skip setup.
   public var confirmSkip: (@MainActor (@escaping @MainActor (Bool) -> Void) -> Void)?
+  /// Runs `work` after `delay` seconds; the import hero's removal after its fade, and the finish's reveal and browser
+  /// handoff, wait on it. Tests run it by hand.
+  var schedule: @MainActor (TimeInterval, @escaping @MainActor () -> Void) -> Void = { delay, work in
+    DispatchQueue.main.asyncAfter(deadline: .now() + delay) { work() }
+  }
 
   let view: OnboardingView
   private weak var window: ShellWindowController?
@@ -87,6 +99,9 @@ public final class OnboardingController {
   private var isAsking = false
   private var browserViews: [(NSView, Bool)] = []
   private var firstStepShown = false
+  /// The browser data import while it replaces the Import step's content (#514), and what it drives.
+  private var importHero: ImportHeroView?
+  private var importSource: (any BrowserDataImportSource)?
 
   public var stage: any OnboardingStage { view.stage }
 
@@ -355,7 +370,7 @@ public final class OnboardingController {
   }
 
   private func back() {
-    guard !isFinished, !isAsking, flow.showsBack || flow.step.kind == .tour else { return }
+    guard !isFinished, !isAsking, importHero == nil, flow.showsBack || flow.step.kind == .tour else { return }
     let before = flow.step
     flow.back()
     guard flow.step != before else { return }
@@ -364,6 +379,10 @@ public final class OnboardingController {
 
   private func handle(_ key: OnboardingView.Key) {
     guard !isFinished, !isAsking else { return }
+    if let importHero {
+      if key == .escape { importHero.handleEscape() }
+      return
+    }
     switch key {
     case .escape:
       if flow.secondaryAction != nil { secondary() }
@@ -431,6 +450,10 @@ public final class OnboardingController {
   }
 
   private func startImport() {
+    if let source = services.makeBrowserDataImport() {
+      presentImportHero(source)
+      return
+    }
     flow.setImportPhase(.importing)
     landed = []
     rebuildImportStep()
@@ -439,6 +462,79 @@ public final class OnboardingController {
       let result = await services.importArcData()
       self?.importFinished(result)
     }
+  }
+
+  // MARK: Browser data import (#514)
+
+  /// Import now: the consent, progress and result replace the step's content in place, in the Hero style. The step
+  /// stays underneath, hidden; the particle field, the footer's progress and Skip setup stay.
+  private func presentImportHero(_ source: any BrowserDataImportSource) {
+    guard importHero == nil, let stepView = view.stepView else { return }
+    flow.setImportPhase(.importing)
+    landed = []
+    let hero = ImportHeroView(source: source, appearance: view.appearanceModel, compact: view.bounds.height < 700)
+    hero.onAnnouncement = { [weak self] text in self?.announce(text) }
+    // A confirmed Skip setup during the import finishes the run when the result shows: no Continue to press.
+    hero.onPhaseChange = { [weak self] phase in
+      if phase == .result, self?.skipAfterImport == true { self?.importSource?.finish() }
+    }
+    importHero = hero
+    importSource = source
+    view.importHero = hero
+    source.onFinish = { [weak self] outcome in self?.importFlowFinished(outcome) }
+    hero.frame = view.bounds
+    hero.autoresizingMask = [.width, .height]
+    hero.wantsLayer = true
+    view.addSubview(hero, positioned: .below, relativeTo: view.backButton)
+    stepView.isHidden = true
+    hero.layoutSubtreeIfNeeded()
+    // The step's content and the hero's cross-fade in 200 ms, Reduce Motion or not.
+    if let layer = hero.layer {
+      OnboardingMotion.set { layer.opacity = 0 }
+      OnboardingMotion.animate(layer, "opacity", to: Float(1), duration: 0.2)
+    }
+    refreshFooter(animated: true)
+    view.rebuildKeyLoop()
+    view.stage.show(.counts(OnboardingCountFormation(numbers: [], state: .importing(landed: []))),
+                    appearance: view.appearanceModel, animated: true)
+    source.start()
+    hero.focusFirstControl()
+  }
+
+  /// The import flow ended (Not now, a cancelled consent, or Continue on the result): the hero leaves and the step
+  /// shows its own Imported state (the first run lands on the first imported Space), Try again, or its Ready state.
+  private func importFlowFinished(_ outcome: BrowserDataImportOutcome) {
+    guard let hero = importHero else { return }
+    importHero = nil
+    importSource = nil
+    view.importHero = nil
+    hero.source.onChange = nil
+    if let layer = hero.layer {
+      OnboardingMotion.animate(layer, "opacity", to: Float(0), duration: 0.2)
+    }
+    schedule(0.22) { [weak hero] in hero?.removeFromSuperview() }
+    if outcome.importedAnything {
+      importedSpaces = outcome.addedSpaces.isEmpty ? Array((window?.sidebar.spaceOrder ?? []).prefix(1)) : outcome.addedSpaces
+      landed = Set(OnboardingCounts.Kind.allCases)
+      flow.setImportPhase(.imported(skipped: outcome.skippedSidebarItems))
+      announce(OnboardingCopy.importFinishedAnnouncement)
+    } else if outcome.attempted {
+      flow.setImportPhase(.failed)
+      announce(OnboardingCopy.importTitle(.failed))
+    } else {
+      flow.setImportPhase(.ready)
+    }
+    if options.mode == .firstRun { services.saveProgress(flow.snapshot) }
+    if skipAfterImport {
+      finish(skipped: true)
+      return
+    }
+    rebuildImportStep()
+    if case .imported = flow.importPhase {
+      view.stepView?.countsView?.land(landed, reduceMotion: view.appearanceModel.reduceMotion)
+    }
+    view.rebuildKeyLoop()
+    view.window?.makeFirstResponder(view)
   }
 
   private func importFinished(_ result: OnboardingImportResult) {
@@ -470,6 +566,7 @@ public final class OnboardingController {
     configure(stepView)
     view.setStep(stepView, animated: true)
     stepView.showAtRest()
+    stepView.isHidden = importHero != nil
     if let layer = stepView.layer {
       OnboardingMotion.set { layer.opacity = 0 }
       OnboardingMotion.animate(layer, "opacity", to: Float(1), duration: 0.2)
@@ -606,6 +703,7 @@ public final class OnboardingController {
     configure(stepView)
     view.setStep(stepView, animated: false)
     stepView.showAtRest()
+    stepView.isHidden = importHero != nil
   }
 
   // MARK: - Skip setup (6.9)
@@ -650,6 +748,10 @@ public final class OnboardingController {
     view.setWash(nil, animated: true)
     if flow.importPhase == .importing {
       skipAfterImport = true
+      // Asking, not importing: nothing to wait for. Closing the consent ends the flow, which finishes the first run.
+      if let importSource, importSource.state.phase == .counting || importSource.state.phase == .consent {
+        importSource.cancel()
+      }
       return
     }
     finish(skipped: true)
@@ -686,7 +788,7 @@ public final class OnboardingController {
     if options.mode == .firstRun { land(on: landing, window: window) }
     view.passesEventsThrough = true
     let reveal: CFTimeInterval = reduceMotion ? 0 : 0.65
-    DispatchQueue.main.asyncAfter(deadline: .now() + reveal) { [weak self] in
+    schedule(reveal) { [weak self] in
       // The browser shows through: the brand surface and the wash fade, the field stays for its fold.
       guard let self else { return }
       for layer in [self.view.surface, self.view.wash] as [CALayer] {
@@ -694,7 +796,7 @@ public final class OnboardingController {
       }
     }
     let commandBarDelay: CFTimeInterval = reduceMotion ? 0.05 : 0.9
-    DispatchQueue.main.asyncAfter(deadline: .now() + commandBarDelay) { [weak self] in
+    schedule(commandBarDelay) { [weak self] in
       guard let self else { return }
       browserShown = true
       removeOverlay()
@@ -770,6 +872,7 @@ public final class OnboardingController {
     guard !isFinished, appearance != view.appearanceModel else { return }
     view.appearanceModel = appearance
     showStepContentInPlace()
+    importHero?.restyle(appearance)
     view.stage.show(view.stepView.map(formation(for:)) ?? .none, appearance: appearance, animated: false)
     view.setWash(flow.step == .theme ? theme?.resolvedTheme : nil, animated: false)
     refreshFooter(animated: false)

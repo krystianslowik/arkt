@@ -6,8 +6,9 @@ import QuartzCore
 /// `ArktDialogSheetContent`, so Delete Space, the launch alerts and later confirmations share one look with the
 /// engine's prompts. One content model, three hosts (`DialogSheet`, `DialogPanel`, `DialogAlert`).
 ///
-/// Not mirrored from the engine model, because no shell dialog uses them yet: the checkbox, the primary enable delay,
-/// stacked buttons and a neutral primary.
+/// The checkbox is for the extension remove sheet's Report abuse (#720). The text field and the
+/// capped, scrolling body are for a page's `prompt()` and long `alert()` messages (#400); stacked buttons, a neutral
+/// primary, Escape dismissing and the input protection are for a site's permission request (#400).
 public struct DialogContent: Equatable, Sendable {
   public enum Icon: Equatable, Sendable {
     case none
@@ -15,6 +16,10 @@ public struct DialogContent: Equatable, Sendable {
     case appIcon
     /// A Space's theme swatch (its gradient stops) with its mark: the Space Delete Space removes.
     case spaceSwatch(colors: [RGBA], isDark: Bool, mark: SpaceIconInfo?)
+    /// A neutral tile with an SF Symbol: the dangerous-file sheet's warning.
+    case symbol(String)
+    /// An image (PNG or any format `NSImage` reads) in a rounded tile: an extension's icon (#720).
+    case image(Data)
   }
 
   /// Where the icon sits: beside the title (32 pt, body indented under the title) or stacked above it (the app-modal
@@ -35,10 +40,35 @@ public struct DialogContent: Equatable, Sendable {
   /// The button Return presses; `.none`: Return presses nothing.
   public enum DefaultButton: Equatable, Sendable { case none, primary, cancel }
 
+  /// A checkbox under the body (the remove sheet's Report abuse); its state is read when the dialog is answered.
+  public struct Checkbox: Equatable, Sendable {
+    public var title: String
+    public var isOn: Bool
+
+    public init(_ title: String, isOn: Bool = false) {
+      self.title = title
+      self.isOn = isOn
+    }
+  }
+
   /// How a dialog was answered.
   public enum Answer: Equatable, Sendable { case primary, secondary, cancel }
 
+  /// A one-line text field under the body (a page's `prompt()`); focus starts in it, with its text selected.
+  public struct Input: Equatable, Sendable {
+    public var text: String
+    /// What VoiceOver calls the field.
+    public var accessibilityLabel: String
+
+    public init(text: String, accessibilityLabel: String) {
+      self.text = text
+      self.accessibilityLabel = accessibilityLabel
+    }
+  }
+
   public var title: String
+  /// The most lines the title wraps to before it truncates; 0: as many as it needs.
+  public var titleMaxLines: Int
   public var icon: Icon
   public var iconPlacement: IconPlacement
   public var subtitle: String?
@@ -47,6 +77,8 @@ public struct DialogContent: Equatable, Sendable {
   public var listItems: [String]
   /// A quiet text link at the footer's leading edge (Show Data Folder); it does not answer the dialog.
   public var footerLink: String?
+  /// The footer link is a quiet red text link (Keep Anyway), not the neutral one.
+  public var footerLinkIsDestructive: Bool
   /// The answer that continues, on the trailing edge: mustard, or a quiet red title when `isDestructive`.
   public var primaryTitle: String
   /// A third answer between cancel and primary.
@@ -60,13 +92,29 @@ public struct DialogContent: Equatable, Sendable {
   /// VoiceOver help on the primary button ("Deletes the Space").
   public var primaryHelp: String?
   public var width: CGFloat
+  public var input: Input?
+  public var checkbox: Checkbox?
+  /// The body (all paragraphs) scrolls inside this height when it needs more; nil: it takes the height it needs.
+  public var bodyMaxHeight: CGFloat?
+  /// Full-width pills one above the other, primary first (a permission request: the answers carry equal weight).
+  public var stackedButtons: Bool
+  /// The primary is a neutral pill, not the mustard one: the dialog does not steer toward it.
+  public var neutralPrimary: Bool
+  /// Escape closes the dialog without an answer (`DialogPanel.onDismiss`), not as Cancel.
+  public var escapeDismisses: Bool
+  /// Seconds after the dialog appears in which button presses and Return are ignored; 0: none.
+  public var inputProtection: TimeInterval
 
   public init(title: String, icon: Icon = .none, iconPlacement: IconPlacement = .beside, subtitle: String? = nil,
               paragraphs: [Paragraph] = [], listHeading: String? = nil, listItems: [String] = [],
-              footerLink: String? = nil, primaryTitle: String, secondaryTitle: String? = nil,
+              footerLink: String? = nil, footerLinkIsDestructive: Bool = false, primaryTitle: String, secondaryTitle: String? = nil,
               cancelTitle: String? = nil, defaultButton: DefaultButton = .primary, isDestructive: Bool = false,
-              escapeAnswersCancel: Bool = true, primaryHelp: String? = nil, width: CGFloat = 420) {
+              escapeAnswersCancel: Bool = true, primaryHelp: String? = nil, width: CGFloat = 420,
+              input: Input? = nil, checkbox: Checkbox? = nil, titleMaxLines: Int = 0,
+              bodyMaxHeight: CGFloat? = nil, stackedButtons: Bool = false,
+              neutralPrimary: Bool = false, escapeDismisses: Bool = false, inputProtection: TimeInterval = 0) {
     self.title = title
+    self.titleMaxLines = titleMaxLines
     self.icon = icon
     self.iconPlacement = iconPlacement
     self.subtitle = subtitle
@@ -74,6 +122,7 @@ public struct DialogContent: Equatable, Sendable {
     self.listHeading = listHeading
     self.listItems = listItems
     self.footerLink = footerLink
+    self.footerLinkIsDestructive = footerLinkIsDestructive
     self.primaryTitle = primaryTitle
     self.secondaryTitle = secondaryTitle
     self.cancelTitle = cancelTitle
@@ -83,13 +132,27 @@ public struct DialogContent: Equatable, Sendable {
     self.escapeAnswersCancel = escapeAnswersCancel
     self.primaryHelp = primaryHelp
     self.width = width
+    self.input = input
+    self.checkbox = checkbox
+    self.bodyMaxHeight = bodyMaxHeight
+    self.stackedButtons = stackedButtons
+    self.neutralPrimary = neutralPrimary
+    self.escapeDismisses = escapeDismisses
+    self.inputProtection = inputProtection
   }
 
-  /// The body as VoiceOver describes the dialog: the paragraphs in order, then the list.
+  /// What VoiceOver speaks when the dialog appears: the title, then the list as items ("example.com wants to: Use your
+  /// camera, Use your microphone"); the title alone when there is no list.
+  public var announcement: String {
+    listItems.isEmpty ? title : "\(title): \(listItems.joined(separator: ", "))"
+  }
+
+  /// The body as VoiceOver describes the dialog: the paragraphs in order, then the list heading and its items, which
+  /// are separated by commas so they do not run into one sentence.
   public var accessibilityDescription: String {
     var parts = paragraphs.map(\.text)
     if let listHeading { parts.append(listHeading) }
-    parts += listItems
+    if !listItems.isEmpty { parts.append(listItems.joined(separator: ", ")) }
     return parts.joined(separator: " ")
   }
 }
@@ -112,6 +175,33 @@ extension DialogContent {
     title: "This data was saved by a newer version of Arkt", icon: .appIcon, iconPlacement: .stacked,
     paragraphs: [.init("Update Arkt to open it. Nothing was changed.")], primaryTitle: "Quit",
     defaultButton: .primary, escapeAnswersCancel: false)
+}
+
+// MARK: - Crash report ask (#129)
+
+extension DialogContent {
+  /// The one-time ask on the launch after a crash, with the switch off: Send (Return) opens the report as a GitHub
+  /// issue once, Always Send turns the switch on, Don't Send (Escape) deletes the report. Every answer ends the ask.
+  public static let crashReportAsk = DialogContent(
+    title: "Arkt quit unexpectedly. Send a report?", icon: .appIcon, iconPlacement: .stacked,
+    paragraphs: [
+      .init("The report has no web addresses, page titles, file paths or names. "
+        + "Nothing is sent until you review it in your browser."),
+      .init("You can change this in Settings, under Privacy.", secondary: true),
+    ],
+    primaryTitle: "Send", secondaryTitle: "Always Send", cancelTitle: "Don't Send",
+    defaultButton: .primary, escapeAnswersCancel: true)
+}
+
+// MARK: - Quit warning (#487, BH-177)
+
+extension DialogContent {
+  /// Cmd-Q while "Warn before quitting" is on: Quit (Return) continues, Cancel (Escape) leaves the app running.
+  public static let quitWarning = DialogContent(
+    title: "Quit Arkt?", icon: .appIcon, iconPlacement: .stacked,
+    paragraphs: [.init("A window is still open.")],
+    primaryTitle: "Quit", cancelTitle: "Cancel",
+    defaultButton: .primary, escapeAnswersCancel: true)
 }
 
 // MARK: - Motion (section 7)
@@ -158,6 +248,6 @@ public enum DialogMotion {
     return CATransform3DTranslate(t, -px, -py, 0)
   }
 
-  /// Strong ease-out (the design system's `cubic-bezier(0.23, 1, 0.32, 1)`).
-  static var easeOut: CAMediaTimingFunction { CAMediaTimingFunction(controlPoints: 0.23, 1, 0.32, 1) }
+  /// Strong ease-out (the design system's `--ease-out`).
+  static var easeOut: CAMediaTimingFunction { MotionCurve.strongEaseOut.timingFunction }
 }

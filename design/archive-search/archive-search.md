@@ -35,9 +35,8 @@ view:
   a neutral pill, and further pages load on their own as the list scrolls (no Load More button).
 - **Space color carries meaning.** Filter chips tint with the Space's own theme color and carry its dot; the filter
   menu shows the same dots. Close-type chips stay neutral.
-- **Focus is the system's.** Every focus ring on this surface is the system focus ring
-  (`NSColor.keyboardFocusIndicatorColor`, following the user's accent color). Mustard is a fill only: never text,
-  never a stroke.
+- **One focus ring.** Buttons (pills, links, the filter button) draw `ShellTokens.focusRing` (graphite in light, porcelain in dark, at 85 %, 3 pt, #642); the
+  search field keeps the system focus ring. Mustard is a fill only: never text, never a stroke.
 
 ## 3. What changes, mapped to the spec
 
@@ -195,7 +194,7 @@ one this issue designs. See open question 5.
 | Title bar | unified, 52 high, transparent, full-size content view; traffic lights at their standard inset; title "Archive" 13 semibold `primaryText`, 12 after the lights, 8 before the field; no hairline below | new |
 | Search field | 32 high, radius 9, `sidebarItemBackground` fill, no edge; magnifier 14 pt `sidebarForeground` at 10 leading; text and placeholder 13 (`primaryText` / `secondaryText`); clear button 14 x 14 `sidebarForeground` | the sidebar URL pill's shape |
 | Filter button | 32 x 32, radius 9, glyph 16 pt `sidebarForeground`, hover `sidebarItemBackground`; active: `sidebarItemHovered` fill, glyph `primaryText`; 10 from the window's trailing edge | new |
-| Focus ring | the system focus ring (`focusRingType = .default`), `NSColor.keyboardFocusIndicatorColor`; never mustard | AppKit |
+| Focus ring | buttons: `ShellTokens.focusRing`, 3 pt outside the control (`KeyboardFocusRingView`, #642); the search field: the system focus ring; never mustard | `ShellTokens.focusRing` |
 | Filter menu | native `NSMenu`: section headers via `NSMenuItem.sectionHeader`, 10 pt circle images in the Space color, system checkmarks and highlight | AppKit |
 | Chip strip | 0 above (it follows the title bar), 10 below, 12 sides, 6 between chips | new |
 | Chip | 24 high capsule (radius 12), padding 10 leading / 5 trailing, 12 medium `primaryText`, 6 between parts; Space chip fill = Space color at 16 % over the surface with a 7 pt dot in the Space color; close-type chip `sidebarItemHovered` with a 12 pt glyph in `sidebarForeground`; remove button 16 x 16 round, xmark 8 pt `sidebarForeground`, hover `sidebarItemHovered` | new `ArchiveTokens.chipTintAlpha` (0.16) |
@@ -273,7 +272,7 @@ Transparency: the toast fill goes to `toastSurface` at alpha 1; everything else 
 Every color is a `TokenPair`; the window follows the system appearance (it belongs to no Space, like Little
 Arkt's frame). Porcelain/graphite surface with the recessed list field. Mustard appears in exactly two places,
 both fills: the Restore pill and the 35 % match highlight. It is never text and never a stroke; the focus rings are
-the system's, and the command bar's caption uses `commandBarText`. Increase Contrast: the search field, the
+`ShellTokens.focusRing` (the search field's is the system's), and the command bar's caption uses `commandBarText`. Increase Contrast: the search field, the
 chips and the list field gain a 1 pt `SettingsTokens.separatorIncreasedContrast` edge, and the selected row's
 `tabCurrentShadow` becomes that edge in dark.
 

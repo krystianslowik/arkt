@@ -24,7 +24,8 @@ with a leading glyph, a sentence and one small neutral pill. The rules:
 - **Lists are recessed fields**, as in the Archive, not hairline-ruled blocks.
 - **Space color carries meaning.** Delete Space shows the Space's own theme swatch; toasts take their surface from the
   Space's theme.
-- **Focus is the system's** focus ring. Mustard is a fill only: never text, never a stroke.
+- **One focus ring.** Pills and links draw `ShellTokens.focusRing` (graphite in light, porcelain in dark, at 85 %, 3 pt, #642); text fields keep the system
+  focus ring. Mustard is a fill only: never text, never a stroke.
 
 Everything an engine draws (extension sheets, permission panel, infobars) uses the same values, copied into the
 engine as the existing comments already do.
@@ -43,9 +44,9 @@ engine as the existing comments already do.
 | Auto-archive | toast "Auto archived 3 tabs" | toast / undo | as `toast-undo` |
 | Archive of several tabs (Clear, Archive Below, multi-selection) | no toast today | toast / undo (new) | `toast-undo` |
 | Recovery | persistent toast with Show Files, one line, truncates at 480 pt | toast / persistent, multi-line | `toast-recovery` |
-| Extension install, post-install, uninstall | engine `ArktDialogSheet` as a window sheet | dialog / window sheet (engine-drawn) | `ext-install`, `ext-remove` |
-| Permission prompts | engine `ArktDialogSheet` as an anchored panel, fade-in 0.14 s | dialog / anchored panel (engine-drawn) | `permission` |
-| Infobars | engine `ArktInfobarView` rows, 40 pt, fade-in 0.14 s | infobar (engine-drawn) | `infobar` |
+| Extension install, post-install, uninstall | engine `ArktDialogSheet` as a window sheet | dialog / window sheet (engine-drawn); Remove from Arkt... in the Extensions panel is the shell's `DialogSheet` (#720) | `ext-install`, `ext-remove` |
+| Permission prompts | shell `DialogPanel` as an anchored panel (#400); the engine's `ArktDialogSheet` stays the fallback while no embedder presents it | dialog / anchored panel | `permission` |
+| Infobars | shell `InfobarPanel` strip, 40 pt per infobar, fade-in 0.14 s (#400); the engine's `ArktInfobarView` rows stay the fallback while no embedder presents them | infobar | `infobar` |
 
 Found while inventorying: the recovery texts are about 100 characters and `ToastView` is one truncating line at most
 480 pt wide, so the most important notice Arkt shows is cut off. The multi-line toast below fixes it.
@@ -83,7 +84,7 @@ enable delay, width (default 420), stacked buttons, neutral primary, Escape dism
 | Sheet corners | bottom corners 14, as the Archive's Clear Archive sheet | |
 | Panel corners | 12 (was 10) | change, see section 6 |
 | Alert corners | 14 | |
-| Focus ring | the system focus ring (`NSColor.keyboardFocusIndicatorColor`), never mustard | AppKit |
+| Focus ring | pills and links: `ShellTokens.focusRing`, 3 pt outside the control (`KeyboardFocusRingView`, #642); text fields: the system focus ring; never mustard | `ShellTokens.focusRing` |
 | Shadow | `overlayShadow`: 0.5 pt edge black 0.12 (dark white 0.20), 18 / 48 blur black 0.22 (dark 0.55), 3 / 10 black 0.10 | new AlertTokens.overlayShadow |
 
 Button order: trailing edge holds the answer that continues; the cancel answer is to its left; a third answer (Allow
@@ -97,7 +98,12 @@ Escape is Cancel, so a stray Return never deletes anything.
    (the Arkt window has no title bar, so the sheet hangs from the window's top edge).
 2. **Anchored panel** (child `NSPanel`, non-activating): permission prompts. Top-leading corner 12 pt inside the
    content card (or the focused split pane), so the prompt points at the page that asked. Never steals focus from a
-   text field on the page unless the user clicks it; Escape answers Never Allow only when the panel is key.
+   text field on the page unless the user clicks it; Escape dismisses it without choosing (the
+   engine's own panel does the same), and only while the panel is key. A page's JavaScript dialogs (alert, confirm,
+   prompt, leave site) use the same panel hung from the card's top edge, below any infobar rows, with the page dimmed
+   under it while it is up (#693, design/extensions `surf-dialog`). The dim sits directly above the page view, under
+   everything the shell draws over the page; it fades in with the panel and fades out over 0.10 s whenever the panel
+   goes, Reduce Motion included (it never moves).
 3. **App-modal alert** (`NSApp.runModal(for:)` on a centered panel): launch failure before any window exists. Icon is
    the plain app icon at 56 pt, no badge, with the brand clear space kept (decision 5); the title stacks under the
    icon, as in system alerts. Runs from the same run-loop callout `askAfterLaunchFailure` uses
@@ -116,6 +122,7 @@ The gain is the Space's own theme swatch and icon as the sheet's icon, so the us
 | Delete Space, untitled | Delete this Space? | as above | as above |
 | Launch failure | Arkt couldn't open its data | Nothing was changed. Try again, or show the data folder. / Error: <type> <code> (secondary) | Show Data Folder (text link, leading), Quit, **Try Again** (primary, Return) |
 | Newer schema | This data was saved by a newer version of Arkt | Update Arkt to open it. Nothing was changed. | **Quit** (primary, Return) |
+| Crash report (next launch after a crash, switch off, asked once) | Arkt quit unexpectedly. Send a report? | The report has no web addresses, page titles, file paths or names. Nothing is sent until you review it in your browser. / You can change this in Settings, under Privacy. (secondary) | Don't Send (Escape), Always Send, **Send** (primary, Return); a window sheet on the browser window (#129) |
 | Extension install | Add "<name>"? (Chromium string) | subtitle: rating and users; list "It can:" + permissions in a recessed field | Open in Web Store (text link), Cancel, **Add Extension** |
 | Extension uninstall | Remove "<name>"? (Chromium string) | checkbox Report abuse (Chromium string) | Cancel, **Remove** (destructive) |
 | Permission | <origin> wants to | glyph + permission ("Know your location") | Allow While Visiting the Site, Allow This Time, Never Allow (stacked, neutral: no nudge) |
@@ -131,7 +138,7 @@ secondary line. Engine strings stay Chromium's (`IDS_*`), so translations keep w
 | Kind | Glyph (SF Symbol) | Lifetime | Action |
 |---|---|---|---|
 | Undo | archivebox | 6 s | Undo (Cmd-Z also undoes; the pill carries no key hint) |
-| Notice with action | arrow.counterclockwise (restore), pin (BH-055), link (BH-191) | 4 s | View / none |
+| Notice with action | arrow.counterclockwise (restore), pin (BH-055), link (BH-191), rectangle.stack (private page cap, #668) | 4 s | View / Close Oldest / none |
 | Error | exclamationmark.circle | 4 s | none, or Try Again when a retry exists |
 | Persistent (recovery) | exclamationmark.shield | until dismissed or replaced | Show Files + dismiss (xmark) |
 
@@ -165,6 +172,7 @@ does today; a transient toast over a persistent one hides it only while it is up
 | Restore failed | Couldn't restore from the Archive. |
 | Import failed | Couldn't import browser data. |
 | Recovery | the four `RecoveryNotice` texts, unchanged; action Show Files |
+| Private page cap (Blank and Incognito windows, #668) | This window has 20 pages open, the most it keeps.; action Close Oldest (`design/private-pages`). When every page is shown or playing sound: This window has 20 pages open. Close one to open another. (no action) |
 
 Counts and Space titles only, never a tab title or URL (the `ToastText` rule). The restore toast drops "Click to
 view." when the View button is shown: the button says it. PARITY(NEEDS-RUNTIME-CHECK BH-086): Arc's toast is
@@ -172,12 +180,21 @@ clickable as a whole and says "Click to view."; Arkt keeps a real button for key
 
 ## 5. Infobars
 
-Kept as the engine draws them, values aligned: 40 pt rows stacked at the top of the tab's container, `surfaceBrand`
+Drawn by the shell since #400 (the engine draws the same rows only where no embedder presents them), values aligned:
+40 pt rows stacked at the top of the tab's container, `surfaceBrand`
 fill with no hairline below (the surface against the page is the edge), 12 inset, 20 pt icon in `secondaryText`, 13
 regular message in `primaryText`, links in `secondaryText` without underline, buttons the small neutral pill (24 high,
 radius 12), close 22 x 22 round. The page moves
 down once by the row height (no height animation, which would resize the page every frame), and the row fades in
 over 0.14 s; no exit animation. Both rules stay: they are right.
+
+How the shell draws them: the engine reports each tab's whole list (message, inline and trailing links, OK and Cancel
+titles, close label, icon) and reserves the strip's height at the top of the tab's container, so the page lies below it
+on the card, in a split pane, in the Peek and in Little Arkt alike. The shell draws one full-width, non-activating
+child panel over that band (the dialogs' anchoring helper, full width instead of the 12 pt inset), with the page
+card's top corners, and no key focus. A tab keeps its list while it is hidden or moved; the strip follows the page.
+Dialogs and permission prompts anchor below the strip. Buttons, links and the close button go to the engine, whose
+delegate decides whether the infobar leaves (a delegate may keep it), so nothing is removed optimistically.
 
 ## 6. Engine restyle (values to copy)
 

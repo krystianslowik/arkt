@@ -1,16 +1,19 @@
 import CoreBridge
+import EngineAPI
 import Foundation
 import Persistence
+import ShellUI
 
 /// Where Arkt keeps its data, where Arc's data would be and which defaults hold app settings. Debug, Profile
-/// (`ARKT_SMOKE_BUILD`) and Engine (`ARKT_CHROMIUM_ENGINE`, development only) builds accept overrides
-/// (`EnvironmentOverrides`) so development, smoke and UI test runs never touch the real folders or defaults.
+/// (`ARKT_SMOKE_BUILD`) and Engine (`ARKT_TEST_SWITCHES`, development only) builds accept overrides
+/// (`EnvironmentOverrides`) so development, smoke and UI test runs never touch the real folders or defaults. Release and
+/// Distribution define none of these conditions, so they compile every override out (DistributionConfigurationTests).
 enum AppEnvironment {
   /// Arkt's data folder. `@concurrent`: `applicationSupport()` may create the folder, and the main thread never
   /// waits on disk.
   @concurrent
   static func databaseLocation() async throws -> DatabaseLocation {
-    #if DEBUG || ARKT_SMOKE_BUILD || ARKT_CHROMIUM_ENGINE
+    #if DEBUG || ARKT_SMOKE_BUILD || ARKT_TEST_SWITCHES
     if let path = ProcessInfo.processInfo.environment["ARKT_DATA_DIR"] {
       return DatabaseLocation(directory: URL(fileURLWithPath: path, isDirectory: true))
     }
@@ -25,10 +28,24 @@ enum AppEnvironment {
     try? FaviconStore(directory: location.directory.appendingPathComponent("Favicons", isDirectory: true))
   }
 
+  /// The command bar's page thumbnails (#370), in the app's cache folder (`<Caches>/<bundle id>/PageImages`), never
+  /// the browsing profile. Debug, Profile and Engine runs with `ARKT_DATA_DIR` keep them in `<data folder>/Caches`, so
+  /// a test run never touches the real caches. Nothing is read or created until the first thumbnail.
+  static func pageImageCache(in location: DatabaseLocation) -> PageImageCache? {
+    #if DEBUG || ARKT_SMOKE_BUILD || ARKT_TEST_SWITCHES
+    if ProcessInfo.processInfo.environment["ARKT_DATA_DIR"] != nil {
+      return PageImageCache(directory: location.directory.appending(path: "Caches/PageImages", directoryHint: .isDirectory))
+    }
+    #endif
+    guard let bundle = Bundle.main.bundleIdentifier,
+          let directory = PageImageCache.defaultDirectory(bundleIdentifier: bundle) else { return nil }
+    return PageImageCache(directory: directory)
+  }
+
   /// Arc's data folder; read only after the user asks for an import. Debug and Profile builds may point it at a
   /// fixture copy.
   static var arcDirectory: URL {
-    #if DEBUG || ARKT_SMOKE_BUILD || ARKT_CHROMIUM_ENGINE
+    #if DEBUG || ARKT_SMOKE_BUILD || ARKT_TEST_SWITCHES
     if let path = ProcessInfo.processInfo.environment["ARKT_ARC_DIR"] {
       return URL(fileURLWithPath: path, isDirectory: true)
     }
@@ -41,7 +58,7 @@ enum AppEnvironment {
   /// `ARKT_DEFAULTS_SUITE` suite when it is set, so a test run never writes the real defaults; a suite name that
   /// would resolve to the real defaults stops the app instead of falling back to them.
   static var userDefaults: UserDefaults {
-    #if DEBUG || ARKT_SMOKE_BUILD || ARKT_CHROMIUM_ENGINE
+    #if DEBUG || ARKT_SMOKE_BUILD || ARKT_TEST_SWITCHES
     if let suite = overrides.defaultsSuiteName {
       guard EnvironmentOverrides.isUsableSuiteName(suite, bundleIdentifier: Bundle.main.bundleIdentifier),
             let defaults = UserDefaults(suiteName: suite) else {
@@ -53,16 +70,39 @@ enum AppEnvironment {
     return .standard
   }
 
+  /// Copies the settings of the old bundle id `dev.arkt.ArktShell` into the standard defaults once (#128). Called first
+  /// thing in `main.swift`, before the delegate, the engine or any settings object reads a default. A run with an
+  /// `ARKT_DEFAULTS_SUITE` override never touches the real defaults, so it skips this.
+  static func migrateLegacyDefaults() {
+    #if DEBUG || ARKT_SMOKE_BUILD || ARKT_TEST_SWITCHES
+    if overrides.defaultsSuiteName != nil { return }
+    #endif
+    guard let bundle = Bundle.main.bundleIdentifier, bundle != LegacyDefaultsMigration.legacyBundleID else { return }
+    LegacyDefaultsMigration.forThisApp(bundleIdentifier: bundle).runIfNeeded()
+  }
+
   /// The sidebar autosave debounce. Debug and Profile builds take `ARKT_AUTOSAVE_DELAY_MS` (0 to 600000), so a test
   /// can quit inside the debounce deterministically.
   static var autosaveDelay: Duration {
-    #if DEBUG || ARKT_SMOKE_BUILD || ARKT_CHROMIUM_ENGINE
+    #if DEBUG || ARKT_SMOKE_BUILD || ARKT_TEST_SWITCHES
     if let delay = overrides.autosaveDelay { return delay }
     #endif
     return SidebarAutosaver.defaultDelay
   }
 
-  #if DEBUG || ARKT_SMOKE_BUILD || ARKT_CHROMIUM_ENGINE
+  /// The sidebar banner's notice source (#648). The updater (#126) replaces it; until then it is empty, except in a
+  /// Debug build asked for a sample notice. Choosing a notice's action withdraws it.
+  @MainActor
+  static func sidebarNoticeSource() -> any SidebarNoticeSource {
+    let source = ManualSidebarNoticeSource()
+    #if DEBUG
+    source.notices = sampleSidebarNotices
+    #endif
+    source.onPerform = { [weak source] notice in source?.notices.removeAll { $0 == notice } }
+    return source
+  }
+
+  #if DEBUG || ARKT_SMOKE_BUILD || ARKT_TEST_SWITCHES
   private static var overrides: EnvironmentOverrides {
     EnvironmentOverrides(environment: ProcessInfo.processInfo.environment)
   }
@@ -76,6 +116,20 @@ enum AppEnvironment {
   /// empty. Key names only.
   static func missingUITestOverrides() -> [String] {
     overrides.missingUITestOverrides(bundleIdentifier: Bundle.main.bundleIdentifier)
+  }
+
+  /// The sample sidebar notices `ARKT_SIDEBAR_NOTICE` asks for (#648); empty when unset.
+  static var sampleSidebarNotices: [ShellUI.SidebarNotice] {
+    switch overrides.sidebarNotice {
+    case .update?: [.update(version: "0.0.0-sample")]
+    case .announcement?:
+      [.announcement(id: "sample",
+                     title: "Archived tabs can now be searched by what was on the page, not only the title",
+                     body: "Open the Archive and type a few words you remember. Tabs archived from today on are "
+                       + "searchable right away.",
+                     actionTitle: "Got It")]
+    case nil: []
+    }
   }
 
   /// The end-to-end data smoke phase (E6, Debug builds only), from `ARKT_SMOKE`. Separate from the scripted UI smoke

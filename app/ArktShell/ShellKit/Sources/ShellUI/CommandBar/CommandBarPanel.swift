@@ -14,7 +14,6 @@ final class CommandBarPanel: NSPanel {
     backgroundColor = .clear
     hasShadow = true
     animationBehavior = .none                     // no system fade: it would eat the 16 ms budget
-    appearance = NSAppearance(named: .darkAqua)   // dark surface even on light Spaces
     collectionBehavior = [.fullScreenAuxiliary, .transient, .ignoresCycle]
     alphaValue = 0
     ignoresMouseEvents = true
@@ -22,13 +21,13 @@ final class CommandBarPanel: NSPanel {
 
   /// The panel stays ordered in once pre-warmed; presenting is alpha plus key status (C7: ordering a
   /// window in cost one to three extra frames in the window server). While hidden it is inert: clicks pass
-  /// through, it cannot become key, and accessibility does not report it.
+  /// through, it cannot become key, and accessibility does not report it (no "open" / "closed" value: VoiceOver would
+  /// read it, #608; a hidden bar is absent from the tree instead).
   var isPresented = false {
     didSet {
       guard isPresented != oldValue else { return }
-      alphaValue = isPresented ? 1 : 0
+      if isPresented { alphaValue = 1 }               // hiding fades out first; the controller then sets alpha 0
       ignoresMouseEvents = !isPresented
-      contentView?.setAccessibilityValue(isPresented ? AXID.CommandBar.open : AXID.CommandBar.closed)
     }
   }
 

@@ -10,6 +10,58 @@ One issue at a time, from claim to pull request. The rules behind each step are 
 
 Contributors open pull requests; maintainers merge. Never push to `main`. Never merge your own pull request.
 
+## Decide or ask
+
+Most open questions already have an answer in the repo. Decide them yourself, note the decision in one comment,
+and keep working. Ask only for the few calls that no document settles.
+
+Before you decide or ask, search in this order and follow what you find:
+
+1. Design docs, specs and plan links (`design/`, the plan link in the issue).
+2. Results docs.
+3. Merged pull requests: `gh pr list --state merged --search "<keyword>"`.
+4. Earlier maintainer comments: `gh issue view <N> --comments`.
+
+### Decide yourself, comment, continue
+
+- [ ] Merge order or overlap with another open pull request, including shared results and docs files. Merge
+      `origin/main` into your branch later and keep both sections.
+- [ ] A soft dependency. Note it in the pull request and proceed.
+- [ ] Issue already shipped or duplicated. Close it with links to the pull requests that shipped it, or split the
+      missing delta into a new issue.
+- [ ] Stale issue text where the code and merged pull requests show the truth. Update the issue body.
+- [ ] Wording mismatch with an obvious intent. Follow the intent and note the difference.
+- [ ] Missing labels, plan link or `Depends-on` line. Add them.
+- [ ] Test strategy details.
+- [ ] Anything the design docs, spec, results docs or an earlier maintainer comment already answers.
+
+### Ask (status:needs-user) only for
+
+- [ ] New product behaviour with no default in the spec or design.
+- [ ] Privacy, legal, money or external services.
+- [ ] Irreversible or outward-facing actions.
+- [ ] A real conflict between two maintainer decisions.
+
+Unknown Arc runtime behaviour is not a reason to ask. Record the question on the runtime-check issue and continue
+with the work that does not depend on it.
+
+### How to ask
+
+1. Post one comment with numbered questions. Give each question your recommended default.
+2. Keep working on every part that does not depend on the answer.
+3. Never block a whole issue for one sub-item. Split the sub-item into its own issue and mark only that one
+   `status:needs-user`.
+
+### Missing machine or tool
+
+If the machine lacks something (for example a Chromium build), leave the issue `status:ready`, write "needs the
+engine build" in the issue or pull request, and continue. Do not set `status:blocked`.
+
+### When unsure
+
+Do not assume what is not written down. If a guess would be hard to undo, ask. If it is easy to undo, decide, note
+it, and continue.
+
 ## 1. Pick
 
 1. List ready, unassigned issues, lowest `order:N` first, then lowest number:
@@ -32,8 +84,9 @@ Contributors open pull requests; maintainers merge. Never push to `main`. Never 
 3. Skip `status:blocked`, `status:needs-user`, and anything assigned to someone else.
 4. Read the whole issue and its plan link. Check it against the definition of ready (`CONTRIBUTING.md`, section 2).
 
-**STOP** if the issue has an open product question (behavior, naming, what ships), unclear acceptance criteria, or
-an open dependency. Comment on the issue with the exact question; do not guess and do not start.
+**STOP** if the issue has a product question that no document settles (see "Decide or ask"), unclear acceptance
+criteria, or an open hard dependency (work that must merge first). Ask with numbered questions and a default each;
+for a hard dependency, name the blocker and set `status:blocked`. A soft dependency is not a stop.
 
 ## 2. Claim
 
@@ -48,7 +101,8 @@ Without write access (fork contributors): post the same comment and ask a mainta
 
 - One assignee, exactly one `status:*` label. Check with `gh issue view <N> --json assignees,labels`.
 - Check open pull requests for the files you need (`gh pr list --state open`, `gh pr diff <PR> --name-only`).
-  **STOP** if another open pull request touches them; comment on both and agree on an order first.
+  If another open pull request touches them, decide the merge order yourself (see "Decide or ask") and note it on
+  both pull requests.
 - Announce any repo hot file you will touch (section 3) in the issue.
 
 ## 3. Worktree and branch

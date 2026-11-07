@@ -9,6 +9,7 @@
 #include "base/feature_list.h"
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
+#include "base/no_destructor.h"
 #include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/browser/ui/ui_features.h"
@@ -33,6 +34,31 @@ WindowOpenDisposition CurrentDisposition() {
   NSEvent* event = NSApp.currentEvent;
   return event ? ui::WindowOpenDispositionFromNSEvent(event)
                : WindowOpenDisposition::CURRENT_TAB;
+}
+
+InfobarSink& Sink() {
+  static base::NoDestructor<InfobarSink> sink;
+  return *sink;
+}
+
+uint64_t NextInfobarId() {
+  static uint64_t next_id = 0;
+  return ++next_id;
+}
+
+InfobarKind KindFor(infobars::InfoBarDelegate::InfoBarIdentifier identifier) {
+  switch (identifier) {
+    case infobars::InfoBarDelegate::EXTENSION_DEV_TOOLS_INFOBAR_DELEGATE:
+    case infobars::InfoBarDelegate::DEV_TOOLS_INFOBAR_DELEGATE:
+    case infobars::InfoBarDelegate::DEV_TOOLS_REMOTE_DEBUGGING_INFOBAR_DELEGATE:
+      return InfobarKind::kDebugger;
+    case infobars::InfoBarDelegate::AUTOMATION_INFOBAR_DELEGATE:
+      return InfobarKind::kAutomation;
+    case infobars::InfoBarDelegate::PAGE_INFO_INFOBAR_DELEGATE:
+      return InfobarKind::kReload;
+    default:
+      return InfobarKind::kOther;
+  }
 }
 
 ArktInfobarButton* ButtonFor(ConfirmInfoBarDelegate* delegate,
@@ -120,11 +146,16 @@ ArktInfobarContent* ContentFor(ConfirmInfoBarDelegate* delegate,
 
 }  // namespace
 
+void SetInfobarSink(InfobarSink sink) {
+  Sink() = std::move(sink);
+}
+
 ArktInfobarPresenter::ArktInfobarPresenter(
     content::WebContents* contents,
     base::RepeatingCallback<const ui::ColorProvider*()> color_provider,
     base::RepeatingClosure layout_changed)
     : manager_(infobars::ContentInfoBarManager::FromWebContents(contents)),
+      contents_(contents ? contents->GetWeakPtr() : nullptr),
       color_provider_(std::move(color_provider)),
       layout_changed_(std::move(layout_changed)),
       stack_([[ArktInfobarStackView alloc] initWithFrame:NSZeroRect]) {
@@ -154,7 +185,7 @@ void ArktInfobarPresenter::OnInfoBarAdded(infobars::InfoBar* infobar) {
       break;
     }
     for (const auto& row : rows_) {
-      if (row.first == other) {
+      if (row.infobar == other) {
         ++index;
         break;
       }
@@ -206,7 +237,9 @@ void ArktInfobarPresenter::Add(infobars::InfoBar* infobar, size_t index) {
     }
   };
   index = std::min(index, rows_.size());
-  rows_.insert(rows_.begin() + index, {infobar, row});
+  rows_.insert(rows_.begin() + index,
+               Row{infobar, row, NextInfobarId(),
+                   KindFor(delegate->GetIdentifier()), content});
   [stack_ insertRow:row atIndex:index];
   LOG(WARNING) << "ARKT: infobar " << confirm->GetIdentifier() << " shown"
                << " buttons=" << confirm->GetButtons()
@@ -216,13 +249,56 @@ void ArktInfobarPresenter::Add(infobars::InfoBar* infobar, size_t index) {
                << " icon=" << (content.icon != nil) << " rows=" << rows_.size()
                << " message=\"" << base::SysNSStringToUTF8(content.message)
                << "\"";
+  Publish();
   layout_changed_.Run();
+}
+
+// The list the shell presents: the drawn infobars in the manager's order.
+std::vector<PresentedInfobar> ArktInfobarPresenter::Presented() const {
+  std::vector<PresentedInfobar> list;
+  for (const Row& row : rows_) {
+    PresentedInfobar infobar;
+    infobar.id = row.id;
+    infobar.kind = row.kind;
+    infobar.content = row.content;
+    list.push_back(infobar);
+  }
+  return list;
+}
+
+bool ArktInfobarPresenter::Perform(uint64_t id,
+                                   InfobarAction action,
+                                   size_t link_index) {
+  for (const Row& row : rows_) {
+    if (row.id == id) {
+      if (!row.infobar->owner()) {
+        return false;
+      }
+      Act(row.infobar, action, link_index);
+      return true;
+    }
+  }
+  return false;
+}
+
+// Called after every change of the list. The sink (the facade) reports the
+// whole list to the shell and says whether the shell presents it; then the
+// rows stay but are not drawn, and the stack keeps its height so the page
+// still sits below the strip the shell draws over it.
+void ArktInfobarPresenter::Publish() {
+  bool presented = false;
+  const InfobarSink& sink = Sink();
+  if (!sink.is_null() && contents_) {
+    presented = sink.Run(contents_.get(), weak_factory_.GetWeakPtr());
+  }
+  presented_ = presented;
+  stack_.hidden = presented;
 }
 
 int ArktInfobarPresenter::Remove(infobars::InfoBar* infobar) {
   for (size_t i = 0; i < rows_.size(); ++i) {
-    if (rows_[i].first == infobar) {
-      ArktInfobarView* row = rows_[i].second;
+    if (rows_[i].infobar == infobar) {
+      ArktInfobarView* row = rows_[i].view;
       rows_.erase(rows_.begin() + i);
       [stack_ removeRow:row];
       return static_cast<int>(i);
@@ -238,6 +314,7 @@ void ArktInfobarPresenter::OnInfoBarRemoved(infobars::InfoBar* infobar,
   }
   LOG(WARNING) << "ARKT: infobar " << infobar->delegate()->GetIdentifier()
                << " removed rows=" << rows_.size();
+  Publish();
   layout_changed_.Run();
 }
 
@@ -246,6 +323,7 @@ void ArktInfobarPresenter::OnInfoBarReplaced(infobars::InfoBar* old_infobar,
   int index = Remove(old_infobar);
   Add(new_infobar, index < 0 ? rows_.size() : static_cast<size_t>(index));
   if (index >= 0) {
+    Publish();
     layout_changed_.Run();
   }
 }
@@ -255,7 +333,7 @@ void ArktInfobarPresenter::OnManagerWillBeDestroyed(
   manager_->RemoveObserver(this);
   manager_ = nullptr;
   while (!rows_.empty()) {
-    Remove(rows_.back().first);
+    Remove(rows_.back().infobar);
   }
   // The contents are going away: no layout call (it would read their view);
   // the bar just leaves the view hierarchy.
@@ -269,7 +347,7 @@ void ArktInfobarPresenter::Act(infobars::InfoBar* infobar,
                                size_t link_index) {
   bool drawn = false;
   for (const auto& row : rows_) {
-    drawn |= row.first == infobar;
+    drawn |= row.infobar == infobar;
   }
   // Not drawn any more, or closing: don't call anything, it might access the
   // owner.

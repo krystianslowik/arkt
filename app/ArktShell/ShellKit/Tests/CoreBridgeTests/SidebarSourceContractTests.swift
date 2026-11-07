@@ -337,4 +337,21 @@ extension SidebarSourceContractTests {
     guard case .tab(_, let url, let title) = info else { return "not a tab" }
     return "\(url.absoluteString) \(title)"
   }
+
+  /// A row leaves without going to the Archive (#356: a Today tab moved into Little Arkt keeps its page).
+  @Test(arguments: SourceKind.allCases)
+  func removeNodeRemovesTheRowAndEmitsStructure(kind: SourceKind) throws {
+    let source = kind.make()
+    let space = try source.addSpace(title: "S")
+    let a = try source.addTab(url: Self.urlA, title: "A", in: .today(space))
+    let b = try source.addTab(url: Self.urlB, title: "B", in: .today(space))
+    var changes: [SidebarChange] = []
+    let observation = source.observe { changes.append($0) }
+    source.removeNode(a)
+    source.removeNode(a)                                   // an unknown id changes nothing
+    #expect(source.children(of: .today(space)) == [b])
+    #expect(source.node(a) == nil)
+    #expect(changes == [.structure(.today(space))])
+    _ = observation
+  }
 }

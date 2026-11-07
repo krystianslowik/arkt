@@ -1,15 +1,38 @@
 import AppKit
+import struct ArcImport.ArcCookie
+import struct ArcImport.BookmarkRecord
+import struct ArcImport.ArcLogin
 internal import WebKit
 import EngineAPI
 
 /// Development stand-in for the Chromium engine. Renders with WKWebView.
 /// Windows and activation follow contract rules 11, 12 and 15. Every tab has `origin == .client` (WKWebView opens no
 /// tabs of its own here) and closes never hold (`wouldHoldClose` is always false, so both close modes close at once);
-/// rules 13, 14 and 16 are not applicable, and so is rule 17's audible state (no public WebKit signal).
+/// rules 13, 14 and 16 are not applicable, and so is rule 17's audible state (no public WebKit signal). Find in page
+/// (rule 22) selects with `window.find` and counts in page script; the hovered link (rule 23) comes from a script
+/// that posts `mouseover` and `mouseout` of links. Tab state (#576): a web content process exit is a crash and the zoom
+/// is `pageZoom`; HTML fullscreen is never reported (WebKit's element fullscreen stays off) and there is no session to
+/// recover. Page info (#582): camera and microphone per site, applied to WebKit's media capture requests
+/// (`FakeSitePermissions`); no site data counts, no reload infobar (no infobars at all) and no site settings page.
 /// Nothing outside this file may import WebKit, and the import is `internal`, so the compiler
 /// rejects any WebKit type in the public surface (EngineAPI types and NSView only).
 @MainActor
-public final class FakeEngine: EngineClient {
+public final class FakeEngine: EngineClient, EngineImporting, EngineDownloads, EngineSiteSettings {
+  /// What `importCookies` and `importPasswords` received, deduped as the engine does (#512). No profile is written.
+  public private(set) var imports = ImportRecording()
+
+  public func importCookies(_ batch: [ArcCookie]) async -> ImportWriteResult { imports.record(batch) }
+  public func importPasswords(_ batch: [ArcLogin]) async -> ImportWriteResult { imports.record(batch) }
+  public func importHistory(_ batch: [ImportedHistoryEntry], after watermark: Date?) async -> ImportWriteResult {
+    imports.record(batch, after: watermark)
+  }
+  public func importBookmarks(_ batch: [BookmarkRecord]) async -> ImportWriteResult { imports.record(batch) }
+  /// Pretend Web Store ids the stub reports as "not available from the Web Store" (#513).
+  public var unavailableExtensionIDs: Set<String> = []
+  public func installExtensionResults(ids: [String]) async -> [ExtensionInstallResult]? {
+    imports.record(extensions: ids, unavailable: unavailableExtensionIDs)
+  }
+
   private final class Entry {
     let webView: WKWebView
     let navigation: NavigationObserver
@@ -22,8 +45,41 @@ public final class FakeEngine: EngineClient {
     var finishCounter = 0
     /// Cloned history stacks (nearest last) when this tab was created by `duplicateTab(_:)` (#81, BH-027).
     var clonedHistory: (back: [HistoryEntry], forward: [HistoryEntry])?
+    /// The text and case of the running find, nil when none runs; replies of an ended find are dropped by `findEpoch`.
+    var findText: String?
+    var findMatchCase = false
+    var findEpoch = 0
+    var findRequests = 0
+    /// The link the pointer is over, as the hover script last reported it.
+    var hoveredLink: URL?
+    /// The main frame's selected text, as the selection script last reported it (#404).
+    var selectedText: String?
     init(webView: WKWebView, navigation: NavigationObserver, snapshot: TabSnapshot) {
       self.webView = webView; self.navigation = navigation; self.snapshot = snapshot
+    }
+  }
+
+  /// Answers WebKit's camera and microphone requests from the site's settings (#582). WKWebView holds its UI delegate
+  /// weakly; the engine keeps this one alive for every tab.
+  private final class MediaCaptureDecider: NSObject, WKUIDelegate {
+    weak var engine: FakeEngine?
+    func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin,
+                 initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType,
+                 decisionHandler: @escaping @MainActor @Sendable (WKPermissionDecision) -> Void) {
+      // The top-level page decides, whichever frame asks; the requesting origin only stands in without a page URL.
+      let port = origin.port == 0 ? nil : origin.port
+      guard let engine, let key = engine.topLevelOrigin(of: webView)
+              ?? FakeSitePermissions.origin(scheme: origin.protocol, host: origin.host, port: port) else {
+        decisionHandler(.prompt)
+        return
+      }
+      let camera = type == .camera || type == .cameraAndMicrophone
+      let microphone = type == .microphone || type == .cameraAndMicrophone
+      switch engine.sitePermissions.mediaDecision(origin: key, camera: camera, microphone: microphone) {
+      case .allow: decisionHandler(.grant)
+      case .block: decisionHandler(.deny)
+      case .ask: decisionHandler(.prompt)
+      }
     }
   }
 
@@ -32,7 +88,24 @@ public final class FakeEngine: EngineClient {
     var onCommit: (@MainActor () -> Void)?
     /// A user link activation in the main frame (#313): the link's URL and modifiers; true cancels it.
     var onLinkActivation: (@MainActor (URL, NSEvent.ModifierFlags) -> Bool)?
+    /// A response WebKit will not show (an attachment, a type with no viewer) or an action it turns into a download.
+    var onDownload: (@MainActor (WKDownload) -> Void)?
+    /// The web content process exited (#576).
+    var onTerminate: (@MainActor () -> Void)?
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) { onCommit?() }
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { onTerminate?() }
+    func webView(_ webView: WKWebView, decidePolicyFor response: WKNavigationResponse,
+                 decisionHandler: @escaping @MainActor @Sendable (WKNavigationResponsePolicy) -> Void) {
+      let disposition = (response.response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Disposition")
+      let isAttachment = disposition?.lowercased().hasPrefix("attachment") ?? false
+      decisionHandler(response.isForMainFrame && (isAttachment || !response.canShowMIMEType) ? .download : .allow)
+    }
+    func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
+      onDownload?(download)
+    }
+    func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
+      onDownload?(download)
+    }
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
                  decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) {
       guard action.navigationType == .linkActivated, action.targetFrame?.isMainFrame ?? true,
@@ -48,21 +121,75 @@ public final class FakeEngine: EngineClient {
   /// How long the end of a load waits for `document.title` before using what WebKit already knows.
   static let titleTimeout: Duration = .milliseconds(500)
 
+  /// Receives the hover (#114) and selection (#404) scripts' messages. The user content controller holds it, so it
+  /// holds the engine weakly.
+  private final class LinkHoverBridge: NSObject, WKScriptMessageHandler {
+    weak var engine: FakeEngine?
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+      MainActor.assumeIsolated {
+        if message.name == FakeEngineScripts.selectionHandler {
+          engine?.selectionReported(by: message.webView, body: message.body)
+        } else {
+          engine?.targetURLReported(by: message.webView, body: message.body)
+        }
+      }
+    }
+  }
+
   private var entries: [TabID: Entry] = [:]
-  private let hub = EngineEventHub()
+  private let hoverBridge = LinkHoverBridge()
+  private let mediaCapture = MediaCaptureDecider()
+  /// Camera and microphone per site (#582).
+  var sitePermissions = FakeSitePermissions()
+  let hub = EngineEventHub()
   public private(set) var windowIDs: [EngineWindowID] = []
   private var hosts: [EngineWindowID: any EngineWindowHosting] = [:]
   private var activeTabs: [EngineWindowID: TabID] = [:]
   private var lastActiveWindow: EngineWindowID?
   private let configuration: WKWebViewConfiguration
-  private let faviconSession = URLSession(configuration: .ephemeral)
+  /// The favicon session; a test swaps in one whose requests a stub answers.
+  var faviconSession = URLSession(configuration: .ephemeral)
+  /// Turns fetched icon bytes into the contract's PNG or ICO. `fetchFavicon` calls it off the main actor; a test swaps
+  /// in one that records the thread it ran on (#725).
+  var faviconConverter: @Sendable (Data) -> Data? = FakeEngine.contractFavicon
+  /// Favicon fetches in flight per tab, and the test waits for the last one to finish (#442).
+  private var faviconFetches: [TabID: Int] = [:]
+  private var faviconFetchWaiters: [TabID: [FaviconFetchWaiter]] = [:]
   public private(set) var tabIDs: [TabID] = []
+  // Downloads (rule 24); the behavior is in the extension at the end of this file.
+  var downloadItems: [DownloadItem] = []
+  var downloadRecords: [DownloadID: DownloadRecord] = [:]
+  /// A Retry's new download and the item it replaces, removed when the new one is listed.
+  var pendingReplacement: [DownloadID: DownloadID] = [:]
+  public var downloadSavePreference: DownloadSavePreference
+  public var downloadDestinationChooser: DownloadDestinationChooser?
+  public let downloadDefaultFolder: URL
+  /// Opens a finished file and reveals it in Finder; tests replace them so no application is launched.
+  public var downloadOpener: @MainActor (URL) -> Void = { NSWorkspace.shared.open($0) }
+  public var downloadRevealer: @MainActor (URL) -> Void = { NSWorkspace.shared.activateFileViewerSelecting([$0]) }
+  /// The clock for a download's start and end time and its speed.
+  public var downloadClock: @MainActor () -> Date = { Date() }
+  /// Starts the downloads the engine itself begins (Retry, `startDownload(from:)`): a view no tab shows.
+  lazy var downloadWebView = WKWebView(frame: .zero, configuration: configuration)
 
-  public init() {
+  /// `downloadFolder`: where downloads go by default; the system Downloads folder when nil.
+  public init(downloadFolder: URL? = nil) {
+    downloadDefaultFolder = downloadFolder
+      ?? FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+      ?? FileManager.default.temporaryDirectory
+    downloadSavePreference = .folder(downloadDefaultFolder)
     configuration = WKWebViewConfiguration()
     configuration.websiteDataStore = .nonPersistent()
     // Appended to WebKit's own platform and engine tokens, so only the Safari part is ours to set.
     configuration.applicationNameForUserAgent = SafariUserAgent.applicationName()
+    hoverBridge.engine = self
+    mediaCapture.engine = self
+    configuration.userContentController.add(hoverBridge, name: FakeEngineScripts.targetURLHandler)
+    configuration.userContentController.addUserScript(
+      WKUserScript(source: FakeEngineScripts.hover, injectionTime: .atDocumentStart, forMainFrameOnly: false))
+    configuration.userContentController.add(hoverBridge, name: FakeEngineScripts.selectionHandler)
+    configuration.userContentController.addUserScript(
+      WKUserScript(source: FakeEngineScripts.selection, injectionTime: .atDocumentStart, forMainFrameOnly: true))
   }
 
   @discardableResult
@@ -84,7 +211,10 @@ public final class FakeEngine: EngineClient {
     let navigation = NavigationObserver()
     navigation.onCommit = { [weak self] in self?.didCommit(id) }
     navigation.onLinkActivation = { [weak self] url, flags in self?.linkActivated(id, url: url, flags: flags) ?? false }
+    navigation.onDownload = { [weak self] download in self?.adoptDownload(download) }
+    navigation.onTerminate = { [weak self] in self?.webContentProcessTerminated(id) }
     webView.navigationDelegate = navigation
+    webView.uiDelegate = mediaCapture
     let entry = Entry(webView: webView, navigation: navigation, snapshot: TabSnapshot(id: id, window: window))
     entries[id] = entry
     tabIDs.append(id)
@@ -96,6 +226,9 @@ public final class FakeEngine: EngineClient {
     entry.observations = [
       webView.observe(\.url, options: [.new]) { [weak self] web, _ in
         MainActor.assumeIsolated { self?.update(id) { $0.url = web.url } event: { .urlChanged(id, web.url) } }
+      },
+      webView.observe(\.hasOnlySecureContent, options: [.new]) { [weak self] _, _ in
+        MainActor.assumeIsolated { self?.hub.emit(.pageInfoChanged(id)) }     // mixed content came or went (#582)
       },
       webView.observe(\.title, options: [.new]) { [weak self] web, _ in
         MainActor.assumeIsolated {
@@ -139,9 +272,13 @@ public final class FakeEngine: EngineClient {
       }
     }
     entries[id] = nil
+    faviconFetches[id] = nil
+    for waiter in faviconFetchWaiters.removeValue(forKey: id) ?? [] { waiter.resume() }
     entry.observations.forEach { $0.invalidate() }
     entry.navigation.onCommit = nil
+    entry.navigation.onTerminate = nil
     entry.webView.navigationDelegate = nil
+    entry.webView.uiDelegate = nil
     entry.webView.stopLoading()
     entry.webView.removeFromSuperview()
     tabIDs.removeAll { $0 == id }
@@ -175,6 +312,72 @@ public final class FakeEngine: EngineClient {
     entry.webView.setAllMediaPlaybackSuspended(muted, completionHandler: nil)
     update(id) { $0.isMuted = muted } event: { .mutedChanged(id, isMuted: muted) }
   }
+
+  // MARK: - Find in page and link hover (#134, #114)
+
+  /// `window.find` selects the match and the page text is counted for the reply; WKWebView's own find reports no
+  /// count. A reply for a find that ended meanwhile is dropped.
+  public func findInPage(_ id: TabID, text: String, forward: Bool, matchCase: Bool) {
+    guard let entry = entries[id] else { return }
+    guard !text.isEmpty else {
+      endFind(entry, action: .clear)
+      hub.emit(.findResult(id, requestID: 0, ordinal: 0, count: 0, isFinal: true))
+      return
+    }
+    let isNew = entry.findText != text || entry.findMatchCase != matchCase
+    entry.findText = text
+    entry.findMatchCase = matchCase
+    entry.findRequests += 1
+    let request = entry.findRequests
+    let epoch = entry.findEpoch
+    let script = FakeEngineScripts.find(text: text, forward: forward, matchCase: matchCase, isNew: isNew)
+    entry.webView.evaluateJavaScript(script) { [weak self, weak entry] result, _ in
+      MainActor.assumeIsolated {
+        guard let self, let entry, entry.findEpoch == epoch, self.entries[id] === entry else { return }
+        let numbers = (result as? [NSNumber])?.map(\.intValue) ?? []
+        let count = numbers.first ?? 0
+        let ordinal = numbers.count > 1 ? numbers[1] : 0
+        self.hub.emit(.findResult(id, requestID: request, ordinal: ordinal, count: count, isFinal: true))
+      }
+    }
+  }
+
+  public func stopFinding(_ id: TabID, action: FindStopAction) {
+    guard let entry = entries[id] else { return }
+    endFind(entry, action: action)
+  }
+
+  private func endFind(_ entry: Entry, action: FindStopAction) {
+    entry.findText = nil
+    entry.findEpoch += 1
+    entry.webView.evaluateJavaScript(FakeEngineScripts.stopFind(action), completionHandler: nil)
+  }
+
+  private func targetURLReported(by web: WKWebView?, body: Any) {
+    guard let (id, entry) = entries.first(where: { $0.value.webView === web }) else { return }
+    let link = (body as? String).flatMap(URL.init(string:))
+    guard entry.hoveredLink != link else { return }
+    entry.hoveredLink = link
+    hub.emit(.targetURLChanged(id, link))
+  }
+
+  private func selectionReported(by web: WKWebView?, body: Any) {
+    guard let entry = entries.values.first(where: { $0.webView === web }) else { return }
+    entry.selectedText = (body as? String).flatMap { $0.isEmpty ? nil : $0 }
+  }
+
+  public func selectedText(of id: TabID) -> String? { entries[id]?.selectedText }
+
+  /// A new load ends the page's find and its hovered link. The selection stays until the new document commits.
+  private func endFindAndHover(_ id: TabID, _ entry: Entry) {
+    entry.findText = nil
+    entry.findEpoch += 1
+    if entry.hoveredLink != nil {
+      entry.hoveredLink = nil
+      hub.emit(.targetURLChanged(id, nil))
+    }
+  }
+
   public func goBack(_ id: TabID) { goToHistory(id, offset: -1) }
   public func goForward(_ id: TabID) { goToHistory(id, offset: 1) }
 
@@ -245,6 +448,27 @@ public final class FakeEngine: EngineClient {
 
   public func snapshot(of id: TabID) -> TabSnapshot? { entries[id]?.snapshot }
   public func contentView(for id: TabID) -> NSView? { entries[id]?.webView }
+
+  /// WebKit's snapshot of the shown page (#370, #352), asked at the width that fits the pixel cap so WebKit does the
+  /// downscale; the caps are applied by `PageImageEncoder` off the main thread. Nil for a tab that is not in a window
+  /// or has no size (nothing drawn), and for one that closed meanwhile.
+  public func pageImage(of id: TabID, _ request: PageImageRequest) async -> PageImage? {
+    guard let web = entries[id]?.webView, web.url != nil, let window = web.window,
+          web.bounds.width > 0, web.bounds.height > 0 else { return nil }
+    let scale = window.backingScaleFactor
+    let configuration = WKSnapshotConfiguration()
+    if let cap = request.maxPixelSize {
+      let factor = min(1, Double(cap.width) / (web.bounds.width * scale), Double(cap.height) / (web.bounds.height * scale))
+      configuration.snapshotWidth = NSNumber(value: web.bounds.width * factor)
+    }
+    guard let snapshot = try? await web.takeSnapshot(configuration: configuration),
+          let frame = snapshot.cgImage(forProposedRect: nil, context: nil, hints: nil),
+          entries[id]?.webView === web else { return nil }
+    // Pixels per point of the page: the snapshot's pixels over the page's width in points.
+    let pageScale = Double(frame.width) / web.bounds.width
+    return await PageImageEncoder.encode(frame, scale: pageScale, request)
+  }
+
   public func observe(_ handler: @escaping @MainActor (EngineEvent) -> Void) -> EngineObservation { hub.add(handler) }
 
   // MARK: - Windows
@@ -348,9 +572,9 @@ public final class FakeEngine: EngineClient {
     case .stop: web.stopLoading()
     case .back: goBack(tab)
     case .forward: goForward(tab)
-    case .zoomIn: web.pageZoom = Self.zoomSteps.first { $0 > web.pageZoom + 0.001 } ?? web.pageZoom
-    case .zoomOut: web.pageZoom = Self.zoomSteps.last { $0 < web.pageZoom - 0.001 } ?? web.pageZoom
-    case .zoomReset: web.pageZoom = 1
+    case .zoomIn: zoomIn(tab)
+    case .zoomOut: zoomOut(tab)
+    case .zoomReset: resetZoom(tab)
     default: break
     }
   }
@@ -381,12 +605,102 @@ public final class FakeEngine: EngineClient {
     hub.emit(.activeTabChanged(id))
   }
 
+  /// Test hook (reachable through `@testable import`): runs page script and answers its string result.
+  func scriptString(_ script: String, in id: TabID) async -> String? {
+    guard let web = entries[id]?.webView else { return nil }
+    return await withCheckedContinuation { (done: CheckedContinuation<String?, Never>) in
+      web.evaluateJavaScript(script) { result, _ in done.resume(returning: result as? String) }
+    }
+  }
+
   /// Test hook (reachable through `@testable import`): runs page script, ignoring its result.
   func runScript(_ script: String, in id: TabID) async {
     guard let web = entries[id]?.webView else { return }
     await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
       web.evaluateJavaScript(script) { _, _ in done.resume() }
     }
+  }
+
+  // MARK: - Page info (#582)
+
+  public var siteSettings: (any EngineSiteSettings)? { self }
+
+  public func pageInfo(of tab: TabID) -> PageInfo? {
+    guard let web = entries[tab]?.webView else { return nil }
+    return sitePermissions.pageInfo(tab: tab, url: web.url, hasOnlySecureContent: web.hasOnlySecureContent)
+  }
+
+  public func sitesWithPermissions() -> [SitePermissions] { sitePermissions.sites() }
+
+  /// One profile (the non-persistent data store), so `tab` changes nothing here. WebKit asks again on the page's next
+  /// request, so no reload is needed and closing the panel raises nothing.
+  public func setPermission(_ kind: SitePermissionKind, to setting: PermissionSetting, forOrigin origin: String,
+                            from tab: TabID) {
+    if sitePermissions.set(kind, to: setting, forOrigin: origin) { announcePageInfo(forOrigin: origin) }
+  }
+
+  public func resetPermissions(forOrigin origin: String, from tab: TabID) {
+    if sitePermissions.reset(forOrigin: origin) { announcePageInfo(forOrigin: origin) }
+  }
+
+  public func pageInfoDidClose(tab: TabID) {}
+
+  private func announcePageInfo(forOrigin origin: String) {
+    for tab in tabIDs where entries[tab]?.webView.url.flatMap(FakeSitePermissions.origin(of:)) == origin {
+      hub.emit(.pageInfoChanged(tab))
+    }
+  }
+
+  /// The top-level page's origin, which a frame's camera or microphone request is decided by (as Chromium decides
+  /// by the embedding origin).
+  func topLevelOrigin(of webView: WKWebView) -> String? { webView.url.flatMap(FakeSitePermissions.origin(of:)) }
+
+  /// The development engine has no site settings page.
+  public func openSiteSettings(forOrigin origin: String, from tab: TabID) {}
+
+  // MARK: - Tab state (#576)
+
+  /// WebKit's page zoom, on Safari's steps (`zoomSteps`), reported in percent.
+  public func zoomIn(_ id: TabID) {
+    guard let web = entries[id]?.webView else { return }
+    setPageZoom(id, Self.zoomSteps.first { $0 > web.pageZoom + 0.001 } ?? web.pageZoom)
+  }
+
+  public func zoomOut(_ id: TabID) {
+    guard let web = entries[id]?.webView else { return }
+    setPageZoom(id, Self.zoomSteps.last { $0 < web.pageZoom - 0.001 } ?? web.pageZoom)
+  }
+
+  public func resetZoom(_ id: TabID) { setPageZoom(id, 1) }
+
+  private func setPageZoom(_ id: TabID, _ factor: CGFloat) {
+    guard let web = entries[id]?.webView else { return }
+    web.pageZoom = factor
+    let percent = Int((factor * 100).rounded())
+    let zoom = TabZoom(percent: percent, isDefault: percent == TabZoom.default.percent)
+    update(id) { $0.zoom = zoom } event: { .zoomChanged(id, zoom, userInitiated: true) }
+  }
+
+  /// Test hook (reachable through `@testable import`): the pid of the tab's web content process, from WebKit's private
+  /// `_webProcessIdentifier`. Nil when WebKit no longer has that property or the page has no process.
+  func webContentProcessIdentifier(of id: TabID) -> pid_t? {
+    guard let web = entries[id]?.webView, web.responds(to: NSSelectorFromString("_webProcessIdentifier")),
+          let pid = (web.value(forKey: "_webProcessIdentifier") as? NSNumber)?.int32Value, pid > 0 else { return nil }
+    return pid
+  }
+
+  /// Whether this WebKit still has `_webProcessIdentifier`, so a test can skip the real-termination checks without it.
+  nonisolated static var canReadWebContentProcessIdentifier: Bool {
+    NSClassFromString("WKWebView")?.instancesRespond(to: NSSelectorFromString("_webProcessIdentifier")) ?? false
+  }
+
+  /// The public delegate gives no reason, so every exit is `.crashed`. A load in progress ends first; the next
+  /// committed navigation (a reload) recovers the tab in `didCommit`.
+  private func webContentProcessTerminated(_ id: TabID) {
+    guard let entry = entries[id] else { return }
+    entry.pendingFinish = nil
+    update(id) { $0.isLoading = false } event: { .loadingChanged(id, isLoading: false) }
+    update(id) { $0.crash = .crashed } event: { .tabCrashed(id, .crashed) }
   }
 
   // MARK: - Load lifecycle
@@ -396,6 +710,7 @@ public final class FakeEngine: EngineClient {
   private func startLoad(_ id: TabID) {
     guard let entry = entries[id] else { return }
     entry.pendingFinish = nil
+    endFindAndHover(id, entry)
     let url = entry.webView.url
     update(id) { $0.url = url } event: { .urlChanged(id, url) }
     update(id) { $0.isLoading = true } event: { .loadingChanged(id, isLoading: true) }
@@ -403,6 +718,10 @@ public final class FakeEngine: EngineClient {
 
   private func didCommit(_ id: TabID) {
     guard let entry = entries[id] else { return }
+    update(id) { $0.crash = nil } event: { .tabRecovered(id) }       // #576: the page has a process again
+    // The old document's selection goes with it; the new document's script reports its own (#404). Not at the load's
+    // start: the old page is still shown then, and a cancelled load (a download, a 204) keeps it.
+    entry.selectedText = nil
     let host = entry.webView.url?.host()
     guard host != entry.committedHost else { return }
     entry.committedHost = host
@@ -469,24 +788,485 @@ public final class FakeEngine: EngineClient {
 
   // MARK: - Favicon
 
+  /// One test waiter. Whichever of the fetch finishing or the deadline arrives first resumes it, and the
+  /// continuation is dropped so the other path cannot resume it again.
+  @MainActor
+  private final class FaviconFetchWaiter {
+    private var continuation: CheckedContinuation<Void, Never>?
+    init(_ continuation: CheckedContinuation<Void, Never>) { self.continuation = continuation }
+    func resume() {
+      continuation?.resume()
+      continuation = nil
+    }
+  }
+
+  /// Test hook (reachable through `@testable import`): waits for the favicon fetch in flight for `id`, if any,
+  /// but no longer than 10 s. The deadline only bounds a test; a fetch that finishes resumes at once.
+  func waitForFaviconFetch(_ id: TabID) async {
+    guard faviconFetches[id, default: 0] > 0 else { return }
+    await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+      let waiter = FaviconFetchWaiter(done)
+      faviconFetchWaiters[id, default: []].append(waiter)
+      Task { @MainActor [weak self] in
+        try? await Task.sleep(for: .seconds(10))
+        self?.expireFaviconFetchWaiter(waiter, for: id)
+      }
+    }
+  }
+
+  private func expireFaviconFetchWaiter(_ waiter: FaviconFetchWaiter, for id: TabID) {
+    faviconFetchWaiters[id]?.removeAll { $0 === waiter }
+    if faviconFetchWaiters[id]?.isEmpty == true { faviconFetchWaiters[id] = nil }
+    waiter.resume()
+  }
+
+  private func beginFaviconFetch(_ id: TabID) {
+    faviconFetches[id, default: 0] += 1
+  }
+
+  private func finishFaviconFetch(_ id: TabID) {
+    guard let count = faviconFetches[id] else { return }
+    guard count > 1 else {
+      faviconFetches[id] = nil
+      for waiter in faviconFetchWaiters.removeValue(forKey: id) ?? [] { waiter.resume() }
+      return
+    }
+    faviconFetches[id] = count - 1
+  }
+
+  /// The longer side, in pixels, of a favicon drawn to PNG: the shell's largest decoded favicon
+  /// (`FaviconDecoder.maxPixelSize`).
+  nonisolated static let rasterFaviconPixels = 64
+
+  /// The most favicon bytes taken; larger ones are dropped before they are parsed. Real favicons are a few KB.
+  nonisolated static let maxFaviconBytes = 512 * 1024
+
+  /// The favicon as the engine contract promises it, PNG or ICO (#675), or nil for bytes that are no image or are
+  /// larger than `maxFaviconBytes`. PNG and ICO bytes pass through. Bytes that start with 00 00 01 00 pass as ICO
+  /// unchecked; the shell's decoder drops any that are not one. Other raster images ImageIO reads (JPEG, GIF, TIFF)
+  /// are scaled down with ImageIO to fit `rasterFaviconPixels`, keeping their aspect ratio. SVG, which ImageIO cannot
+  /// read, is drawn by AppKit to fit the same square. Parses untrusted bytes: call it off the main actor
+  /// (`downloadFavicon` does).
+  nonisolated static func contractFavicon(_ data: Data) -> Data? {
+    guard data.count <= maxFaviconBytes else { return nil }
+    let png: [UInt8] = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
+    let ico: [UInt8] = [0x00, 0x00, 0x01, 0x00]
+    if data.starts(with: png) || data.starts(with: ico) { return data }
+    let side = rasterFaviconPixels
+    if let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+       CGImageSourceGetCount(source) > 0 {
+      let options: [CFString: Any] = [
+        kCGImageSourceCreateThumbnailFromImageAlways: true,
+        kCGImageSourceCreateThumbnailWithTransform: true,
+        kCGImageSourceThumbnailMaxPixelSize: side,
+      ]
+      return CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary).flatMap(pngData)
+    }
+    guard let image = NSImage(data: data), image.isValid, image.size.width > 0, image.size.height > 0 else {
+      return nil
+    }
+    let scale = CGFloat(side) / max(image.size.width, image.size.height)
+    let width = max(1, Int((image.size.width * scale).rounded()))
+    let height = max(1, Int((image.size.height * scale).rounded()))
+    guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+          let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+    else { return nil }
+    var rect = CGRect(x: 0, y: 0, width: width, height: height)
+    let graphics = NSGraphicsContext(cgContext: context, flipped: false)
+    guard let bitmap = image.cgImage(forProposedRect: &rect, context: graphics, hints: nil) else { return nil }
+    context.draw(bitmap, in: CGRect(x: 0, y: 0, width: width, height: height))
+    return context.makeImage().flatMap(pngData)
+  }
+
+  /// Downloads the icon at `url` and converts it with `convert`, both on the concurrent pool, so neither the body nor
+  /// the parsing ever runs on the main actor. Nil unless the response is an HTTP 200 image/* within `maxFaviconBytes`:
+  /// a body that announces more is dropped unread, and one without a usable length is read only up to the cap
+  /// (`readFavicon`).
+  @concurrent
+  nonisolated static func downloadFavicon(from url: URL, session: URLSession,
+                                          convert: @Sendable (Data) -> Data?) async -> Data? {
+    guard let (bytes, response) = try? await session.bytes(from: url) else { return nil }
+    defer { bytes.task.cancel() }
+    guard let http = response as? HTTPURLResponse, http.statusCode == 200,
+          http.mimeType?.lowercased().hasPrefix("image/") == true,
+          http.expectedContentLength <= Int64(maxFaviconBytes),
+          let data = try? await readFavicon(bytes) else { return nil }
+    return convert(data)
+  }
+
+  /// The bytes of `body`, or nil as soon as it runs past `limit`: at most one byte past the cap is ever read.
+  nonisolated static func readFavicon<Body: AsyncSequence>(_ body: Body, limit: Int = maxFaviconBytes) async throws
+    -> Data? where Body.Element == UInt8 {
+    var data = Data()
+    for try await byte in body {
+      guard data.count < limit else { return nil }
+      data.append(byte)
+    }
+    return data
+  }
+
+  nonisolated private static func pngData(_ image: CGImage) -> Data? {
+    let data = NSMutableData()
+    guard let destination = CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil) else { return nil }
+    CGImageDestinationAddImage(destination, image, nil)
+    return CGImageDestinationFinalize(destination) ? data as Data : nil
+  }
+
   /// Prototype favicon: <link rel=icon> or /favicon.ico, fetched with an ephemeral URLSession and
-  /// accepted only as an HTTP 200 image/* response. Real engines push it.
+  /// accepted only as an HTTP 200 image/* response, then given to the shell as PNG or ICO (`contractFavicon`, off the
+  /// main actor). Real engines push it.
   private func fetchFavicon(_ id: TabID) {
     guard let web = entries[id]?.webView, let pageURL = web.url, !pageURL.isFileURL else { return }
+    beginFaviconFetch(id)
     let script = "(document.querySelector('link[rel~=\"icon\"]') || {}).href || ''"
-    let session = faviconSession
     web.evaluateJavaScript(script) { [weak self] result, _ in
       MainActor.assumeIsolated {
         let href = (result as? String).flatMap { $0.isEmpty ? nil : URL(string: $0) }
-        guard let iconURL = href ?? URL(string: "/favicon.ico", relativeTo: pageURL)?.absoluteURL else { return }
-        Task { @MainActor [weak self] in
-          guard let (data, response) = try? await session.data(from: iconURL),
-                let http = response as? HTTPURLResponse, http.statusCode == 200,
-                http.mimeType?.lowercased().hasPrefix("image/") == true,
-                self?.entries[id]?.snapshot.url == pageURL else { return }
-          self?.update(id) { $0.faviconData = data } event: { .faviconChanged(id, data) }
+        guard let iconURL = href ?? URL(string: "/favicon.ico", relativeTo: pageURL)?.absoluteURL else {
+          self?.finishFaviconFetch(id)
+          return
+        }
+        self?.fetchFavicon(id, from: iconURL, pageURL: pageURL)
+      }
+    }
+  }
+
+  /// Fetches and converts the icon at `iconURL` off the main actor (`downloadFavicon`), then gives it to tab `id`
+  /// if the tab still shows `pageURL`. Returns the task so a test can await it without a clock.
+  @discardableResult
+  func fetchFavicon(_ id: TabID, from iconURL: URL, pageURL: URL?) -> Task<Void, Never> {
+    let session = faviconSession
+    let convert = faviconConverter
+    return Task { @MainActor [weak self] in
+      guard self?.entries[id]?.snapshot.url == pageURL,
+            let favicon = await FakeEngine.downloadFavicon(from: iconURL, session: session, convert: convert),
+            self?.entries[id]?.snapshot.url == pageURL else {         // the page may have moved on meanwhile
+        self?.finishFaviconFetch(id)
+        return
+      }
+      self?.update(id) { $0.faviconData = favicon } event: { .faviconChanged(id, favicon) }
+      self?.finishFaviconFetch(id)
+    }
+  }
+}
+
+// MARK: - Downloads (rule 24)
+//
+// Kept in this file: only FakeEngine.swift may import WebKit (WebKitIsolationTests).
+
+/// What the engine keeps of one download: the live WKDownload and what Retry needs.
+@MainActor
+final class DownloadRecord {
+  var download: WKDownload?
+  /// The delegate; WKDownload holds it weakly.
+  var observer: DownloadObserver?
+  var request: URLRequest?
+  var resumeData: Data?
+  /// The target decided for the item, kept for a resume.
+  var target: URL?
+  var progressObservation: NSKeyValueObservation?
+  /// Speed is the bytes since the last sample over the time since it.
+  var lastSample: (date: Date, bytes: Int64)?
+  /// The user cancelled or removed it: a failure callback that follows is not an interruption.
+  var isEnding = false
+  /// Removes the partial file and marks the item cancelled; runs once, when WebKit has finished the cancel.
+  var finishCancel: (@MainActor () -> Void)?
+}
+
+/// The WKDownloadDelegate of one download, forwarding to the engine.
+@MainActor
+final class DownloadObserver: NSObject, WKDownloadDelegate {
+  let id: DownloadID
+  weak var engine: FakeEngine?
+  init(id: DownloadID, engine: FakeEngine) { self.id = id; self.engine = engine }
+
+  func download(_ download: WKDownload, decideDestinationUsing response: URLResponse, suggestedFilename: String,
+                completionHandler: @escaping @MainActor @Sendable (URL?) -> Void) {
+    guard let engine else { completionHandler(nil); return }
+    engine.decideDestination(id, response: response, suggestedFilename: suggestedFilename, completion: completionHandler)
+  }
+
+  func downloadDidFinish(_ download: WKDownload) { engine?.downloadFinished(id) }
+
+  func download(_ download: WKDownload, didFailWithError error: any Error, resumeData: Data?) {
+    engine?.downloadFailed(id, error: error, resumeData: resumeData)
+  }
+}
+
+/// Downloads through WKDownload (rule 24). WebKit offers no pause and no danger judgement: `pause` and the danger
+/// commands do nothing, and every item is `.notDangerous`. Progress is the download's own NSProgress; bytes arrive from
+/// the network, so the contract's held response is a loopback server in the GUI tests.
+extension FakeEngine {
+  public var downloads: [DownloadItem] { downloadItems }
+
+  public func observeDownloads(_ handler: @escaping @MainActor (DownloadEvent) -> Void) -> EngineObservation {
+    hub.addDownloadObserver(handler)
+  }
+
+  public func startDownload(from url: URL) {
+    startDownload(DownloadID(), request: URLRequest(url: url), replacing: nil)
+  }
+
+  // MARK: Commands
+
+  public func perform(_ command: DownloadCommand, on id: DownloadID) {
+    guard let item = download(id), let record = downloadRecords[id] else { return }
+    switch command {
+    case .cancel:
+      guard item.state.isActive else { return }
+      cancelDownload(id)
+    case .pause, .keepDangerous, .discardDangerous:
+      return                                    // WebKit cannot pause and judges nothing dangerous
+    case .resume:
+      guard case .interrupted = item.state, item.canResume else { return }
+      resumeDownload(id)
+    case .open:
+      guard item.canBeOpened, let target = item.targetPath else { return }
+      downloadOpener(target)
+    case .showInFinder:
+      guard let target = item.targetPath else { return }
+      downloadRevealer(target)
+    case .retry:
+      switch item.state {
+      case .interrupted where item.canResume: resumeDownload(id)
+      case .interrupted, .cancelled:
+        guard let request = record.request else { return }
+        startDownload(DownloadID(), request: request, replacing: id)
+      default: return
+      }
+    case .remove:
+      if item.state.isActive { cancelDownload(id) }
+      removeDownloadItem(id)
+    }
+  }
+
+  // MARK: Starting
+
+  func adoptDownload(_ download: WKDownload) {
+    let id = DownloadID()
+    attach(download, to: id, record: DownloadRecord(), request: download.originalRequest)
+  }
+
+  private func startDownload(_ id: DownloadID, request: URLRequest, replacing old: DownloadID?) {
+    let record = DownloadRecord()
+    record.request = request
+    // The old row goes when the new one is listed (decideDestination), so a refused panel keeps it.
+    pendingReplacement[id] = old                    // nil: no row to replace
+    downloadRecords[id] = record
+    downloadWebView.startDownload(using: request) { [weak self] download in
+      MainActor.assumeIsolated { self?.attach(download, to: id, record: record, request: request) }
+    }
+  }
+
+  private func attach(_ download: WKDownload, to id: DownloadID, record: DownloadRecord, request: URLRequest?) {
+    record.request = request
+    record.download = download
+    let observer = DownloadObserver(id: id, engine: self)
+    record.observer = observer
+    download.delegate = observer
+    downloadRecords[id] = record
+  }
+
+  // MARK: WebKit callbacks
+
+  func decideDestination(_ id: DownloadID, response: URLResponse, suggestedFilename: String,
+                         completion: @escaping @MainActor @Sendable (URL?) -> Void) {
+    guard let record = downloadRecords[id] else { completion(nil); return }
+    if let target = record.target {                // a resume keeps its file
+      completion(target)
+      return
+    }
+    let name = suggestedFilename.isEmpty ? "download" : suggestedFilename
+    switch downloadSavePreference {
+    case .folder(let folder):
+      chosen(id, response, name, uniqueTarget(name, in: usableFolder(folder)), completion)
+    case .ask:
+      guard let chooser = downloadDestinationChooser else {
+        chosen(id, response, name, uniqueTarget(name, in: downloadDefaultFolder), completion)
+        return
+      }
+      let request = DownloadDestinationRequest(suggestedFilename: name, directory: downloadDefaultFolder)
+      Task { [weak self] in
+        let target = await chooser(request)
+        guard let self else { completion(nil); return }
+        guard let target else {
+          self.downloadRecords[id] = nil
+          self.pendingReplacement[id] = nil
+          completion(nil)                          // the panel was cancelled: the download never lists
+          return
+        }
+        self.chosen(id, response, name, target, completion)
+      }
+    }
+  }
+
+  private func chosen(_ id: DownloadID, _ response: URLResponse, _ name: String, _ target: URL,
+                      _ completion: @MainActor @Sendable (URL?) -> Void) {
+    guard let record = downloadRecords[id] else { completion(nil); return }
+    try? FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+    record.target = target
+    let total = response.expectedContentLength > 0 ? response.expectedContentLength : nil
+    let item = DownloadItem(
+      id: id, url: response.url ?? record.request?.url ?? target, filename: target.lastPathComponent,
+      targetPath: target, totalBytes: total, mimeType: response.mimeType ?? "application/octet-stream",
+      startTime: downloadClock())
+    downloadItems.append(item)
+    if let old = pendingReplacement.removeValue(forKey: id) { removeDownloadItem(old) }
+    hub.emit(DownloadEvent.downloadCreated(item))
+    if let download = record.download {
+      record.progressObservation = download.progress.observe(\.completedUnitCount, options: [.new]) { [weak self] _, _ in
+        MainActor.assumeIsolated { self?.downloadProgressed(id) }
+      }
+    }
+    completion(target)
+  }
+
+  private func downloadProgressed(_ id: DownloadID) {
+    guard let record = downloadRecords[id], let progress = record.download?.progress,
+          let item = download(id), item.state == .inProgress else { return }
+    let received = progress.completedUnitCount
+    let now = downloadClock()
+    var speed = item.bytesPerSecond
+    if let last = record.lastSample, now.timeIntervalSince(last.date) > 0.5 {
+      speed = Int64(Double(received - last.bytes) / now.timeIntervalSince(last.date))
+      record.lastSample = (now, received)
+    } else if record.lastSample == nil {
+      record.lastSample = (now, received)
+    }
+    let total = progress.totalUnitCount > 0 ? progress.totalUnitCount : item.totalBytes
+    changeDownload(id) {
+      $0.receivedBytes = max($0.receivedBytes, received)
+      $0.bytesPerSecond = max(0, speed)
+      if let total { $0.totalBytes = total }
+    }
+  }
+
+  func downloadFinished(_ id: DownloadID) {
+    guard let record = downloadRecords[id], let item = download(id), item.state.isActive else { return }
+    record.progressObservation = nil
+    let size = (try? item.targetPath.map { try FileManager.default.attributesOfItem(atPath: $0.path())[.size] as? Int64 })
+      .flatMap { $0 } ?? item.receivedBytes
+    let end = downloadClock()
+    changeDownload(id) {
+      $0.receivedBytes = size
+      if $0.totalBytes == nil { $0.totalBytes = size }
+      $0.state = .complete; $0.endTime = end; $0.bytesPerSecond = 0
+    }
+    record.download = nil
+  }
+
+  func downloadFailed(_ id: DownloadID, error: any Error, resumeData: Data?) {
+    guard let record = downloadRecords[id], let item = download(id), item.state.isActive, !record.isEnding else {
+      downloadRecords[id]?.download = nil
+      downloadRecords[id]?.finishCancel?()          // the cancel failed the download: it is over either way
+      return
+    }
+    record.progressObservation = nil
+    record.resumeData = resumeData
+    record.download = nil
+    let reason = Self.interruptReason(for: error)
+    changeDownload(id) {
+      $0.state = .interrupted(reason); $0.canResume = resumeData != nil; $0.bytesPerSecond = 0
+    }
+  }
+
+  static func interruptReason(for error: any Error) -> DownloadInterruptReason {
+    switch (error as? URLError)?.code {
+    case .notConnectedToInternet?, .networkConnectionLost?, .dataNotAllowed?: .networkDisconnected
+    case .timedOut?: .networkTimeout
+    case .cannotFindHost?, .cannotConnectToHost?, .dnsLookupFailed?: .serverUnreachable
+    case .secureConnectionFailed?, .serverCertificateUntrusted?, .serverCertificateHasBadDate?,
+         .serverCertificateHasUnknownRoot?, .serverCertificateNotYetValid?, .clientCertificateRejected?:
+      .serverCertProblem
+    case .cancelled?: .userCanceled
+    case .noPermissionsToReadFile?, .fileDoesNotExist?, .cannotWriteToFile?, .cannotCreateFile?: .fileAccessDenied
+    default: .networkFailed
+    }
+  }
+
+  // MARK: Internals
+
+  private func cancelDownload(_ id: DownloadID) {
+    guard let record = downloadRecords[id], let item = download(id), !record.isEnding else { return }
+    record.isEnding = true
+    record.progressObservation = nil
+    // WebKit finishes the cancel asynchronously and may still create or write the file until it has, so the file goes
+    // and the item reads cancelled only once WebKit says the cancel is done. The download stays alive until then, so
+    // it is never released while it is still starting up.
+    record.finishCancel = { [weak self, weak record] in
+      record?.finishCancel = nil
+      if let target = item.targetPath {
+        try? FileManager.default.removeItem(at: target)
+        try? FileManager.default.removeItem(at: target.appendingPathExtension("download"))
+      }
+      guard let self else { return }
+      let end = self.downloadClock()
+      self.changeDownload(id) { $0.state = .cancelled; $0.bytesPerSecond = 0; $0.endTime = end }
+    }
+    guard let download = record.download else { record.finishCancel?(); return }
+    record.download = nil
+    download.cancel { _ in
+      MainActor.assumeIsolated {
+        withExtendedLifetime(download) {}
+        record.finishCancel?()
+      }
+    }
+  }
+
+  private func resumeDownload(_ id: DownloadID) {
+    guard let record = downloadRecords[id], let data = record.resumeData else { return }
+    record.resumeData = nil
+    record.isEnding = false
+    changeDownload(id) { $0.state = .inProgress; $0.endTime = nil }
+    downloadWebView.resumeDownload(fromResumeData: data) { [weak self] download in
+      MainActor.assumeIsolated {
+        guard let self else { return }
+        self.attach(download, to: id, record: record, request: record.request)
+        record.progressObservation = download.progress.observe(\.completedUnitCount, options: [.new]) { [weak self] _, _ in
+          MainActor.assumeIsolated { self?.downloadProgressed(id) }
         }
       }
     }
+  }
+
+  private func removeDownloadItem(_ id: DownloadID) {
+    guard downloadItems.contains(where: { $0.id == id }) else { return }
+    downloadItems.removeAll { $0.id == id }
+    downloadRecords[id] = nil
+    hub.emit(DownloadEvent.downloadRemoved(id))
+  }
+
+  private func changeDownload(_ id: DownloadID, _ mutate: (inout DownloadItem) -> Void) {
+    guard let index = downloadItems.firstIndex(where: { $0.id == id }) else { return }
+    var item = downloadItems[index]
+    mutate(&item)
+    guard item != downloadItems[index] else { return }
+    downloadItems[index] = item
+    hub.emit(DownloadEvent.downloadUpdated(item))
+  }
+
+  private func usableFolder(_ folder: URL) -> URL {
+    var isDirectory: ObjCBool = false
+    let usable = FileManager.default.fileExists(atPath: folder.path(), isDirectory: &isDirectory)
+      && isDirectory.boolValue && FileManager.default.isWritableFile(atPath: folder.path())
+    return usable ? folder : downloadDefaultFolder
+  }
+
+  func uniqueTarget(_ suggested: String, in folder: URL) -> URL {
+    let filename = DownloadFilename.sanitized(suggested)
+    let base = (filename as NSString).deletingPathExtension
+    let ext = (filename as NSString).pathExtension
+    var candidate = folder.appending(path: filename)
+    var number = 0
+    while FileManager.default.fileExists(atPath: candidate.path()) {
+      number += 1
+      candidate = folder.appending(path: ext.isEmpty ? "\(base) (\(number))" : "\(base) (\(number)).\(ext)")
+    }
+    // Belt and braces: the target is a direct child of the folder, whatever the name did.
+    guard DownloadFilename.isDirectChild(candidate, of: folder) else {
+      return folder.appending(path: "download")
+    }
+    return candidate
   }
 }

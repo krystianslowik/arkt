@@ -1,4 +1,5 @@
 import AppKit
+import ImageIO
 import ArktEngineABI
 import EngineAPITestSupport
 
@@ -25,9 +26,140 @@ final class ScriptedEvent: NSObject, ArktEngineEvent {
   var isActive = false
   var isAudible = false
   var isMuted = false
+  var dialog: (any ArktJavaScriptDialog)?
+  var permission: (any ArktPermissionRequest)?
+  var infobars: [any ArktInfobar]?
+  var findRequestId = 0
+  var findOrdinal = 0
+  var findCount = 0
+  var findIsFinal = false
+  var download: (any ArktDownloadItem)?
 
   init(_ kind: ArktEngineEventKind, tab: (any ArktTabHandle)?, browser: (any ArktBrowserHandle)?) {
     self.kind = kind; self.tab = tab; self.browser = browser
+  }
+}
+
+/// A page's alert, confirm or prompt (#400): plain values and the one answer. `answers` records what the page's call
+/// would have returned.
+final class ScriptedDialog: NSObject, ArktJavaScriptDialog {
+  let kind: ArktDialogKind
+  let tab: any ArktTabHandle
+  let title: String
+  let message: String
+  let defaultPromptText: String?
+  let acceptTitle = "OK"
+  let cancelTitle: String?
+  private(set) var isEnded = false
+  private(set) var answer: (accepted: Bool, userInput: String?)?
+  var onEnd: (() -> Void)?
+
+  init(kind: ArktDialogKind, tab: any ArktTabHandle, title: String, message: String, defaultPromptText: String?) {
+    self.kind = kind; self.tab = tab; self.title = title; self.message = message
+    self.defaultPromptText = kind == .prompt ? (defaultPromptText ?? "") : nil
+    cancelTitle = kind == .alert ? nil : "Cancel"
+  }
+
+  func respond(accepted: Bool, userInput: String?) -> Bool {
+    guard !isEnded else { return false }
+    answer = (accepted, userInput)
+    end()
+    return true
+  }
+
+  /// The engine's own end, or the end after an answer: once, reported with `DialogEnded`.
+  func end() {
+    guard !isEnded else { return }
+    isEnded = true
+    onEnd?()
+  }
+}
+
+/// A site's permission request (#400): plain values and the one answer. `choice` records what the shell answered.
+final class ScriptedPermission: NSObject, ArktPermissionRequest {
+  let tab: any ArktTabHandle
+  let origin: String
+  let kinds: [NSNumber]
+  let title: String
+  let items: [String]
+  let allowTitle: String
+  let allowThisTimeTitle: String?
+  let blockTitle: String
+  private(set) var isEnded = false
+  private(set) var choice: ArktPermissionChoice?
+  var onEnd: (() -> Void)?
+
+  init(tab: any ArktTabHandle, origin: String, kinds: [ArktPermissionKind], items: [String], oneTime: Bool) {
+    self.tab = tab; self.origin = origin; self.kinds = kinds.map { NSNumber(value: $0.rawValue) }
+    self.items = items
+    title = "\(origin) wants to"
+    allowTitle = oneTime ? "Allow while visiting the site" : "Allow"
+    allowThisTimeTitle = oneTime ? "Allow this time" : nil
+    blockTitle = oneTime ? "Never allow" : "Block"
+  }
+
+  func respond(choice: ArktPermissionChoice) -> Bool {
+    guard !isEnded else { return false }
+    self.choice = choice
+    end()
+    return true
+  }
+
+  /// The engine's own end, or the end after an answer: once, reported with `PermissionEnded`.
+  func end() {
+    guard !isEnded else { return }
+    isEnded = true
+    onEnd?()
+  }
+}
+
+/// An infobar (#400): plain values and the shell's actions. `actions` records what reached the delegate; Ok, Cancel and
+/// Close remove the infobar (the delegate returned true), a link keeps it.
+final class ScriptedInfobar: NSObject, ArktInfobar {
+  private static var counter: UInt = 0
+  let infobarId: UInt
+  let tab: any ArktTabHandle
+  var kind: ArktInfobarKind = .other
+  var message: String
+  var messageLinkRanges: [NSValue] = []
+  var linkTitle: String?
+  var linkAccessibilityLabel: String?
+  var linkBeforeButtons = false
+  var okTitle: String? = "OK"
+  var okTooltip: String?
+  var okEnabled = true
+  var cancelTitle: String? = "Cancel"
+  var cancelTooltip: String?
+  var cancelEnabled = true
+  var closeAccessibilityLabel: String? = "Close"
+  var iconPNG: Data?
+  private(set) var isEnded = false
+  private(set) var actions: [(action: ArktInfobarAction, linkIndex: UInt)] = []
+  /// The tab removes the infobar from its list and reports the new one.
+  var onRemoved: ((ScriptedInfobar) -> Void)?
+
+  init(tab: any ArktTabHandle, message: String) {
+    Self.counter += 1
+    infobarId = Self.counter
+    self.tab = tab; self.message = message
+  }
+
+  func act(_ action: ArktInfobarAction, linkIndex: UInt) -> Bool {
+    guard !isEnded else { return false }
+    actions.append((action, linkIndex))
+    switch action {
+    case .link, .messageLink: break
+    case .ok, .cancel, .close: remove()
+    @unknown default: break
+    }
+    return true
+  }
+
+  /// The infobar is gone, whoever removed it.
+  func remove() {
+    guard !isEnded else { return }
+    isEnded = true
+    onRemoved?(self)
   }
 }
 
@@ -103,6 +235,11 @@ final class ScriptedTab: NSObject, ArktTabHandle {
   var queued: [() -> Void] = []
   /// Showing the initial about:blank, which is replaced by the first navigation and never kept in the history.
   var isInitialBlank = false
+  /// Find in page and link hover (ScriptedFind.swift).
+  var findSession: FindSession?
+  var findRequests = 0
+  var pageSelection = ""
+  var hoveredLink: URL?
   /// The title the current load will report.
   private var loadingTitle: String?
   private var committedHost: String?
@@ -117,7 +254,123 @@ final class ScriptedTab: NSObject, ArktTabHandle {
 
   private var current: (url: URL, title: String)? { url.map { ($0, title) } }
 
-  private func record(_ kind: ArktEngineEventKind, _ fill: (ScriptedEvent) -> Void = { _ in }) {
+  // MARK: JavaScript dialogs (#400)
+
+  /// The pending alert, confirm or prompt.
+  private(set) var jsDialog: ScriptedDialog?
+
+  /// The page raises a dialog: the earlier one ends first, as Chromium's manager closes it.
+  @discardableResult
+  func raiseDialog(_ kind: ArktDialogKind, message: String, defaultText: String? = nil) -> ScriptedDialog {
+    endJSDialog()
+    let dialog = ScriptedDialog(kind: kind, tab: self, title: "\(url?.host() ?? "This page") says", message: message,
+                                defaultPromptText: defaultText)
+    dialog.onEnd = { [weak self, unowned dialog] in
+      guard let self else { return }
+      if jsDialog === dialog { jsDialog = nil }
+      record(.dialogEnded) { $0.dialog = dialog }
+    }
+    jsDialog = dialog
+    record(.dialogRequested) { $0.dialog = dialog }
+    return dialog
+  }
+
+  /// The tab stopped being its window's active tab: Chromium's manager answers a confirm or prompt false or null
+  /// (`kTabHidden`) and closes it; an alert already ran its callback and stays.
+  func hidden() {
+    guard let kind = jsDialog?.kind, kind != .alert else { return }
+    endJSDialog()
+  }
+
+  /// The engine ends the pending dialog (a navigation, a later dialog, the tab closing).
+  func endJSDialog() { jsDialog?.end() }
+
+  // MARK: Permission requests (#400)
+
+  /// The pending request, and what asked for it (kept so a hidden tab can ask again, as Chromium's manager does).
+  private(set) var permission: ScriptedPermission?
+  private var permissionAsk: (origin: String, kinds: [ArktPermissionKind], items: [String], oneTime: Bool)?
+
+  /// The page asks for a permission: the earlier request ends first. Shown only while the tab is its window's active
+  /// tab (a hidden tab's ask stays pending until it is shown).
+  @discardableResult
+  func askPermission(_ kinds: [ArktPermissionKind], items: [String], oneTime: Bool) -> ScriptedPermission? {
+    endPermission()
+    permissionAsk = (url?.host() ?? "This page", kinds, items, oneTime)
+    return showPermission()
+  }
+
+  private func showPermission() -> ScriptedPermission? {
+    guard let ask = permissionAsk, isActive else { return nil }
+    let request = ScriptedPermission(tab: self, origin: ask.origin, kinds: ask.kinds, items: ask.items,
+                                     oneTime: ask.oneTime)
+    request.onEnd = { [weak self, unowned request] in
+      guard let self else { return }
+      if permission === request { permission = nil }
+      record(.permissionEnded) { $0.permission = request }
+    }
+    permission = request
+    record(.permissionRequested) { $0.permission = request }
+    return request
+  }
+
+  /// The tab stopped being its window's active tab: Chromium's manager deletes the prompt and keeps the ask pending.
+  func permissionHidden() { endPermissionView() }
+
+  /// The tab is its window's active tab again: the pending ask gets a new prompt.
+  func permissionShown() {
+    guard permission == nil, permissionAsk != nil else { return }
+    _ = showPermission()
+  }
+
+  /// The site withdraws the ask, or a navigation or the tab closing drops it: the prompt ends and the ask is gone.
+  func endPermission() {
+    permissionAsk = nil
+    permission?.end()
+  }
+
+  private func endPermissionView() { permission?.end() }
+
+  // MARK: Infobars (#400)
+
+  /// The tab's infobars in the engine's order; they stay while the tab is hidden.
+  private(set) var infobars: [ScriptedInfobar] = []
+
+  private func makeInfobar(_ message: String, _ configure: (ScriptedInfobar) -> Void) -> ScriptedInfobar {
+    let infobar = ScriptedInfobar(tab: self, message: message)
+    configure(infobar)
+    infobar.onRemoved = { [weak self] removed in
+      guard let self else { return }
+      infobars.removeAll { $0 === removed }
+      reportInfobars()
+    }
+    return infobar
+  }
+
+  /// The engine adds an infobar and reports the tab's whole list.
+  @discardableResult
+  func addInfobar(_ message: String, configure: (ScriptedInfobar) -> Void = { _ in }) -> ScriptedInfobar {
+    let infobar = makeInfobar(message, configure)
+    infobars.append(infobar)
+    reportInfobars()
+    return infobar
+  }
+
+  /// The tab moved to another window: its infobars come back as one list of new infobars; the old objects are gone and
+  /// refuse every action.
+  func moveInfobarsToNewPresenter() {
+    let old = infobars
+    for previous in old { previous.onRemoved = nil; previous.remove() }
+    infobars = old.map { previous in makeInfobar(previous.message) { _ in } }
+    reportInfobars()
+  }
+
+  private func reportInfobars() {
+    let list = infobars
+    record(.infobarsChanged) { $0.infobars = list }
+  }
+
+  func record(_ kind: ArktEngineEventKind, _ fill: (ScriptedEvent) -> Void = { _ in }) {
     let event = ScriptedEvent(kind, tab: self, browser: owner)
     fill(event)
     facade.record(event)
@@ -132,6 +385,7 @@ final class ScriptedTab: NSObject, ArktTabHandle {
 
   func startLoad(_ target: URL, title: String?) {
     isInitialBlank = false
+    endFindAndHover()
     url = target
     loadingTitle = title
     record(.urlChanged) { $0.url = target }
@@ -180,7 +434,7 @@ final class ScriptedTab: NSObject, ArktTabHandle {
     record(.titleChanged) { $0.title = newTitle }
   }
 
-  private func reportHistory() {
+  func reportHistory() {
     let now = (canGoBack, canGoForward)
     guard now != lastHistory else { return }
     lastHistory = now
@@ -192,6 +446,8 @@ final class ScriptedTab: NSObject, ArktTabHandle {
   func navigate(to target: URL) {
     whenInserted { [self] in
       guard owner != nil else { return }
+      endJSDialog()                 // Chromium closes it when the navigation starts
+      endPermission()               // and drops the ask
       if let current, current.url != target, !isInitialBlank {
         back.insert(current, at: 0)
         forward = []
@@ -232,7 +488,10 @@ final class ScriptedTab: NSObject, ArktTabHandle {
   }
 
   func activate() {
-    whenInserted { [self] in owner?.activate(self) }
+    whenInserted { [self] in
+      owner?.activate(self)
+      unpark()
+    }
   }
 
   func close(mode: ArktCloseMode) -> ArktCloseResult {
@@ -268,6 +527,46 @@ final class ScriptedTab: NSObject, ArktTabHandle {
     }
   }
 
+  // MARK: Frame copy (#370, #352)
+
+  /// The page's size in points and its backing scale, for `copyFrame`.
+  var frameSize = NSSize(width: 1280, height: 800)
+  var frameScale: CGFloat = 2
+  /// False models a tab whose surface Chromium cannot copy: hidden and evicted, discarded, or never drawn.
+  var frameAvailable = true
+  /// The `maxPixelSize` of every `copyFrame`, in order.
+  private(set) var copyRequests: [NSSize] = []
+
+  /// `RenderWidgetHostView::CopyFromSurface` as the facade runs it: nil without a drawn frame, else a PNG scaled down
+  /// to fit `maxPixelSize` (zero: full size), answered later on the main thread.
+  func copyFrame(maxPixelSize: NSSize, completion: @escaping (Data?, NSSize, CGFloat) -> Void) {
+    copyRequests.append(maxPixelSize)
+    let frame = owner != nil && committedHost != nil && frameAvailable ? renderFrame(fitting: maxPixelSize) : nil
+    Task { @MainActor in completion(frame?.png, frame?.size ?? .zero, frame?.scale ?? 0) }
+  }
+
+  private func renderFrame(fitting cap: NSSize) -> (png: Data, size: NSSize, scale: CGFloat)? {
+    var width = (frameSize.width * frameScale).rounded()
+    var height = (frameSize.height * frameScale).rounded()
+    if cap.width > 0, cap.height > 0 {
+      let factor = min(1, cap.width / width, cap.height / height)
+      width = max(1, (width * factor).rounded(.down))
+      height = max(1, (height * factor).rounded(.down))
+    }
+    guard let context = CGContext(data: nil, width: Int(width), height: Int(height), bitsPerComponent: 8,
+                                  bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue
+                                    | CGBitmapInfo.byteOrder32Little.rawValue) else { return nil }
+    context.setFillColor(red: 0.2, green: 0.4, blue: 0.6, alpha: 1)
+    context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+    let data = NSMutableData()
+    guard let image = context.makeImage(),
+          let destination = CGImageDestinationCreateWithData(data, "public.png" as CFString, 1, nil) else { return nil }
+    CGImageDestinationAddImage(destination, image, nil)
+    guard CGImageDestinationFinalize(destination) else { return nil }
+    return (data as Data, NSSize(width: width, height: height), width / frameSize.width)
+  }
+
   /// The page starts or stops playing sound (`OnAudioStateChanged`).
   func setAudible(_ audible: Bool) {
     guard isAudible != audible else { return }
@@ -291,19 +590,28 @@ final class ScriptedTab: NSObject, ArktTabHandle {
       guard let source = owner, let target = browser as? ScriptedBrowser, target !== source, !target.isClosed else {
         return
       }
+      findSession = nil
+      pageSelection = ""
       source.move(self, to: target)
       target.activate(self)
       if source.tabList.isEmpty { source.finishClose(reason: .windowClosing, window: .lastTabClosed) }
     }
   }
 
+  /// A parked copy (#380): the page's URL, title and history, not active, and no load until it is shown (activated,
+  /// navigated or moved), as the real facade holds the clone outside the tab strip.
   func duplicate() -> (any ArktTabHandle)? {
     guard let owner else { return nil }
-    let copy = owner.insertTab(opener: owner.active, origin: .client, active: true)
-    copy.back = back
-    copy.forward = forward
-    if let url { copy.startLoad(url, title: title) }
-    return copy
+    return owner.insertParkedCopy(of: self)
+  }
+
+  /// The load a parked copy still owes; it starts when the copy is shown.
+  var parkedLoad: (url: URL, title: String?)?
+
+  private func unpark() {
+    guard let pending = parkedLoad else { return }
+    parkedLoad = nil
+    startLoad(pending.url, title: pending.title)
   }
 
   // MARK: Engine side
@@ -383,6 +691,20 @@ final class ScriptedBrowser: NSObject, ArktBrowserHandle {
   }
 
   @discardableResult
+  /// A duplicate parked for this window: reported with `TabCreated`, never active, loading only when shown.
+  func insertParkedCopy(of source: ScriptedTab) -> ScriptedTab {
+    let tab = ScriptedTab(facade: facade, owner: self, opener: source, origin: .client)
+    tab.url = source.url
+    tab.title = source.title
+    tab.isInitialBlank = source.isInitialBlank
+    tab.back = source.back
+    tab.forward = source.forward
+    if let url = source.url, !source.isInitialBlank { tab.parkedLoad = (url, source.title) }
+    insert(tab, active: false, url: nil)
+    tab.reportHistory()
+    return tab
+  }
+
   func insertTab(opener: (any ArktTabHandle)?, origin: ArktTabOrigin, active: Bool) -> ScriptedTab {
     let tab = ScriptedTab(facade: facade, owner: self, opener: opener, origin: origin)
     insert(tab, active: active, url: nil)
@@ -419,8 +741,12 @@ final class ScriptedBrowser: NSObject, ArktBrowserHandle {
 
   func activate(_ tab: ScriptedTab) {
     guard active !== tab, tabList.contains(where: { $0 === tab }) else { return }
+    let previous = active
     active = tab
     facade.record(ScriptedEvent(.activeTabChanged, tab: tab, browser: self))
+    previous?.hidden()
+    previous?.permissionHidden()
+    tab.permissionShown()
   }
 
   /// Removes a tab; closing the active tab activates its right neighbour, else the left one.
@@ -433,6 +759,8 @@ final class ScriptedBrowser: NSObject, ArktBrowserHandle {
     let closed = ScriptedEvent(.tabClosed, tab: tab, browser: self)
     closed.closeReason = reason
     facade.record(closed)
+    tab.endJSDialog()           // the manager goes with the contents, after the tab strip reported the removal
+    tab.endPermission()
     if active === tab {
       active = nil
       if reactivate, !tabList.isEmpty { activate(tabList[min(index, tabList.count - 1)]) }
@@ -522,6 +850,19 @@ final class ScriptedFacade: NSObject, ArktEngine {
   var testAPIEnabled = true
   /// Answers engine window requests (`-hostForEngineWindowRequest:` on the embedder).
   var hostProvider: ((any ArktWindowRequest) -> any ArktWindowHost)?
+
+  /// Downloads (`ScriptedDownloads.swift`): the list, the prefs, and what Open and Show in Finder were asked of.
+  var scriptedDownloads: [ScriptedDownloadItem] = []
+  var openedDownloads: [String] = []
+  var revealedDownloads: [String] = []
+  var downloadPromptsForLocation = false
+  var downloadDestinationHandler: ((String, URL, @escaping (URL?) -> Void) -> Void)?
+  /// The default folder is a fresh temporary one, so a test never writes to the real Downloads folder.
+  let defaultDownloadDirectory = FileManager.default.temporaryDirectory
+    .appending(path: "arkt-scripted-downloads-\(UUID().uuidString)")
+  lazy var downloadDirectory: URL = defaultDownloadDirectory
+
+  deinit { try? FileManager.default.removeItem(at: defaultDownloadDirectory) }
 
   var browsers: [any ArktBrowserHandle] { browserList.filter { !$0.isClosed } }
   /// No event waits for delivery.
@@ -648,6 +989,7 @@ final class ScriptedFacade: NSObject, ArktEngine {
       tab.setAudible(true)
       return "running"
     }
+    if script == "window.getSelection().toString()" { return tab.pageSelection }
     if script == "window.close()" {
       engineCloseTab(tab, reason: .page)
       return NSNull()
@@ -656,6 +998,157 @@ final class ScriptedFacade: NSObject, ArktEngine {
       return ["sum": NSNumber(value: 3), "list": [NSNumber(value: 1), "two", NSNull()], "ok": NSNumber(value: true)]
     }
     return nil
+  }
+
+  // MARK: Import (#512)
+
+  /// What one import call carried, read through the lending blocks as the engine reads it.
+  struct ScriptedImportedCookie: Equatable {
+    var hostKey: String, name: String, path: String, value: String
+    var expires: Date, creation: Date?, lastAccess: Date?
+    var isSecure: Bool, isHTTPOnly: Bool, sameSite: Int, priority: Int, sourceScheme: Int, sourcePort: Int
+    var partitionKey: String
+  }
+  struct ScriptedImportedLogin: Equatable {
+    var originURL: String, actionURL: String?, signonRealm: String, username: String, password: String
+    var dateCreated: Date?, dateLastUsed: Date?
+  }
+  struct ScriptedImportedHistoryEntry: Equatable {
+    var url: String, title: String, visitTimes: [Date], visitTransitions: [Int]
+  }
+  struct ScriptedImportedBookmark: Equatable {
+    var url: String, title: String, guid: String?, dateAdded: Date?, folderPath: [String]
+  }
+  private final class ScriptedImportResult: NSObject, ArktImportResult {
+    let written: Int, skipped: Int, failed: Int
+    let failureReason: String?
+    let lastVisitTime: Date?
+    init(written: Int, skipped: Int, failed: Int, failureReason: String?, lastVisitTime: Date? = nil) {
+      self.written = written; self.skipped = skipped; self.failed = failed; self.failureReason = failureReason
+      self.lastVisitTime = lastVisitTime
+    }
+  }
+
+  private(set) var importedCookieBatches: [[ScriptedImportedCookie]] = []
+  private(set) var importedLoginBatches: [[ScriptedImportedLogin]] = []
+  private(set) var importedHistoryBatches: [[ScriptedImportedHistoryEntry]] = []
+  /// The watermark each history call carried.
+  private(set) var importedHistoryWatermarks: [Date?] = []
+  private(set) var importedBookmarkBatches: [[ScriptedImportedBookmark]] = []
+  /// The newest visit time the scripted history answer reports.
+  var importLastVisitTime: Date?
+  /// The answer to an import: every record written, unless a test sets this.
+  var importAnswer: (written: Int?, skipped: Int, failed: Int, failureReason: String?) = (nil, 0, 0, nil)
+
+  /// When true, a history answer is delivered twice, as a facade that answers a dropped barrier and then the barrier
+  /// itself would.
+  var importHistoryAnswersTwice = false
+
+  private func importResult(count: Int) -> any ArktImportResult {
+    let written = importAnswer.written ?? count - importAnswer.skipped - importAnswer.failed
+    return ScriptedImportResult(written: written, skipped: importAnswer.skipped, failed: importAnswer.failed,
+                                failureReason: importAnswer.failureReason, lastVisitTime: importLastVisitTime)
+  }
+
+  func importCookies(_ cookies: [any ArktImportCookie], completion: @escaping (any ArktImportResult) -> Void) {
+    importedCookieBatches.append(cookies.map { cookie in
+      var value = ""
+      cookie.withValueBytes { bytes, count in
+        value = String(decoding: UnsafeRawBufferPointer(start: bytes, count: Int(count)), as: UTF8.self)
+      }
+      return ScriptedImportedCookie(
+        hostKey: cookie.hostKey, name: cookie.name, path: cookie.path, value: value, expires: cookie.expires,
+        creation: cookie.creation, lastAccess: cookie.lastAccess, isSecure: cookie.isSecure,
+        isHTTPOnly: cookie.isHTTPOnly, sameSite: cookie.sameSite, priority: cookie.priority,
+        sourceScheme: cookie.sourceScheme, sourcePort: cookie.sourcePort, partitionKey: cookie.partitionKey)
+    })
+    let result = importResult(count: cookies.count)
+    // The real facade answers from a posted task.
+    Task { @MainActor in completion(result) }
+  }
+
+  func importPasswords(_ logins: [any ArktImportLogin], completion: @escaping (any ArktImportResult) -> Void) {
+    importedLoginBatches.append(logins.map { login in
+      var password = ""
+      login.withPasswordBytes { bytes, count in
+        password = String(decoding: UnsafeRawBufferPointer(start: bytes, count: Int(count)), as: UTF8.self)
+      }
+      return ScriptedImportedLogin(
+        originURL: login.originURL, actionURL: login.actionURL, signonRealm: login.signonRealm,
+        username: login.username, password: password, dateCreated: login.dateCreated,
+        dateLastUsed: login.dateLastUsed)
+    })
+    let result = importResult(count: logins.count)
+    Task { @MainActor in completion(result) }
+  }
+
+  func importHistory(
+    _ entries: [any ArktImportHistoryEntry], after: Date?, completion: @escaping (any ArktImportResult) -> Void
+  ) {
+    importedHistoryWatermarks.append(after)
+    importedHistoryBatches.append(entries.map { entry in
+      ScriptedImportedHistoryEntry(
+        url: entry.url, title: entry.title, visitTimes: entry.visitTimes, visitTransitions: entry.visitTransitions.map(\.intValue))
+    })
+    let result = importResult(count: entries.reduce(0) { $0 + $1.visitTimes.count })
+    let twice = importHistoryAnswersTwice
+    Task { @MainActor in
+      completion(result)
+      if twice { completion(result) }
+    }
+  }
+
+  func importBookmarks(_ bookmarks: [any ArktImportBookmark], completion: @escaping (any ArktImportResult) -> Void) {
+    importedBookmarkBatches.append(bookmarks.map { bookmark in
+      ScriptedImportedBookmark(
+        url: bookmark.url, title: bookmark.title, guid: bookmark.guid, dateAdded: bookmark.dateAdded,
+        folderPath: bookmark.folderPath)
+    })
+    let result = importResult(count: bookmarks.count)
+    Task { @MainActor in completion(result) }
+  }
+
+  /// What each `installExtensions` call received.
+  private(set) var installedExtensionBatches: [[String]] = []
+  /// The scripted result per id; an id not in it is installed.
+  var extensionAnswers: [String: (status: ArktExtensionInstallStatus, reason: String?)] = [:]
+
+  final class ScriptedExtensionResult: NSObject, ArktExtensionInstallResult {
+    let extensionID: String
+    let status: ArktExtensionInstallStatus
+    let failureReason: String?
+    init(_ id: String, _ status: ArktExtensionInstallStatus, _ reason: String?) {
+      extensionID = id; self.status = status; failureReason = reason
+    }
+  }
+
+  /// A scripted batch stays open until `finishHeldExtensionBatch()` or `cancelExtensionInstalls()`.
+  var holdsExtensionBatch = false
+  private(set) var extensionCancelCount = 0
+  private var heldBatch: (ids: [String], completion: ([any ArktExtensionInstallResult]) -> Void)?
+
+  func installExtensions(
+    _ ids: [String], completion: @escaping ([any ArktExtensionInstallResult]) -> Void
+  ) {
+    installedExtensionBatches.append(ids)
+    if holdsExtensionBatch {
+      heldBatch = (ids, completion)
+      return
+    }
+    let results: [any ArktExtensionInstallResult] = ids.map { id in
+      let answer = extensionAnswers[id] ?? (.installed, nil)
+      return ScriptedExtensionResult(id, answer.status, answer.reason)
+    }
+    Task { @MainActor in completion(results) }
+  }
+
+  /// What the real facade does: every id not yet confirmed fails with "cancelled", then the completion runs.
+  func cancelExtensionInstalls() {
+    extensionCancelCount += 1
+    guard let held = heldBatch else { return }
+    heldBatch = nil
+    let results: [any ArktExtensionInstallResult] = held.ids.map { ScriptedExtensionResult($0, .failed, "cancelled") }
+    Task { @MainActor in held.completion(results) }
   }
 
   func answerDialog(in tab: any ArktTabHandle, accept: Bool) -> Bool {

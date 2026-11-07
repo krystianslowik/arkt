@@ -161,7 +161,8 @@ public final class SidebarOutlineDrop {
     guard let url = SidebarTextDrop.url(for: text) else { return false }
     let placement = SidebarTextDrop.location(for: target, space: controller.spaceID)
     let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-    return onTextDrop?(url, url.host() ?? trimmed, placement) ?? false
+    // The title is saved raw; the sidebar writes it by the rule when shown (`HostDisplay.title(_:for:)`, #732).
+    return onTextDrop?(url, url.host() ?? trimmed, placement) ?? false // not shown
   }
 
   private func endHover(dropped: Bool) {

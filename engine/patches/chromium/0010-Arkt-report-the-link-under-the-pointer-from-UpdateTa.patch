@@ -1,0 +1,26 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Arkt contributors <noreply@arkt.invalid>
+Date: Tue, 27 Oct 2026 12:23:38 +0100
+Subject: [PATCH] Arkt: report the link under the pointer from UpdateTargetURL
+
+BrowserWebContentsDelegate::UpdateTargetURL calls arkt::NotifyTargetURLChanged (//arkt/browser:link_activation) before it looks for a status bubble. Arkt windows have none, WebContentsObserver has no target URL callback, and the bubble code casts every bubble to StatusBubbleViews, so this call is the only seam for the hovered link's URL (#114).
+---
+ .../browser_web_contents_delegate.cc                         | 5 +++++
+ 1 file changed, 5 insertions(+)
+
+diff --git a/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc b/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc
+index 01efc14715..bfebf7eae7 100644
+--- a/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc
++++ b/chrome/browser/ui/browser_web_contents_delegate/browser_web_contents_delegate.cc
+@@ -808,6 +808,11 @@ void BrowserWebContentsDelegate::SetContentsBounds(content::WebContents* source,
+ 
+ void BrowserWebContentsDelegate::UpdateTargetURL(content::WebContents* source,
+                                                  const GURL& url) {
++#if BUILDFLAG(IS_MAC)
++  // Arkt windows have no status bubble (GetStatusBubbles is empty), so Arkt
++  // takes the report here and its shell draws the link itself.
++  arkt::NotifyTargetURLChanged(source, url);
++#endif  // BUILDFLAG(IS_MAC)
+   std::vector<StatusBubble*> status_bubbles =
+       browser_ui_controller_->GetStatusBubbles();
+   for (StatusBubble* status_bubble : status_bubbles) {

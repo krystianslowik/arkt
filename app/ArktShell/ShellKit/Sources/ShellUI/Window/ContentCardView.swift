@@ -9,6 +9,9 @@ public final class ContentCardView: NSView {
   public private(set) var contentView: NSView?
   /// Covers the page inside `clipView` (rounded corners, hairline above it) while set; the first-run empty state.
   public private(set) var emptyStateView: NSView?
+  /// Covers the page area (below the Toolbar) while set: the crashed tab view (#578). Above the page, below the
+  /// Toolbar and the empty state.
+  public private(set) var pageOverlayView: NSView?
   /// Back / Forward / Reload and the full URL at the top of the page while `showsToolbar` (KB-018, BH-032).
   /// Inside `clipView`, so the card's corners clip it; the page and the empty state sit below it.
   public let toolbar = ContentToolbarView(frame: .zero)
@@ -28,11 +31,49 @@ public final class ContentCardView: NSView {
       needsLayout = true
     }
   }
+  /// The find bar (#134), above the page at the top trailing corner of the page area. One bar for the window: the
+  /// single card hosts it, or the focused pane's card while a split shows (#493). A pane's close button stays under it.
+  var findBarView: FindBarView? {
+    didSet {
+      guard findBarView !== oldValue else { return }
+      // A transfer moves the view to the next card first, so the one it left must not pull it back out.
+      if oldValue?.superview === self { oldValue?.removeFromSuperview() }
+      if let findBarView, findBarView.superview !== self {
+        addSubview(findBarView, positioned: .above, relativeTo: closeButton ?? clipView)
+      }
+      needsLayout = true
+    }
+  }
+  /// The zoom pill (#579), above the page at the top trailing corner, below the find bar while that shows. Hosted like
+  /// the find bar: the single card, or the focused pane's card while a split shows.
+  var zoomPillView: ZoomPillView? {
+    didSet {
+      guard zoomPillView !== oldValue else { return }
+      if oldValue?.superview === self { oldValue?.removeFromSuperview() }
+      if let zoomPillView, zoomPillView.superview !== self {
+        addSubview(zoomPillView, positioned: .above, relativeTo: findBarView ?? closeButton ?? clipView)
+      }
+      needsLayout = true
+    }
+  }
+  /// The link status pill (#114), above the page at a bottom corner; created on first use.
+  private(set) var statusPillView: StatusPillView?
+  /// The pointer moved over the card, in the card's coordinates; set with the pill, which it keeps out of the way.
+  var onPointerMoved: (@MainActor (CGPoint) -> Void)?
   /// Multiplies the hairline border's opacity. A split draws its focused pane at 1 and the others at 0.5 [I]
   /// PARITY(NEEDS-RUNTIME-CHECK RT-37).
   public var borderEmphasis: CGFloat = 1 {
     didSet { if borderEmphasis != oldValue { needsDisplay = true } }
   }
+  /// The focused pane of a shown split; a single card never is. Under Increase Contrast it draws `paneFocusRing`.
+  public var isFocusedSplitPane = false {
+    didSet { if isFocusedSplitPane != oldValue { needsDisplay = true } }
+  }
+  /// Increase Contrast (#640): the focused split pane draws a 2 pt ink ring outside the card, where a 1 pt edge is too
+  /// weak to tell which pane has focus. Drawn as a layer border around the card, so the page never moves or shrinks.
+  public let paneFocusRing = CALayer()
+  /// Tests replace it.
+  var increaseContrast: @MainActor () -> Bool = { IncreasedContrast.systemSetting }
   /// The pane close (X) of a split pane (#388), above the page at the top trailing corner; nil on the single card.
   public private(set) var closeButton: SplitPaneCloseButton?
   /// A click (or VoiceOver press) on `closeButton`.
@@ -72,10 +113,18 @@ public final class ContentCardView: NSView {
     toolbar.autoresizingMask = []
     clipView.addSubview(toolbar)
     applyBorderWidth()
+    paneFocusRing.cornerRadius = metrics.cardCornerRadius + ShellTokens.splitPaneFocusRingWidth
+    paneFocusRing.cornerCurve = .continuous
+    paneFocusRing.borderWidth = ShellTokens.splitPaneFocusRingWidth
+    paneFocusRing.isHidden = true
+    layer?.addSublayer(paneFocusRing)
     setAccessibilityElement(true)
     setAccessibilityRole(.group)
     setAccessibilityIdentifier(AXID.Content.card)
+    IncreasedContrast.observe(self, selector: #selector(displayOptionsChanged(_:)))
   }
+
+  @objc private func displayOptionsChanged(_ note: Notification) { needsDisplay = true }
 
   /// Where the page goes in `clipView`: everything below the Toolbar when it shows.
   private var contentFrame: CGRect { split.contentFrame }
@@ -117,6 +166,7 @@ public final class ContentCardView: NSView {
   /// (autoresizing, no constraints).
   public func setContent(_ view: NSView?) {
     if contentView === view { return }
+    setPageOverlay(nil)                                     // it covered the page that leaves
     contentView?.removeFromSuperview()
     contentView = view
     guard let view else { return }
@@ -129,6 +179,7 @@ public final class ContentCardView: NSView {
   /// Forgets the content without removing it: another card mounts the same view next (Little Arkt's Open in moves
   /// the page's view to the main window), and removing it here could take it out of that card.
   public func releaseContent() {
+    setPageOverlay(nil)
     contentView = nil
   }
 
@@ -142,6 +193,18 @@ public final class ContentCardView: NSView {
     view.autoresizingMask = [.width, .height]
     view.frame = clipView.bounds
     clipView.addSubview(view, positioned: .above, relativeTo: nil)
+  }
+
+  /// Installs `view` over the page area, below the Toolbar, or removes the current one when nil.
+  public func setPageOverlay(_ view: NSView?) {
+    if pageOverlayView === view { return }
+    pageOverlayView?.removeFromSuperview()
+    pageOverlayView = view
+    guard let view else { return }
+    view.translatesAutoresizingMaskIntoConstraints = true
+    view.autoresizingMask = [.width, .height]
+    view.frame = contentFrame
+    clipView.addSubview(view, positioned: .below, relativeTo: toolbar)
   }
 
   public override func setFrameSize(_ newSize: NSSize) {
@@ -158,8 +221,14 @@ public final class ContentCardView: NSView {
     let split = split
     toolbar.frame = split.toolbarFrame
     contentView?.frame = split.contentFrame
+    pageOverlayView?.frame = split.contentFrame
     emptyStateView?.frame = clipView.bounds
+    layoutFindBar()
+    layoutZoomPill()
+    layoutStatusPill()
     layoutToast()
+    let ring = ShellTokens.splitPaneFocusRingWidth
+    paneFocusRing.frame = bounds.insetBy(dx: -ring, dy: -ring)
     // An explicit shadow path avoids an offscreen pass to derive the shadow shape from content alpha.
     layer?.shadowPath = CGPath(roundedRect: bounds, cornerWidth: metrics.cardCornerRadius,
                                cornerHeight: metrics.cardCornerRadius, transform: nil)
@@ -170,13 +239,18 @@ public final class ContentCardView: NSView {
     let flavor = ThemeFlavor(appearance: effectiveAppearance)
     guard let layer, let clip = clipView.layer else { return }
     layer.shadowOpacity = flavor == .dark ? 0 : 1   // Shadow token is clear in dark; skip the shadow pass
-    layer.shadowColor = ShellTokens.cardShadow.resolve(flavor).cgColor
-    layer.shadowRadius = 3
-    layer.shadowOffset = CGSize(width: 0, height: -1)
+    layer.shadowColor = ShellTokens.cardLiftShadow.color.resolve(flavor).cgColor
+    layer.shadowRadius = ShellTokens.cardLiftShadow.radius
+    layer.shadowOffset = ShellTokens.cardLiftShadow.unflippedOffset
     var border = ShellTokens.cardBorder.resolve(flavor)
     border.alpha *= Double(borderEmphasis)
     clip.borderColor = border.cgColor
     applyBorderWidth()
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    paneFocusRing.borderColor = ShellTokens.splitPaneFocusRing.resolve(flavor).cgColor
+    paneFocusRing.isHidden = !(isFocusedSplitPane && increaseContrast())
+    CATransaction.commit()
   }
 
   public override func viewDidChangeEffectiveAppearance() {
@@ -243,10 +317,53 @@ public final class ContentCardView: NSView {
     if closeButton.frame != frame { closeButton.frame = frame }
   }
 
+  /// 12 points from the top and trailing edges of this card's page area, below the Toolbar when it shows. On a split
+  /// pane that page area is the pane, so the bar anchors there rather than to the whole content card.
+  func layoutFindBar() {
+    guard let findBarView, !findBarView.isHidden, findBarView.superview === self else { return }
+    let frame = FindBarLayout.frame(in: split.contentFrame)
+    if findBarView.frame != frame { findBarView.frame = frame }
+  }
+
+  /// At the top trailing corner of this card's page area like the find bar, and 8 points below the find bar while it
+  /// shows on this card.
+  func layoutZoomPill() {
+    guard let zoomPillView, !zoomPillView.isHidden, zoomPillView.superview === self else { return }
+    let findBar = findBarView.flatMap { $0.isHidden || $0.superview !== self ? nil : $0.frame }
+    let frame = ZoomPillLayout.frame(in: split.contentFrame, resetWidth: zoomPillView.resetWidth, below: findBar)
+    if zoomPillView.frame != frame { zoomPillView.frame = frame }
+  }
+
   /// Centered, `ToastView.bottomInset` above the bottom edge, at most `ToastView.maxWidth` wide.
   private func layoutToast() {
     guard let toastView, !toastView.isHidden else { return }       // laid out again when it shows
     toastView.frame = toastView.frame(centeredIn: bounds)
+  }
+
+  // MARK: Status pill (#114)
+
+  /// The card's status pill, made (with the tracking area that follows the pointer for it) the first time it is needed.
+  func ensureStatusPill() -> StatusPillView {
+    if let statusPillView { return statusPillView }
+    let pill = StatusPillView(frame: .zero)
+    addSubview(pill, positioned: .above, relativeTo: clipView)            // above the page, below a toast
+    addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect],
+                                   owner: self, userInfo: nil))
+    statusPillView = pill
+    return pill
+  }
+
+  /// Bottom corner of its side, `StatusPillGeometry.inset` in; the width follows the text and the card.
+  private func layoutStatusPill() {
+    guard let pill = statusPillView, !pill.isHidden else { return }
+    let width = pill.preferredWidth(maxWidth: StatusPillGeometry.maxWidth(cardWidth: bounds.width))
+    let frame = StatusPillGeometry.frame(corner: pill.corner, width: width, in: bounds)
+    if pill.frame != frame { pill.frame = frame }
+  }
+
+  public override func mouseMoved(with event: NSEvent) {
+    guard let onPointerMoved else { return super.mouseMoved(with: event) }
+    onPointerMoved(convert(event.locationInWindow, from: nil))
   }
 
   /// One physical pixel at the current backing scale.

@@ -226,7 +226,7 @@ public final class ContentToolbarView: NSView {
     let menu = NSMenu()
     menu.autoenablesItems = false
     for (index, entry) in entries.enumerated() {
-      let title = entry.title.isEmpty ? entry.url.absoluteString : entry.title
+      let title = entry.title.isEmpty ? HostDisplay.address(entry.url) : entry.title
       let item = NSMenuItem(title: title, action: #selector(historyMenuItemChosen(_:)), keyEquivalent: "")
       item.target = self
       item.tag = sign * (index + 1)

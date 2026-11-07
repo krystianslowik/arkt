@@ -19,6 +19,11 @@ LinkActivationDecider& Decider() {
   return *decider;
 }
 
+TargetURLObserver& TargetObserver() {
+  static base::NoDestructor<TargetURLObserver> observer;
+  return *observer;
+}
+
 class LinkActivationThrottle : public content::NavigationThrottle {
  public:
   explicit LinkActivationThrottle(
@@ -94,6 +99,19 @@ bool ShouldDropLinkOpenedFromTab(content::WebContents* source,
   // Copied, as in the throttle.
   LinkActivationDecider decider = Decider();
   return decider.Run(activation);
+}
+
+void SetTargetURLObserver(TargetURLObserver observer) {
+  TargetObserver() = std::move(observer);
+}
+
+void NotifyTargetURLChanged(content::WebContents* source, const GURL& url) {
+  if (!source || TargetObserver().is_null()) {
+    return;
+  }
+  // Copied: the observer may replace itself (a facade restart) while it runs.
+  TargetURLObserver observer = TargetObserver();
+  observer.Run(source, url);
 }
 
 }  // namespace arkt

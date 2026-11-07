@@ -28,15 +28,19 @@ public final class ShellEngineHost: EngineWindowHosting {
     controller?.perform(command, disposition: disposition) ?? false
   }
 
-  /// Peek decides user link clicks (#313); it answers without calling the engine.
+  /// Opt-Cmd-click opens Little Arkt (#356); Peek decides the other user link clicks (#313). Both answer without
+  /// calling the engine.
   public func decideLinkActivation(_ activation: EngineLinkActivation) -> EngineLinkDecision {
-    controller?.peek.decide(activation) ?? .navigate
+    guard let controller else { return .navigate }
+    if controller.opensLinkInLittleArkt(activation) { return .cancel }
+    return controller.peek.decide(activation)
   }
 
-  /// An Esc the page did not use closes an open Peek (Esc goes to the page first, decided 2026-10-25).
+  /// An Esc the page did not use closes an open Peek (Esc goes to the page first, decided 2026-10-25); otherwise it
+  /// stops the page while it loads, unless another Esc owner is open (KB-055, #614).
   public func handleUnhandledKeyDown(_ event: NSEvent, in tab: TabID?) -> Bool {
     guard event.keyCode == 53, let controller else { return false }
-    return controller.peek.handleEscape(in: tab)
+    return controller.peek.handleEscape(in: tab) || controller.stopLoadingOnEscape(event, in: tab)
   }
 
   /// A command from a menu item or key equivalent: the shell runs the commands it claims, the engine the rest.

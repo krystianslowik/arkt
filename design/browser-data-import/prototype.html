@@ -1,0 +1,486 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Arkt Browser Data Import</title>
+<!--
+  Arkt browser data import sheet prototype (#514, part of #131). Single file, no network, synthetic data only.
+  States are addressable by hash: #<dir>-<entry>-<state>[&dark][&rm][&shot]
+    dir:    a (Ledger) | b (Tiers)
+    entry:  menu (File > Import Browser Data..., an everyday sheet in the system font)
+            hero (the onboarding import step handing off, Hero style in Avenir Next)
+    state:  consent | consent-worst | consent-zero | progress | progress-worst | result | denied
+    Short form: #a-consent means the menu entry. #a-hero-consent is the onboarding entry.
+    dark: dark appearance   rm: Reduce Motion   shot: hide the prototype controls
+  1 CSS px = 1 pt. Colors are the ShellTokens / BrandTokens values already used in design/alerts-sheets-toasts.
+  Copy never names the other browser: "your browser data", "your other browser".
+-->
+<style>
+:root {
+  --accent: #E9B520; --accent-highlight: #F3CA3D; --accent-pressed: #DCA319; --on-accent: #202321;
+  --surface: #FAF9F5;
+  --focus: rgba(0,103,244,0.50);
+  --text: color(display-p3 0.0549 0.0588 0.0627 / 0.90);
+  --text-2: rgba(0,0,0,0.64);
+  --text-3: rgba(0,0,0,0.44);
+  --fill: color(display-p3 0.0549 0.0588 0.0627 / 0.05);
+  --fill-hover: color(display-p3 0.0549 0.0588 0.0627 / 0.10);
+  --divider: color(display-p3 0.0549 0.0588 0.0627 / 0.10);
+  --fg: rgba(0,0,0,0.48);
+  --list-field: color(display-p3 0.0549 0.0588 0.0627 / 0.035);
+  --card-border: rgba(0,0,0,0.10);
+  --ink: #202321; --on-ink: #FAF9F5;           /* checkbox and bar fill: graphite, never mustard */
+  --overlay-shadow: 0 0 0 0.5px rgba(0,0,0,0.12), 0 18px 48px rgba(0,0,0,0.22), 0 3px 10px rgba(0,0,0,0.10);
+  --theme-a: #DCE8F7; --theme-b: #BFD3EE;
+  --page: #FFFFFF; --page-ink: rgba(0,0,0,0.10); --page-ink-2: rgba(0,0,0,0.18);
+  --desktop: #C9CDD2;
+  --win-shadow: 0 0 0 0.5px rgba(0,0,0,0.18), 0 24px 64px rgba(0,0,0,0.26), 0 4px 14px rgba(0,0,0,0.10);
+  --row-cur: rgba(255,255,255,0.85);
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --spring-springy-fast: cubic-bezier(0.34, 1.28, 0.64, 1);
+  --sheet-curve: cubic-bezier(0.32, 0.72, 0, 1);
+  /* Hero tokens, from design/onboarding/prototype/base.css */
+  --h-bg: #FAF9F5; --h-bg-rgb: 250 249 245; --h-ink: #202321; --h-muted: #62655F; --h-line: rgb(32 35 33 / 0.12);
+  --h-control: rgb(32 35 33 / 0.05); --h-accent-text: #8A5A0E; --h-ghost: rgb(250 249 245 / 0.55);
+  --h-dot: 32 35 33;
+  --font-hero: "Avenir Next", -apple-system, BlinkMacSystemFont, sans-serif;
+  --font-sys: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --surface: #202321; --focus: rgba(26,145,255,0.55);
+  --fg: rgba(255,255,255,0.57); --list-field: color(display-p3 0 0 0 / 0.14);
+  --text: rgba(255,255,255,0.84); --text-2: rgba(255,255,255,0.76); --text-3: rgba(255,255,255,0.50);
+  --fill: color(display-p3 0.98 0.984 1 / 0.10); --fill-hover: color(display-p3 0.98 0.984 1 / 0.15);
+  --divider: rgba(255,255,255,0.075); --card-border: rgba(255,255,255,0.20);
+  --ink: #FAF9F5; --on-ink: #202321;
+  --overlay-shadow: 0 0 0 0.5px rgba(255,255,255,0.20), 0 18px 48px rgba(0,0,0,0.55), 0 3px 10px rgba(0,0,0,0.30);
+  --theme-a: #2E3A4C; --theme-b: #1F2734;
+  --page: #1E1F22; --page-ink: rgba(255,255,255,0.10); --page-ink-2: rgba(255,255,255,0.22);
+  --desktop: #2C3036;
+  --win-shadow: 0 0 0 0.5px rgba(255,255,255,0.20), 0 24px 64px rgba(0,0,0,0.55), 0 4px 14px rgba(0,0,0,0.30);
+  --row-cur: color(display-p3 0.98 0.984 1 / 0.20);
+  --h-bg: #202321; --h-bg-rgb: 32 35 33; --h-ink: #FAF9F5; --h-muted: #B6BAB3; --h-line: rgb(250 249 245 / 0.12);
+  --h-control: rgb(250 249 245 / 0.06); --h-accent-text: #E9B520; --h-ghost: rgb(255 255 255 / 0.06);
+  --h-dot: 250 249 245;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--desktop); font: 13px/1.35 var(--font-sys); color: var(--text); -webkit-font-smoothing: antialiased;
+  display: grid; place-items: center; padding: 40px 16px; overflow: hidden; }
+body.is-hero { background: var(--h-bg); padding: 0; }
+button { font: inherit; color: inherit; }
+.num { font-variant-numeric: tabular-nums; }
+
+/* ---------- Browser window context (menu entry) ---------- */
+.win { width: 1000px; height: 640px; border-radius: 12px; position: relative; overflow: hidden;
+  background: linear-gradient(165deg, var(--theme-a), var(--theme-b)); box-shadow: var(--win-shadow); }
+.lights { position: absolute; left: 12px; top: 16px; display: flex; gap: 11px; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; display: block; box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.14); }
+.lights i:nth-child(1) { background: #FF5F57; } .lights i:nth-child(2) { background: #FEBC2E; } .lights i:nth-child(3) { background: #28C840; }
+.sidebar { position: absolute; left: 0; top: 0; bottom: 0; width: 190px; padding: 44px 10px 10px; }
+.urlpill { height: 34px; border-radius: 9px; background: var(--fill); display: flex; align-items: center; padding: 0 10px; color: var(--text-2); margin-bottom: 12px; }
+.stitle { font-weight: 600; color: var(--text-2); padding: 12px 8px 6px; }
+.srow { height: 34px; border-radius: 9px; display: flex; align-items: center; gap: 9px; padding: 0 9px; white-space: nowrap; }
+.srow.cur { background: var(--row-cur); box-shadow: 0 1px 2px rgba(0,0,0,0.08); }
+.srow b { width: 16px; height: 16px; border-radius: 4px; flex: none; display: block; }
+.card { position: absolute; left: 190px; top: 10px; right: 10px; bottom: 10px; border-radius: 10px; overflow: hidden; background: var(--page);
+  box-shadow: 0 0 0 1px var(--card-border), 0 1px 4px rgba(0,0,0,0.10); }
+.page { position: absolute; inset: 0; padding: 56px 72px; }
+.page i { display: block; height: 10px; border-radius: 5px; background: var(--page-ink); margin-bottom: 14px; }
+.page i.h { height: 26px; width: 52%; border-radius: 7px; background: var(--page-ink-2); margin-bottom: 26px; }
+.page i.img { height: 150px; border-radius: 10px; margin: 26px 0; }
+.sheet-host { position: absolute; left: 190px; right: 10px; top: 10px; display: flex; justify-content: center; z-index: 5; pointer-events: none; }
+.sheet { pointer-events: auto; border-radius: 0 0 14px 14px; overflow: hidden; box-shadow: var(--overlay-shadow); }
+.anim .sheet { animation: sheetIn 300ms var(--sheet-curve) both; }
+@keyframes sheetIn { from { transform: translateY(-102%); } to { transform: none; } }
+:root[data-rm] .anim .sheet { animation: fadeIn 200ms ease both; }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+/* ---------- Buttons: the brand's pills at chrome size ---------- */
+.btn { all: unset; box-sizing: border-box; height: 28px; min-width: 76px; padding: 0 16px; border-radius: 14px; text-align: center;
+  font-size: 13px; font-weight: 600; line-height: 28px; background: var(--fill-hover); color: var(--text); white-space: nowrap;
+  transition: transform 160ms var(--ease-out), background-color 120ms ease, opacity 150ms ease; cursor: default; }
+.btn.primary { background: var(--accent); color: var(--on-accent); }
+.btn[disabled] { opacity: 0.4; }
+.btn:active { transform: scale(0.97); }
+:root[data-rm] .btn:active { transform: none; }
+@media (hover: hover) and (pointer: fine) { .btn:hover { background: var(--fill); } .btn.primary:hover { background: var(--accent-highlight); } }
+.btn.primary:active { background: var(--accent-pressed); }
+.btn:focus-visible { outline: none; box-shadow: 0 0 0 3.5px var(--focus); }
+
+/* ---------- Dialog sheet (menu entry) ---------- */
+.dlg { width: 460px; background: var(--surface); color: var(--text); padding: 20px; }
+.dlg.wide { width: 500px; }
+.dlg .ttl { font-size: 15px; font-weight: 600; line-height: 1.3; letter-spacing: -0.005em; }
+.dlg .sub { font-size: 12px; color: var(--text-2); margin-top: 3px; line-height: 1.4; }
+.foot { display: flex; align-items: center; gap: 8px; margin-top: 18px; }
+.foot .sp { flex: 1; }
+.foot .note { font-size: 12px; color: var(--text-2); }
+
+/* Check, status glyphs */
+.cb { width: 16px; height: 16px; border-radius: 4.5px; flex: none; box-shadow: inset 0 0 0 1px var(--card-border); background: var(--fill);
+  display: grid; place-items: center; transition: background-color 120ms ease; }
+.cb.on { background: var(--ink); box-shadow: none; }
+.cb.off-dis { opacity: 0.4; }
+.cb svg { width: 10px; height: 10px; opacity: 0; stroke: var(--on-ink); }
+.cb.on svg { opacity: 1; }
+.glyph { width: 16px; height: 16px; flex: none; display: grid; place-items: center; }
+.glyph svg { width: 16px; height: 16px; }
+.g-done { color: var(--ink); } .g-wait { color: var(--text-3); } .g-skip { color: var(--text-3); } .g-fail { color: var(--text-2); }
+.g-active { color: var(--ink); }
+.anim .g-active svg { animation: spin 900ms linear infinite; }
+:root[data-rm] .g-active svg { animation: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.anim .g-done.pop svg { animation: pop 240ms var(--spring-springy-fast) both; }
+:root[data-rm] .g-done.pop svg { animation: none; }
+@keyframes pop { from { transform: scale(0.8); opacity: 0; } to { transform: none; opacity: 1; } }
+
+/* ---------- Rows (shared markup, three skins) ---------- */
+.row { display: grid; grid-template-columns: 16px minmax(0,1fr) auto; column-gap: 12px; align-items: center; position: relative; }
+.row .lab { min-width: 0; }
+.row .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .det { color: var(--text-2); font-size: 12px; display: flex; align-items: center; gap: 5px; margin-top: 1px; }
+.row .det svg { width: 11px; height: 11px; flex: none; }
+.row .val { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.row.dim .name, .row.dim .val { color: var(--text-3); }
+.row.skip .name, .row.skip .val, .row.wait .name, .row.wait .val { color: var(--text-3); }
+.bar { height: 3px; border-radius: 1.5px; background: var(--fill-hover); overflow: hidden; margin-top: 6px; position: relative; }
+.bar i { display: block; height: 100%; border-radius: 1.5px; background: var(--ink); }
+.bar.live i::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.45), transparent); transform: translateX(-100%); }
+.anim .bar.live i::after { animation: sweep 1400ms var(--ease-out) infinite; }
+:root[data-theme="dark"] .bar.live i::after { background: linear-gradient(90deg, transparent, rgba(0,0,0,0.3), transparent); }
+:root[data-rm] .bar.live i::after { animation: none; display: none; }
+@keyframes sweep { to { transform: translateX(100%); } }
+
+/* Skin: menu rows */
+.menu .row { min-height: 40px; padding: 6px 0; }
+.menu .name { font-size: 13px; font-weight: 500; }
+.menu .val { font-size: 13px; color: var(--text); }
+.menu .row.progressing .val { color: var(--text-2); }
+
+/* Direction A: Ledger. One recessed field; rows never move between consent, progress and result. */
+.ledger { margin-top: 16px; background: var(--list-field); border-radius: 10px; padding: 2px 12px; }
+.ledger .row + .row { box-shadow: 0 -0.5px 0 var(--divider); }
+.keynote { margin-top: 12px; display: flex; gap: 10px; align-items: flex-start; font-size: 12px; line-height: 1.45; color: var(--text-2); padding: 0 2px; }
+.keynote svg { width: 14px; height: 14px; flex: none; margin-top: 1px; color: var(--fg); }
+.keynote b { color: var(--text); font-weight: 600; }
+.notice { margin-top: 12px; border-radius: 10px; background: var(--fill); padding: 10px 12px; display: flex; gap: 10px; }
+.notice .glyph { margin-top: 1px; }
+.notice .t { font-size: 13px; font-weight: 600; }
+.notice .s { font-size: 12px; color: var(--text-2); margin-top: 2px; line-height: 1.4; }
+
+/* Direction B: Tiers. Types are grouped by what they need; progress is one bar; the result splits by outcome. */
+.overall { margin-top: 16px; }
+.overall .line { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; }
+.overall .line b { font-weight: 600; }
+.overall .line span { color: var(--text-2); font-variant-numeric: tabular-nums; }
+.overall .bar { height: 6px; border-radius: 3px; margin-top: 8px; }
+.overall .bar i { border-radius: 3px; }
+.tier { margin-top: 14px; }
+.tier h4 { margin: 0 0 6px 2px; font-size: 12px; font-weight: 600; color: var(--text-2); display: flex; justify-content: space-between; align-items: center; }
+.tier h4 svg { width: 12px; height: 12px; }
+.tier .box { background: var(--list-field); border-radius: 10px; padding: 0 12px; }
+.tier .box .row + .row { box-shadow: 0 -0.5px 0 var(--divider); }
+.tier .box .keynote { padding: 8px 0 10px; margin: 0; box-shadow: 0 -0.5px 0 var(--divider); }
+.tier.lock .box { background: var(--fill); }
+.tier + .tier { margin-top: 12px; }
+.menu .tier .row { min-height: 36px; padding: 5px 0; }
+
+/* ---------- Hero entry (onboarding step handing off here). Moment surface: Avenir Next at the website's scale. ---------- */
+.hwin { width: 1000px; height: 700px; position: relative; overflow: hidden; background: var(--h-bg); color: var(--h-ink); font-family: var(--font-hero); }
+.hwin .lights { z-index: 3; }
+.field { position: absolute; inset: 0; pointer-events: none; }
+.field svg { width: 100%; height: 100%; display: block; }
+.hstage { position: absolute; left: 50%; top: 0; bottom: 0; width: 640px; margin-left: -320px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding-bottom: 64px; }
+.eyebrow { font-size: 12px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: var(--h-accent-text); }
+.hwin h1 { margin: 12px 0 0; font-weight: 600; font-size: 56px; letter-spacing: -0.055em; line-height: 0.92; text-wrap: balance; }
+.lede { margin: 14px 0 0; font-size: 18px; line-height: 1.45; color: var(--h-muted); max-width: 44ch; }
+.hlist { width: 100%; margin-top: 26px; text-align: left; }
+.hwin .row { grid-template-columns: 22px minmax(0,1fr) auto; column-gap: 16px; min-height: 52px; padding: 7px 4px; box-shadow: 0 -1px 0 var(--h-line); }
+.hwin .row:first-child { box-shadow: none; }
+.hwin .name { font-size: 18px; font-weight: 500; letter-spacing: -0.01em; }
+.hwin .det { font-size: 13px; color: var(--h-muted); font-family: var(--font-hero); }
+.hwin .val { font-size: 26px; font-weight: 600; letter-spacing: -0.03em; }
+.hwin .row.progressing .val, .hwin .row.wait .val, .hwin .row.skip .val { font-size: 18px; font-weight: 500; color: var(--h-muted); letter-spacing: -0.01em; }
+.hwin .row.skip .name, .hwin .row.skip .val, .hwin .row.wait .name, .hwin .row.wait .val, .hwin .row.dim .name, .hwin .row.dim .val { color: var(--h-muted); opacity: 0.6; }
+.hwin .cb { width: 22px; height: 22px; border-radius: 6px; box-shadow: inset 0 0 0 1.5px var(--h-line); background: var(--h-control); }
+.hwin .cb.on { background: var(--h-ink); box-shadow: none; }
+.hwin .cb svg { width: 13px; height: 13px; stroke: var(--h-bg); }
+.hwin .glyph, .hwin .glyph svg { width: 22px; height: 22px; }
+.hwin .g-done, .hwin .g-active { color: var(--h-ink); } .hwin .g-wait, .hwin .g-skip { color: var(--h-muted); } .hwin .g-fail { color: var(--h-accent-text); }
+.hwin .bar { background: var(--h-line); height: 3px; }
+.hwin .bar i { background: var(--h-ink); }
+.hwin .bar.live i::after { background: linear-gradient(90deg, transparent, rgb(var(--h-bg-rgb) / 0.55), transparent); }
+.hkey { margin-top: 18px; font-size: 14px; line-height: 1.5; color: var(--h-muted); max-width: 52ch; display: flex; gap: 10px; text-align: left; }
+.hkey svg { width: 16px; height: 16px; flex: none; margin-top: 3px; color: var(--h-accent-text); }
+.hkey b { color: var(--h-ink); font-weight: 600; }
+.hbtns { display: flex; gap: 12px; margin-top: 24px; }
+.hbtn { all: unset; box-sizing: border-box; position: relative; display: inline-flex; align-items: center; justify-content: center; min-height: 50px; min-width: 132px; padding: 0 26px; border-radius: 999px;
+  font: 600 15px/1 var(--font-hero); letter-spacing: 0.005em; background: var(--accent); color: var(--on-accent); white-space: nowrap; transition: transform 160ms var(--ease-out), opacity 150ms ease; }
+.hbtn:active { transform: scale(0.97); background: var(--accent-pressed); }
+:root[data-rm] .hbtn:active { transform: none; }
+.hbtn.ghost { background: var(--h-ghost); color: var(--h-ink); box-shadow: inset 0 0 0 1px var(--h-line); }
+.hbtn[disabled] { opacity: 0.4; }
+.hfoot { position: absolute; left: 0; right: 0; bottom: 24px; display: flex; justify-content: center; font-size: 14px; color: var(--h-muted); }
+.hskip { position: absolute; right: 32px; bottom: 24px; font-size: 14px; color: var(--h-muted); }
+.hwin .tier h4 { color: var(--h-muted); font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; margin: 0 0 4px 4px; }
+.hwin .tier .box { background: none; padding: 0; }
+.hwin .tier.lock .box { background: none; }
+.hwin .tier + .tier { margin-top: 14px; }
+.hwin .tier { margin-top: 0; }
+.hwin .tier .box .row + .row { box-shadow: 0 -1px 0 var(--h-line); }
+.hwin .tier .row { min-height: 46px; }
+.hwin .tier .box .keynote { color: var(--h-muted); box-shadow: 0 -1px 0 var(--h-line); }
+.hwin .overall .line { font-size: 15px; } .hwin .overall .line span { color: var(--h-muted); }
+.hwin .overall { margin-top: 22px; width: 100%; text-align: left; }
+.hwin .overall .bar { height: 6px; }
+.hnote { margin-top: 18px; font-size: 14px; color: var(--h-muted); }
+.hwin .tier .row { padding: 4px 4px; }
+.hstage.dense h1 { font-size: 48px; }
+.hstage.dense .hlist { margin-top: 18px; }
+
+/* ---------- Prototype controls ---------- */
+#ctl { position: fixed; left: 12px; top: 10px; z-index: 50; display: flex; gap: 6px; flex-wrap: wrap; font: 12px var(--font-sys); max-width: 980px; }
+#ctl a, #ctl button { all: unset; padding: 3px 9px; border-radius: 10px; background: rgba(0,0,0,0.55); color: #fff; font: 12px var(--font-sys); cursor: pointer; }
+#ctl a.on { background: var(--accent); color: #202321; }
+.shot #ctl { display: none; }
+</style>
+</head>
+<body>
+<div id="ctl"></div>
+<div id="root"></div>
+<script>
+"use strict";
+/* ---------- Synthetic data. Never real browsing data. ---------- */
+const TYPES = [
+  { id: "spaces",  name: "Spaces and tabs", lock: false },
+  { id: "history", name: "History",         lock: false },
+  { id: "ext",     name: "Extensions",      lock: false },
+  { id: "cookies", name: "Cookies",         lock: true  },
+  { id: "pw",      name: "Passwords",       lock: true  },
+];
+const DATA = {
+  normal: { spaces: [4, 213],        history: [48210],    ext: [14],  cookies: [3904],      pw: [312] },
+  worst:  { spaces: [128, 41902],    history: [2147483647], ext: [1203], cookies: [12480311],  pw: [98765] },
+  zero:   { spaces: [0, 0],          history: [0],        ext: [0],   cookies: [0],         pw: [0] },
+};
+/* Counts: grouped digits up to 9,999,999; above that compact (12.5M, 2.1B). Never wraps. */
+function fmt(n) {
+  if (n >= 1e9) return (n / 1e9).toFixed(1).replace(/\.0$/, "") + "B";
+  if (n >= 1e7) return (n / 1e6).toFixed(1).replace(/\.0$/, "") + "M";
+  return n.toLocaleString("en-US");
+}
+const plural = (n, s) => `${fmt(n)} ${s}${n === 1 ? "" : "s"}`;
+
+/* ---------- Glyphs ---------- */
+const I = {
+  check: '<svg viewBox="0 0 10 10" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 5.2l2.1 2.1L8 3"/></svg>',
+  done: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6.2"/><path d="M5.2 8.2l2 2 3.6-4"/></svg>',
+  wait: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-dasharray="1.6 2.6" stroke-linecap="round"><circle cx="8" cy="8" r="6.2"/></svg>',
+  skip: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="8" cy="8" r="6.2"/><path d="M5.5 8h5"/></svg>',
+  fail: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="8" cy="8" r="6.2"/><path d="M8 4.8v3.8M8 11.2v.1"/></svg>',
+  active: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="8" cy="8" r="6.2" opacity="0.2"/><path d="M8 1.8a6.2 6.2 0 0 1 6.2 6.2"/></svg>',
+  lock: '<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="9" height="6" rx="1.8"/><path d="M4.6 6V4.6a2.4 2.4 0 0 1 4.8 0V6"/></svg>',
+};
+const glyph = (k, pop) => `<span class="glyph g-${k}${pop ? " pop" : ""}">${I[k]}</span>`;
+
+/* ---------- Scenarios ---------- */
+function scenario(state) {
+  const worst = state.endsWith("worst"), zero = state.endsWith("zero");
+  const d = DATA[worst ? "worst" : zero ? "zero" : "normal"];
+  return { d, worst, zero };
+}
+/* Progress snapshots: each type is done | active | keychain | wait | skip */
+function progressRows(d, worst) {
+  const hist = d.history[0], got = Math.round(hist * 0.64);
+  return {
+    spaces: { st: "done" },
+    history: { st: "active", done: got, total: hist },
+    ext: { st: "skip" },
+    cookies: { st: "wait" },
+    pw: { st: "wait" },
+  };
+}
+
+/* ---------- Row ---------- */
+function row(t, ctx) {
+  const d = ctx.d[t.id], n = t.id === "spaces" ? d[1] : d[0];
+  const zero = n === 0;
+  let slot, val, det = "", cls = "row", bar = "";
+  if (t.id === "spaces" && !zero) det = `in ${plural(d[0], "Space")}`;
+  if (ctx.mode === "consent") {
+    const on = !zero && ctx.checked[t.id] !== false;
+    slot = `<span class="cb${on ? " on" : ""}${zero ? " off-dis" : ""}" role="checkbox" aria-checked="${on}"${zero ? ' aria-disabled="true"' : ""}>${I.check}</span>`;
+    val = fmt(n);
+    if (t.lock && !zero && ctx.dir !== "b") det = `${I.lock}Needs your Mac password`;
+    if (zero) cls += " dim";
+  } else if (ctx.mode === "progress") {
+    const p = ctx.prog[t.id];
+    cls += " " + (p.st === "done" ? "" : p.st === "active" ? "progressing" : p.st);
+    if (p.st === "done") { slot = glyph("done", true); val = fmt(n); }
+    else if (p.st === "active") {
+      slot = glyph("active"); val = `${fmt(p.done)} of ${fmt(p.total)}`;
+      bar = `<div class="bar live"><i style="width:${Math.round(p.done / p.total * 100)}%"></i></div>`;
+    }
+    else if (p.st === "keychain") { slot = glyph("active"); val = "Waiting for macOS"; cls += " progressing"; }
+    else if (p.st === "skip") { slot = glyph("skip"); val = "Skipped"; }
+    else { slot = glyph("wait"); val = "Waiting"; }
+    if (zero && p.st !== "done") { slot = glyph("skip"); val = "Skipped"; cls += " skip"; }
+  } else { /* result */
+    const r = ctx.res[t.id];
+    if (r === "done") { slot = glyph("done"); val = fmt(n); }
+    else if (r === "fail") { slot = glyph("fail"); val = "Not imported"; cls += " skip"; }
+    else { slot = glyph("skip"); val = zero ? "None found" : "Skipped"; cls += " skip"; }
+  }
+  return `<div class="${cls}">${slot}<div class="lab"><div class="name">${t.name}</div>${det ? `<div class="det">${det}</div>` : ""}${bar}</div><div class="val">${val}</div></div>`;
+}
+
+const PRE = `Next, macOS will ask to let Arkt read your other browser&rsquo;s saved logins. <b>Choose Allow, not Always Allow</b>, so this is a one-time permission.`;
+const keynote = `<div class="keynote">${I.lock}<span>${PRE}</span></div>`;
+const needsKey = (ctx) => TYPES.some(t => t.lock && ctx.d[t.id][0] > 0 && ctx.checked[t.id] !== false);
+const anyChecked = (ctx) => TYPES.some(t => ctx.d[t.id][t.id === "spaces" ? 1 : 0] > 0 && ctx.checked[t.id] !== false);
+
+/* ---------- Content per direction: returns { head, body, foot } as menu HTML; hero reuses the same pieces ---------- */
+function copy(state, ctx) {
+  const k = state.replace(/-(worst|zero)$/, "");
+  if (k === "consent") return ctx.zero
+    ? { t: "Nothing to import", s: "Your other browser has nothing Arkt can bring over." }
+    : { t: "Import browser data", s: "Choose what to bring into Arkt. Your other browser stays as it is.", ht: "Choose what comes over.", hs: "Your other browser stays as it is." };
+  if (k === "progress") return { t: "Importing your browser data", s: "Your other browser stays as it is.", ht: "Bringing it over.", hs: "Your other browser stays as it is." };
+  if (k === "result") return { t: "Import finished", s: "Everything you chose came over.", ht: "Your setup is here.", hs: "All of it came over. Your other browser stays as it is." };
+  return { t: "Import finished", s: "Most of it came over.", ht: "Most of it came over.", hs: "Your other browser stays as it is." };
+}
+const DENIED = { t: "Passwords and cookies weren&rsquo;t imported", s: "macOS didn&rsquo;t let Arkt read your other browser&rsquo;s saved logins." };
+
+function menuSheet(dir, state, ctx) {
+  const k = state.replace(/-(worst|zero)$/, "");
+  const c = copy(state, ctx);
+  ctx.mode = k === "consent" ? "consent" : k === "progress" ? "progress" : "result";
+  if (ctx.mode === "progress") ctx.prog = progressRows(ctx.d, ctx.worst);
+  if (ctx.mode === "result") ctx.res = Object.fromEntries(TYPES.map(t => [t.id, (k === "denied" && t.lock) ? "fail" : (t.id === "ext" ? "done" : "done")]));
+  ctx.checked = {};
+  const rows = TYPES.map(t => ({ t, h: row(t, ctx) }));
+  let body = "", foot = "";
+
+  if (dir === "a") {
+    body = `<div class="ledger">${rows.map(r => r.h).join("")}</div>`;
+    if (ctx.mode === "consent" && needsKey(ctx)) body += keynote;
+    if (k === "denied") body += `<div class="notice">${glyph("fail")}<div><div class="t">${DENIED.t}</div><div class="s">${DENIED.s} Retry asks again.</div></div></div>`;
+  } else {
+    const free = rows.filter(r => !r.t.lock), lock = rows.filter(r => r.t.lock);
+    if (ctx.mode === "progress") {
+      const ov = Math.round((1 + 0.64) / 5 * 100);
+      body += `<div class="overall"><div class="line"><b>Importing history</b><span>1 of ${ctx.zero ? 0 : 5} done</span></div><div class="bar live"><i style="width:${ov}%"></i></div></div>`;
+    }
+    if (k === "denied") {
+      body += `<div class="tier"><h4>Imported</h4><div class="box">${free.map(r => r.h).join("")}</div></div>`;
+      body += `<div class="tier lock"><h4>Not imported</h4><div class="box">${lock.map(r => r.h).join("")}<div class="keynote">${glyph("fail")}<span><b>${DENIED.t}.</b> ${DENIED.s} Retry asks again.</span></div></div></div>`;
+    } else if (k === "result") {
+      body += `<div class="tier"><h4>Imported</h4><div class="box">${rows.map(r => r.h).join("")}</div></div>`;
+    } else {
+      body += `<div class="tier"><h4>${ctx.mode === "consent" ? "Ready to import" : "No password needed"}</h4><div class="box">${free.map(r => r.h).join("")}</div></div>`;
+      body += `<div class="tier lock"><h4>${I.lock.replace("<svg", '<svg style="display:none"')}Needs your Mac password</h4><div class="box">${lock.map(r => r.h).join("")}${ctx.mode === "consent" && needsKey(ctx) ? keynote : ""}</div></div>`;
+    }
+  }
+
+  if (ctx.mode === "consent") foot = `<span class="sp"></span><button class="btn">Cancel</button><button class="btn primary"${anyChecked(ctx) ? "" : " disabled"}>Import</button>`;
+  else if (ctx.mode === "progress") foot = `<span class="note">Cancel keeps what has already come over.</span><span class="sp"></span><button class="btn">Cancel</button>`;
+  else if (k === "denied") foot = `<span class="sp"></span><button class="btn">Done</button><button class="btn primary">Retry</button>`;
+  else foot = `<span class="sp"></span><button class="btn primary">Done</button>`;
+
+  const wide = dir === "b" ? " wide" : "";
+  return `<div class="dlg${wide}" role="dialog" aria-label="${c.t}"><div class="ttl">${c.t}</div><div class="sub">${c.s}</div>${body}<div class="foot">${foot}</div></div>`;
+}
+
+function windowHTML(inner) {
+  return `<div class="win anim" id="stage"><div class="lights"><i></i><i></i><i></i></div>
+  <div class="sidebar"><div class="urlpill">fieldguide.example</div><div class="stitle">Work</div>
+  <div class="srow"><b style="background:#5C7DAA"></b>Q4 planning</div><div class="srow"><b style="background:#E9B520"></b>Design review notes</div><div class="srow"><b style="background:#2F5FD8"></b>Inbox</div>
+  <div class="srow cur"><b style="background:#E5694B"></b>Field guide to lichens</div><div class="srow"><b style="background:#7C8B6B"></b>Release checklist</div></div>
+  <div class="card"><div class="page"><i class="h"></i><i></i><i></i><i style="width:70%"></i><i class="img"></i><i></i><i style="width:60%"></i></div></div>
+  <div class="sheet-host"><div class="sheet">${inner}</div></div></div>`;
+}
+
+/* ---------- Hero ---------- */
+function fieldSVG() {
+  /* Static stand-in for the onboarding particle field: sparse ink dots and a mustard fold band along the bottom. */
+  let s = "", seed = 7;
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  for (let i = 0; i < 520; i++) s += `<circle cx="${(rnd() * 1000).toFixed(1)}" cy="${(rnd() * 700).toFixed(1)}" r="${(0.5 + rnd() * 0.9).toFixed(2)}" fill="rgb(var(--h-dot) / ${(0.06 + rnd() * 0.14).toFixed(2)})"/>`;
+  for (let i = 0; i < 1500; i++) {
+    const x = rnd() * 1000, base = 676 + Math.sin(x / 150 + 1) * 18 - x * 0.07, y = base + (rnd() - 0.2) * 70 * rnd();
+    s += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${(0.6 + rnd() * 1.1).toFixed(2)}" fill="#E9B520" opacity="${(0.25 + rnd() * 0.5).toFixed(2)}"/>`;
+  }
+  return `<svg viewBox="0 0 1000 700" preserveAspectRatio="xMidYMid slice" aria-hidden="true">${s}</svg>`;
+}
+function heroStage(dir, state, ctx) {
+  const k = state.replace(/-(worst|zero)$/, "");
+  const c = copy(state, ctx);
+  ctx.mode = k === "consent" ? "consent" : k === "progress" ? "progress" : "result";
+  if (ctx.mode === "progress") ctx.prog = progressRows(ctx.d, ctx.worst);
+  if (ctx.mode === "result") ctx.res = Object.fromEntries(TYPES.map(t => [t.id, (k === "denied" && t.lock) ? "fail" : "done"]));
+  ctx.checked = {};
+  const rows = TYPES.map(t => ({ t, h: row(t, ctx) }));
+  let list = "";
+  if (dir === "a") list = `<div class="hlist">${rows.map(r => r.h).join("")}</div>`;
+  else {
+    const free = rows.filter(r => !r.t.lock), lock = rows.filter(r => r.t.lock);
+    const ov = ctx.mode === "progress" ? `<div class="overall"><div class="line"><b>Importing history</b><span>1 of ${ctx.zero ? 0 : 5} done</span></div><div class="bar live"><i style="width:33%"></i></div></div>` : "";
+    if (k === "denied") list = `<div class="hlist"><div class="tier"><h4>Imported</h4><div class="box">${free.map(r => r.h).join("")}</div></div><div class="tier lock"><h4>Not imported</h4><div class="box">${lock.map(r => r.h).join("")}</div></div></div>`;
+    else if (k === "result") list = `<div class="hlist">${rows.map(r => r.h).join("")}</div>`;
+    else list = `${ov}<div class="hlist" style="margin-top:${ov ? 14 : 26}px"><div class="tier"><h4>${ctx.mode === "consent" ? "Ready to import" : "No password needed"}</h4><div class="box">${free.map(r => r.h).join("")}</div></div><div class="tier lock"><h4>Needs your Mac password</h4><div class="box">${lock.map(r => r.h).join("")}</div></div></div>`;
+  }
+  let note = "", btns = "";
+  if (ctx.mode === "consent") {
+    if (needsKey(ctx)) note = `<div class="hkey">${I.lock}<span>${PRE}</span></div>`;
+    btns = `<button class="hbtn ghost">Not now</button><button class="hbtn"${anyChecked(ctx) ? "" : " disabled"}>Import</button>`;
+  } else if (ctx.mode === "progress") {
+    note = `<div class="hnote">Cancel keeps what has already come over.</div>`;
+    btns = `<button class="hbtn ghost">Cancel</button>`;
+  } else if (k === "denied") {
+    note = `<div class="hnote"><b style="color:var(--h-ink);font-weight:600">${DENIED.t}.</b> ${DENIED.s}</div>`;
+    btns = `<button class="hbtn ghost">Continue</button><button class="hbtn">Retry</button>`;
+  } else btns = `<button class="hbtn">Continue</button>`;
+  const eyebrow = ctx.mode === "consent" ? "Your browser data" : ctx.mode === "progress" ? "Importing" : "Imported";
+  return `<div class="hwin anim" id="stage"><div class="field">${fieldSVG()}</div><div class="lights"><i></i><i></i><i></i></div>
+  <div class="hstage dense"><div class="eyebrow">${eyebrow}</div><h1>${c.ht || c.t}</h1><p class="lede">${c.hs || c.s}</p>${list}${note}<div class="hbtns">${btns}</div></div>
+  <div class="hfoot">1 of 6</div><div class="hskip">Skip setup</div></div>`;
+}
+
+/* ---------- Mount ---------- */
+const STATES = ["consent", "consent-worst", "consent-zero", "progress", "progress-worst", "result", "denied"];
+function parse() {
+  const parts = location.hash.replace(/^#/, "").split("&");
+  const key = parts[0] || "a-consent";
+  const flags = new Set(parts.slice(1));
+  const m = key.match(/^(a|b)-(?:(hero|menu)-)?(.+)$/) || ["", "a", "menu", "consent"];
+  return { dir: m[1], entry: m[2] || "menu", state: m[3], dark: flags.has("dark"), rm: flags.has("rm"), shot: flags.has("shot") };
+}
+function mount() {
+  const p = parse(), de = document.documentElement;
+  if (p.dark) de.dataset.theme = "dark"; else delete de.dataset.theme;
+  if (p.rm) de.dataset.rm = ""; else delete de.dataset.rm;
+  document.body.classList.toggle("shot", p.shot);
+  document.body.classList.toggle("is-hero", p.entry === "hero");
+  const ctx = scenario(p.state); ctx.dir = p.dir;
+  const root = document.getElementById("root");
+  root.innerHTML = p.entry === "hero" ? heroStage(p.dir, p.state, ctx) : windowHTML(`<div class="menu">${menuSheet(p.dir, p.state, ctx)}</div>`);
+  if (p.shot) root.firstElementChild.classList.remove("anim");
+  const base = `${p.dir}-${p.entry}-`;
+  const tail = (p.dark ? "&dark" : "") + (p.rm ? "&rm" : "");
+  document.getElementById("ctl").innerHTML =
+    ["a", "b"].map(d => `<a class="${d === p.dir ? "on" : ""}" href="#${d}-${p.entry}-${p.state}${tail}">Direction ${d.toUpperCase()}</a>`).join("") +
+    ["menu", "hero"].map(e => `<a class="${e === p.entry ? "on" : ""}" href="#${p.dir}-${e}-${p.state}${tail}">${e === "menu" ? "Menu" : "Onboarding"}</a>`).join("") +
+    STATES.map(s => `<a class="${s === p.state ? "on" : ""}" href="#${base}${s}${tail}">${s}</a>`).join("") +
+    `<a href="#${base}${p.state}${p.dark ? "" : "&dark"}${p.rm ? "&rm" : ""}">${p.dark ? "Light" : "Dark"}</a>` +
+    `<a href="#${base}${p.state}${p.dark ? "&dark" : ""}${p.rm ? "" : "&rm"}">${p.rm ? "Motion on" : "Reduce Motion"}</a>` +
+    `<button onclick="mount()">Replay</button>`;
+}
+window.addEventListener("hashchange", mount);
+mount();
+</script>
+</body>
+</html>

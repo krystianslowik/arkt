@@ -530,16 +530,16 @@ Worst case, before and after:
 
 | Token | Mode | Before | After | Worst surface |
 |---|---|---|---|---|
-| `secondaryText` | light | 0.50: 3.16:1 | 0.64: 4.55:1 | hovered URL bar over the pink stop `#F29BBB` |
-| `secondaryText` | dark | 0.50: 2.91:1 | 0.76: 4.53:1 | hovered URL bar over the Dev stop `#2D4468` |
-| `sidebarForeground` | light | 0.30: 1.92:1 | 0.48: 3.00:1 | close X on a hovered row over `#F29BBB` |
-| `sidebarForeground` | dark | 0.45: 2.45:1 | 0.57: 3.00:1 | close X on `tabCurrent` over `#2D4468` |
+| `secondaryText` | light | 0.50: 3.16:1 | 0.64: 4.55:1 | hovered URL bar over the earlier sample Personal end stop |
+| `secondaryText` | dark | 0.50: 2.91:1 | 0.76: 4.53:1 | hovered URL bar over the earlier sample Dev start stop |
+| `sidebarForeground` | light | 0.30: 1.92:1 | 0.48: 3.00:1 | close X on a hovered row over the earlier sample Personal end stop |
+| `sidebarForeground` | dark | 0.45: 2.45:1 | 0.57: 3.00:1 | close X on `tabCurrent` over the earlier sample Dev start stop |
 
 One step lower (0.63, 0.75, 0.47, 0.56) fails each case, so these are the smallest passing values at 0.01. The
 order primary > secondary > sidebar foreground holds in both modes and is asserted. Arc parity: both tokens are
 now darker (light) and brighter (dark) than Arc's levels.
 
-Not fixed here: `primaryText` dark (white 0.80) reaches 4.27:1 on `tabCurrent` over `#2D4468`, below 4.5 (fixed in
+Not fixed here: `primaryText` dark (white 0.80) reaches 4.27:1 on `tabCurrent` over the earlier sample Dev start stop, below 4.5 (fixed in
 #146, below).
 
 Checks: `nice -n 10 swift test -j 4` in ShellKit: Swift Testing 334 tests (327 plus 7 new), XCTest 181 tests
@@ -554,7 +554,7 @@ with the same probe as #72: 4.5:1 over every shipped Space theme surface, bare a
 | Token | Mode | Before | After | Worst surface |
 |---|---|---|---|---|
 | `primaryText` | light | 0.90: 6.83:1 | unchanged | |
-| `primaryText` | dark | 0.80: 4.27:1 | 0.84: 4.52:1 | `tabCurrent` over the Dev stop `#2D4468` |
+| `primaryText` | dark | 0.80: 4.27:1 | 0.84: 4.52:1 | `tabCurrent` over the earlier sample Dev start stop |
 
 0.83 gives 4.46:1, so 0.84 is the smallest passing level at 0.01. The fix raises the text level instead of lowering
 `tabCurrent` dark (0.17 would also pass) because it changes one token, keeps the current row clearly brighter than
@@ -563,7 +563,7 @@ primary > secondary (0.76) > sidebar foreground (0.57) still holds. Arc parity: 
 Arc's 0.80.
 
 Not covered: the letter tile shown for rows without a favicon draws `primaryText` on `sidebarItemHovered` on top of
-the row fill. In dark mode on `tabCurrent` over `#2D4468` that nested fill stays below 4.5:1 even at white 1.0
+the row fill. In dark mode on `tabCurrent` over the earlier sample Dev start stop that nested fill stays below 4.5:1 even at white 1.0
 (about 4.1:1), so it needs a change to the tile itself rather than the text level (fixed in #153, below).
 
 Checks: `nice -n 10 swift test -j 4` in ShellKit: Swift Testing 338 tests, XCTest 182 tests (GUI included), 0
@@ -580,14 +580,14 @@ stands in for the site's favicon and is read as an initial), so the test asserts
 | Mode | Tile fill | Before | After | Worst surface |
 |---|---|---|---|---|
 | light | P3 `#0E0F10` at 0.10 | 5.78:1 | unchanged | |
-| dark | P3 `#FAFBFF` at 0.15, now P3 `#0E0F10` at 0.15 | 3.40:1 | 5.43:1 | `tabCurrent` over the Dev stop `#2D4468` |
+| dark | P3 `#FAFBFF` at 0.15, now P3 `#0E0F10` at 0.15 | 3.40:1 | 5.43:1 | `tabCurrent` over the earlier sample Dev start stop |
 
 The fix is a new token, `ShellTokens.letterTileFill`: light keeps the shipped value (the same as
 `sidebarItemHovered` light), dark now darkens the surface instead of lightening it, so both flavors draw the tile
 as the palette's dark ink at a low level. `primaryText` is unchanged. Alternatives measured and dropped: white 1.0
 ink on the old tile reaches 4.09:1; a fainter light tile makes it worse (`#FAFBFF` at 0.05: 4.10:1); no fill
 passes with no headroom (4.52:1) and loses the tile shape. Black at 0.12 (5.36:1) is equivalent; `#0E0F10` matches
-the light tile. On the darkest shipped dark stop (`#120F2E`, bare row) the dark tile is barely visible; the letter
+the light tile. On the darkest shipped dark stop (the earlier sample Dev end stop, bare row) the dark tile is barely visible; the letter
 still reads there, which is what the tile is for.
 
 Fill and ink depend on the flavor only, so the bitmap cache key (`letter-<letter>-<flavor>@<size>x<scale>`) is
@@ -1683,7 +1683,7 @@ factor. `secondaryText` light fell to 4.49:1 (hovered URL bar over the Personal 
 
 | Token | Mode | Before | After | Worst surface |
 |---|---|---|---|---|
-| `secondaryText` | light | 0.65: 4.49:1 | 0.66: 4.60:1 | hovered URL bar over `#F29BBB` darkened by grain at 0.5 |
+| `secondaryText` | light | 0.65: 4.49:1 | 0.66: 4.60:1 | hovered URL bar over the earlier sample Personal end stop darkened by grain at 0.5 |
 
 ### Deferred
 
@@ -2282,6 +2282,38 @@ and `SettingsWindowTests` 26 (the same switch test now asserts the final copy). 
 the UI test target's `build-for-testing` succeed. The XCUITests ran locally, 6 of 6 in about 2.5 minutes:
 `xcodebuild -project ArktShell.xcodeproj -scheme ArktShellUITests -derivedDataPath build -only-testing:ArktShellUITests/PeekTests test`.
 
+## Favorites grid: adaptive columns (#337) (2026-10-26)
+
+Built to the maintainer decision on #337, which replaces the RT-15 runtime check for BH-050 (copied into the plan's
+Decisions). The grid takes 1 to 4 columns by sidebar width and fills its rows evenly.
+
+- **Math** (`FavoritesLayout`, pure). Column capacity is how many 52 pt tiles (the measured default tile) fit with
+  9 pt gaps, clamped to 1...4: 2 at the 150 pt minimum sidebar, 3 at the default 190 pt, 4 from 251 pt. The columns
+  for N Favorites are the fewest rows the capacity allows, filled evenly: `rows = ceil(N / capacity)`,
+  `columns = ceil(N / rows)`. So 4 in a wide sidebar make one row of 4; 4 at the default width make 2 + 2; 5 in a
+  wide sidebar make 3 + 2; a short last row keeps the grid's columns. Tiles grow to fill the row, edges on whole
+  points. One column only happens for a single Favorite (no supported width is that narrow).
+- **Grid.** The flow layout is replaced by `FavoritesCollectionLayout`, a small `NSCollectionViewLayout` that
+  places each item at the grid's frame for it (the half-point floor that kept three tiles from wrapping is gone).
+  The sidebar asks the grid for its columns at the content width before it reads the height.
+- **Column spring** (`FavoritesColumnMotion`). A resize that changes the column count moves every tile on the
+  `firm` spring (no visible overshoot, about 0.3 s), one interruptible spring per tile slot (left, width and row as
+  shares of the row), so the tiles keep following a sidebar that is still being dragged and a resize back mid-flight
+  reverses from where each tile is, with its velocity. The grid height follows the rows the tiles span, and the Space
+  page below follows it. Reduce Motion, the first width, an off-screen grid and Favorite additions or removals switch
+  at once.
+- **Keyboard** (#343). Arrows use the current columns. Down over the gap of a short last row takes that row's last
+  tile; Down from the last row still leaves for the outline.
+- **Drop band** (#104). Unchanged code: the band is the grid's frame, so it covers every row of the new layout.
+  The unload limit (#376) does not read the layout.
+
+Tests (written first; baselines are this run minus the new tests): ShellKit unit 1243 passed (baseline 1234 + 9 in `FavoritesLayoutTests`: capacity, columns
+and frames for 1 to 12 Favorites at the narrow, default and wide widths (36 cases each), slots, fractional height,
+keyboard neighbors). ShellKitGUITests 1070 run (baseline 1063 + 7: `FavoritesGridColumnsTests` 6, one Ctrl-Space
+case in `TabKeyboardNavigationTests`), 17 skipped, 0 failures. `FavoriteTileCloseTests` moved its pointer in the
+removed-Favorite hover test: with two Favorites left the grid now takes two wider columns. Debug app build succeeds.
+XCUITest not run: no identifier or covered flow changed.
+
 ## Space swipe follow-ups (#295) (2026-10-26)
 
 Follow-up to #24 (fixed in #282): the four review notes from #282 and the two #24 acceptance runs. This section is
@@ -2434,3 +2466,433 @@ run 3's dominant hitch is one 16.66 ms interval at frame 9 of a swipe, the same 
 under load. The machine was not idle even at load 4.9: WindowServer ran at 23-70% CPU, `searchpartyd` at up to 86%,
 `bird` at up to 62%, and `coreaudiod` and browser helpers stayed busy. A 3 of 3 run on a quiet machine is still
 needed; it is a maintainer step, not something this tree can force from a shared machine.
+## Command bar: action search, site search, Paste and Go, suggestion removal (#112)
+
+Plan: parity spec section 2.7 (BH-104 to BH-114); Track C open question 5 (default search engine stays the
+Google placeholder). Pull request: see #112.
+
+### Per rule
+
+- BH-104 (partially, rest deferred): results now collect open tabs from every Space of the window's profile,
+  the current Space first, and matching Spaces appear as "Switch to Space" results. Deferred: archived tabs
+  (no shell-facing archive provider; `Archive` lives in ArktCore), history (no history store yet) and
+  extensions (no extension list provider) as result sources, and folders as results (tied to the BH-105
+  deferral below). Arc actions are covered by BH-106's action search.
+- BH-105 DEFERRED: showing only the switched-to tab under its closed folder needs the sidebar outline's
+  peek-row rendering, which BH-092 also waits on; it is sidebar outline work, not command bar work. The
+  command bar side (matching tabs inside closed folders, across Spaces) is done: `openTabs` walks folders.
+- BH-106 / KB-081: Tab on the empty bar just opened with Cmd-T enters action search (chip "Actions",
+  placeholder "Search actions..."); the window's verbs are New Space, Next Space, Previous Space, Toggle
+  Toolbar. Tab elsewhere is left alone; Backspace on the empty scoped field leaves the scope [I] (Arc
+  unverified).
+- BH-107 / KB-082: a typed alias plus Tab scopes the query to the engine (chip with the engine name); Enter
+  opens the engine's search URL. Tab is the only trigger, per the spec (`migratedToTabOnlySiteSearchTrigger`).
+  Seeded engines (`seededPopularSiteSearches`): YouTube `yt`, Wikipedia `wiki`, GitHub `gh`,
+  Stack Overflow `so`, behind `SiteSearchEngines.seeded`; the window can substitute a real keyword store later.
+- BH-108 / GS-035: a URL on the clipboard at bar open makes "Paste and Go" the top suggestion of the empty
+  Cmd-T bar (Cmd-L never offers it); Enter opens it. The bottom bar's "+" button turns into "Paste and Go"
+  (symbol, tooltip, accessibility label) while hovered with Cmd held and a URL on the clipboard, and clicking
+  in that state opens the URL; a `flagsChanged` monitor lives only for the hover. The pasteboard read is
+  `CommandBarController.pasteboardURL(_:)`: URLs only; a schemeless host is not Paste and Go.
+- BH-109 / KB-083: the hovered removable row shows an X, and Cmd-Opt-Delete removes the selected row;
+  removal is session-scoped (the row stays hidden for the controller's lifetime) and `onRemoveSuggestion` is
+  the hook a history store will persist through. The typed-URL row, Paste and Go, actions and Spaces are not
+  removable. After a removal the next suggestion takes the row's place.
+- BH-110: covered by `CommandBarTests.testSidebarClickWorksWhileTheBarIsOpen`: with the bar open and key, a
+  click on a sidebar row hit-tests to the row (the centered panel is not in its way), activates it and
+  resigns the bar.
+- BH-111: `SidebarController.onCurrentSpaceChanged` fires when a Space commits; the window refreshes the open
+  bar's suggestions on it (current Space first, so the order flips on a switch).
+- BH-112: already done before #112; `CommandBarTests.testGeometryAndDarkSurface` pins the centered frame
+  (midX == parent midX, top at 34% of the window height).
+- BH-113: the notice "We talk to your search engine to help us suggest results." rides with the rows that
+  send the query to the engine (it adds `CommandBarGeometry.noticeHeight`, top edge pinned); the X dismisses
+  it for good under Arc's key `commandBarSearchSuggestionsPrivacyHasBeenExplicitlyDismissed`, and
+  `searchSuggestEnabled` off drops the search rows and the notice. Both live in `CommandBarSettings`,
+  defaults-backed in the app, ephemeral in tests.
+- BH-114 / KB-038 DEFERRED: NEEDS-RUNTIME-CHECK (RT-03). Whether holding Cmd / Ctrl alone opens anything in
+  Arc, and with which defaults and timing, is unverified; it needs a maintainer runtime check and a product
+  decision before implementation.
+- Search engine choice and the suggestions setting wired to the Settings window: DEFERRED, as the issue
+  prefers: the Settings window (#307) waits on the #305 design review. `CommandBarSettings` persists both
+  under Arc's keys, so the wiring is a read of the same defaults once #307 exists.
+
+### Tests
+
+TDD: failing tests first (compile errors counted), then implementation.
+
+- `app/ArktCore`: `swift test` — 368 passed (103 + 102 + 65 + 98), unchanged by this branch.
+- `app/ArktShell/ShellKit`: `swift test --skip ShellKitGUITests` — 610 passed (ShellUITests 266, 47 suites;
+  +28 vs main: SiteSearchEnginesTests 4, CommandBarActionsTests 3, CommandBarSettingsTests 4,
+  CommandBarResultsScopeTests 15, CommandBarGeometryTests +1, CommandBarOpenTabsTests +1).
+- `swift test --filter ShellKitGUITests` — 515 cases, 514 passed; the one failure is
+  `SpacePagerTests.testFramePacingDuringSwipeAndKeyboardSwitch` under heavy machine load (load1 6.3-9.4 on 10
+  cores, just under the gate's NOT-MEASURABLE cutoff; the hitch moves between labels across runs).
+  A/B: origin/main versions of the touched files pass 3/3 standalone, this branch passes 3/3 standalone and
+  4/4 including an earlier run; the swipe/settle path is unchanged by this branch (the BH-111 hook early
+  returns while the bar is closed). New GUI tests: CommandBarTests +14, SidebarViewTests +5.
+- App build (App target touched): `xcodegen generate` + Debug `xcodebuild build` — BUILD SUCCEEDED.
+- XCUITest (`ArktShellUITests/CommandBarKeyTests` + `FirstRunAndOpenTests`): 13 tests, 0 failures,
+  `** TEST SUCCEEDED **` (result bundle `build/ui-112b.xcresult`). A first run under load had two harness
+  timeouts (window and results-table snapshot at load1 14-19); both passed in the rerun and are the
+  harness's known load sensitivity.
+
+### Deviations and leftovers
+
+- The search engine for the search row stays the Google placeholder (open question 5); its display name is
+  `CommandBarSettings.searchEngineName`.
+- Suggestion removal is session-scoped; persisting removals waits on a history store (`onRemoveSuggestion`
+  is the seam).
+- The seeded site-search list is a placeholder set of four popular engines; a Chromium keyword store replaces
+  it behind `siteSearchProvider`.
+- `CommandBarGeometry.noticeHeight` (32) is TODO(measure), like the other unmeasured chrome constants
+  (open question 2).
+
+## Command bar, hybrid design, part 1: restyle and layout (#371, supersedes draft #322)
+
+Part 1 of two pull requests for #371 (`Refs #371`). It carries #322's eight commits (authorship kept) onto current
+`main`, then restyles the bar to `design/command-bar/`. Part 2 (filters, Tab rule, Esc, empty-state groups, motion,
+Cmd-Shift-V) stacks on this branch.
+
+### What changed
+
+- `CommandBarGeometry` is the README's table: 680 wide, 16 corners, 58 field, 40 rows, 9 selected radius, 6 list
+  padding, 34 hint strip, top edge at 22 % of the window (176 of 800) so results grow downward, at most five rows
+  without scrolling (seven in the empty state, group headers 26 each, used by part 2). Little Arkt keeps the old
+  look: its metrics, tokens and row views moved to `LittleArktGeometry`, `ShellTokens.lookup*` and
+  `LittleArktLookupRows`.
+- Tokens: `ShellTokens.commandBar*` are light and dark pairs (glass, opaque surface, text, secondary, tertiary,
+  divider, edges, selected row, key cap, scrim, pill well, pill on, pill on text, tick). `ShellTokensContrastTests`
+  gained six tests: text on the opaque surface and on every fill a row puts under it (selected row, key cap, pill
+  well) at 4.5:1 in both appearances, the selected pill and its count, graphite on mustard above 7:1, and mustard
+  only as a fill.
+- View: glass surface (`NSVisualEffectView`, opaque under Reduce Transparency), magnifier, 22 pt field, filter pills
+  with per-filter counts (hidden for an empty query), Esc key cap (closes the bar), hint strip, scope chip and notice
+  kept. The panel no longer forces dark: the bar, its cells and the scrim take the window behind it, light or dark.
+- Scrim: a click-through child window of the parent, black 28 % in dark and graphite 10 % in light, ordered in
+  once at alpha 0 like the panel, so a show orders no window.
+- Rows by the README's anatomy: 20 pt slot with a 16 pt symbol, title with the query match in semibold, secondary
+  URL, right-aligned trailing caption and key caps (Return on the selected row, action shortcuts). The selected row's
+  fill and its 3 pt mustard tick are one view behind the rows (`CommandBarSelectionIndicator`), instant here.
+- Accessibility: dialog group "Command bar"; rows read "<title>, <host>, <kind>, <k> of <n>"; pills are a tab group
+  announcing "<name>, <count> results, selected"; new `AXID`s `commandBar.filters`, `commandBar.filter.<name>`,
+  `commandBar.hints`, `commandBar.escape`. The UI test harness matches a row by title prefix.
+- Site-search rows read "Search <site> for <query>"; placeholder "Search or enter address".
+
+### Deviations from the design
+
+- The design's `--ink-3` (.36 / .44) and the selected pill's count at 55 % fail the README's own 4.5:1 rule on the
+  surfaces; the tokens are raised (tertiary .62 dark, .68 light; count 75 %), found by the new contrast tests.
+- Favicons are not in the bar yet (the symbol slot carries a generic symbol); history rows have no source (no
+  history store), so the History pill counts 0. Recent tabs with relative times and the preview column are #372 and
+  part 2.
+
+### Tests
+
+TDD: the failing tests came first (compile errors counted: the new geometry, row content, filter count and token
+tests referenced values that did not exist), then the implementation.
+
+- `app/ArktCore`: `swift test` - 556 passed (145 + 117 + 70 + 8 + 216), untouched by this branch.
+- `app/ArktShell/ShellKit`: `swift test --skip ShellKitGUITests` - 1643 passed in nine runs (origin/main at the same
+  point: 1587; +56: 27 are #322's carried tests, 29 are new here: `CommandBarRowContentTests` 13, `CommandBarFilterTests` 5,
+  `CommandBarGeometryTests` +4, `ShellTokensContrastTests` +6, `CommandBarResultsScopeTests` +1).
+- `swift test --filter ShellKitGUITests` - 1398 cases, 30 skipped, 4 failures in 3 tests, none in the command bar:
+  `SpaceSwipeHitchTests.testSpaceSwitchPassesStayUnderOneFrameOfMainThreadCPU` (22.9 s; a frame-pacing gate under
+  load), `SplitDragTests.testDropFavoriteOnPlainTabMovesItIntoSplitAndClickVsDrag` (an event-queue test; passes
+  14 of 14 standalone), `OnboardingTests.testFooterFadesOutAsTheFoldBegins` (0.9999998 against 1.0). A baseline run
+  of origin/main (1352 cases, 28 skipped) fails the first two as well plus `SpacePagerTests`'
+  `testFramePacingDuringSwipeAndKeyboardSwitch`; the onboarding one is a float comparison and is not near this code.
+- New GUI tests: `CommandBarHybridTests` 27. Existing command bar GUI tests: `CommandBarTests` 67,
+  `CommandBarArchivedTests` 2, `AXProxyRowsTests`, `AccessibilityIdentifierTests`, `LittleArkt*` and
+  `JavaScriptDialog*` all pass after the changes below.
+- `CommandBarHybridTests` 20 times in a row on the final commit under load (load1 9.2 to 22.4): 20 of 20 passed, 27
+  tests each. The existing latency gate `CommandBarTests.testAppearsUnder16ms` passes.
+- App build (App target touched): `xcodegen generate` + Debug `xcodebuild build` - BUILD SUCCEEDED; UI tests
+  `xcodebuild build-for-testing` (scheme `ArktShellUITests`) - TEST BUILD SUCCEEDED. UI tests were not run (the
+  harness drives the real app; this run was told not to launch it). `Shell.selectCommandBarRow` now matches a row by
+  its title, since a row's label is the whole sentence.
+
+### Existing tests changed
+
+- `CommandBarTests.testGeometryAndDarkSurface` is now `testGeometryAndFollowsTheWindowAppearance` (680 wide, top at
+  22 %, appearance follows the window).
+- `testShowWithUnchangedResultsKeepsTheCells`: the marker moved to the cell's tooltip, because the selected row's
+  title is redrawn when it loses selection.
+- `CommandBarArchivedTests`: the caption reads "Restore from Archive" without the arrow.
+- `AXProxyRowsTests` and `AccessibilityIdentifierTests`: row labels are "<title>, <host>, <kind>, <k> of <n>".
+
+### Deferred to part 2
+
+Filter state and Cmd-1 to Cmd-4, Tab and Shift-Tab (the smart rule), Esc clearing first, the empty state's groups and
+Recent tabs with times, the selection slide, the fades and Cmd-Shift-V. The preview column and Cmd-Return stay in
+#372. History rows need a history store; the pill is there and counts 0.
+
+## Command bar, hybrid design, part 2: behaviour (#371, closes it; supersedes draft #322)
+
+Part 2 of two (part 1, the restyle and layout, is #527). It stacks on part 1's branch.
+
+### What changed
+
+- Filters: `CommandBarFilter` state on the controller (All on every open), Cmd-1 to Cmd-4 pick a pill, Tab and
+  Shift-Tab cycle. The query stays; the pills count the unfiltered rows; a filter that matches nothing shows one
+  non-actionable row, "No <filter> match <query>". Archived results belong to All and Tabs. VoiceOver hears "Tabs, 3
+  results" on a change. A typed query now also lists up to three matching actions, so the Actions pill counts them.
+- The smart Tab rule (`CommandBarTabAction`, the maintainer's decision on #371, which resolves the README's open
+  question 1): Tab scopes the search when something on screen shows a Tab key cap, and cycles the filters otherwise.
+  A Tab key cap shows on a site-search row (a typed alias or the start of a site name, "Search GitHub for git") and in
+  the hint strip of a bar just opened for a new tab with an empty field (action search, #322, KB-081). The hint strip
+  mirrors it: its Tab item is whatever Tab will do. A whole alias typed puts its row first, so Tab scopes at once
+  (#322's behaviour) and Return, with nothing yet to search for, scopes too. Inside a scope Tab is consumed.
+- Esc clears the query first and closes the bar when it is already empty (a Cmd-L prefill clears too).
+- Cmd-Shift-V is Paste and Go from any state of a new-tab bar; with nothing on the clipboard it beeps and the bar stays.
+- Empty state: Clipboard (Paste and Go, only for a URL), Recent tabs (up to four, "12 min", "1 h", "Yesterday") and two
+  Actions, each under a 26 pt header on the group's first row. Recent tabs are per Space, the current Space first like
+  the suggestions (BH-111), the tabs shown in this window by most recent view, then the rest in sidebar order. The
+  plain `make(query:openTabs:)` convenience (Little Arkt's lookup) keeps listing up to six open tabs.
+- Hint strip: Move, Open (empty state), "Cmd 1-4 Filter", the Tab item, and on the right the empty state's line or
+  "Paste and Go" with its shortcut. A row shows a URL without its scheme.
+- Motion (`CommandBarMotion`, `CommandBarSelectionMotion`): the selection fill and tick slide to the new row on
+  `SpringPreset.firmFast`, retargeted from where they are when a key repeats (a `SpringField` run, applied as a layer
+  transform; the indicator's frame is always the target row). New results do not slide; Reduce Motion moves it
+  instantly. The bar and the scrim fade in (0.1 s, no scale) and out (0.1 s); the panel goes to alpha 0 when the fade
+  ends, inert at once. Reduce Motion keeps both fades. Opacity and transform only.
+
+### Tests
+
+TDD: the new unit tests (tab rule, filter state, empty state, relative time, selection motion, fade data) and
+`CommandBarBehaviourTests` were written before the code (compile errors counted).
+
+- `app/ArktShell/ShellKit`: `swift test --skip ShellKitGUITests` - 1691 passed (part 1 on main: 1643; +48: tab rule, filter
+  state, empty state, relative time, selection motion, fade data, row content additions).
+- GUI, this part's suites only (the full ShellKitGUITests run was dropped to keep the machine free; it was run on the
+  branch before the last review fixes: 1451 cases, failures only in `SpaceSwipeHitchTests`, `SpacePagerTests`,
+  `SplitDragTests`, `OnboardingTests` and, once under load, the latency gate - all also failing or flaky on main):
+  `CommandBarBehaviourTests` 52 (1 skipped: the screenshot render), `CommandBarHybridTests` 28, `CommandBarTests` 67,
+  all passing. Before the last two small commits the two new suites also passed 20 of 20 runs in a row under load
+  (load1 8.5 to 44.9); they were not re-run 20 times after.
+- Latency gate: part 1 had made the first frame about one frame later in over half the samples (p95 17.6 ms against
+  a bound of 17.6, 10 to 13 ms before). A show now skips every update that changes nothing (placeholder, scope chip,
+  pills, hint strip); `testAppearsUnder16ms` p95 is 10.6 to 13.3 ms again over 8 runs (load 20 to 30, so the gate
+  itself reported NOT-MEASURABLE).
+- App build and `build-for-testing` for the UI tests: BUILD SUCCEEDED and TEST BUILD SUCCEEDED before the review fixes.
+  The two new UI tests (`test_371_commandDigitsPickTheFilterPills`, `test_371_escClearsTheQueryThenCloses`) are only
+  compiled, not run: the harness drives the real app.
+
+### Review notes folded in
+
+Pill counts cover every match (not the capped rows); the pasteboard is read once per show; the query field keeps 160 pt
+and the pills hide below that; the pills are wired (click and VoiceOver press); the new-tab Cmd monitor in
+`SidebarController` is removed on teardown; a pill change in the middle of a fade-out starts from where the layer is;
+entering a scope resets the filter; the empty "No <filter> match" row is not selected; the caret is mustard.
+
+### Deviations and leftovers
+
+- The light scrim is graphite 10 %, as in the prototype's light screen (`body.light .scrim`), not the 28 % black of the
+  dark screen: 28 % black over a light page reads as a heavy grey.
+- Hover still selects the row (from #322), so the tick follows the pointer; the README's "hover without the tick" is not
+  built.
+- The History pill counts 0 until there is a history store.
+- Recent tabs are per window and in memory: a tab not shown since the app started has no time.
+- The window shadow during the fades is the window server's (`hasShadow`) and does not follow the layer opacity; check it
+  on screen.
+
+## Space theme overlay colors and OKLab gradients (#381) (2026-10-28)
+
+- **OKLab.** `ThemeGradient.expand` turns each theme's stops into 32 OKLab steps per pair (33 stops for two colors)
+  once per theme; `ThemeBackgroundView` hands those to its `CAGradientLayer`s, so the layer's own blend runs between
+  points that are already perceptually spaced. The end stops and every original stop are kept exactly; the steps between
+  move by less than 0.05 per component for every shipped theme (pinned in `ThemeOverlayTests`).
+- **Overlay layer.** `SpaceThemeInfo.overlayColors` (already stored, imported and bridged) is drawn as a second gradient of
+  the same shape, source-over above the base gradients and below the texture multiplies. One layer for the lower Space and
+  one for the upper: the pager changes only their opacities (1 - t and t) and the colors are set only when the lower
+  index changes; a Space without overlay colors hides its layer, so existing themes pay nothing. A settled theme change
+  fades the old overlay out and the new one in on the gradient's own curve (or spring); Reduce Motion and the creator's
+  live preview snap.
+- **Strength (design call).** The "intensity knob" of the issue is the opacity slider of #410. `ThemeContrast.drawn`
+  multiplies each overlay color's alpha by the theme's opacity and keeps the result in the drawn theme (whose opacity is
+  1), so the renderer needs no extra input: 0 draws no overlay, 100 % draws the stored alpha. PARITY(NEEDS-RUNTIME-CHECK).
+- **Contrast.** The overlay is part of what the sidebar text sits on: `ThemeContrast.resolve(stops:opacity:overlay:in:)`
+  composites the overlay color at each stop's position over the stop before measuring, so the mix and tone rule hold with
+  an overlay. Without overlay colors the result is identical to before. The shipped-surface probe
+  (`ShellContrastProbe`) now samples in OKLab like the window and composites overlays; no token had to change, all
+  contrast tests pass as they were.
+- **Creator.** No new control (the design has none): the model keeps a theme's overlay colors while the colors, texture
+  or opacity are edited, and the live preview draws them through the same path.
+- Not measured: frame time (no per-frame work was added: layer opacities only) and before/after screenshots (the app was
+  not launched on the machine that finished this).
+
+## Command bar preview column (#372) (2026-10-28)
+
+### What changed
+
+- The bar widens from 680 pt to 968 pt when the selected row is an open tab or a history row and the query is not empty. Suggestions, site search, actions, Paste and Go, archived results, an address row, a Space and a no-match row stay at 680, as does an empty query. The wide bar keeps the narrow bar's leading edge and grows to the right, so the list's leading edge does not move. The column is 300 pt wide with 12 pt padding and a hairline on its leading edge. It is no taller than the five rows, and the bar does not grow vertically for it. A shorter band shrinks the thumbnail and hides it below 48 pt.
+- Width is an interruptible `SpringPreset.firmFast` spring (`CommandBarWidthMotion`) on a mask and on the trailing cluster's transform. The panel is laid out once when it becomes wide, and once when a narrowing spring settles. A frame of the spring does not layout. Up or Down mid-flight retargets from the current width and velocity. Moving between two preview rows keeps the column and cross-fades its content. Reduce Motion sets the width at once and still fades the content. The signpost `CommandBarPreviewWidth` covers the spring and stays open across a retarget. Reduce Motion does not begin it.
+- The thumbnail is 116 pt high with 10 pt corners when the band fits. An open tab asks `PageThumbnails.thumbnail(of:)` for a live image. A history row asks `thumbnail(for:)` for the cached image, including when that page is also open. Until the image arrives the well shows the favicon, or the row symbol. A token from an earlier selection is dropped. The well is on screen before the request, and the image is decoded on the main actor after the await.
+- The title is 14 pt semibold, one line. An open tab's meta line is "<host> · open in <Space>, <time>" with a 6 pt green dot. History is "<host> · visited <time>" with no dot. Preview times come from `CommandBarRelativeTime.preview` ("11 min ago"; "Now" and "Yesterday" stay as they are). The history row's trailing time stays without "ago".
+- Split View (Cmd-Return) is the secondary button and opens the page in a new split pane. Switch to Tab (Return) is the only mustard button; the label is graphite on the mustard fill. A history row that is not open uses "Open", and Split View still opens a new split pane. A history row that is also an open tab uses "Switch to Tab", keeps the visited line and still uses the cached thumbnail. Opt-Return on a visible preview opens a new tab. Opt-Return on a switch row with no preview, including the empty query, still switches.
+- VoiceOver gets the group "Preview, <title>" when the column appears, and two labelled buttons. The buttons are not in the Tab order.
+- The app wires `PageThumbnails` from `AppSession` through `ShellWindowController`. History rows appear only when `historyProvider` returns visits. The app passes none until a store exists.
+
+### Deviations
+
+- No 240 pt column and no rule that hides the preview on a narrow window (README open question 5). When the window cannot hold 968 pt past the leading edge, the width clips to the window and the column stays 300 pt, so the list shrinks.
+- The wide bar is anchored to the narrow bar's leading edge. On a 1280 pt window the right margin is 12 pt, and the width is exactly 968 pt.
+- An empty query stays at 680 pt even when a recent open tab is selected.
+- There is no history store in the product. The History pill stays at 0 in the app. History rows exist when `historyProvider` returns visits.
+- Opt-Return on a visible preview opens a new tab. Opt-Return on an empty-query Switch to Tab row still switches, so the existing empty-query test stays valid.
+- A window resize with no preview snaps. Only a visible preview, or a width spring that is already running, animates the width. The height follows the rows immediately, including while the column is still clipping away.
+- The preview's text and controls sit in a flipped content group. The column and the bar are both flipped; an unflipped group drew the thumbnail and the buttons upside down.
+- The history screenshot uses five synthetic visits so the five-row band can show the 116 pt thumbnail. One history row hides it, because the column is shorter than the thumbnail plus the text and the buttons.
+- Frame time of the widening spring: not run. `testTheBarWidensOnASpringWithoutMovingTheLeadingEdgeOrLayingOutPerFrame` asserts that a frame while the spring runs does not increment the layout counter, and it passed. A live frame-time number needs a display link and a wall-clock wait. The tests step the spring by hand and do not sleep. The `commandbar.latency.ms` sample in `CommandBarTests` is the show-latency gate, not this spring.
+- The spring's unit tests live in ShellUITests, the same place as the selection-motion tests. The window, the spring on a live bar, Reduce Motion, the no-layout assertion, accessibility, Cmd-Return and the screenshots live in ShellKitGUITests.
+
+### Tests
+
+`cd app/ArktShell/ShellKit && swift test -j 2 --skip ShellKitGUITests` (nice -n 20), exit 0, on the final sources:
+
+- Test run with 1114 tests in 137 suites passed after 1.050 seconds.
+- Test run with 38 tests in 6 suites passed after 0.036 seconds.
+- Test run with 60 tests in 7 suites passed after 2.151 seconds.
+- Test run with 7 tests in 2 suites passed after 0.027 seconds.
+- Test run with 181 tests in 18 suites passed after 0.281 seconds.
+- Test run with 49 tests in 6 suites passed after 3.163 seconds.
+- Test run with 257 tests in 24 suites passed after 1.011 seconds.
+- Test run with 111 tests in 15 suites passed after 0.552 seconds.
+- Test run with 23 tests in 8 suites passed after 0.175 seconds.
+
+1840 tests, 0 failures. The 19 new tests are `CommandBarPreviewTests` (12) and `CommandBarWidthMotionTests` (7), inside the 1114.
+
+GUI, the command-bar classes, under the GUI lock (`swift test --filter 'CommandBarPreviewWindowTests|CommandBarHybridTests|CommandBarBehaviourTests|CommandBarArchivedTests/|CommandBarTests/'`), exit 0:
+
+- CommandBarArchivedTests: Executed 2 tests, with 0 failures in 0.490 seconds.
+- CommandBarBehaviourTests: Executed 52 tests, with 1 test skipped and 0 failures in 13.569 seconds.
+- CommandBarHybridTests: Executed 28 tests, with 1 test skipped and 0 failures in 7.934 seconds.
+- CommandBarPreviewWindowTests: Executed 8 tests, with 0 failures in 3.146 seconds.
+- CommandBarTests: Executed 67 tests, with 0 failures in 38.080 seconds.
+- ShellKitGUITests.xctest: Executed 157 tests, with 2 tests skipped and 0 failures in 63.218 seconds.
+
+The two skips are the pre-existing screenshot renders. `commandbar.latency.ms` on that run: median 17.13, p95 17.51, bound 17.66, asserted=yes. That is the show-latency gate.
+
+`cd app/ArktCore && swift test`: not run. ArktCore was not edited.
+
+UI test `ArktShellUITests/CommandBarKeyTests/test_372_cmdReturnOpensTheSelectedTabInASplit`: not run to a result. xcodebuild reached Set Up, then XCTest stayed in `recordIssue` while symbolication blocked in `open`. The harness refuses to launch when `dev.arkt.Arkt` is already running, and another worktree's ArktShell (pid 82119) holds that bundle id. It was left running. The in-process twin `CommandBarPreviewWindowTests.testCmdReturnSplitsAndOptReturnOpensATab` passed. The XCUITest method is in `CommandBarKeyTests`.
+
+Widening frame time: not run. The structural no-layout assertion passed, as above.
+
+## Auto-archive exempts a playing Today tab (#92) (2026-10-28)
+
+BH-076's auto-archive half. Clear already leaves a playing row (`pagePlaysMedia`). Auto-archive now uses the same rule.
+
+- `ShellWindowSet.autoArchiveExempt` also unions each window's loaded tabs whose engine snapshot `isAudible` is true, including a tab that is not the one showing. Chromium keeps `isAudible` true for a muted page that still plays, so that page is exempt too. Mute alone is not. A page that was never loaded has no snapshot and is not exempt.
+- A playing pane is exempt, and so is its parent split, matching `nodesHoldingClose`. `AutoArchivePolicy.lastActive` already keeps a split when any pane is exempt; the policy was not changed.
+- Little Arkt window auto-archive (`littleArcWindowsToArchive`, exempt window ids) is a separate path and was not changed.
+
+`AppSession.startAutoArchive` already reads `windows.autoArchiveExempt`, so that file was not edited. Its comment still says media-playing tabs join once the engine reports audio. The engine reports it, and the exempt set now includes those tabs.
+
+Tests (written first: the new GUI case failed on the audible background tab, the muted page that still plays, and the split, and passed the mute-only and never-loaded cases, before the code): `ShellWindowSetTests` 12 run, 0 failures (the class had 11; the new case is `testAnAudibleBackgroundTabIsExemptFromAutoArchive`). ShellKit unit (`swift test -j 2 --skip ShellKitGUITests`): 1821 Swift Testing tests passed, 0 failures (1095 + 38 + 60 + 7 + 181 + 49 + 257 + 111 + 23). ArktCore not run: no ArktCore change. App build and XCUITest not run: `app/ArktShell/App` and `project.yml` were not touched.
+
+## Little Arkt: archive on close and idle, and Cmd-Shift-T (#355) (2026-11-05)
+
+BH-138, KB-080, BH-137. A Little Arkt page now goes to the Archive under the Little Arkt source.
+
+- `LittleArktWindowController.requestClose` captures the page (URL, title) and the window frame when the user asks to close (close button, Cmd-W) or the idle timer does; the window archives it when the engine reports the window closed with `.userClose`. The capture is dropped when a leave-site prompt is cancelled (`.closeCancelled`), when Open in moves the page, and when the window closes for any other reason (a quit or an extension while a prompt is up). A page that closes its own popup archives nothing. A prompt the user confirms still archives.
+- `ArchiveCoordinator.archiveLittleArkt(url:title:reason:)` queues one tab entry with source `.littleArc` and no section, through the same outbox as every archive; the sidebar does not change. `takeBackLittleArkt(_:)` takes an entry out of the archive without a sidebar insert, by id (not limited to the 50 latest archives). It refuses an entry the user restored from the Archive, so that window is not reopened (no second copy next to the Today row). The store side of `restore` moved into a shared `withdraw`.
+- `AutoArchiveTimer` runs a Little Arkt pass on every tick: `AutoArchivePolicy.littleArcWindowsToArchive` over `ShellWindowSet.littleArktIdleCandidates()`, with `ArchiveSettings.littleArcThreshold` (6 hours by default), loaded with the other archive settings when the timer starts and updated live from the Settings row (#448) through `AutoArchiveTimer.apply(_:)`, from the next tick. A window the user is in (key window of the active app), a page playing sound and a page that would ask before leaving are not candidates; each pass that sees one counts as activity, so its idle time starts again when that ends rather than closing it at once. Activity is otherwise opening, becoming key and resigning key; a page navigating on its own does not count.
+- Idle time is wall-clock time (`Date`), like the Today tabs' auto-archive: a Mac asleep for longer than the threshold closes and archives its idle Little Arkt windows on the first pass after it wakes.
+- Reopen Closed Tab (Cmd-Shift-T): `ShellWindowSet` keeps the last 50 closed Little Arkt windows. File > Reopen Closed Tab now targets `ReopenClosedRouter` (`AppCommands.reopenRouter`): it sends the action to whatever takes it down the responder chain (the key browser window, a key Little Arkt window), and with no window to take it (the only window was a Little Arkt and it closed) reopens the last closed Little Arkt itself. An explicit target, so the Engine build's `AppController` never gets it. A Little Arkt reopens on its page at its last frame, moved fully onto the screen it overlaps most (else the main screen) and shrunk to fit when it is not fully on a screen's visible frame (`LittleArktLayout.frame(reopening:on:)` over `WindowFramePlacement.restoredFrame`). There is no Chromium engine command for reopen.
+
+Product decisions (maintainer, 2026-11-05): Cmd-Shift-T in a main window reopens that window's own closes first, then the last Little Arkt (no recency merge across windows); idle closes show no toast; a reopened popup comes back as a normal Little Arkt.
+
+Tests (written first): CoreBridge `ArchiveCoordinatorTests` + `AutoArchiveTimerTests` 69 passed after merging main with #448 (10 new, one for a threshold change applied live, including a take-back after more than 50 other archives and one after a restore from the Archive). `LittleArktArchiveTests` (new) 18 run, 0 failures, 10 consecutive runs; `LittleArktLayoutTests` 12 passed (3 new; a frame partly off screen moves fully in); `MainMenuInventoryTests` 16 and `MainMenuKeyEquivalentTests` 8 (the router target); `LittleArktWindowTests` 14, `LittleArktFlightTests` 39 (2 skipped), `LittleArktDialogTests` 17, `ReopenClosedTests` 14, `SplitPaneReopenTests` 8, all 0 failures. ShellKit unit (`swift test -j 2 --skip ShellKitGUITests`): 1975 Swift Testing tests passed, 0 failures (1159 + 38 + 60 + 9 + 183 + 49 + 327 + 125 + 25). App `xcodebuild` Debug: BUILD SUCCEEDED. ArktCore and engine not run: no change there. Deliberate break: replacing the `.closeCancelled` clear with `break` fails `testACancelledLeaveSitePromptForgetsTheClose` ("a close the user cancelled is not archived later"); restored. `InMemoryEngine.engineEndWindow(_:reason:)` is a new test driver: the engine ends a window with a prompt up (a quit).
+
+## Little Arkt: Dock menu, Window menu and Opt-Cmd-click (#356) (2026-11-05)
+
+### What changed
+
+- `LittleArktMenus` (ShellUI, owned by `ShellWindowSet`): the Dock menu's rows (page titles, Hide All / Show All
+  Little Arkt Windows, Close Little Arkt Windows) and the Window menu's "Little Arkt" section above Bring All to Front.
+  A row brings its window forward, also from hidden. Little Arkt windows are excluded from AppKit's own window list,
+  so they are not listed twice. Rows show the page title, then the host, at most 60 characters.
+- Dock menu: `AppDelegate.applicationDockMenu` builds it with `MainMenu.dockMenu`, adding New Window and New Little
+  Arkt Window (Opt-Cmd-N). The Window menu's delegate is `AppCommands`, which rebuilds the section when it opens.
+- Opt-Cmd-click on a link (exactly Option and Command): `ShellEngineHost.decideLinkActivation` cancels it before
+  Peek routing, and a new Little Arkt window opens on the URL one turn later.
+- Opt-Cmd-click on a Today tab's row: the page moves into a new Little Arkt window (`moveTab`, no reload) from
+  whichever window has it, else a new page opens on its URL. The row then leaves the sidebar without an Archive entry
+  (`SidebarSource.removeNode`, new); the page is archived when its Little Arkt window closes. Every window that was
+  left on that row's handoff placeholder moves on to the next tab (unless another window shows it) or clears its card,
+  and any window drops a placeholder whose row is gone, whatever removed it.
+- Opt-Cmd-click on a pinned tab's row or a Favorite's tile opens its page in a new Little Arkt window and keeps the pin
+  or Favorite where it is, as a Peek does (decided on #356; docs/design/little-arkt.md updated).
+- Settings > Links: "Open Little Arkt when clicking on links with ⌥⌘ held"
+  (`optionCommandClickLittleArcEntryPointEnabled`), on by default. It covers both clicks.
+- Space chooser: "Open in New Window" between the Spaces and Copy Link. The window fades out, then the page moves into
+  a new browser window on the Space Open in names. No flight, because the target window is not on screen yet. If the
+  new window cannot take the page, it closes again.
+- The Window menu heading is `NSMenuItem.sectionHeader(title:)`.
+
+### Deviations and follow-ups
+
+- Engine build Dock menu: Chromium's `AppController` stays `NSApp.delegate` and answers `applicationDockMenu:`, so
+  the Dock menu above is the FakeEngine build's only. #658 asks for the embedder seam. From the code, the Window
+  menu's section should work in the Engine build: Arkt installs its own `windowsMenu` with `AppCommands` as delegate,
+  and Chromium binds its menu bridges by tag, which that menu has none of. This is not checked at runtime.
+- The Dock menu has no XCUITest handle (it belongs to the Dock process); its rows are covered in ShellKitGUITests.
+
+### Review changes
+
+The two-window placeholder fix, removal without the Archive, pinned tabs and Favorites, closing the empty window
+after a failed Open in New Window, and the section header. Tests:
+
+- `LittleArktMenusTests` grew to 22. The new cases cover:
+  - two windows with the page live in the other one;
+  - a placeholder whose row goes;
+  - a pinned tab, a Favorite, and a plain click on a Favorite;
+  - Open in New Window with the full motion, and with a failure.
+- `SidebarSourceContractTests.removeNodeRemovesTheRowAndEmitsStructure` runs on both sources.
+
+Each new behavior was broken on purpose once, and its test failed:
+
+- Without the follow-ups in `ShellWindowSet.moveToLittleArkt`, the two-window case failed (the clicking window stayed on the placeholder).
+- Without `dropPlaceholderOfRemovedRow` in the sidebar observation, `testAPlaceholderGoesWithItsRow` failed.
+- Archiving instead of removing failed the Today tab case ("removed, not archived").
+- A no-op `ModelSidebarSource.removeNode` failed the contract test for `.model`.
+- Not opening pinned tabs and Favorites failed both cases (no Little Arkt window).
+- Dropping the `performClose` after a failed Open in New Window failed its case (2 windows, not 1).
+- A plain heading item failed the Window menu case.
+- Committing Open in New Window without the fade failed the full-motion case.
+
+### After #355 merged
+
+- `openLittleArkt(url:frame:)` keeps #355's `frame` and falls back to `nextLittleArktFrame()`.
+- Close Little Arkt Windows goes through `requestClose`, so a hidden window records its page for the Archive and
+  Cmd-Shift-T the same way Cmd-W does. A new `withMotion: false` skips the close motion for a window that is not on
+  screen, and #355's rules for dropping the record are unchanged.
+- File > Reopen Closed Tab keeps #355's `ReopenClosedRouter` target. The Window menu keeps `AppCommands` as its
+  delegate.
+- Test: `LittleArktArchiveTests.testCloseLittleArktWindowsArchivesHiddenWindowsAndTheyCanBeReopened` (one hidden
+  window and one shown, both archived and both reopenable).
+- Deliberate break: the old `closeFromMenu` body (`phase = .closing`, then asking the engine without
+  `requestClose`) fails it: one archive entry instead of two, and the hidden window cannot be reopened.
+- Runs:
+  - `--filter 'ShellUITests|CoreBridgeTests'`: 1199 and 341 tests passed.
+  - GUI `--filter 'LittleArkt|MainMenu|Archive|Reopen|SidebarClick|Handoff|Favorites|ToastView|ShellWindowSet|Settings'`: 380 run, 5 skipped, 0 failures.
+  - Debug app `xcodebuild -scheme ArktShell -configuration Debug -jobs 2`: BUILD SUCCEEDED.
+
+### Tests
+
+Written first. Each failed to compile before the code existed.
+
+- `LittleArktClickRoutingTests` (ShellUITests, 7): the modifier rule, the setting default, the copy and the menu row
+  titles. `swift test --filter ShellUITests`: 1162 tests in 140 suites passed.
+- `LittleArktMenusTests` (ShellKitGUITests, 15): Opt-Cmd-click on a link, with the setting off and with other
+  modifiers; Opt-Cmd-click on a loaded and an unloaded Today tab and with the setting off; Open in New Window and the
+  chooser's items; the Dock rows, Hide All / Show All, a row from hidden, Close All with a hidden window; the Window
+  menu section, replaced not doubled, and removed with the last window. 15 run, 0 failures, five runs in a row.
+- `MainMenuKeyEquivalentTests`: two new cases (the Dock menu's last items, the Window menu's delegate). Its class, with
+  the other Little Arkt, Settings, Peek, Handoff, TabActions and sidebar classes (`--filter
+  'MainMenuKeyEquivalentTests|LittleArkt|Settings|SidebarClick|TabActions|Peek|Handoff|SidebarOutline|SplitSidebar'`):
+  315 run, 6 skipped, 0 failures.
+- `LittleArktTests` (XCUITest, 4): Opt-Cmd-click opens Little Arkt, Open in, Cmd-W and the chooser's Open in New Window.
+  The app and test bundle build (`xcodebuild ... build-for-testing`: TEST BUILD SUCCEEDED). Not run: the suite needs
+  the real pointer and keyboard, and the Mac was in use.

@@ -164,12 +164,14 @@ extension ShellWindowController {
     return true
   }
 
-  /// The frame, in the root view, of the one pane still showing a page, if exactly one is.
+  /// The frame, in the root view, of the one pane still showing a page, if exactly one is: where it is drawn, so a
+  /// close during a running reflow grows the card from there (#602).
   private func lastPaneFrame() -> CGRect? {
     let container = rootView.split
-    let shown = container.paneCards.filter { $0.contentView != nil }
-    guard shown.count == 1, let card = shown.first else { return nil }
-    return rootView.convert(card.frame, from: container)
+    let drawn = container.presentedPaneFrames
+    let shown = container.paneCards.indices.filter { container.paneCards[$0].contentView != nil }
+    guard shown.count == 1, let index = shown.first, drawn.indices.contains(index) else { return nil }
+    return rootView.convert(drawn[index], from: container)
   }
 
   /// The split row's pane to focus: the last focused one unless its page was closed, else the first open pane.
@@ -442,7 +444,7 @@ extension ShellWindowController {
     let focusIndex = split(holding: target).flatMap { sidebar.children(of: .split($0)).firstIndex(of: target) } ?? 0
     let index = side.isBeforeFocus ? focusIndex : focusIndex + 1
     do {
-      let added = try sidebar.addToSplit(.new(url: url, title: url.host() ?? url.absoluteString), target: target,
+      let added = try sidebar.addToSplit(.new(url: url, title: HostDisplay.savedTitle(for: url)), target: target,
                                          at: index, orientation: side.orientation)
       activate(node: added.pane)
     } catch {

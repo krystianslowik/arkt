@@ -49,11 +49,11 @@ public enum SpaceThemeCatalog {
   /// The six families, Dune first. Every stop is measured by `ShellTokensContrastTests`.
   public static let families: [Family] = [
     Family("Dune", light: [0xF7EED2, 0xEBD592], dark: [0x3D3420, 0x1E1A10]),
-    Family("Mist", light: [0xE0F2FB, 0xC5C6E2], dark: [0x3A4158, 0x1C2030]),
+    Family("Mist", light: [0xEEF1F4, 0xB0C4DA], dark: [0x3A4158, 0x1C2030]),
     Family("Paper", light: [0xF4F1EA, 0xE4DDD2], dark: [0x3A3631, 0x211F1C]),
     Family("Sage", light: [0xE6EDE3, 0xC4D3C0], dark: [0x2F3B33, 0x171E1A]),
-    Family("Blossom", light: [0xF2EAE4, 0xF29BBB], dark: [0x4A2A3A, 0x1F1520]),
-    Family("Indigo", light: [0xE4E2F4, 0xC9C3E8], dark: [0x2D4468, 0x120F2E]),
+    Family("Blossom", light: [0xF7EEF3, 0xDDB4D2], dark: [0x4A2A3A, 0x1F1520]),
+    Family("Indigo", light: [0xE4E2F4, 0xC9C3E8], dark: [0x3C3B72, 0x1D1838]),
   ]
 
   /// Dune: the theme of the Space the first run creates (decision 5).

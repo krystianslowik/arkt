@@ -1,3 +1,5 @@
+import EngineAPI
+import EngineAPITestSupport
 import Foundation
 import Testing
 @testable import ShellUI
@@ -200,6 +202,131 @@ struct ToastKindTests {
     presenter.dismissFromButton()
     #expect(presenter.current == nil)
     #expect(calls == 0, "dismiss never runs the action")
+  }
+}
+
+/// The post-install toast (#594, `design/extensions` `toast-pin`): "<name> added" with Pin, since new extensions are not
+/// pinned (#590). Driven by InMemoryEngine's install events.
+@MainActor
+struct ExtensionInstallToastTests {
+  private static let forever: ToastSleep = { _ in try await Task.sleep(for: .seconds(3600)) }
+  private static let reader = InstalledExtension(id: "reader", name: "Quiet Reader")
+  private static let readerAction = ExtensionAction(id: "reader", name: "Quiet Reader")
+
+  private func make() -> (InMemoryEngine, ToastPresenter, ExtensionInstallToasts) {
+    let engine = InMemoryEngine()
+    let presenter = ToastPresenter(sleep: Self.forever)
+    let toasts = ExtensionInstallToasts(extensions: engine) { presenter }
+    return (engine, presenter, toasts)
+  }
+
+  @Test func anInstallShowsOneToastWithPin() {
+    let (engine, presenter, toasts) = make()
+    engine.installExtension(Self.reader, action: Self.readerAction)
+    #expect(presenter.current?.text == "\u{201C}Quiet Reader\u{201D} added")
+    #expect(presenter.current?.actionTitle == "Pin")
+    #expect(presenter.current?.kind == .notice)
+    #expect(presenter.current?.spokenText == "Quiet Reader added")
+    withExtendedLifetime(toasts) {}
+  }
+
+  @Test func pinPinsTheExtensionAndDismisses() {
+    let (engine, presenter, toasts) = make()
+    engine.installExtension(Self.reader, action: Self.readerAction)
+    presenter.performActionForTesting()
+    #expect(engine.pinnedExtensionIDs == ["reader"])
+    #expect(presenter.current == nil)
+    withExtendedLifetime(toasts) {}
+  }
+
+  /// `.installed` may arrive after the `.extensionActionsChanged` that lists the action and its pin: an extension the
+  /// engine already pinned gets the toast without a Pin action.
+  @Test func anAlreadyPinnedExtensionGetsNoPinAction() {
+    let (engine, presenter, toasts) = make()
+    engine.installExtension(Self.reader, action: Self.readerAction, pinned: true)
+    #expect(presenter.current?.text == "\u{201C}Quiet Reader\u{201D} added")
+    #expect(presenter.current?.actionTitle == nil)
+    withExtendedLifetime(toasts) {}
+  }
+
+  /// An extension without an action yet (its action may be announced later) still pins from the toast.
+  @Test func pinWorksWhenTheActionIsNotListedYet() {
+    let (engine, presenter, toasts) = make()
+    engine.installExtension(Self.reader)
+    #expect(presenter.current?.actionTitle == "Pin")
+    presenter.performActionForTesting()
+    #expect(engine.pinnedExtensionIDs == ["reader"])
+    withExtendedLifetime(toasts) {}
+  }
+
+  @Test func eachInstallShowsItsOwnToast() {
+    let (engine, presenter, toasts) = make()
+    var shown: [String] = []
+    engine.installExtension(Self.reader)
+    shown.append(presenter.current?.text ?? "")
+    engine.installExtension(InstalledExtension(id: "clips", name: "Clips"))
+    shown.append(presenter.current?.text ?? "")
+    #expect(shown == ["\u{201C}Quiet Reader\u{201D} added", "\u{201C}Clips\u{201D} added"])
+    presenter.performActionForTesting()
+    #expect(engine.pinnedExtensionIDs == ["clips"], "Pin acts on the toast's own extension")
+    withExtendedLifetime(toasts) {}
+  }
+
+  /// A long name truncates inside the quotes, so "added" always shows; VoiceOver hears the whole name.
+  @Test func aLongNameTruncatesAndIsSpokenWhole() {
+    let name = String(repeating: "Reader Pro ", count: 8) + "Ultimate"
+    let toast = ExtensionInstallToasts.toast(for: InstalledExtension(id: "x", name: name), isPinned: false)
+    #expect(toast.text.hasSuffix("\u{2026}\u{201D} added"))
+    #expect(toast.text.count <= ExtensionInstallToasts.nameLimit + "\u{201C}\u{201D} added".count)
+    #expect(toast.spokenText == "\(name) added")
+  }
+
+  @Test func surroundingWhitespaceIsTrimmedAndAnEmptyNameIsGeneric() {
+    #expect(ExtensionInstallToasts.toast(for: InstalledExtension(id: "x", name: "  Clips \n"), isPinned: false).text
+            == "\u{201C}Clips\u{201D} added")
+    let unnamed = ExtensionInstallToasts.toast(for: InstalledExtension(id: "x", name: " "), isPinned: false)
+    #expect(unnamed.text == "Extension added")
+    #expect(unnamed.spokenText == "Extension added")
+  }
+
+  @Test func noChromiumOrWindowMenuWording() {
+    let toast = ExtensionInstallToasts.toast(for: Self.reader, isPinned: false)
+    for word in ["Chromium", "Window menu", "Chrome"] {
+      #expect(!toast.text.contains(word) && !toast.spokenText.contains(word))
+    }
+  }
+
+  @Test func noPresenterNoToastAndNoCrash() {
+    let engine = InMemoryEngine()
+    let toasts = ExtensionInstallToasts(extensions: engine) { nil }
+    engine.installExtension(Self.reader)
+    #expect(engine.pinnedExtensionIDs.isEmpty)
+    withExtendedLifetime(toasts) {}
+  }
+
+  /// Extensions a browser import installs show no toast each (the import has its own summary), and an import leaves a
+  /// toast already up, such as that summary, in place.
+  @Test func anImportInstallShowsNoToastAndLeavesTheSummaryUp() async {
+    let (engine, presenter, toasts) = make()
+    presenter.show(Toast(text: "Imported 2 extensions"))
+    let ids = [String(repeating: "a", count: 32), String(repeating: "b", count: 32)]
+    let results = await engine.installExtensionResults(ids: ids)
+    #expect(results?.map(\.outcome) == [.installed, .installed])
+    #expect(presenter.current?.text == "Imported 2 extensions")
+    engine.installExtension(InstalledExtension(id: "c", name: "Clips", source: .browserImport))
+    #expect(presenter.current?.text == "Imported 2 extensions")
+    withExtendedLifetime(toasts) {}
+  }
+
+  @Test func anInstallDefaultsToTheUser() {
+    #expect(InstalledExtension(id: "x", name: "X").source == .user)
+  }
+
+  @Test func otherExtensionEventsShowNothing() {
+    let (engine, presenter, toasts) = make()
+    engine.setExtensionCommands([])
+    #expect(presenter.current == nil)
+    withExtendedLifetime(toasts) {}
   }
 }
 

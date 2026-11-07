@@ -75,7 +75,44 @@ enum ScriptedHarness {
         let chromium = try chromium(engine)
         try scriptedBrowser(chromium, window).closeByExtension()
         try await delivered(chromium)
-      }
+      },
+      // A scripted tab has a frame once its load finished; nothing to show.
+      showPage: { _, _ in },
+      raiseDialog: { engine, id, kind, message, defaultText in
+        let (chromium, tab) = try parts(engine, id)
+        tab.raiseDialog(try ArktDialogKind(kind), message: message, defaultText: defaultText)
+        try await delivered(chromium)
+      },
+      raisePermission: { engine, id, kinds in
+        let (chromium, tab) = try parts(engine, id)
+        tab.askPermission(kinds.map(ArktPermissionKind.init), items: kinds.map(Self.phrase), oneTime: kinds.allSatisfy {
+          $0 != .notifications && $0 != .other
+        })
+        try await delivered(chromium)
+      },
+      raiseInfobar: { engine, id, message in
+        let (chromium, tab) = try parts(engine, id)
+        tab.addInfobar(message)
+        try await delivered(chromium)
+      },
+      findPage: { occurrences, link in InMemoryEngine.findPageURL(occurrences: occurrences, link: link) },
+      selectedText: { engine, id in
+        let value = try await chromium(engine).evaluateScript("window.getSelection().toString()", in: id,
+                                                              userGesture: false)
+        guard case .string(let text)? = value else { throw HarnessError("selection answered \(String(describing: value))") }
+        return text
+      },
+      hoverLink: { engine, id in
+        let (chromium, tab) = try parts(engine, id)
+        tab.hover(tab.linkOfPage)
+        try await delivered(chromium)
+      },
+      leaveLink: { engine, id in
+        let (chromium, tab) = try parts(engine, id)
+        tab.hover(nil)
+        try await delivered(chromium)
+      },
+      downloads: .scripted()
     )
   }
 
@@ -117,5 +154,41 @@ enum ScriptedHarness {
   static func delivered(_ engine: ChromiumEngine) async throws {
     let facade = scripted(engine)
     try await ScriptedWait.until("the facade to deliver its batch") { facade.isIdle }
+  }
+}
+
+extension ScriptedHarness {
+  static func phrase(_ kind: PermissionKind) -> String {
+    switch kind {
+    case .geolocation: "Know your location"
+    case .notifications: "Show notifications"
+    case .camera: "Use your camera"
+    case .microphone: "Use your microphone"
+    case .other: "Use a permission"
+    }
+  }
+}
+
+extension ArktPermissionKind {
+  init(_ kind: PermissionKind) {
+    switch kind {
+    case .geolocation: self = .geolocation
+    case .notifications: self = .notifications
+    case .camera: self = .camera
+    case .microphone: self = .microphone
+    case .other: self = .other
+    }
+  }
+}
+
+extension ArktDialogKind {
+  /// Throws for a leave-site prompt: the facade has no such kind until #585.
+  init(_ kind: JavaScriptDialog.Kind) throws {
+    switch kind {
+    case .alert: self = .alert
+    case .confirm: self = .confirm
+    case .prompt: self = .prompt
+    case .beforeUnload: throw ScriptedHarness.HarnessError("the facade has no leave-site dialog kind yet (#585)")
+    }
   }
 }

@@ -1,4 +1,5 @@
 import AppKit
+import ArcImport
 import Archive
 import CoreBridge
 import EngineAPI
@@ -28,15 +29,28 @@ final class AppSession {
   /// The app-level settings the Settings window edits (#307), over the same defaults and Toolbar setting; every
   /// browser window applies them.
   private(set) lazy var settings = AppSettings(defaults: AppEnvironment.userDefaults, toolbar: toolbarSetting)
+  /// Crash reporting (#129): capture behind the Settings > Privacy switch, local reports, the one-time ask.
+  private(set) lazy var crashCapture = CrashCapture(directory: location.directory, settings: settings)
+  /// Search suggestions and the BH-113 notice dismissal, shared by every window's command bar (#112).
+  let commandBarSettings = CommandBarSettings(defaults: AppEnvironment.userDefaults)
   let archiveStore: ArchiveStore
   let settingsStore: SettingsStore
+  /// The engine, for the import's writes (`EngineImporting`) next to what `windows` does with it.
+  private let engine: any EngineClient
   let importer: ArcImportCoordinator
   /// Archive and restore: the model first, then an outbox to `archiveStore` (decision 11).
   let archive: ArchiveCoordinator
   /// The auto-archive pass every minute (E5d).
   let autoArchive: AutoArchiveTimer
+  /// The archive thresholds Settings edits (#448): each change reaches `autoArchive` at once and is stored. Little
+  /// Arkt reads its threshold here (`littleArktThreshold`, 6 hours by default).
+  let archiveSettings: ArchiveSettingsModel
   /// Archived matches in every window's command bar (#111).
   let archiveSearch: ArchiveCommandBarSearch
+  /// The command bar preview's page thumbnails (#370): live tabs through the engine, history items from the cache.
+  let pageThumbnails: PageThumbnails
+  /// Emptied with Clear Archive.
+  private let pageImageCache: PageImageCache?
   /// The archive held an item at the last check (Window > Clear Archive... is enabled then); refreshed off the main
   /// actor each time the menu is validated, like `isArcImportAvailable`.
   private(set) var archiveHasItems = false
@@ -49,6 +63,9 @@ final class AppSession {
   private(set) var isArcImportAvailable = false
   /// The availability check in flight; at most one at a time.
   private var availabilityCheck: Task<Void, Never>?
+  /// The import sheet's model while the sheet shows (#514); one at a time.
+  private var browserDataImport: BrowserDataImportModel?
+  private var profileImporterStorage: (any ProfileImporting)?
   /// nil when the favicon folder was refused (it never is for Arkt's own data folder).
   private let faviconStore: FaviconStore?
   private var faviconWriter: FaviconWriter?
@@ -73,13 +90,18 @@ final class AppSession {
        hostLookup: ShellWindowSet.HostLookup? = nil) {
     self.location = location
     self.database = state.database
+    self.engine = engine
     let source = ModelSidebarSource(sidebar: state.sidebar ?? SidebarModel.Sidebar())
     self.source = source
     // Toolbar on / off is an app-level setting in the user defaults (`topBarURLEnabled`; Debug test runs use the
     // `ARKT_DEFAULTS_SUITE` suite), not in the database: see ToolbarSetting.
-    self.windows = ShellWindowSet(engine: engine, sidebar: source, toolbarSetting: toolbarSetting,
-                                  sidebarStateStore: SidebarWindowStateStore(defaults: AppEnvironment.userDefaults),
-                                  hostLookup: hostLookup)
+    let windows = ShellWindowSet(engine: engine, sidebar: source, toolbarSetting: toolbarSetting,
+                                 sidebarStateStore: SidebarWindowStateStore(defaults: AppEnvironment.userDefaults),
+                                 sessionStore: WindowSessionStore(defaults: AppEnvironment.userDefaults),
+                                 commandBarSettings: commandBarSettings, hostLookup: hostLookup)
+    // BH-196: the one-off Copy URL tip remembers what it showed (#404).
+    windows.copyLinkEducation = CopyLinkEducation(defaults: AppEnvironment.userDefaults)
+    self.windows = windows
     let archiveStore = ArchiveStore(database: state.database)
     let settingsStore = SettingsStore(database: state.database)
     self.archiveStore = archiveStore
@@ -93,15 +115,37 @@ final class AppSession {
     let archive = ArchiveCoordinator(source: source, store: archiveStore)
     self.archive = archive
     autosaver.beforeSave = { [weak archive] in await archive?.flushPendingAdds() ?? true }
-    self.autoArchive = AutoArchiveTimer(coordinator: archive, state: settingsStore)
+    let autoArchive = AutoArchiveTimer(coordinator: archive, state: settingsStore)
+    self.autoArchive = autoArchive
+    let archiveSettings = ArchiveSettingsModel(state: settingsStore)
+    archiveSettings.onChange = { [weak autoArchive] in autoArchive?.apply($0) }
+    self.archiveSettings = archiveSettings
     self.archiveSearch = ArchiveCommandBarSearch(source: source, store: archiveStore, coordinator: archive)
     self.faviconStore = faviconStore
+    let pageImageCache = AppEnvironment.pageImageCache(in: location)
+    self.pageImageCache = pageImageCache
+    self.pageThumbnails = PageThumbnails(engine: engine, cache: pageImageCache)
     source.onDidChange = { [weak self] sidebar in
       guard let self else { return }
       autosaver.scheduleSave(sidebar)                 // every model change
+      crashCapture.updateRedactions(from: sidebar)    // #129: the names reports must not carry
       changedSinceBackup = true
     }
     windows.configure = { [weak self] controller in self?.wire(controller) }
+    // #355, BH-138, KB-080: a Little Arkt window the user or the idle timer closed goes to the Archive under the
+    // Little Arkt source; Reopen Closed Tab takes the entry back.
+    windows.onLittleArktArchive = { [weak archive] closed in
+      archive?.archiveLittleArkt(url: closed.url, title: closed.title, reason: closed.isIdle ? .auto : .manual).id
+    }
+    windows.onLittleArktTakeBack = { [weak archive] id in archive?.takeBackLittleArkt(id) ?? false }
+    // Downloads (#132): the Library button, popover and window, for an engine that has downloads.
+    windows.downloads = DownloadsCenter(engine: engine, settings: settings)
+    windows.downloads?.onChangeLocation = { [weak self] in self?.showSettings(pane: .general) }
+    // #648: the sidebar banner. The updater (#126) will be its notice source; until then a Debug build shows the
+    // sample notice `ARKT_SIDEBAR_NOTICE` names, and an action withdraws it.
+    windows.sidebarBanner = SidebarBannerCenter(model: SidebarBannerModel(
+      source: AppEnvironment.sidebarNoticeSource(),
+      dismissals: SidebarNoticeDismissals(defaults: AppEnvironment.userDefaults)))
     archiveSearch.currentSpaceProvider = { [weak self] in self?.windows.primary?.currentSpace }
     archiveSearch.onRestored = { [weak self] restored, text in self?.didRestore(restored, toast: text) }
     archiveSearch.onRestoreFailed = { [weak self] text in self?.shownWindow().toasts.show(Toast(text: text, kind: .error)) }
@@ -111,6 +155,8 @@ final class AppSession {
   /// `defersWindows`: the launch window and auto-archive wait for `finishLaunch(opensWindow:)` (the Chromium engine
   /// calls it after `embedderReady`, when the windows it queued exist).
   func start(outcome: OpenOutcome, defersWindows: Bool = false) {
+    crashCapture.updateRedactions(from: source.sidebar)
+    crashCapture.start()                              // #129: before anything else can crash
     startFavicons(prune: outcome == .opened)          // before a window can create engine tabs
     launchNotice = Self.notice(for: outcome)
     if let notice = launchNotice {
@@ -145,6 +191,7 @@ final class AppSession {
   func finishLaunch(opensWindow: Bool) {
     let window = opensWindow ? windows.openWindow() : windows.primary
     if let window { presentOnboardingIfNeeded(on: window) }
+    askAboutCrashIfNeeded()
     if let notice = launchNotice, let window {
       launchNotice = nil
       window.toasts.show(notice.toast) { [location] in
@@ -152,6 +199,15 @@ final class AppSession {
       }
     }
     startAutoArchive()
+  }
+
+  /// The launch's one-time crash report ask (#129), on the primary window unless a first run covers it.
+  private func askAboutCrashIfNeeded() {
+    crashCapture.askAgain = { [weak self] in self?.askAboutCrashIfNeeded() }
+    crashCapture.askIfNeeded { [weak self] in
+      guard let window = self?.windows.primary, !window.isShowingOnboarding else { return nil }
+      return window.window
+    }
   }
 
   /// The app's hooks on every browser window, before it is shown. Its stored favicons load off the main actor
@@ -167,12 +223,17 @@ final class AppSession {
       return restored.nodeID
     }
     window.onRemoveSpace = { [weak self] id in self?.archive.removeSpace(id) }                 // #206, decision on #86
+    window.onManageExtensions = { [weak self] in self?.showSettings(pane: .extensions) }        // #595
     window.onTabHidden = { [weak self] id in self?.source.markInactive([id], at: .now) }       // decision 10
     window.onFaviconChanged = { [weak self] id, data in self?.faviconWriter?.record(data, for: id) }
     window.isArcImportAvailable = isArcImportAvailable
     // Settings (#307): Cmd-1 ... Cmd-9 counting, and the Peek link switches read from the app's defaults suite.
     window.tabNavigationSettings = settings.tabNavigation
     window.peek.linkSettings = { [weak self] in self?.settings.peekLinks ?? PeekLinkSettings() }
+    window.opensLittleArktOnOptionCommandClick = { [weak self] in                                // #356, BH-132
+      self?.settings.opensLittleArktOnOptionCommandClick ?? true
+    }
+    window.pageThumbnails = pageThumbnails
     window.commandBar.archivedProvider = { [weak self] query in await self?.archiveSearch.matches(for: query) ?? [] }
     window.commandBar.onRestoreArchived = { [weak self] id in self?.archiveSearch.restore(id) }   // BH-104
     guard let writer = faviconWriter else { return }
@@ -212,6 +273,15 @@ final class AppSession {
                                                   toast: ToastText.autoArchiveToast(count: archived.count))
     }
     importer.onAutoArchiveClockReset = { [weak self] date in self?.autoArchive.clockDidReset(to: date) }
+    // #355, BH-137: idle Little Arkt windows close and archive after "Archive Little Arkts after:" (the archive
+    // settings' Little Arkt threshold, 6 hours by default; the Settings row, #448, updates it live).
+    autoArchive.littleArkts = { [weak self] in
+      (self?.windows.littleArktIdleCandidates() ?? []).map {
+        LittleArcWindowActivity(id: $0.id, lastActiveAt: $0.lastActiveAt)
+      }
+    }
+    autoArchive.onLittleArktsIdle = { [weak self] ids in self?.windows.closeIdleLittleArkts(ids) }
+    Task { [archiveSettings] in await archiveSettings.load() }
     resumeAutoArchive()
   }
 
@@ -288,6 +358,7 @@ final class AppSession {
     model.currentSpaceProvider = { [weak self] in self?.windows.primary?.currentSpace }
     model.onRestored = { [weak self] restored, text in self?.didRestore(restored, toast: text) }
     model.onRestoreFailed = { [weak self] text in self?.shownWindow().toasts.show(Toast(text: text, kind: .error)) }
+    model.onCleared = { [pageImageCache] in await pageImageCache?.removeAll() }     // cleared pages lose their thumbnails
     let controller = ArchiveWindowController(dataSource: model)
     controller.onOpenSettings = { [weak self] in self?.showSettings(pane: .spaces) }   // the education banner
     archiveWindow = controller
@@ -399,6 +470,11 @@ final class AppSession {
     settings.setLittleArktHotKeyTaken(state == .taken)
   }
 
+  // MARK: - Library window (#132)
+
+  /// Window > Show Library (Cmd-Shift-L): the Library on the section used last. Nothing for an engine with no downloads.
+  func showLibrary() { windows.downloads?.showLibrary() }
+
   // MARK: - Settings window (#307)
 
   private var settingsWindow: SettingsWindowController?
@@ -414,6 +490,7 @@ final class AppSession {
   /// import (File > Import Browser Data...), the data folder and the Spaces.
   private func settingsServices() -> SettingsServices {
     var services = SettingsServices()
+    services.openLibrary = { [weak self] in self?.showLibrary() }                     // #132
     services.isDefaultBrowser = { DefaultBrowser.isDefault() }
     services.makeDefaultBrowser = { await DefaultBrowser.makeDefault() }
     services.canImportBrowserData = { [weak self] in
@@ -422,7 +499,10 @@ final class AppSession {
     }
     services.importBrowserData = { [weak self] in self?.importFromArc() }
     services.showDataFolder = { [location] in NSWorkspace.shared.activateFileViewerSelecting([location.directory]) }
+    services.crashReportCount = { [weak self] in self?.crashCapture.storedCount ?? 0 }     // #129
+    services.sendCrashReport = { [weak self] in self?.crashCapture.sendNewest() }
     services.spaces = { [weak self] in self.map { SettingsSpaceSummary.list(from: $0.source) } ?? [] }
+    services.archiveRows = archiveSettings.settingsRows                                // #448
     return services
   }
 
@@ -430,7 +510,8 @@ final class AppSession {
 
   /// Off while a first run covers a window: it runs its own import, and a second one would collide with it.
   var canImportFromArc: Bool {
-    isArcImportAvailable && !importer.isRunning && !windows.controllers.contains(where: \.isShowingOnboarding)
+    isArcImportAvailable && !importer.isRunning && browserDataImport == nil
+      && !windows.controllers.contains(where: \.isShowingOnboarding)
   }
 
   /// Re-checks whether Arc's sidebar file exists, off the main actor, unless a check is already running. The menu
@@ -449,15 +530,56 @@ final class AppSession {
     }
   }
 
-  /// File > Import from Arc... and the empty state's button. Reads Arc's folder only now, off the main actor.
+  /// File > Import Browser Data... and the empty state's button: the consent, progress and result sheet (#514) on the
+  /// window the user is in. Arc's folder is read only after the user chose what to import.
   func importFromArc() {
     guard canImportFromArc else { return }
-    Task { [weak self] in await self?.runImport() }
+    let model = makeBrowserDataImport()
+    browserDataImport = model
+    model.onFinish = { [weak self] outcome in
+      self?.browserDataImport = nil
+      Self.log.notice("browser data import finished imported \(outcome.importedAnything, privacy: .public)")
+    }
+    if shownWindow().presentBrowserDataImport(source: model) == nil { browserDataImport = nil }
   }
 
-  private func runImport() async {
-    guard let outcome = await performImport() else { return }
-    showSummary(outcome.summary)
+  /// The import behind the sheet and the first run's Import step: the sidebar part (Spaces, tabs, Favorites) through
+  /// the existing coordinator, the rest (history, bookmarks, cookies, passwords, extensions) through the one
+  /// `ProfileImportCoordinator`. `knownSidebar` is a count the caller already has (the first run's), so the sidebar
+  /// file is counted once.
+  func makeBrowserDataImport(knownSidebar: SpacesAndTabsCount? = nil) -> BrowserDataImportModel {
+    let spaces = SpacesAndTabsStep(
+      count: { [arcFiles] in
+        if let knownSidebar { return knownSidebar }
+        var last: ArcImportCounts?
+        do { for try await counts in ArcImportCounter.counts(arcFiles) { last = counts } } catch { return nil }
+        return last.map { SpacesAndTabsCount(items: $0.pinnedTabs + $0.favorites, spaces: $0.spaces) }
+      },
+      run: { [weak self] in
+        guard let outcome = await self?.performImport(showsFailureToast: false) else {
+          return SpacesAndTabsResult(items: 0, skipped: 0, failed: true, addedSpaces: [])
+        }
+        let summary = outcome.summary
+        return SpacesAndTabsResult(items: summary.tabs + summary.favorites, skipped: summary.skipped + summary.archiveSkipped,
+                                   failed: false, addedSpaces: outcome.addedSpaces)
+      })
+    return BrowserDataImportModel(
+      coordinator: profileImporter, root: arcFiles.directory.appendingPathComponent("User Data", isDirectory: true),
+      spaces: spaces)
+  }
+
+  /// One coordinator for the session: a second run is refused while one is going.
+  private var profileImporter: any ProfileImporting {
+    if let existing = profileImporterStorage { return existing }
+    let made: any ProfileImporting
+    if let importing = engine as? any EngineImporting {
+      made = ProfileImportCoordinator(engine: importing, importRecord: settingsStore,
+                                      keyProvider: KeychainSafeStorageKeyProvider())
+    } else {
+      made = UnavailableProfileImporter()
+    }
+    profileImporterStorage = made
+    return made
   }
 
   /// Runs the import and applies its favicons; nil when it was already running or failed (the failure toast is
@@ -490,19 +612,6 @@ final class AppSession {
     }
   }
 
-  /// Counts only (decision 6d).
-  private func showSummary(_ summary: ArcImportSummary) {
-    let alert = NSAlert()
-    alert.messageText = "Import complete"
-    alert.informativeText = summary.lines.joined(separator: "\n")
-    alert.addButton(withTitle: "OK")
-    if let sheetWindow = shownWindow().window {
-      alert.beginSheetModal(for: sheetWindow)
-    } else {
-      alert.runModal()
-    }
-  }
-
   // MARK: - Termination
 
   /// True while a sidebar change is unsaved or being written, an archived entry is not yet in the archive store, a
@@ -518,12 +627,14 @@ final class AppSession {
     isTerminating = true
     autoArchive.stop()  // stop first: no auto-archive pass may run between the sidebar write and the outbox write
     source.markInactive(windows.visibleNodes, at: .now)
+    windows.saveSessionsForTermination()              // #116: before the engine closes the tabs
   }
 
   /// The quit was cancelled (Chromium: a held leave-site prompt, or the user): auto-archive runs again. The visible
   /// tabs keep the stamp `prepareForTermination` wrote; they are stamped again when they stop being visible.
   func terminationCancelled() {
     isTerminating = false
+    windows.resumeSessions()
     resumeAutoArchive()
   }
 
@@ -646,5 +757,6 @@ extension AppSession: AppSettingsObserver {
   func appSettingsDidChange(_ settings: AppSettings) {
     for window in windows.controllers { window.tabNavigationSettings = settings.tabNavigation }
     syncLittleArktHotKey()                            // #354: the Links switch turns the system-wide hotkey on
+    crashCapture.settingsDidChange()                  // #129: the Privacy switch gates what is kept
   }
 }

@@ -10,12 +10,19 @@
 #include <utility>
 #include <vector>
 
+#include "arkt/api/arkt_downloads.h"
 #include "arkt/api/arkt_embedder.h"
+#include "arkt/api/arkt_import_writer.h"
 #include "arkt/browser/arkt_browser_window.h"
+#include "arkt/browser/arkt_extension_batch_install.h"
 #include "arkt/browser/arkt_extension_calls.h"
 #include "arkt/browser/arkt_extensions_container.h"
 #include "arkt/browser/arkt_extensions_menu.h"
+#include "arkt/browser/arkt_javascript_dialog.h"
+#import "arkt/browser/arkt_infobar_view.h"
+#include "arkt/browser/arkt_infobars.h"
 #include "arkt/browser/arkt_link_activation.h"
+#include "arkt/browser/arkt_permission_prompt.h"
 #import "arkt/browser/arkt_tab_container_view.h"
 #include "base/check.h"
 #include "base/command_line.h"
@@ -27,7 +34,13 @@
 #include "base/no_destructor.h"
 #include "base/scoped_observation.h"
 #include "base/strings/sys_string_conversions.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/strings/utf_string_conversions.h"
+#include "base/task/bind_post_task.h"
 #include "base/task/sequenced_task_runner.h"
+#include "base/task/thread_pool.h"
+#include "base/time/time.h"
+#include "chrome/browser/download/download_prefs.h"  // nogncheck
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/tab_list/tab_removed_reason.h"
@@ -44,15 +57,23 @@
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "chrome/browser/ui/unload_controller.h"
 #include "components/favicon/content/content_favicon_driver.h"
+#include "chrome/common/pref_names.h"
 #include "components/javascript_dialogs/tab_modal_dialog_manager.h"
+#include "components/prefs/pref_service.h"
 #include "components/favicon/core/favicon_driver.h"
 #include "components/favicon/core/favicon_driver_observer.h"
+#include "components/find_in_page/find_notification_details.h"
+#include "components/find_in_page/find_result_observer.h"
+#include "components/find_in_page/find_tab_helper.h"
+#include "components/find_in_page/find_types.h"
 #include "components/sessions/content/session_tab_helper.h"
 #include "components/tabs/public/tab_interface.h"
+#include "components/viz/common/frame_sinks/copy_output_result.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/render_frame_host.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/reload_type.h"
 #include "content/public/browser/web_contents.h"
@@ -60,9 +81,13 @@
 #include "content/public/common/isolated_world_ids.h"
 #include "mojo/public/cpp/bindings/callback_helpers.h"
 #include "third_party/skia/include/core/SkBitmap.h"
+#include "ui/strings/grit/ui_strings.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/gfx/codec/png_codec.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/size.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/image/image_skia_rep.h"
@@ -295,6 +320,26 @@ const char* KindName(ArktEngineEventKind kind) {
       return "AudibleChanged";
     case ArktEngineEventKindMutedChanged:
       return "MutedChanged";
+    case ArktEngineEventKindDialogRequested:
+      return "DialogRequested";
+    case ArktEngineEventKindDialogEnded:
+      return "DialogEnded";
+    case ArktEngineEventKindPermissionRequested:
+      return "PermissionRequested";
+    case ArktEngineEventKindPermissionEnded:
+      return "PermissionEnded";
+    case ArktEngineEventKindInfobarsChanged:
+      return "InfobarsChanged";
+    case ArktEngineEventKindFindResult:
+      return "FindResult";
+    case ArktEngineEventKindTargetURLChanged:
+      return "TargetURLChanged";
+    case ArktEngineEventKindDownloadCreated:
+      return "DownloadCreated";
+    case ArktEngineEventKindDownloadUpdated:
+      return "DownloadUpdated";
+    case ArktEngineEventKindDownloadRemoved:
+      return "DownloadRemoved";
   }
   return "unknown";
 }
@@ -322,6 +367,14 @@ const char* KindName(ArktEngineEventKind kind) {
 @property(nonatomic) BOOL isAudible;
 @property(nonatomic) BOOL isMuted;
 @property(nonatomic) ArktWindowCloseReason windowCloseReason;
+@property(nonatomic, nullable) id<ArktJavaScriptDialog> dialog;
+@property(nonatomic, nullable) id<ArktPermissionRequest> permission;
+@property(nonatomic, nullable, copy) NSArray<id<ArktInfobar>>* infobars;
+@property(nonatomic) NSInteger findRequestId;
+@property(nonatomic) NSInteger findOrdinal;
+@property(nonatomic) NSInteger findCount;
+@property(nonatomic) BOOL findIsFinal;
+@property(nonatomic, nullable) id<ArktDownloadItem> download;
 @end
 
 @implementation ArktFacadeEvent
@@ -341,6 +394,416 @@ const char* KindName(ArktEngineEventKind kind) {
 @synthesize isAudible = _isAudible;
 @synthesize isMuted = _isMuted;
 @synthesize windowCloseReason = _windowCloseReason;
+@synthesize dialog = _dialog;
+@synthesize permission = _permission;
+@synthesize infobars = _infobars;
+@synthesize findRequestId = _findRequestId;
+@synthesize findOrdinal = _findOrdinal;
+@synthesize findCount = _findCount;
+@synthesize findIsFinal = _findIsFinal;
+@synthesize download = _download;
+@end
+
+// One download as plain values (#132), read from a snapshot when the change
+// was recorded.
+@interface ArktFacadeDownload : NSObject <ArktDownloadItem>
+- (instancetype)initWithSnapshot:(const arkt::DownloadSnapshot&)snapshot;
+@end
+
+@implementation ArktFacadeDownload
+@synthesize guid = _guid;
+@synthesize url = _url;
+@synthesize filename = _filename;
+@synthesize targetPath = _targetPath;
+@synthesize totalBytes = _totalBytes;
+@synthesize receivedBytes = _receivedBytes;
+@synthesize state = _state;
+@synthesize interruptReason = _interruptReason;
+@synthesize dangerType = _dangerType;
+@synthesize mimeType = _mimeType;
+@synthesize startTime = _startTime;
+@synthesize endTime = _endTime;
+@synthesize bytesPerSecond = _bytesPerSecond;
+@synthesize canResume = _canResume;
+
+- (instancetype)initWithSnapshot:(const arkt::DownloadSnapshot&)snapshot {
+  if ((self = [super init])) {
+    using State = arkt::DownloadSnapshot::State;
+    _guid = base::SysUTF8ToNSString(snapshot.guid);
+    _url = arkt::ToNSURL(snapshot.url);
+    if (!_url) {
+      _url = [NSURL URLWithString:@"about:blank"];
+    }
+    _filename = base::SysUTF8ToNSString(snapshot.filename);
+    _targetPath = snapshot.target_path.empty()
+                      ? nil
+                      : [NSURL fileURLWithPath:base::SysUTF8ToNSString(
+                                                   snapshot.target_path.value())];
+    _totalBytes = snapshot.total_bytes;
+    _receivedBytes = snapshot.received_bytes;
+    switch (snapshot.state) {
+      case State::kInProgress:
+        _state = ArktDownloadStateInProgress;
+        break;
+      case State::kPaused:
+        _state = ArktDownloadStatePaused;
+        break;
+      case State::kComplete:
+        _state = ArktDownloadStateComplete;
+        break;
+      case State::kCancelled:
+        _state = ArktDownloadStateCancelled;
+        break;
+      case State::kInterrupted:
+        _state = ArktDownloadStateInterrupted;
+        break;
+    }
+    _interruptReason = snapshot.interrupt_reason;
+    _dangerType = snapshot.danger_type;
+    _mimeType = base::SysUTF8ToNSString(snapshot.mime_type);
+    _startTime = snapshot.start_time.ToNSDate();
+    _endTime = snapshot.end_time.is_null() ? nil : snapshot.end_time.ToNSDate();
+    _bytesPerSecond = snapshot.bytes_per_second;
+    _canResume = snapshot.can_resume;
+  }
+  return self;
+}
+@end
+
+// A page's alert, confirm or prompt (#400): plain values read once when the
+// request arrives, and the shell's one answer. The request is the overlay's
+// self-owned ArktJavaScriptDialog, reached through a weak pointer that
+// Chromium's manager invalidates when it ends the dialog.
+@interface ArktFacadeJavaScriptDialog : NSObject <ArktJavaScriptDialog>
+- (instancetype)initWithRequest:(base::WeakPtr<arkt::ArktJavaScriptDialog>)request
+                            tab:(id<ArktTabHandle>)tab;
+// The request is over (answered or ended by the engine).
+- (void)markEnded;
+@end
+
+@implementation ArktFacadeJavaScriptDialog {
+  base::WeakPtr<arkt::ArktJavaScriptDialog> _request;
+  BOOL _ended;
+}
+
+@synthesize kind = _kind;
+@synthesize tab = _tab;
+@synthesize title = _title;
+@synthesize message = _message;
+@synthesize defaultPromptText = _defaultPromptText;
+@synthesize acceptTitle = _acceptTitle;
+@synthesize cancelTitle = _cancelTitle;
+
+- (instancetype)initWithRequest:(base::WeakPtr<arkt::ArktJavaScriptDialog>)request
+                            tab:(id<ArktTabHandle>)tab {
+  if ((self = [super init])) {
+    _request = request;
+    _tab = tab;
+    switch (request->type()) {
+      case content::JAVASCRIPT_DIALOG_TYPE_ALERT:
+        _kind = ArktDialogKindAlert;
+        break;
+      case content::JAVASCRIPT_DIALOG_TYPE_CONFIRM:
+        _kind = ArktDialogKindConfirm;
+        break;
+      case content::JAVASCRIPT_DIALOG_TYPE_PROMPT:
+        _kind = ArktDialogKindPrompt;
+        break;
+    }
+    _title = base::SysUTF16ToNSString(request->title());
+    _message = base::SysUTF16ToNSString(request->message());
+    if (_kind == ArktDialogKindPrompt) {
+      _defaultPromptText =
+          base::SysUTF16ToNSString(request->default_prompt_text());
+    }
+    // The strings the Views dialog's buttons use (DialogDelegate): an alert
+    // only has OK.
+    _acceptTitle = base::SysUTF16ToNSString(l10n_util::GetStringUTF16(IDS_APP_OK));
+    if (_kind != ArktDialogKindAlert) {
+      _cancelTitle =
+          base::SysUTF16ToNSString(l10n_util::GetStringUTF16(IDS_APP_CANCEL));
+    }
+  }
+  return self;
+}
+
+- (BOOL)isEnded {
+  return _ended || !_request;
+}
+
+- (void)markEnded {
+  _ended = YES;
+}
+
+- (BOOL)respondAccepted:(BOOL)accepted userInput:(NSString*)userInput {
+  arkt::CheckFacadeEntry();
+  if (self.isEnded) {
+    return NO;
+  }
+  const std::u16string input =
+      userInput ? base::SysNSStringToUTF16(userInput) : std::u16string();
+  // The manager runs the page's callback; the ended callback then reports
+  // DialogEnded.
+  return _request->Respond(accepted, input);
+}
+
+@end
+
+// A site's permission request (#400): plain values read once when the prompt
+// is created, and the shell's one answer. The request is the prompt's own
+// ArktPermissionAsk, reached through a weak pointer that dies with the prompt
+// (Chromium's manager deletes it on a tab switch, a navigation, a withdrawn
+// request, an answer or the tab closing).
+@interface ArktFacadePermissionRequest : NSObject <ArktPermissionRequest>
+- (instancetype)initWithAsk:(base::WeakPtr<arkt::ArktPermissionAsk>)ask
+                        tab:(id<ArktTabHandle>)tab;
+// The request is over (answered or ended by the engine).
+- (void)markEnded;
+@end
+
+@implementation ArktFacadePermissionRequest {
+  base::WeakPtr<arkt::ArktPermissionAsk> _ask;
+  BOOL _ended;
+}
+
+@synthesize tab = _tab;
+@synthesize origin = _origin;
+@synthesize kinds = _kinds;
+@synthesize title = _title;
+@synthesize items = _items;
+@synthesize allowTitle = _allowTitle;
+@synthesize allowThisTimeTitle = _allowThisTimeTitle;
+@synthesize blockTitle = _blockTitle;
+
+- (instancetype)initWithAsk:(base::WeakPtr<arkt::ArktPermissionAsk>)ask
+                        tab:(id<ArktTabHandle>)tab {
+  if ((self = [super init])) {
+    _ask = ask;
+    _tab = tab;
+    const arkt::ArktPermissionAsk::Values& values = ask->values();
+    _origin = base::SysUTF16ToNSString(values.origin);
+    _title = base::SysUTF16ToNSString(values.title);
+    NSMutableArray<NSString*>* items = [NSMutableArray array];
+    for (const std::u16string& item : values.items) {
+      [items addObject:base::SysUTF16ToNSString(item)];
+    }
+    _items = items;
+    NSMutableArray<NSNumber*>* kinds = [NSMutableArray array];
+    for (arkt::PermissionKind kind : values.kinds) {
+      ArktPermissionKind mapped = ArktPermissionKindOther;
+      switch (kind) {
+        case arkt::PermissionKind::kGeolocation:
+          mapped = ArktPermissionKindGeolocation;
+          break;
+        case arkt::PermissionKind::kNotifications:
+          mapped = ArktPermissionKindNotifications;
+          break;
+        case arkt::PermissionKind::kCamera:
+          mapped = ArktPermissionKindCamera;
+          break;
+        case arkt::PermissionKind::kMicrophone:
+          mapped = ArktPermissionKindMicrophone;
+          break;
+        case arkt::PermissionKind::kOther:
+          break;
+      }
+      [kinds addObject:@(mapped)];
+    }
+    _kinds = kinds;
+    _allowTitle = base::SysUTF16ToNSString(values.allow_title);
+    if (values.allow_this_time_title) {
+      _allowThisTimeTitle =
+          base::SysUTF16ToNSString(*values.allow_this_time_title);
+    }
+    _blockTitle = base::SysUTF16ToNSString(values.block_title);
+  }
+  return self;
+}
+
+- (BOOL)isEnded {
+  return _ended || !_ask;
+}
+
+- (void)markEnded {
+  _ended = YES;
+}
+
+- (BOOL)respondWithChoice:(ArktPermissionChoice)choice {
+  arkt::CheckFacadeEntry();
+  if (self.isEnded) {
+    return NO;
+  }
+  arkt::PermissionChoice mapped = arkt::PermissionChoice::kDismiss;
+  switch (choice) {
+    case ArktPermissionChoiceAllow:
+      mapped = arkt::PermissionChoice::kAllow;
+      break;
+    case ArktPermissionChoiceAllowThisTime:
+      mapped = arkt::PermissionChoice::kAllowThisTime;
+      break;
+    case ArktPermissionChoiceBlock:
+      mapped = arkt::PermissionChoice::kBlock;
+      break;
+    case ArktPermissionChoiceDismiss:
+      mapped = arkt::PermissionChoice::kDismiss;
+      break;
+  }
+  // The permission delegate resolves the request and the manager deletes the
+  // prompt; its ended callback then reports PermissionEnded.
+  return _ask->Respond(mapped);
+}
+
+@end
+
+// An infobar of a tab (#400): plain values read when it joined the list, and
+// the shell's actions on it. It reaches the infobar through the tab's presenter
+// by id and a weak pointer, so an infobar that is gone (the delegate removed
+// it, the tab closed, the presenter went with a move to another window)
+// refuses every action.
+@interface ArktFacadeInfobar : NSObject <ArktInfobar>
+- (instancetype)initWithValues:(const arkt::PresentedInfobar&)values
+                     presenter:
+                         (base::WeakPtr<arkt::ArktInfobarPresenter>)presenter
+                           tab:(id<ArktTabHandle>)tab;
+// The infobar left the tab's list.
+- (void)markEnded;
+@end
+
+namespace {
+
+// The icon as a PNG at 2x of 20 points (the engine rasterized it in the
+// window's colors); nil when the infobar has none.
+NSData* PNGForInfobarIcon(NSImage* image) {
+  if (!image) {
+    return nil;
+  }
+  NSBitmapImageRep* rep = [[NSBitmapImageRep alloc]
+      initWithBitmapDataPlanes:NULL
+                    pixelsWide:40
+                    pixelsHigh:40
+                 bitsPerSample:8
+               samplesPerPixel:4
+                      hasAlpha:YES
+                      isPlanar:NO
+                colorSpaceName:NSCalibratedRGBColorSpace
+                   bytesPerRow:0
+                  bitsPerPixel:0];
+  [NSGraphicsContext saveGraphicsState];
+  NSGraphicsContext.currentContext =
+      [NSGraphicsContext graphicsContextWithBitmapImageRep:rep];
+  [image drawInRect:NSMakeRect(0, 0, 40, 40)
+           fromRect:NSZeroRect
+          operation:NSCompositingOperationSourceOver
+           fraction:1.0];
+  [NSGraphicsContext restoreGraphicsState];
+  return [rep representationUsingType:NSBitmapImageFileTypePNG
+                           properties:@{}];
+}
+
+}  // namespace
+
+@implementation ArktFacadeInfobar {
+  base::WeakPtr<arkt::ArktInfobarPresenter> _presenter;
+  uint64_t _id;
+  BOOL _ended;
+}
+
+@synthesize tab = _tab;
+@synthesize kind = _kind;
+@synthesize message = _message;
+@synthesize messageLinkRanges = _messageLinkRanges;
+@synthesize linkTitle = _linkTitle;
+@synthesize linkAccessibilityLabel = _linkAccessibilityLabel;
+@synthesize linkBeforeButtons = _linkBeforeButtons;
+@synthesize okTitle = _okTitle;
+@synthesize okTooltip = _okTooltip;
+@synthesize okEnabled = _okEnabled;
+@synthesize cancelTitle = _cancelTitle;
+@synthesize cancelTooltip = _cancelTooltip;
+@synthesize cancelEnabled = _cancelEnabled;
+@synthesize closeAccessibilityLabel = _closeAccessibilityLabel;
+@synthesize iconPNG = _iconPNG;
+
+- (instancetype)initWithValues:(const arkt::PresentedInfobar&)values
+                     presenter:
+                         (base::WeakPtr<arkt::ArktInfobarPresenter>)presenter
+                           tab:(id<ArktTabHandle>)tab {
+  if ((self = [super init])) {
+    _presenter = presenter;
+    _id = values.id;
+    _tab = tab;
+    switch (values.kind) {
+      case arkt::InfobarKind::kOther:
+        _kind = ArktInfobarKindOther;
+        break;
+      case arkt::InfobarKind::kDebugger:
+        _kind = ArktInfobarKindDebugger;
+        break;
+      case arkt::InfobarKind::kAutomation:
+        _kind = ArktInfobarKindAutomation;
+        break;
+      case arkt::InfobarKind::kReload:
+        _kind = ArktInfobarKindReload;
+        break;
+    }
+    ArktInfobarContent* content = values.content;
+    _message = [content.message copy] ?: @"";
+    _messageLinkRanges = [content.messageLinkRanges copy] ?: @[];
+    _linkTitle = [content.linkTitle copy];
+    _linkAccessibilityLabel = [content.linkAccessibilityLabel copy];
+    _linkBeforeButtons = content.linkBeforeButtons;
+    _okTitle = [content.okButton.title copy];
+    _okTooltip = [content.okButton.tooltip copy];
+    _okEnabled = content.okButton.enabled;
+    _cancelTitle = [content.cancelButton.title copy];
+    _cancelTooltip = [content.cancelButton.tooltip copy];
+    _cancelEnabled = content.cancelButton.enabled;
+    _closeAccessibilityLabel = [content.closeAccessibilityLabel copy];
+    _iconPNG = PNGForInfobarIcon(content.icon);
+  }
+  return self;
+}
+
+- (NSUInteger)infobarId {
+  return static_cast<NSUInteger>(_id);
+}
+
+- (BOOL)isEnded {
+  return _ended || !_presenter;
+}
+
+- (void)markEnded {
+  _ended = YES;
+}
+
+- (BOOL)actWithAction:(ArktInfobarAction)action linkIndex:(NSUInteger)linkIndex {
+  arkt::CheckFacadeEntry();
+  if (self.isEnded) {
+    return NO;
+  }
+  arkt::InfobarAction mapped = arkt::InfobarAction::kOk;
+  switch (action) {
+    case ArktInfobarActionOk:
+      mapped = arkt::InfobarAction::kOk;
+      break;
+    case ArktInfobarActionCancel:
+      mapped = arkt::InfobarAction::kCancel;
+      break;
+    case ArktInfobarActionLink:
+      mapped = arkt::InfobarAction::kLink;
+      break;
+    case ArktInfobarActionMessageLink:
+      mapped = arkt::InfobarAction::kMessageLink;
+      break;
+    case ArktInfobarActionClose:
+      mapped = arkt::InfobarAction::kClose;
+      break;
+  }
+  // The delegate runs, and decides whether the infobar goes; the presenter
+  // then reports the tab's new list.
+  return _presenter->Perform(_id, mapped, linkIndex);
+}
+
 @end
 
 // A link activation as plain values (#313).
@@ -358,6 +821,36 @@ const char* KindName(ArktEngineEventKind kind) {
 @synthesize sourceURL = _sourceURL;
 @synthesize modifierFlags = _modifierFlags;
 @synthesize disposition = _disposition;
+@end
+
+// The counts of one import call (#512).
+@interface ArktFacadeImportResult : NSObject <ArktImportResult>
+@property(nonatomic, assign) NSInteger written;
+@property(nonatomic, assign) NSInteger skipped;
+@property(nonatomic, assign) NSInteger failed;
+@property(nonatomic, copy, nullable) NSString* failureReason;
+@property(nonatomic, copy, nullable) NSDate* lastVisitTime;
+@end
+
+@implementation ArktFacadeImportResult
+@synthesize written = _written;
+@synthesize skipped = _skipped;
+@synthesize failed = _failed;
+@synthesize failureReason = _failureReason;
+@synthesize lastVisitTime = _lastVisitTime;
+@end
+
+// One id of an extension install batch (#513).
+@interface ArktFacadeExtensionInstallResult : NSObject <ArktExtensionInstallResult>
+@property(nonatomic, copy) NSString* extensionID;
+@property(nonatomic, assign) ArktExtensionInstallStatus status;
+@property(nonatomic, copy, nullable) NSString* failureReason;
+@end
+
+@implementation ArktFacadeExtensionInstallResult
+@synthesize extensionID = _extensionID;
+@synthesize status = _status;
+@synthesize failureReason = _failureReason;
 @end
 
 // One registered event sink.
@@ -420,6 +913,25 @@ const char* KindName(ArktEngineEventKind kind) {
 - (void)insertFinished:(BOOL)inserted;
 // The contents' beforeunload outcome (WebContentsObserver::BeforeUnloadFired).
 - (void)beforeUnloadFired:(BOOL)proceed;
+// WebContentsDelegate::UpdateTargetURL for the tab's contents (#114).
+- (void)reportTargetURL:(const GURL&)url;
+// A duplicate the shell parks (#380) lives as bare contents outside every tab
+// strip, so chrome.tabs and chrome.windows neither list it nor fire events
+// for it and no extension can reach it by id. `contents` is the clone;
+// `browser` is the window it was parked for (the handle's window until it is
+// shown).
+- (void)parkContents:(content::WebContents*)contents
+                  in:(ArktFacadeBrowser*)browser
+              opener:(ArktFacadeTab*)opener;
+- (BOOL)isParked;
+// True while -unpark is inserting the contents into its window (Inserted
+// binds the handle without announcing it a second time).
+- (BOOL)isUnparking;
+// Inserts a parked copy at the end of its window's tabs, not active, and binds
+// the handle to the new tab. YES when the handle has a tab afterwards.
+- (BOOL)unpark;
+// Drops a parked copy's contents and reports its TabClosed.
+- (void)closeParkedWithReason:(ArktCloseReason)reason;
 @property(nonatomic) BOOL closingByClient;
 @property(nonatomic) BOOL closing;
 @end
@@ -440,23 +952,67 @@ namespace arkt {
 namespace {
 
 // The facade's model: handles, the pending event batch and the sinks.
-class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
+class Facade : public BrowserCollectionObserver,
+               public TabStripModelObserver,
+               public DownloadWatcherDelegate {
  public:
   explicit Facade(FacadeDelegate* delegate) : delegate_(delegate) {
     pending_ = [[NSMutableArray alloc] init];
     sinks_ = [[NSMutableArray alloc] init];
     browsers_ = [[NSMutableArray alloc] init];
+    parked_ = [NSHashTable weakObjectsHashTable];
+    infobar_objects_ = [[NSMutableDictionary alloc] init];
   }
 
   void Start() {
     SetLinkActivationDecider(base::BindRepeating(
         &Facade::DecideLinkActivation, base::Unretained(this)));
+    SetTargetURLObserver(base::BindRepeating(&Facade::TargetURLChanged,
+                                             base::Unretained(this)));
+    SetJavaScriptDialogPresenter(base::BindRepeating(
+        &Facade::PresentJavaScriptDialog, base::Unretained(this)));
+    SetPermissionPresenter(base::BindRepeating(
+        &Facade::PresentPermission, base::Unretained(this)));
+    SetInfobarSink(base::BindRepeating(&Facade::PresentInfobars,
+                                       base::Unretained(this)));
     observation_.Observe(GlobalBrowserCollection::GetInstance());
     GlobalBrowserCollection::GetInstance()->ForEach(
         [this](BrowserWindowInterface* browser) {
           Adopt(browser);
           return true;
         });
+    if (Profile* profile = EmbedderProfile()) {
+      downloads_ = std::make_unique<DownloadWatcher>(profile, this);
+    }
+  }
+
+  // The downloads of the embedder profile (#132), or null without one.
+  DownloadWatcher* downloads() { return downloads_.get(); }
+
+  // DownloadWatcherDelegate, called from Chromium's download notifications.
+  // The updates of one download in a batch merge into the last one, so the
+  // shell sees a download move at most once per batch.
+  void DownloadCreated(const DownloadSnapshot& download) override {
+    RecordDownload(ArktEngineEventKindDownloadCreated, download);
+  }
+  void DownloadUpdated(const DownloadSnapshot& download) override {
+    DropPendingUpdates(download.guid);
+    RecordDownload(ArktEngineEventKindDownloadUpdated, download);
+  }
+  void DownloadRemoved(const DownloadSnapshot& download) override {
+    DropPendingUpdates(download.guid);
+    RecordDownload(ArktEngineEventKindDownloadRemoved, download);
+  }
+  // The active tab of an Arkt window: the page a retry or a saved link is
+  // attributed to.
+  content::WebContents* ContentsForNewDownload() override {
+    for (auto& [browser, handle] : browser_handles_) {
+      if (content::WebContents* contents =
+              browser->GetTabStripModel()->GetActiveWebContents()) {
+        return contents;
+      }
+    }
+    return nullptr;
   }
 
   FacadeDelegate* delegate() { return delegate_; }
@@ -493,6 +1049,152 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
     return decision == ArktLinkDecisionCancel;
   }
 
+  // WebContentsDelegate::UpdateTargetURL reached the hook of patch 0010
+  // (#114): the link under the pointer changed. A tab without a handle (a
+  // parked copy) reports nothing.
+  void TargetURLChanged(content::WebContents* contents, const GURL& url) {
+    tabs::TabInterface* tab =
+        contents ? tabs::TabInterface::MaybeGetFromContents(contents)
+                 : nullptr;
+    if (ArktFacadeTab* handle = tab ? HandleForTab(tab) : nil) {
+      [handle reportTargetURL:url];
+    }
+  }
+
+  // A page's alert, confirm or prompt in an Arkt window with an embedder host
+  // (#400), called by Chromium's TabModalDialogManager from inside
+  // RunJavaScriptDialog (or when a pending alert's tab comes forward). True
+  // takes the dialog: DialogRequested goes to the shell, which answers with
+  // -respondAccepted:userInput: or lets the engine end it. False leaves it to
+  // Chromium's Views dialog: the tab has no handle, or its window's host is
+  // the placeholder (nobody would show the dialog).
+  bool PresentJavaScriptDialog(content::WebContents* contents,
+                               base::WeakPtr<ArktJavaScriptDialog> request) {
+    tabs::TabInterface* tab =
+        contents ? tabs::TabInterface::MaybeGetFromContents(contents)
+                 : nullptr;
+    ArktFacadeTab* handle = tab ? HandleForTab(tab) : nil;
+    ArktFacadeBrowser* browser = handle.browser;
+    if (!request || !handle || !browser || sinks_.count == 0) {
+      return false;
+    }
+    ArktFacadeJavaScriptDialog* dialog =
+        [[ArktFacadeJavaScriptDialog alloc] initWithRequest:request
+                                                        tab:handle];
+    request->SetEndedCallback(base::BindOnce(
+        &Facade::DialogEnded, base::Unretained(this),
+        base::Owned(new DialogReference(dialog))));
+    ArktFacadeEvent* event = [[ArktFacadeEvent alloc] init];
+    event.kind = ArktEngineEventKindDialogRequested;
+    event.tab = handle;
+    event.browser = browser;
+    event.dialog = dialog;
+    LOG(WARNING) << "ARKT: facade dialog requested kind="
+                 << static_cast<int>(dialog.kind);
+    RecordFromNotification(event);
+    return true;
+  }
+
+  // A site's permission request in an Arkt window with an embedder host
+  // (#400), called by the permission prompt factory when Chromium creates the
+  // prompt (a new request, or a tab that comes forward again). True takes the
+  // request: PermissionRequested goes to the shell, which answers with
+  // -respondWithChoice: or lets the engine end it. False leaves it to the
+  // engine-drawn panel: the tab has no handle, or nobody listens.
+  bool PresentPermission(content::WebContents* contents,
+                         base::WeakPtr<ArktPermissionAsk> ask) {
+    tabs::TabInterface* tab =
+        contents ? tabs::TabInterface::MaybeGetFromContents(contents)
+                 : nullptr;
+    ArktFacadeTab* handle = tab ? HandleForTab(tab) : nil;
+    ArktFacadeBrowser* browser = handle.browser;
+    if (!ask || !handle || !browser || sinks_.count == 0) {
+      return false;
+    }
+    ArktFacadePermissionRequest* request =
+        [[ArktFacadePermissionRequest alloc] initWithAsk:ask tab:handle];
+    ask->SetEndedCallback(base::BindOnce(
+        &Facade::PermissionEnded, base::Unretained(this),
+        base::Owned(new PermissionReference(request))));
+    ArktFacadeEvent* event = [[ArktFacadeEvent alloc] init];
+    event.kind = ArktEngineEventKindPermissionRequested;
+    event.tab = handle;
+    event.browser = browser;
+    event.permission = request;
+    LOG(WARNING) << "ARKT: facade permission requested items="
+                 << request.items.count;
+    RecordFromNotification(event);
+    return true;
+  }
+
+  // A tab's infobars in an Arkt window with an embedder host (#400), called by
+  // the tab's infobar presenter after every change of its list. True takes the
+  // list: InfobarsChanged goes to the shell with the tab's whole list, and the
+  // presenter keeps its rows hidden (only their height stays, so the page sits
+  // below the strip the shell draws). False leaves the rows engine-drawn: the
+  // tab has no handle, or nobody listens. One event per tab per batch: a later
+  // change replaces the list of the pending one.
+  bool PresentInfobars(content::WebContents* contents,
+                       base::WeakPtr<ArktInfobarPresenter> presenter) {
+    tabs::TabInterface* tab =
+        contents ? tabs::TabInterface::MaybeGetFromContents(contents)
+                 : nullptr;
+    ArktFacadeTab* handle = tab ? HandleForTab(tab) : nil;
+    ArktFacadeBrowser* browser = handle.browser;
+    if (!presenter || !handle || !browser || sinks_.count == 0) {
+      return false;
+    }
+    NSMutableArray<id<ArktInfobar>>* list = [NSMutableArray array];
+    NSMutableSet<NSNumber*>* keep = [NSMutableSet set];
+    for (const PresentedInfobar& presented : presenter->Presented()) {
+      NSNumber* key = @(presented.id);
+      ArktFacadeInfobar* object = infobar_objects_[key];
+      if (!object) {
+        object = [[ArktFacadeInfobar alloc] initWithValues:presented
+                                                 presenter:presenter
+                                                       tab:handle];
+        infobar_objects_[key] = object;
+      }
+      [list addObject:object];
+      [keep addObject:key];
+    }
+    // Infobars of this tab that are not in the list any more are gone (acted
+    // on, removed by the page, or left behind by a move to another window).
+    for (NSNumber* key in [infobar_objects_ allKeys]) {
+      ArktFacadeInfobar* object = infobar_objects_[key];
+      if (object.tab == handle && ![keep containsObject:key]) {
+        [object markEnded];
+        [infobar_objects_ removeObjectForKey:key];
+      }
+    }
+    LOG(WARNING) << "ARKT: facade infobars changed count=" << list.count;
+    for (ArktFacadeEvent* pending in pending_) {
+      if (pending.kind == ArktEngineEventKindInfobarsChanged &&
+          pending.tab == handle) {
+        pending.infobars = list;
+        return true;
+      }
+    }
+    ArktFacadeEvent* event = [[ArktFacadeEvent alloc] init];
+    event.kind = ArktEngineEventKindInfobarsChanged;
+    event.tab = handle;
+    event.browser = browser;
+    event.infobars = list;
+    RecordFromNotification(event);
+    return true;
+  }
+
+  // The tab is gone: its infobar objects refuse actions and are let go.
+  void DropInfobars(ArktFacadeTab* handle) {
+    for (NSNumber* key in [infobar_objects_ allKeys]) {
+      ArktFacadeInfobar* object = infobar_objects_[key];
+      if (object.tab == handle) {
+        [object markEnded];
+        [infobar_objects_ removeObjectForKey:key];
+      }
+    }
+  }
+
   // The modifiers Blink derived a link's disposition from
   // (NavigationPolicyFromEventModifiers, Mac): the browser gets the
   // disposition only. NEEDS-RUNTIME-CHECK: a middle click reads as Command,
@@ -514,6 +1216,8 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
 
   // Facade calls from the embedder must never arrive while the facade is
   // inside a Chromium notification (Decision 3).
+  bool InNotification() const { return in_notification_ > 0; }
+
   void CheckNotInNotification(const char* call) {
     CHECK_EQ(in_notification_, 0)
         << "ARKT: facade " << call << " called inside a Chromium notification";
@@ -575,6 +1279,65 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
         FROM_HERE, base::BindOnce(&Facade::Deliver, base::Unretained(this)));
   }
 
+  void RecordDownload(ArktEngineEventKind kind,
+                      const DownloadSnapshot& download) {
+    ArktFacadeEvent* event = [[ArktFacadeEvent alloc] init];
+    event.kind = kind;
+    event.download = [[ArktFacadeDownload alloc] initWithSnapshot:download];
+    RecordFromNotification(event);
+  }
+
+  // A newer update of the same download replaces the pending ones.
+  void DropPendingUpdates(const std::string& guid) {
+    NSString* key = base::SysUTF8ToNSString(guid);
+    for (NSInteger i = static_cast<NSInteger>(pending_.count) - 1; i >= 0;
+         --i) {
+      ArktFacadeEvent* event = pending_[static_cast<NSUInteger>(i)];
+      if (event.kind == ArktEngineEventKindDownloadUpdated &&
+          [event.download.guid isEqualToString:key]) {
+        [pending_ removeObjectAtIndex:static_cast<NSUInteger>(i)];
+      }
+    }
+  }
+
+  // Keeps the Objective-C dialog alive until its request ends.
+  struct DialogReference {
+    explicit DialogReference(ArktFacadeJavaScriptDialog* dialog)
+        : dialog(dialog) {}
+    ArktFacadeJavaScriptDialog* __strong dialog;
+  };
+
+  // Keeps the Objective-C permission request alive until its prompt ends.
+  struct PermissionReference {
+    explicit PermissionReference(ArktFacadePermissionRequest* request)
+        : request(request) {}
+    ArktFacadePermissionRequest* __strong request;
+  };
+
+  // The prompt is over, answered or ended by the engine: one PermissionEnded.
+  void PermissionEnded(PermissionReference* reference) {
+    ArktFacadePermissionRequest* request = reference->request;
+    [request markEnded];
+    ArktFacadeEvent* event = [[ArktFacadeEvent alloc] init];
+    event.kind = ArktEngineEventKindPermissionEnded;
+    event.tab = request.tab;
+    event.browser = request.tab.browser;
+    event.permission = request;
+    RecordFromNotification(event);
+  }
+
+  // The request is over, answered or ended by the engine: one DialogEnded.
+  void DialogEnded(DialogReference* reference) {
+    ArktFacadeJavaScriptDialog* dialog = reference->dialog;
+    [dialog markEnded];
+    ArktFacadeEvent* event = [[ArktFacadeEvent alloc] init];
+    event.kind = ArktEngineEventKindDialogEnded;
+    event.tab = dialog.tab;
+    event.browser = dialog.tab.browser;
+    event.dialog = dialog;
+    RecordFromNotification(event);
+  }
+
   // Records an event from inside a Chromium notification (a WebContents or
   // favicon observer): a facade call made from there CHECKs.
   void RecordFromNotification(ArktFacadeEvent* event) {
@@ -615,6 +1378,38 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
     Record(event);
   }
 
+  // Parked duplicates (#380): copies held outside every tab strip, closed
+  // with the window they were parked for.
+  void AddParked(ArktFacadeTab* tab) { [parked_ addObject:tab]; }
+  void RemoveParked(ArktFacadeTab* tab) { [parked_ removeObject:tab]; }
+
+  // The copy exists: TabCreated, origin client, not active, as for any
+  // duplicate; ChromiumEngine drops it when it announced the copy already.
+  void RecordParkedCreated(ArktFacadeTab* tab, ArktFacadeBrowser* browser) {
+    ArktFacadeEvent* event = [[ArktFacadeEvent alloc] init];
+    event.kind = ArktEngineEventKindTabCreated;
+    event.tab = tab;
+    event.browser = browser;
+    event.url = tab.url;
+    event.title = tab.title;
+    event.opener = tab.opener;
+    event.origin = tab.origin;
+    event.isActive = NO;
+    Record(event);
+    [tab reportState];
+  }
+
+  // The window closes: its parked copies end first, each with its TabClosed.
+  void CloseParkedOf(ArktFacadeBrowser* browser) {
+    for (ArktFacadeTab* tab in [parked_ allObjects]) {
+      if (tab.browser == browser) {
+        [tab closeParkedWithReason:terminating_
+                                       ? ArktCloseReasonAppTerminating
+                                       : ArktCloseReasonWindowClosing];
+      }
+    }
+  }
+
   // The window's extension action list changed (ToolbarActionsModel, a
   // Chromium notification). One event per window per batch.
   void RecordActionsChanged(ArktFacadeBrowser* browser) {
@@ -641,6 +1436,7 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
     ++in_notification_;
     ArktFacadeBrowser* handle = HandleForBrowser(browser);
     if (handle) {
+      CloseParkedOf(handle);
       TabStripModel* model = browser->GetTabStripModel();
       if (model) {
         model->RemoveObserver(this);
@@ -769,6 +1565,16 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
       RecordTabMoved(handle, browser);
       return;
     }
+    if (binding_ && binding_.isUnparking) {
+      // A parked copy shown (#380): the shell knows the tab already.
+      handle = binding_;
+      binding_ = nil;
+      tab_handles_[tab] = handle;
+      [handle bindTab:tab browser:browser];
+      [handle seedState];
+      [handle reportState];
+      return;
+    }
     if (binding_) {
       handle = binding_;
       binding_ = nil;
@@ -845,6 +1651,7 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
     LOG(WARNING) << "ARKT: facade tab closed session id " << handle.sessionId
                  << " reason " << ReasonName(event.closeReason);
     Record(event);
+    DropInfobars(handle);
     [handle unbind];
     tab_handles_.erase(tab);
   }
@@ -924,12 +1731,18 @@ class Facade : public BrowserCollectionObserver, public TabStripModelObserver {
   }
 
   const raw_ptr<FacadeDelegate> delegate_;
+  std::unique_ptr<DownloadWatcher> downloads_;
   int in_notification_ = 0;
   bool posted_ = false;
   bool terminating_ = false;
   NSMutableArray<ArktFacadeEvent*>* __strong pending_;
   NSMutableArray<ArktFacadeSink*>* __strong sinks_;
   NSMutableArray<ArktFacadeBrowser*>* __strong browsers_;
+  // Parked duplicates still holding contents (weak: the shell owns them).
+  NSHashTable<ArktFacadeTab*>* __strong parked_;
+  // The infobar objects the shell holds, by infobar id (unique per run).
+  NSMutableDictionary<NSNumber*, ArktFacadeInfobar*>* __strong
+      infobar_objects_;
   std::map<BrowserWindowInterface*, ArktFacadeBrowser* __strong>
       browser_handles_;
   std::map<tabs::TabInterface*, ArktFacadeTab* __strong> tab_handles_;
@@ -958,7 +1771,8 @@ bool RunOrDefer(const char* call, base::OnceClosure work) {
 // (Task W3-5 step 2). Each kind is recorded only when its value changed
 // since the last report. Every callback is a Chromium notification.
 class TabObserver : public content::WebContentsObserver,
-                    public favicon::FaviconDriverObserver {
+                    public favicon::FaviconDriverObserver,
+                    public find_in_page::FindResultObserver {
  public:
   explicit TabObserver(ArktFacadeTab* handle) : handle_(handle) {}
   TabObserver(const TabObserver&) = delete;
@@ -978,6 +1792,63 @@ class TabObserver : public content::WebContentsObserver,
             favicon::ContentFaviconDriver::FromWebContents(contents)) {
       favicon_observation_.Observe(driver);
     }
+    find_observation_.Reset();
+    target_url_ = GURL();
+    if (contents) {
+      // Not created here: the tab helpers may attach it after the tab is
+      // bound, and creating it twice is a CHECK. Find() creates a missing one
+      // when it is first needed.
+      if (auto* helper =
+              find_in_page::FindTabHelper::FromWebContents(contents)) {
+        find_observation_.Observe(helper);
+      }
+    }
+  }
+
+  // Find in page (#134). FindTabHelper owns the session: a text or case that
+  // differs from the last search, or a stopped search, starts a new one at the
+  // first match; the same text again moves to the next or previous match.
+  // Its replies reach OnFindResultAvailable already filtered for stopped and
+  // replaced searches.
+  void Find(const std::u16string& text, bool forward, bool match_case) {
+    if (!web_contents()) {
+      return;
+    }
+    ObserveFind()->StartFinding(text, forward, match_case,
+                                /*find_match=*/true);
+  }
+
+  // Ends a running find (Clear) so the tab can leave its window: Browser's
+  // OnTabStripModelChanged builds the Views find bar for an inserted tab whose
+  // find session is active. Reports nothing, as every stop.
+  void StopActiveFind() {
+    if (!web_contents()) {
+      return;
+    }
+    find_in_page::FindTabHelper* helper =
+        find_in_page::FindTabHelper::FromWebContents(web_contents());
+    if (helper && helper->is_find_session_active()) {
+      helper->StopFinding(find_in_page::SelectionAction::kClear);
+    }
+  }
+
+  void StopFind(find_in_page::SelectionAction action) {
+    if (!web_contents()) {
+      return;
+    }
+    ObserveFind()->StopFinding(action);
+  }
+
+  // The link under the pointer changed (#114). Only changes are reported, and
+  // a new document or new contents start with no link.
+  void ReportTargetURL(const GURL& url) {
+    if (!web_contents() || url == target_url_) {
+      return;
+    }
+    target_url_ = url;
+    ArktFacadeEvent* event = NewEvent(ArktEngineEventKindTargetURLChanged);
+    event.url = ToNSURL(url);
+    Emit(event);
   }
 
   // The values TabCreated carries, taken without recording events. Loading,
@@ -996,6 +1867,7 @@ class TabObserver : public content::WebContentsObserver,
     can_go_forward_ = false;
     audible_ = false;
     muted_ = false;
+    target_url_ = GURL();
     host_ = std::string(contents->GetLastCommittedURL().host());
     favicon_ = nil;
   }
@@ -1032,6 +1904,11 @@ class TabObserver : public content::WebContentsObserver,
   void DidFinishNavigation(content::NavigationHandle* navigation) override {
     if (!navigation->IsInPrimaryMainFrame()) {
       return;
+    }
+    if (navigation->HasCommitted() && !navigation->IsSameDocument()) {
+      // The old document's link is gone with it; Chromium's own clear may not
+      // come for a pointer that never moved.
+      ReportTargetURL(GURL());
     }
     if (navigation->HasCommitted() && !navigation->IsSameDocument()) {
       std::string host(navigation->GetURL().host());
@@ -1083,6 +1960,34 @@ class TabObserver : public content::WebContentsObserver,
 
   void DidUpdateAudioMutingState(bool muted) override { ReportMuted(muted); }
 
+  // find_in_page::FindResultObserver:
+  void OnFindResultAvailable(content::WebContents* contents) override {
+    find_in_page::FindTabHelper* helper =
+        find_in_page::FindTabHelper::FromWebContents(contents);
+    if (!helper) {
+      return;
+    }
+    const find_in_page::FindNotificationDetails& result = helper->find_result();
+    ArktFacadeEvent* event = NewEvent(ArktEngineEventKindFindResult);
+    event.findRequestId = result.request_id();
+    event.findOrdinal = std::max(result.active_match_ordinal(), 0);
+    event.findCount = std::max(result.number_of_matches(), 0);
+    event.findIsFinal = result.final_update();
+    Emit(event);
+  }
+
+  void OnFindEmptyText(content::WebContents* contents) override {
+    // Empty text stops the find (FindTabHelper::StartFinding); reported once
+    // as 0 of 0 with request id 0.
+    ArktFacadeEvent* event = NewEvent(ArktEngineEventKindFindResult);
+    event.findIsFinal = YES;
+    Emit(event);
+  }
+
+  void OnFindTabHelperDestroyed(find_in_page::FindTabHelper* helper) override {
+    find_observation_.Reset();
+  }
+
   // favicon::FaviconDriverObserver:
   void OnFaviconUpdated(favicon::FaviconDriver* driver,
                         NotificationIconType type,
@@ -1097,6 +2002,22 @@ class TabObserver : public content::WebContentsObserver,
   }
 
  private:
+  // The contents' FindTabHelper, created when the tab has none, with this
+  // observer added.
+  find_in_page::FindTabHelper* ObserveFind() {
+    content::WebContents* contents = web_contents();
+    find_in_page::FindTabHelper* helper =
+        find_in_page::FindTabHelper::FromWebContents(contents);
+    if (!helper) {
+      find_in_page::FindTabHelper::CreateForWebContents(contents);
+      helper = find_in_page::FindTabHelper::FromWebContents(contents);
+    }
+    if (!find_observation_.IsObserving()) {
+      find_observation_.Observe(helper);
+    }
+    return helper;
+  }
+
   ArktFacadeEvent* NewEvent(ArktEngineEventKind kind) {
     ArktFacadeEvent* event = [[ArktFacadeEvent alloc] init];
     event.kind = kind;
@@ -1199,10 +2120,14 @@ class TabObserver : public content::WebContentsObserver,
   bool audible_ = false;
   bool muted_ = false;
   std::string host_;
+  GURL target_url_;
   NSData* __strong favicon_ = nil;
   base::ScopedObservation<favicon::FaviconDriver,
                           favicon::FaviconDriverObserver>
       favicon_observation_{this};
+  base::ScopedObservation<find_in_page::FindTabHelper,
+                          find_in_page::FindResultObserver>
+      find_observation_{this};
 };
 
 }  // namespace
@@ -1210,6 +2135,106 @@ class TabObserver : public content::WebContentsObserver,
 
 namespace arkt {
 namespace {
+
+// -----------------------------------------------------------------------------
+// Frame copy (#370 thumbnails, #352 Little Arkt's flight).
+
+using FrameCompletion = void (^)(NSData* png, NSSize pixelSize, CGFloat scale);
+
+// The copy may give up after this long in viz (a frame that never comes).
+constexpr base::TimeDelta kFrameCopyTimeout = base::Seconds(2);
+
+void AnswerNoFrame(FrameCompletion completion) {
+  completion(nil, NSZeroSize, 0);
+}
+
+// Posts the empty answer, so the completion never runs inside the call.
+void PostNoFrame(FrameCompletion completion) {
+  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+      FROM_HERE, base::BindOnce(&AnswerNoFrame, completion));
+}
+
+// On the UI thread: hands the bitmap to the thread pool for the PNG encode and
+// answers on the UI thread with the PNG, its size and its pixels per point.
+void OnFrameCopied(FrameCompletion completion,
+                   int point_width,
+                   const content::CopyFromSurfaceResult& result) {
+  if (!result.has_value() || result->bitmap.drawsNothing() ||
+      result->bitmap.colorType() != kN32_SkColorType || point_width <= 0) {
+    VLOG(1) << "ARKT: facade copyFrame: no frame ("
+            << (result.has_value() ? "empty or unsupported bitmap"
+                                   : "copy failed")
+            << ")";
+    AnswerNoFrame(completion);
+    return;
+  }
+  SkBitmap bitmap = result->bitmap;
+  bitmap.setImmutable();
+  const NSSize size = NSMakeSize(bitmap.width(), bitmap.height());
+  const CGFloat scale = static_cast<CGFloat>(bitmap.width()) / point_width;
+  base::ThreadPool::PostTaskAndReplyWithResult(
+      FROM_HERE,
+      {base::TaskPriority::USER_VISIBLE,
+       base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
+      base::BindOnce(
+          [](SkBitmap bitmap) {
+            return gfx::PNGCodec::FastEncodeBGRASkBitmap(
+                bitmap, /*discard_transparency=*/true);
+          },
+          std::move(bitmap)),
+      base::BindOnce(
+          [](FrameCompletion completion, NSSize size, CGFloat scale,
+             std::optional<std::vector<uint8_t>> png) {
+            if (!png || png->empty()) {
+              AnswerNoFrame(completion);
+              return;
+            }
+            completion([NSData dataWithBytes:png->data() length:png->size()],
+                       size, scale);
+          },
+          completion, size, scale));
+}
+
+// Starts the copy of `contents`' current frame, scaled by viz to fit
+// `max_pixel_size` (empty: the full frame). Never shows or wakes the tab: a
+// discarded tab, or one without a surface to copy, answers nil.
+void CopyFrame(content::WebContents* contents,
+               NSSize max_pixel_size,
+               FrameCompletion completion) {
+  content::RenderWidgetHostView* view =
+      contents && !contents->WasDiscarded()
+          ? contents->GetRenderWidgetHostView()
+          : nullptr;
+  if (!view || !view->IsSurfaceAvailableForCopy()) {
+    PostNoFrame(completion);
+    return;
+  }
+  const gfx::Size points = view->GetViewBounds().size();
+  const double device_scale = view->GetDeviceScaleFactor();
+  if (points.IsEmpty() || device_scale <= 0) {
+    PostNoFrame(completion);
+    return;
+  }
+  // An empty output size copies at the surface's own (device pixel) size.
+  gfx::Size output;
+  if (max_pixel_size.width > 0 && max_pixel_size.height > 0) {
+    const double width = points.width() * device_scale;
+    const double height = points.height() * device_scale;
+    const double factor = std::min({1.0, max_pixel_size.width / width,
+                                    max_pixel_size.height / height});
+    if (factor < 1.0) {
+      output = gfx::Size(std::max(1, static_cast<int>(width * factor)),
+                         std::max(1, static_cast<int>(height * factor)));
+    }
+  }
+  // CopyFromSurface may answer on another sequence; the answer is posted
+  // back to this one (the UI thread).
+  view->CopyFromSurface(
+      gfx::Rect(), output, kFrameCopyTimeout,
+      base::BindPostTask(
+          base::SequencedTaskRunner::GetCurrentDefault(),
+          base::BindOnce(&OnFrameCopied, completion, points.width())));
+}
 
 // Runs `insert` with `handle` bound to the next inserted tab (createTab,
 // duplicate). A handle whose insert did not happen gets its terminal
@@ -1239,6 +2264,37 @@ void InsertClientTab(
   LOG(WARNING) << "ARKT: facade client tab inserted session id "
                << handle.sessionId
                << (handle.tabInterface ? "" : " (closed again at once)");
+  [handle insertFinished:YES];
+}
+
+// Clones `source` (its navigation entries) into a parked copy for `handle`
+// (#380): contents outside every tab strip, so extensions neither see nor
+// reach it. A handle whose copy was not made gets its terminal TabClosed.
+void ParkDuplicate(ArktFacadeBrowser* browser_handle,
+                   ArktFacadeTab* source,
+                   ArktFacadeTab* handle) {
+  BrowserWindowInterface* browser = browser_handle.browserInterface;
+  if (!browser) {
+    g_facade->RecordDroppedInsert(handle, browser_handle,
+                                  /*window_gone=*/true);
+    [handle insertFinished:NO];
+    return;
+  }
+  TabStripModel* model = browser->GetTabStripModel();
+  int index = source.tabInterface ? model->GetIndexOfTab(source.tabInterface)
+                                  : TabStripModel::kNoTab;
+  if (index == TabStripModel::kNoTab ||
+      !chrome::CanDuplicateTabAt(browser, index)) {
+    g_facade->RecordDroppedInsert(handle, browser_handle,
+                                  /*window_gone=*/false);
+    [handle insertFinished:NO];
+    return;
+  }
+  std::unique_ptr<content::WebContents> copy =
+      model->GetWebContentsAt(index)->Clone();
+  [handle parkContents:copy.release() in:browser_handle opener:source];
+  LOG(WARNING) << "ARKT: facade duplicate parked outside the tab strip";
+  g_facade->RecordParkedCreated(handle, browser_handle);
   [handle insertFinished:YES];
 }
 
@@ -1311,6 +2367,9 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
   ArktFacadeBrowser* __weak _pendingBrowser;
   // Calls made while the insert is pending, run in order after it.
   std::vector<base::OnceClosure> _queued;
+  // A parked duplicate's contents, outside every tab strip (#380).
+  std::unique_ptr<content::WebContents> _parked;
+  BOOL _unparking;
 }
 
 @synthesize closingByClient = _closingByClient;
@@ -1393,7 +2452,7 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
   _pending = NO;
   std::vector<base::OnceClosure> queued;
   queued.swap(_queued);
-  if (!inserted || !_tab) {
+  if (!inserted || (!_tab && !_parked)) {
     LOG(WARNING) << "ARKT: facade "
                  << (inserted ? "tab closed at its insert"
                               : "deferred insert dropped")
@@ -1458,11 +2517,100 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
 }
 
 - (content::WebContents*)contents {
-  return _tab ? _tab->GetContents() : nullptr;
+  return _tab ? _tab->GetContents() : _parked.get();
+}
+
+- (void)parkContents:(content::WebContents*)contents
+                  in:(ArktFacadeBrowser*)browser
+              opener:(ArktFacadeTab*)opener {
+  _parked.reset(contents);
+  _browser = browser;
+  _opener = opener;
+  if (!_observer) {
+    _observer = std::make_unique<arkt::TabObserver>(self);
+  }
+  _observer->SetContents(contents);
+  [self seedState];
+  arkt::g_facade->AddParked(self);
+}
+
+- (BOOL)isParked {
+  return _parked != nullptr;
+}
+
+- (BOOL)isUnparking {
+  return _unparking;
+}
+
+// Shows a parked copy: now, or from a posted task when this runs inside a
+// Chromium notification or a nested run loop (Decision 3: the strip insert
+// never runs there). The callers that are mutators already run deferred.
+- (BOOL)unpark {
+  if (!_parked) {
+    return _tab != nullptr;
+  }
+  if (arkt::g_facade->InNotification() || arkt::IsInNestedLoop()) {
+    base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+        FROM_HERE, base::BindOnce(
+                       [](ArktFacadeTab* that) {
+                         if (!arkt::g_facade->InNotification()) {
+                           [that unpark];
+                         }
+                       },
+                       self));
+    return NO;
+  }
+  ArktFacadeBrowser* home = _browser;
+  BrowserWindowInterface* interface = home ? home.browserInterface : nullptr;
+  if (!interface) {
+    return NO;
+  }
+  // A window that is closing keeps the copy parked: it ends with the window.
+  arkt::ArktBrowserWindow* window =
+      arkt::ArktBrowserWindow::FromBrowser(interface);
+  if ((window && window->IsAttemptingToClose()) ||
+      interface->GetTabStripModel()->closing_all()) {
+    return NO;
+  }
+  arkt::g_facade->RemoveParked(self);
+  // The new tab brings its helpers (favicon driver, session id): observe it
+  // afresh when the insert binds the handle.
+  _observer.reset();
+  _unparking = YES;
+  arkt::g_facade->SetBinding(self);
+  TabStripModel* model = interface->GetTabStripModel();
+  model->InsertWebContentsAt(model->count(), std::move(_parked),
+                             AddTabTypes::ADD_NONE);
+  arkt::g_facade->EndBinding();
+  _unparking = NO;
+  LOG(WARNING) << "ARKT: facade parked copy shown, session id " << _sessionId;
+  return _tab != nullptr;
+}
+
+- (void)closeParkedWithReason:(ArktCloseReason)reason {
+  if (!_parked) {
+    return;
+  }
+  arkt::g_facade->RemoveParked(self);
+  ArktFacadeBrowser* home = _browser;
+  ArktFacadeEvent* event = [[ArktFacadeEvent alloc] init];
+  event.kind = ArktEngineEventKindTabClosed;
+  event.tab = self;
+  event.browser = home;
+  event.closeReason = reason;
+  arkt::g_facade->Record(event);
+  _observer.reset();
+  _parked.reset();
+  _browser = nil;
+  _closing = NO;
+  [_container showContentsView:nil];
 }
 
 - (NSView*)containerView {
   arkt::CheckFacadeEntry();
+  // The copy is about to be shown (a reopened row, a Peek): it joins its
+  // window now, so it loads only from here.
+  [self unpark];
   [self adoptContentsView];
   return _container;
 }
@@ -1590,7 +2738,7 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
 - (BOOL)wouldHoldClose {
   arkt::CheckFacadeEntry();
   content::WebContents* contents = self.contents;
-  if (!contents) {
+  if (!contents || _parked) {
     return NO;
   }
   // TabStripModel::ShouldRunUnloadListenerBeforeClosing: unload-time
@@ -1631,11 +2779,71 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
                        self, static_cast<bool>(muted))];
 }
 
+- (void)findInPageWithText:(NSString*)text
+                   forward:(BOOL)forward
+                 matchCase:(BOOL)matchCase {
+  [self runOrQueue:"findInPage"
+              work:base::BindOnce(
+                       [](ArktFacadeTab* that, std::u16string text,
+                          bool forward, bool match_case) {
+                         if (that.contents && that->_observer) {
+                           that->_observer->Find(text, forward, match_case);
+                         }
+                       },
+                       self, base::SysNSStringToUTF16(text),
+                       static_cast<bool>(forward),
+                       static_cast<bool>(matchCase))];
+}
+
+- (void)stopFindingWithAction:(ArktFindAction)action {
+  find_in_page::SelectionAction selection_action;
+  switch (action) {
+    case ArktFindActionKeep:
+      selection_action = find_in_page::SelectionAction::kKeep;
+      break;
+    case ArktFindActionActivate:
+      selection_action = find_in_page::SelectionAction::kActivate;
+      break;
+    case ArktFindActionClear:
+    default:
+      selection_action = find_in_page::SelectionAction::kClear;
+      break;
+  }
+  [self runOrQueue:"stopFinding"
+              work:base::BindOnce(
+                       [](ArktFacadeTab* that,
+                          find_in_page::SelectionAction action) {
+                         if (that.contents && that->_observer) {
+                           that->_observer->StopFind(action);
+                         }
+                       },
+                       self, selection_action)];
+}
+
+- (void)reportTargetURL:(const GURL&)url {
+  if (_observer) {
+    _observer->ReportTargetURL(url);
+  }
+}
+
+- (void)copyFrameWithMaxPixelSize:(NSSize)maxPixelSize
+                       completion:(void (^)(NSData* _Nullable png,
+                                            NSSize pixelSize,
+                                            CGFloat scale))completion {
+  // A read: nothing about the tab changes, so it is not queued or deferred
+  // like the mutators; a pending or closed tab has no contents and answers
+  // nil.
+  arkt::CheckFacadeEntry();
+  arkt::CopyFrame(_pending || _parked ? nullptr : self.contents, maxPixelSize,
+                  completion);
+}
+
 - (void)navigateToURL:(NSURL*)url {
   GURL target = arkt::ToGURL(url);
   [self runOrQueue:"navigate"
               work:base::BindOnce(
                        [](ArktFacadeTab* that, GURL target) {
+                         [that unpark];
                          content::WebContents* contents = that.contents;
                          if (!contents) {
                            return;
@@ -1652,6 +2860,7 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
   [self runOrQueue:"reload"
               work:base::BindOnce(
                        [](ArktFacadeTab* that) {
+                         [that unpark];
                          if (content::WebContents* contents = that.contents) {
                            contents->GetController().Reload(
                                content::ReloadType::NORMAL, true);
@@ -1664,6 +2873,7 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
   [self runOrQueue:"goBack"
               work:base::BindOnce(
                        [](ArktFacadeTab* that) {
+                         [that unpark];
                          content::WebContents* contents = that.contents;
                          if (contents &&
                              contents->GetController().CanGoBack()) {
@@ -1677,6 +2887,7 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
   [self runOrQueue:"goForward"
               work:base::BindOnce(
                        [](ArktFacadeTab* that) {
+                         [that unpark];
                          content::WebContents* contents = that.contents;
                          if (contents &&
                              contents->GetController().CanGoForward()) {
@@ -1690,6 +2901,7 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
   [self runOrQueue:"goToHistoryOffset"
               work:base::BindOnce(
                        [](ArktFacadeTab* that, int offset) {
+                         [that unpark];
                          content::WebContents* contents = that.contents;
                          if (offset != 0 && contents &&
                              contents->GetController().CanGoToOffset(offset)) {
@@ -1704,6 +2916,7 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
               work:base::BindOnce(
                        [](ArktFacadeTab* that) {
                          ArktFacadeTab* tab = that;
+                         [tab unpark];
                          if (!tab.tabInterface || !tab.browser) {
                            return;
                          }
@@ -1720,6 +2933,11 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
 
 - (ArktCloseResult)closeWithMode:(ArktCloseMode)mode {
   self.closingByClient = YES;
+  if (_parked) {
+    // Never shown, so nothing to unload: the copy just ends.
+    [self closeParkedWithReason:ArktCloseReasonClient];
+    return ArktCloseResultClosed;
+  }
   BOOL not_now = [self
       runOrQueue:"close"
             work:base::BindOnce(
@@ -1758,6 +2976,9 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
 
 - (void)focus {
   arkt::CheckFacadeEntry();
+  if (_parked) {
+    return;
+  }
   if (content::WebContents* contents = self.contents) {
     contents->Focus();
   }
@@ -1777,6 +2998,7 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
                        [](ArktFacadeTab* that,
                           ArktFacadeBrowser* destination) {
                          ArktFacadeTab* tab = that;
+                         [tab unpark];
                          ArktFacadeBrowser* source =
                              static_cast<ArktFacadeBrowser*>(tab.browser);
                          if (!tab.tabInterface || !source || !destination ||
@@ -1792,6 +3014,12 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
                          int index = from->GetIndexOfTab(tab.tabInterface);
                          if (index == TabStripModel::kNoTab) {
                            return;
+                         }
+                         // A running find ends before the insert: the
+                         // other Browser would build Chromium's Views find
+                         // bar for it (#134). Nothing is reported.
+                         if (tab->_observer) {
+                           tab->_observer->StopActiveFind();
                          }
                          LOG(WARNING) << "ARKT: facade moving session id "
                                       << tab.sessionId << " to window "
@@ -1821,10 +3049,10 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
       return nil;
     }
   }
-  // The copy (navigation entries, the current one loading) is inserted next
-  // to this tab and reported with TabCreated, origin client, like createTab:
-  // now, from a posted task inside a nested run loop, or right after this
-  // tab's own pending insert.
+  // The copy (navigation entries, never loaded until shown) is parked outside
+  // every tab strip (#380) and reported with TabCreated, origin client, like
+  // createTab: now, from a posted task inside a nested run loop, or right
+  // after this tab's own pending insert. It joins its window when shown.
   ArktFacadeTab* handle =
       [[ArktFacadeTab alloc] initWithOrigin:ArktTabOriginClient];
   base::OnceClosure work = base::BindOnce(
@@ -1834,20 +3062,7 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
         // moved since the call (#258).
         ArktFacadeBrowser* target =
             static_cast<ArktFacadeBrowser*>(source.browser) ?: original;
-        arkt::InsertClientTab(
-            target, handle,
-            base::BindOnce(
-                [](ArktFacadeTab* source, BrowserWindowInterface* browser) {
-                  int index = source.tabInterface
-                                  ? browser->GetTabStripModel()->GetIndexOfTab(
-                                        source.tabInterface)
-                                  : TabStripModel::kNoTab;
-                  if (index != TabStripModel::kNoTab &&
-                      chrome::CanDuplicateTabAt(browser, index)) {
-                    chrome::DuplicateTabAt(browser, index);
-                  }
-                },
-                source));
+        arkt::ParkDuplicate(target, source, handle);
       },
       browser, self, handle);
   if (_pending) {
@@ -1992,10 +3207,41 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
 
 // -----------------------------------------------------------------------------
 
+namespace arkt {
+namespace {
+
+// The shell's completion for an import: the counts as an engine-private
+// result, delivered from a posted task (ImportCookies and ImportLogins post).
+void DeliverImportResult(void (^completion)(id<ArktImportResult>),
+                         ImportCounts counts) {
+  ArktFacadeImportResult* result = [[ArktFacadeImportResult alloc] init];
+  result.written = counts.written;
+  result.skipped = counts.skipped;
+  result.failed = counts.failed;
+  if (!counts.latest_visit.is_null()) {
+    result.lastVisitTime = counts.latest_visit.ToNSDate();
+  }
+  if (!counts.reasons.empty()) {
+    std::string lines;
+    for (const auto& [reason, count] : counts.reasons) {
+      lines += reason + ": " + base::NumberToString(count) + "\n";
+    }
+    result.failureReason = base::SysUTF8ToNSString(lines);
+  }
+  LOG(WARNING) << "ARKT: facade import written " << counts.written
+               << " skipped " << counts.skipped << " failed " << counts.failed;
+  completion(result);
+}
+
+}  // namespace
+}  // namespace arkt
+
 @interface ArktFacadeEngine : NSObject <ArktEngine>
 @end
 
-@implementation ArktFacadeEngine
+@implementation ArktFacadeEngine {
+  void (^_downloadDestinationHandler)(NSString*, NSURL*, void (^)(NSURL*));
+}
 
 - (void)embedderReady {
   arkt::CheckFacadeEntry();
@@ -2207,7 +3453,321 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
   return answered;
 }
 
+- (void)importCookies:(NSArray<id<ArktImportCookie>>*)cookies
+           completion:(void (^)(id<ArktImportResult> result))completion {
+  arkt::CheckFacadeEntry();
+  std::vector<arkt::ImportCookie> batch;
+  batch.reserve(cookies.count);
+  for (id<ArktImportCookie> cookie in cookies) {
+    arkt::ImportCookie out;
+    out.host_key = base::SysNSStringToUTF8(cookie.hostKey);
+    out.name = base::SysNSStringToUTF8(cookie.name);
+    out.path = base::SysNSStringToUTF8(cookie.path);
+    out.expires = base::Time::FromNSDate(cookie.expires);
+    out.creation = cookie.creation ? base::Time::FromNSDate(cookie.creation)
+                                   : base::Time();
+    out.last_access = cookie.lastAccess
+                          ? base::Time::FromNSDate(cookie.lastAccess)
+                          : base::Time();
+    out.secure = cookie.isSecure;
+    out.http_only = cookie.isHTTPOnly;
+    out.same_site = static_cast<int>(cookie.sameSite);
+    out.priority = static_cast<int>(cookie.priority);
+    out.source_scheme = static_cast<int>(cookie.sourceScheme);
+    out.source_port = static_cast<int>(cookie.sourcePort);
+    out.partition_key = base::SysNSStringToUTF8(cookie.partitionKey);
+    // The engine's own copy is built inside the lending block.
+    std::string* value = &out.value;
+    [cookie withValueBytes:^(const void* bytes, NSUInteger length) {
+      value->assign(static_cast<const char*>(bytes), length);
+    }];
+    batch.push_back(std::move(out));
+  }
+  LOG(WARNING) << "ARKT: facade importCookies " << batch.size();
+  arkt::ImportCookies(
+      arkt::EmbedderProfile(), std::move(batch),
+      base::BindOnce(&arkt::DeliverImportResult, completion));
+}
+
+- (void)importPasswords:(NSArray<id<ArktImportLogin>>*)logins
+             completion:(void (^)(id<ArktImportResult> result))completion {
+  arkt::CheckFacadeEntry();
+  std::vector<arkt::ImportLogin> batch;
+  batch.reserve(logins.count);
+  for (id<ArktImportLogin> login in logins) {
+    arkt::ImportLogin out;
+    out.origin_url = base::SysNSStringToUTF8(login.originURL);
+    out.action_url =
+        login.actionURL ? base::SysNSStringToUTF8(login.actionURL) : "";
+    out.signon_realm = base::SysNSStringToUTF8(login.signonRealm);
+    out.username = base::SysNSStringToUTF16(login.username);
+    out.date_created = login.dateCreated
+                           ? base::Time::FromNSDate(login.dateCreated)
+                           : base::Time();
+    out.date_last_used = login.dateLastUsed
+                             ? base::Time::FromNSDate(login.dateLastUsed)
+                             : base::Time();
+    std::u16string* password = &out.password;
+    [login withPasswordBytes:^(const void* bytes, NSUInteger length) {
+      *password = base::UTF8ToUTF16(std::string_view(
+          static_cast<const char*>(bytes), length));
+    }];
+    batch.push_back(std::move(out));
+  }
+  LOG(WARNING) << "ARKT: facade importPasswords " << batch.size();
+  arkt::ImportLogins(
+      arkt::EmbedderProfile(), std::move(batch),
+      base::BindOnce(&arkt::DeliverImportResult, completion));
+}
+
+- (void)importHistory:(NSArray<id<ArktImportHistoryEntry>>*)entries
+                after:(NSDate*)after
+           completion:(void (^)(id<ArktImportResult> result))completion {
+  arkt::CheckFacadeEntry();
+  std::vector<arkt::ImportHistoryEntry> batch;
+  batch.reserve(entries.count);
+  size_t visits = 0;
+  for (id<ArktImportHistoryEntry> entry in entries) {
+    arkt::ImportHistoryEntry out;
+    out.url = base::SysNSStringToUTF8(entry.url);
+    out.title = base::SysNSStringToUTF16(entry.title);
+    NSArray<NSDate*>* times = entry.visitTimes;
+    NSArray<NSNumber*>* transitions = entry.visitTransitions;
+    out.visits.reserve(times.count);
+    for (NSUInteger i = 0; i < times.count; ++i) {
+      arkt::ImportVisit visit;
+      visit.time = base::Time::FromNSDate(times[i]);
+      visit.transition = i < transitions.count ? transitions[i].intValue : 0;
+      out.visits.push_back(visit);
+    }
+    visits += out.visits.size();
+    batch.push_back(std::move(out));
+  }
+  LOG(WARNING) << "ARKT: facade importHistory " << batch.size() << " urls "
+               << visits << " visits";
+  arkt::ImportHistory(
+      arkt::EmbedderProfile(), std::move(batch),
+      after ? base::Time::FromNSDate(after) : base::Time(),
+      base::BindOnce(&arkt::DeliverImportResult, completion));
+}
+
+- (void)importBookmarks:(NSArray<id<ArktImportBookmark>>*)bookmarks
+             completion:(void (^)(id<ArktImportResult> result))completion {
+  arkt::CheckFacadeEntry();
+  std::vector<arkt::ImportBookmark> batch;
+  batch.reserve(bookmarks.count);
+  for (id<ArktImportBookmark> bookmark in bookmarks) {
+    arkt::ImportBookmark out;
+    out.url = base::SysNSStringToUTF8(bookmark.url);
+    out.title = base::SysNSStringToUTF16(bookmark.title);
+    out.guid = bookmark.guid ? base::SysNSStringToUTF8(bookmark.guid) : "";
+    out.date_added = bookmark.dateAdded
+                         ? base::Time::FromNSDate(bookmark.dateAdded)
+                         : base::Time();
+    for (NSString* name in bookmark.folderPath) {
+      out.folder_path.push_back(base::SysNSStringToUTF16(name));
+    }
+    batch.push_back(std::move(out));
+  }
+  LOG(WARNING) << "ARKT: facade importBookmarks " << batch.size();
+  arkt::ImportBookmarks(
+      arkt::EmbedderProfile(), std::move(batch),
+      base::BindOnce(&arkt::DeliverImportResult, completion));
+}
+
+- (void)installExtensions:(NSArray<NSString*>*)ids
+               completion:(void (^)(NSArray<id<ArktExtensionInstallResult>>*
+                                        results))completion {
+  arkt::CheckFacadeEntry();
+  std::vector<std::string> list;
+  list.reserve(ids.count);
+  for (NSString* extension_id in ids) {
+    list.push_back(base::SysNSStringToUTF8(extension_id));
+  }
+  LOG(WARNING) << "ARKT: facade installExtensions " << list.size();
+  arkt::InstallWebstoreExtensions(
+      arkt::EmbedderProfile(), std::move(list),
+      base::BindOnce(
+          [](void (^completion)(NSArray<id<ArktExtensionInstallResult>>*),
+             std::vector<arkt::ExtensionInstallOutcome> outcomes) {
+            NSMutableArray<id<ArktExtensionInstallResult>>* results =
+                [NSMutableArray arrayWithCapacity:outcomes.size()];
+            for (const arkt::ExtensionInstallOutcome& outcome : outcomes) {
+              ArktFacadeExtensionInstallResult* result =
+                  [[ArktFacadeExtensionInstallResult alloc] init];
+              result.extensionID = base::SysUTF8ToNSString(outcome.id);
+              switch (outcome.status) {
+                case arkt::ExtensionInstallOutcome::Status::kInstalled:
+                  result.status = ArktExtensionInstallStatusInstalled;
+                  break;
+                case arkt::ExtensionInstallOutcome::Status::kAlreadyInstalled:
+                  result.status = ArktExtensionInstallStatusAlreadyInstalled;
+                  break;
+                case arkt::ExtensionInstallOutcome::Status::kFailed:
+                  result.status = ArktExtensionInstallStatusFailed;
+                  result.failureReason =
+                      base::SysUTF8ToNSString(outcome.reason);
+                  break;
+              }
+              [results addObject:result];
+            }
+            completion(results);
+          },
+          completion));
+}
+- (void)cancelExtensionInstalls {
+  arkt::CheckFacadeEntry();
+  arkt::CancelWebstoreExtensionInstalls();
+}
+
+// MARK: Downloads (#132)
+
+- (NSArray<id<ArktDownloadItem>>*)downloads {
+  arkt::CheckFacadeEntry();
+  NSMutableArray<id<ArktDownloadItem>>* list = [NSMutableArray array];
+  if (arkt::DownloadWatcher* watcher = arkt::g_facade->downloads()) {
+    for (const arkt::DownloadSnapshot& snapshot : watcher->Snapshots()) {
+      [list addObject:[[ArktFacadeDownload alloc]
+                          initWithSnapshot:snapshot]];
+    }
+  }
+  return list;
+}
+
+- (void)performDownloadCommand:(ArktDownloadCommand)command
+             onDownloadWithGUID:(NSString*)guid {
+  arkt::CheckFacadeEntry();
+  arkt::g_facade->CheckNotInNotification("perform(download:on:)");
+  arkt::DownloadWatcher* watcher = arkt::g_facade->downloads();
+  if (!watcher) {
+    return;
+  }
+  arkt::DownloadCommand mapped;
+  switch (command) {
+    case ArktDownloadCommandCancel:
+      mapped = arkt::DownloadCommand::kCancel;
+      break;
+    case ArktDownloadCommandPause:
+      mapped = arkt::DownloadCommand::kPause;
+      break;
+    case ArktDownloadCommandResume:
+      mapped = arkt::DownloadCommand::kResume;
+      break;
+    case ArktDownloadCommandOpen:
+      mapped = arkt::DownloadCommand::kOpen;
+      break;
+    case ArktDownloadCommandShowInFinder:
+      mapped = arkt::DownloadCommand::kShowInFinder;
+      break;
+    case ArktDownloadCommandRetry:
+      mapped = arkt::DownloadCommand::kRetry;
+      break;
+    case ArktDownloadCommandKeepDangerous:
+      mapped = arkt::DownloadCommand::kKeepDangerous;
+      break;
+    case ArktDownloadCommandDiscardDangerous:
+      mapped = arkt::DownloadCommand::kDiscardDangerous;
+      break;
+    case ArktDownloadCommandRemove:
+      mapped = arkt::DownloadCommand::kRemove;
+      break;
+    default:
+      return;
+  }
+  LOG(WARNING) << "ARKT: facade download command " << static_cast<int>(command)
+               << " on " << base::SysNSStringToUTF8(guid);
+  watcher->Perform(mapped, base::SysNSStringToUTF8(guid));
+}
+
+- (void)startDownloadFromURL:(NSURL*)url {
+  arkt::CheckFacadeEntry();
+  arkt::g_facade->CheckNotInNotification("startDownload(from:)");
+  if (arkt::DownloadWatcher* watcher = arkt::g_facade->downloads()) {
+    watcher->StartDownload(arkt::ToGURL(url));
+  }
+}
+
+- (BOOL)downloadPromptsForLocation {
+  arkt::CheckFacadeEntry();
+  Profile* profile = arkt::EmbedderProfile();
+  return profile && profile->GetPrefs()->GetBoolean(prefs::kPromptForDownload);
+}
+
+- (void)setDownloadPromptsForLocation:(BOOL)prompts {
+  arkt::CheckFacadeEntry();
+  if (Profile* profile = arkt::EmbedderProfile()) {
+    profile->GetPrefs()->SetBoolean(prefs::kPromptForDownload, prompts);
+  }
+}
+
+- (NSURL*)downloadDirectory {
+  arkt::CheckFacadeEntry();
+  Profile* profile = arkt::EmbedderProfile();
+  DownloadPrefs* prefs =
+      profile ? DownloadPrefs::FromBrowserContext(profile) : nullptr;
+  return prefs ? [NSURL fileURLWithPath:base::SysUTF8ToNSString(
+                                            prefs->DownloadPath().value())]
+               : [self defaultDownloadDirectory];
+}
+
+- (void)setDownloadDirectory:(NSURL*)directory {
+  arkt::CheckFacadeEntry();
+  Profile* profile = arkt::EmbedderProfile();
+  if (DownloadPrefs* prefs =
+          profile ? DownloadPrefs::FromBrowserContext(profile) : nullptr) {
+    prefs->SetDownloadPath(
+        base::FilePath(base::SysNSStringToUTF8(directory.path)));
+  }
+}
+
+- (NSURL*)defaultDownloadDirectory {
+  arkt::CheckFacadeEntry();
+  return [NSURL fileURLWithPath:base::SysUTF8ToNSString(
+                                    DownloadPrefs::GetDefaultDownloadDirectory()
+                                        .value())];
+}
+
+- (void (^)(NSString*, NSURL*, void (^)(NSURL*)))downloadDestinationHandler {
+  return _downloadDestinationHandler;
+}
+
+- (void)setDownloadDestinationHandler:
+    (void (^)(NSString*, NSURL*, void (^)(NSURL*)))handler {
+  arkt::CheckFacadeEntry();
+  _downloadDestinationHandler = [handler copy];
+  if (!handler) {
+    arkt::SetDownloadDestinationHandler(arkt::DownloadDestinationHandler());
+    return;
+  }
+  // The block takes one answer: the first call runs the engine's callback, a
+  // later one does nothing.
+  void (^block)(NSString*, NSURL*, void (^)(NSURL*)) = [handler copy];
+  arkt::SetDownloadDestinationHandler(base::BindRepeating(
+      [](void (^block)(NSString*, NSURL*, void (^)(NSURL*)),
+         const std::string& name, const base::FilePath& directory,
+         base::OnceCallback<void(std::optional<base::FilePath>)> answer) {
+        auto shared = std::make_shared<
+            base::OnceCallback<void(std::optional<base::FilePath>)>>(
+            std::move(answer));
+        block(base::SysUTF8ToNSString(name),
+              [NSURL fileURLWithPath:base::SysUTF8ToNSString(
+                                         directory.value())],
+              ^(NSURL* chosen) {
+                if (!*shared) {
+                  return;
+                }
+                auto callback = std::move(*shared);
+                std::move(callback).Run(
+                    chosen ? std::optional<base::FilePath>(base::FilePath(
+                                 base::SysNSStringToUTF8(chosen.path)))
+                           : std::nullopt);
+              });
+      },
+      block));
+}
+
 @end
+
 
 namespace arkt {
 

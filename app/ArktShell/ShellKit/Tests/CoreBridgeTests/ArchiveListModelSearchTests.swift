@@ -214,6 +214,24 @@ struct ArchiveListModelSearchTests {
     #expect(await harness.model.clearArchive() == false)
   }
 
+  /// A clear also clears what was kept about the cleared pages, such as the command bar's thumbnails (#370).
+  @Test func clearArchiveRunsTheClearedHookOnce() async throws {
+    let harness = try Harness(items: [Self.tab("One", ago: 10)])
+    var cleared = 0
+    harness.model.onCleared = { cleared += 1 }
+    #expect(await harness.model.clearArchive())
+    #expect(cleared == 1)
+  }
+
+  @Test func failedClearSkipsTheClearedHook() async throws {
+    let harness = try Harness(items: [Self.tab("One", ago: 10)])
+    await harness.store.setFails(true)
+    var cleared = 0
+    harness.model.onCleared = { cleared += 1 }
+    #expect(await harness.model.clearArchive() == false)
+    #expect(cleared == 0)
+  }
+
   // MARK: - Education banner (BH-089)
 
   @Test func bannerWaitsForAnAutoArchivedItem() async throws {

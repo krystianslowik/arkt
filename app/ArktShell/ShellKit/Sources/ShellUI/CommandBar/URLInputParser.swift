@@ -4,6 +4,10 @@ import Foundation
 ///
 /// Rules, in order:
 /// - Input with whitespace is a query.
+/// - An engine-internal or local scheme always opens (#499): `chrome://`, `chrome-extension://`, `file://`,
+///   `arkt://`, `about:`, `view-source:` and `data:`, each with something after the scheme. The engine decides
+///   whether it can show the page (FakeEngine and WebKit cannot open `chrome://`). `javascript:` is a query, as in
+///   Chromium for typed input, so it never runs.
 /// - A leading scheme (`^[A-Za-z][A-Za-z0-9+.-]*://`) must be http or https and have a host; other schemes are
 ///   queries. A "://" later in the input (`example.com/login?next=https://x`) is not a scheme.
 /// - Otherwise the authority (up to the first `/ ? #`) must be `[userinfo@]host[:port]` where host is
@@ -32,6 +36,8 @@ public enum URLInputParser {
   public static func url(from raw: String) -> URL? {
     let input = raw.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !input.isEmpty, input.rangeOfCharacter(from: .whitespacesAndNewlines) == nil else { return nil }
+
+    if let url = internalURL(input) { return url }
 
     if let scheme = leadingScheme(input) {
       guard scheme == "http" || scheme == "https", let url = URL(string: input),
@@ -65,9 +71,28 @@ public enum URLInputParser {
     return URL(string: searchBase + encoded) ?? URL(string: searchBase)!
   }
 
-  /// True when the input starts with `scheme://` (any scheme; `url(from:)` decides whether it opens).
+  /// True when the input starts with `scheme://` (any scheme; `url(from:)` decides whether it opens), or with an
+  /// internal scheme such as `about:` that opens without `//`.
   public static func hasExplicitScheme(_ raw: String) -> Bool {
-    leadingScheme(raw.trimmingCharacters(in: .whitespacesAndNewlines)) != nil
+    let input = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    return leadingScheme(input) != nil || internalURL(input) != nil
+  }
+
+  private static let internalSlashSchemes: Set<String> = ["chrome", "chrome-extension", "file", "arkt"]
+  private static let internalColonSchemes: Set<String> = ["about", "view-source", "data"]
+
+  /// A URL for an engine-internal or local scheme with a non-empty remainder, else nil.
+  private static func internalURL(_ input: String) -> URL? {
+    guard let colon = input.firstIndex(of: ":") else { return nil }
+    let scheme = input[..<colon].lowercased()
+    var rest = input[input.index(after: colon)...]
+    if internalSlashSchemes.contains(scheme) {
+      guard rest.hasPrefix("//") else { return nil }
+      rest = rest.dropFirst(2)
+    } else if !internalColonSchemes.contains(scheme) {
+      return nil
+    }
+    return rest.isEmpty ? nil : URL(string: input)
   }
 
   /// The lowercased scheme when the input starts with `scheme://`, else nil.

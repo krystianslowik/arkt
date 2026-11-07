@@ -12,11 +12,14 @@ public enum AlertTokens {
   /// Sheets, panels and alerts: 18 / 48 and 3 / 10 drops plus `overlayEdge`.
   public static let overlayShadow = ShellTokens.overlayShadow
   public static let overlayEdge = ShellTokens.overlayEdge
+  /// The dim over a page under its JavaScript dialog (#693, design/extensions `surf-dialog`): black 10 % in light,
+  /// 28 % in dark.
+  public static let pageDim = TokenPair(light: .black(0.10), dark: .black(0.28))
   /// Toasts: 8 / 24 and 1 / 3 drops plus `toastEdge`.
   public static let toastShadow = ShellTokens.toastShadow
   public static let toastEdge = ShellTokens.toastEdge
   /// Dialog edges, the list field and the toast's action pill under Increase Contrast.
-  public static let increasedContrastEdge = ArchiveTokens.increasedContrastEdge
+  public static let increasedContrastEdge = ShellTokens.increasedContrastEdge
   /// How much of the Space theme's first color stop the toast surface takes (decision 2).
   public static let toastTintLight = 0.22
   public static let toastTintDark = 0.30

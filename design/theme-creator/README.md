@@ -49,7 +49,7 @@ All sizes in points.
 | Colour dot | 26 diameter, 3 pt white ring, shadow 2 down / 8 blur; 34 while dragged, shadow 8 down / 22 blur |
 | Link line | 1.5 pt white at 85 % between the two dots |
 | Section label | 12 semibold, `secondaryText`, 18 high row, 8 below it; 16 between sections |
-| Texture swatches | five 18 pt circles, 6 apart, on the label row's trailing edge; the selected one has a 1.5 pt accent ring 2 pt out |
+| Texture swatches | five 18 pt circles, 6 apart, on the label row's trailing edge; the selected one has a 1.5 pt `primaryText` ring 2 pt out (near-black at 90 % in light, white at 84 % in dark; at least 3:1 on the popover surface) |
 | Slider track | full width, 10 high, radius 5, 0.5 pt inner edge |
 | Slider knob | 24 diameter, white, 0.5 pt edge, shadow 2 down / 6 blur |
 
@@ -138,7 +138,7 @@ screen refers to them.
 | Event | Pattern | When | Rate limit |
 |---|---|---|---|
 | Slider detent | `.generic` | Texture amount or Opacity reaches or crosses 0, 50 or 100 % | Once per crossing; re-armed after the value moves 3 % away from that stop |
-| Preset hue | `.alignment` | The dragged dot's hue crosses the hue of a preset family (computed at launch from `SpaceThemeCatalog.families`: the HSL hue of each family's second light stop, today Paper 37, Dune 45, Sage 107, Mist 238, Indigo 250, Blossom 338) | Once per crossing; re-armed after 6 degrees; skipped when the hue jumps more than 30 degrees in one event (a fast fling) |
+| Preset hue | `.alignment` | The dragged dot's hue crosses the hue of a preset family (computed at launch from `SpaceThemeCatalog.families`: the HSL hue of each family's second light stop, today Paper 37, Dune 45, Sage 107, Mist 211, Indigo 250, Blossom 316) | Once per crossing; re-armed after 6 degrees; skipped when the hue jumps more than 30 degrees in one event (a fast fling) |
 | Tone limit | `.levelChange` | A dot arrives at the pad's top or bottom limit | Once per arrival; re-armed after the dot moves 4 pt away from the limit |
 | Texture step | `.alignment` | The selected texture swatch changes | Once per change |
 
@@ -184,7 +184,11 @@ Transparency**: the popover is already opaque.
 - Popover surface: a new pair, porcelain `#FAF9F5` in light (`surfaceBrand`) and `#262927` in dark.
 - Brand colors: [`design/brand/tokens/brand-tokens.json`](../brand/tokens/brand-tokens.json). The pad's top end is
   porcelain; its bottom end `#121214` is new and belongs with the theme code, not the brand.
-- Focus and selection: the system focus ring and `controlAccentColor` for the selected texture swatch.
+- Focus: the chrome's ink ring, `ShellTokens.focusRing` (3 pt, 85 %, `KeyboardFocusRingView`, #687), around the part
+  that has the focus: the colour-count button, the slider knob, the selected texture swatch (covering its selection
+  ring) and the colour disc. It shows only once a key is pressed, in the popover's tone; a colour dot's ring is always
+  the graphite tone, because it hugs the dot's white edge over the user's colours. Never the system ring.
+- Selection: the selected texture swatch's ring is `ShellTokens.primaryText`, replacing `controlAccentColor` (#687).
 - Springs: `Motion/SpringPreset`.
 - Contrast: `Contrast.ratio` and the probe in `ShellTokensContrastTests`.
 
@@ -211,3 +215,7 @@ The text tone flip of step 4 is derived when drawing; it is not stored.
 | `directions/v1-3-in-place-*.png` | First round, rejected: editing in place on the window |
 | `directions/v2-a-disc-*.png` | Second round, not picked: disc |
 | `directions/v2-c-ribbon-*.png` | Second round, not picked: hue ribbon with a Light slider |
+
+Focus ring (#687): the ink ring of [`design/drag-hint-focus-ring`](../drag-hint-focus-ring/README.md). Screens of these
+controls, focused: [light](../drag-hint-focus-ring/screens/drag-hint-focus-ring-controls-light.png),
+[dark](../drag-hint-focus-ring/screens/drag-hint-focus-ring-controls-dark.png).

@@ -30,4 +30,13 @@ struct BlockingFlushTests {
     }
     #expect(outcome == true)
   }
+
+  @Test func withoutATimeoutWaitsForAnOperationThatOutlastsAnyDeadlineAndReturnsItsResult() {
+    let outcome = BlockingFlush.run(timeout: nil) {
+      // Many suspensions: the operation needs the global executor repeatedly, so no fixed deadline could cover it.
+      for _ in 0..<1000 { await Task.yield() }
+      return true
+    }
+    #expect(outcome == true)
+  }
 }

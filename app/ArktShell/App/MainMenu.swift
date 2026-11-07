@@ -56,7 +56,7 @@ enum MainMenu {
     let services = NSMenu(title: "Services")
     let windows = NSMenu(title: "Window")
     let help = NSMenu(title: "Help")
-    main.addItem(submenu(title: "Arkt Shell", items: appItems(commands: commands, services: services)))
+    main.addItem(submenu(title: "Arkt", items: appItems(commands: commands, services: services)))
     main.addItem(submenu(title: "File", items: fileItems(commands: commands)))
     main.addItem(submenu(title: "Edit", items: editItems(commands: commands)))
     main.addItem(submenu(title: "View", items: viewItems()))
@@ -64,6 +64,7 @@ enum MainMenu {
     main.addItem(holder(for: spacesMenu()))                                            // #387, built in ShellUI
     main.addItem(submenu(title: TabsMenu.title, items: TabsMenu.items()))               // #103, built in ShellUI
     windowItems(commands: commands).forEach { windows.addItem($0) }
+    windows.delegate = commands                                                        // #356: Little Arkt's section
     // Onboarding spec, section 12: the first Help item, no shortcut.
     help.addItem(item("Welcome to Arkt", #selector(AppCommands.showWelcome(_:)), "", [], target: commands))
     main.addItem(holder(for: windows))
@@ -75,17 +76,17 @@ enum MainMenu {
   // MARK: - Menus
 
   private static func appItems(commands: AppCommands, services: NSMenu) -> [NSMenuItem] {
-    let quit = item("Quit Arkt Shell", #selector(NSApplication.terminate(_:)), "q", target: NSApp)   // KB-069
+    let quit = item("Quit Arkt", #selector(NSApplication.terminate(_:)), "q", target: NSApp)   // KB-069
     quit.tag = Tag.exit
     return [
-      item("About Arkt Shell", #selector(NSApplication.orderFrontStandardAboutPanel(_:)), "", [], target: NSApp),
+      item("About Arkt", #selector(NSApplication.orderFrontStandardAboutPanel(_:)), "", [], target: NSApp),
       .separator(),
       // KB-066: Arkt's Settings window (#307); it keeps Cmd-, from Chromium's settings page (decision 9).
       item("Settings...", #selector(AppCommands.showSettings(_:)), ",", target: commands),
       .separator(),
       holder(for: services),
       .separator(),
-      item("Hide Arkt Shell", #selector(NSApplication.hide(_:)), "h", target: NSApp),                // KB-069
+      item("Hide Arkt", #selector(NSApplication.hide(_:)), "h", target: NSApp),                // KB-069
       item("Hide Others", #selector(NSApplication.hideOtherApplications(_:)), "h", [.command, .option],
            target: NSApp),
       item("Show All", #selector(NSApplication.unhideAllApplications(_:)), "", [], target: NSApp),
@@ -100,6 +101,10 @@ enum MainMenu {
     [
       item("New Tab", #selector(ShellWindowController.newTab(_:)), "t"),                  // KB-001
       item("New Window", #selector(AppCommands.newWindow(_:)), "n", target: commands),   // KB-005
+      item("New Incognito Window", #selector(AppCommands.newIncognitoWindow(_:)), "n",
+           [.command, .shift], target: commands),                                      // KB-007, BH-174
+      item("New Blank Window", #selector(AppCommands.newBlankWindow(_:)), "n",
+           [.command, .control], target: commands),                                    // KB-006, BH-170
       // KB-044, BH-130: the quick lookup bar; Return opens the result in a Little Arkt window.
       item("New Little Arkt Window", #selector(AppCommands.newLittleArktWindow(_:)), "n",
            [.command, .option], target: commands),
@@ -107,7 +112,8 @@ enum MainMenu {
       .separator(),
       item("Archive Tab", #selector(ShellWindowController.closeTab(_:)), "w"),             // KB-008
       // KB-010, BH-074 (#346): also reopens a closed Peek. PARITY(NEEDS-RUNTIME-CHECK): Arc's title and place.
-      item("Reopen Closed Tab", #selector(ShellWindowController.reopenClosedTab(_:)), "t", [.command, .shift]),
+      item("Reopen Closed Tab", #selector(ShellWindowController.reopenClosedTab(_:)), "t", [.command, .shift],
+           target: commands.reopenRouter),                                              // #355: no key window too
       // KB-019, BH-075 (#110): the current Space's Today tabs go to the Archive; no row plays media (BH-076).
       item("Clear Today Tabs", #selector(ShellWindowController.clearTodayTabs(_:)), "k", [.command, .shift]),
       item("Close Window", #selector(NSWindow.performClose(_:)), "w", [.command, .shift]), // KB-009
@@ -224,14 +230,31 @@ enum MainMenu {
       item("Minimize", #selector(NSWindow.performMiniaturize(_:)), "m"),                   // KB-069
       item("Zoom", #selector(NSWindow.performZoom(_:)), "", []),
       .separator(),
+      // KB-065, #132: the native Library; Downloads and Show All History claim their ids in the window host.
+      item("Show Library", #selector(AppCommands.showLibrary(_:)), "l", [.command, .shift], target: commands),
       page("Downloads", .downloads, "j", [.command, .shift]),                              // KB-065
-      // KB-043: Show Archive is unbound by default; Cmd-Shift-L stays reserved for the Library (KB-065).
+      // KB-043: Show Archive is unbound by default; Cmd-Shift-L is the Library's (KB-065).
       item("Show Archive", #selector(AppCommands.showArchive(_:)), "", [], target: commands),
       // BH-087, KB-043: unbound; opens the Archive window and asks there (#111).
       item("Clear Archive...", #selector(AppCommands.clearArchive(_:)), "", [], target: commands),
       .separator(),
       item("Bring All to Front", #selector(NSApplication.arrangeInFront(_:)), "", [], target: NSApp),
     ]
+  }
+
+  /// The Dock menu (#356, BH-139, GS-041; docs/design/little-arkt.md, Copy): the Little Arkt windows by page title,
+  /// Hide All / Show All and Close Little Arkt Windows, then New Window and New Little Arkt Window. FakeEngine build
+  /// only: in the Engine build Chromium's `AppController` answers `applicationDockMenu:` until an embedder seam
+  /// forwards it (#658).
+  static func dockMenu(commands: AppCommands, littleArkts: LittleArktMenus?) -> NSMenu {
+    let menu = NSMenu(title: "Dock")
+    let rows = littleArkts?.dockItems() ?? []
+    rows.forEach { menu.addItem($0) }
+    if !rows.isEmpty { menu.addItem(.separator()) }
+    menu.addItem(item("New Window", #selector(AppCommands.newWindow(_:)), "", [], target: commands))
+    menu.addItem(item(LittleArktLookup.menuTitle, #selector(AppCommands.newLittleArktWindow(_:)), "n",
+                      [.command, .option], target: commands))
+    return menu
   }
 
   /// Hidden, with an empty submenu: Chromium's BookmarkMenuBridge takes it over (W3-8, condition 1).

@@ -148,7 +148,7 @@ struct ThemeTextureIntensityTests {
 @MainActor
 struct ThemeGrainLayerTests {
   private func theme(_ texture: String?, _ noise: Double, dark: Bool = false) -> SpaceThemeInfo {
-    SpaceThemeInfo(baseColors: [.p3(hex: 0xF2EAE4, alpha: 1), .p3(hex: 0xF29BBB, alpha: 1)], texture: texture,
+    SpaceThemeInfo(baseColors: [.p3(hex: 0xF7EEF3, alpha: 1), .p3(hex: 0xDDB4D2, alpha: 1)], texture: texture,
                    noiseFactor: noise, isDark: dark)
   }
 

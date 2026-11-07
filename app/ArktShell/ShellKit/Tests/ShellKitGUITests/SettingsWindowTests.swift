@@ -313,7 +313,7 @@ final class SettingsWindowTests: XCTestCase {
   func testUnbuiltRowsAreShownDisabled() throws {
     let controller = make()
     controller.show()
-    for name in ["warnBeforeQuitting", "updateAutomatically"] {
+    for name in ["updateAutomatically"] {
       let control = try find(AXID.Settings.control("general", name), in: controller, as: SettingsSwitch.self)
       XCTAssertFalse(control.isEnabled, name)
       XCTAssertEqual(control.alphaValue, 0.42, accuracy: 0.001, name)
@@ -327,6 +327,30 @@ final class SettingsWindowTests: XCTestCase {
                            as: SettingsPopUpButton.self)
     XCTAssertFalse(restore.isEnabled)
     XCTAssertEqual(restore.selectedTitle, "Restore last windows")
+  }
+
+  /// BH-177: the row is a real switch, off until the user turns it on, and a later change follows the setting.
+  func testWarnBeforeQuittingIsARealToggleDefaultOff() throws {
+    let settings = AppSettings(defaults: defaults)
+    let controller = make(settings: settings)
+    controller.show()
+    let control = try find(AXID.Settings.control("general", "warnBeforeQuitting"), in: controller,
+                           as: SettingsSwitch.self)
+    XCTAssertTrue(control.isEnabled)
+    XCTAssertFalse(control.isOn)
+    XCTAssertEqual(control.alphaValue, 1, accuracy: 0.001)
+    let row = try XCTUnwrap(control.enclosingSettingsRow)
+    XCTAssertFalse(row.isPlanned)
+    XCTAssertEqual(row.captionText, "Hold Command-Q to quit while a window is open.")
+    XCTAssertFalse(row.captionText.contains("Not available yet."))
+
+    control.performClick(nil)
+    XCTAssertTrue(settings.warnsBeforeQuitting)
+    XCTAssertEqual(defaults.object(forKey: AppSettings.Key.shouldWarnBeforeQuitting) as? Bool, true)
+
+    settings.warnsBeforeQuitting = false
+    XCTAssertFalse(control.isOn)
+    XCTAssertEqual(defaults.object(forKey: AppSettings.Key.shouldWarnBeforeQuitting) as? Bool, false)
   }
 
   // MARK: - Appearance
@@ -403,6 +427,61 @@ final class SettingsWindowTests: XCTestCase {
     XCTAssertEqual(controller.primaryActionCount(in: .spaces), 0)
   }
 
+  /// Without the archive rows' services the two thresholds stay planned at their defaults.
+  func testArchiveRowsArePlannedWithoutTheirServices() throws {
+    let controller = make()
+    controller.show(pane: .spaces)
+    for (name, title) in [("archiveTodayAfter", "12 hours"), ("archiveLittleArktAfter", "6 hours")] {
+      let popUp = try find(AXID.Settings.control("spaces", name), in: controller, as: SettingsPopUpButton.self)
+      XCTAssertFalse(popUp.isEnabled, name)
+      XCTAssertEqual(popUp.selectedTitle, title, name)
+      XCTAssertTrue(try XCTUnwrap(popUp.enclosingSettingsRow).isPlanned, name)
+    }
+  }
+
+  /// #448: "Archive Today tabs after" and "Archive Little Arkt windows after" are real pop-ups with all seven
+  /// durations; each shows its stored value and writes a choice back at once.
+  func testArchiveRowsReadAndWriteTheirThresholds() throws {
+    var tabs = "24 hours"
+    var littleArkt = "6 hours"
+    var writes: [String] = []
+    var env = SettingsServices()
+    env.archiveRows = SettingsArchiveRows(
+      tabsAfter: { tabs },
+      setTabsAfter: { tabs = $0; writes.append("tabs \($0)") },
+      littleArktAfter: { littleArkt },
+      setLittleArktAfter: { littleArkt = $0; writes.append("little \($0)") })
+    let controller = SettingsWindowController(settings: AppSettings(defaults: defaults), services: env)
+    controllers.append(controller)
+    controller.show(pane: .spaces)
+
+    let today = try find(AXID.Settings.control("spaces", "archiveTodayAfter"), in: controller,
+                         as: SettingsPopUpButton.self)
+    let little = try find(AXID.Settings.control("spaces", "archiveLittleArktAfter"), in: controller,
+                          as: SettingsPopUpButton.self)
+    let options = ["1 hour", "6 hours", "12 hours", "24 hours", "7 days", "30 days", "Never"]
+    for popUp in [today, little] {
+      XCTAssertTrue(popUp.isEnabled)
+      XCTAssertEqual(popUp.items, options)
+      XCTAssertEqual(popUp.alphaValue, 1, accuracy: 0.001)
+      XCTAssertFalse(try XCTUnwrap(popUp.enclosingSettingsRow).isPlanned)
+    }
+    XCTAssertEqual(today.selectedTitle, "24 hours")
+    XCTAssertEqual(little.selectedTitle, "6 hours")
+    XCTAssertEqual(today.accessibilityLabel(), "Archive Today tabs after")
+    XCTAssertEqual(little.accessibilityLabel(), "Archive Little Arkt windows after")
+    XCTAssertFalse(try XCTUnwrap(today.enclosingSettingsRow).captionText.contains("Not available yet."))
+
+    today.select("7 days")
+    little.select("Never")
+    today.select("7 days")                                   // the current title again: no write
+
+    XCTAssertEqual(writes, ["tabs 7 days", "little Never"])
+    XCTAssertEqual(today.selectedTitle, "7 days")
+    XCTAssertEqual(little.selectedTitle, "Never")
+    XCTAssertEqual(controller.primaryActionCount(in: .spaces), 0)
+  }
+
   func testAdvancedImportAndDataFolder() throws {
     let services = Services()
     let controller = make(services: services)
@@ -418,7 +497,7 @@ final class SettingsWindowTests: XCTestCase {
     XCTAssertEqual(services.revealed, 1)
     XCTAssertEqual(controller.primaryActionCount(in: .advanced), 0)
     let reset = try find(AXID.Settings.control("advanced", "resetAll"), in: controller, as: NSButton.self)
-    XCTAssertFalse(reset.isEnabled)
+    XCTAssertTrue(reset.isEnabled, "Reset all settings is built (#617)")
   }
 
   /// No ad blocking row (decision 3) and no user-facing "Arc" anywhere in Settings.

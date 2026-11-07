@@ -585,10 +585,50 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
         LOG(WARNING) << "ARKT selftest mutedChanged tab=" << tab
                      << " muted=" << (event.isMuted ? "yes" : "no");
         break;
+      case ArktEngineEventKindDialogRequested:
+        // Nobody draws it here; the self-test's `answer` command ends it.
+        LOG(WARNING) << "ARKT selftest dialogRequested tab=" << tab
+                     << " kind=" << event.dialog.kind;
+        break;
+      case ArktEngineEventKindDialogEnded:
+        LOG(WARNING) << "ARKT selftest dialogEnded tab=" << tab;
+        break;
+      case ArktEngineEventKindPermissionRequested:
+        // Nobody draws it here either; the page waits until the prompt ends.
+        LOG(WARNING) << "ARKT selftest permissionRequested tab=" << tab
+                     << " items=" << event.permission.items.count;
+        break;
+      case ArktEngineEventKindPermissionEnded:
+        LOG(WARNING) << "ARKT selftest permissionEnded tab=" << tab;
+        break;
+      case ArktEngineEventKindInfobarsChanged:
+        // Nobody draws it here: the engine-drawn rows stay while this host has
+        // no sink that presents them.
+        LOG(WARNING) << "ARKT selftest infobarsChanged tab=" << tab
+                     << " count=" << event.infobars.count;
+        break;
+      case ArktEngineEventKindFindResult:
+        LOG(WARNING) << "ARKT selftest findResult tab=" << tab
+                     << " request=" << event.findRequestId
+                     << " ordinal=" << event.findOrdinal
+                     << " count=" << event.findCount
+                     << " final=" << (event.findIsFinal ? "yes" : "no");
+        break;
+      case ArktEngineEventKindTargetURLChanged:
+        LOG(WARNING) << "ARKT selftest targetURLChanged tab=" << tab
+                     << " url="
+                     << (event.url ? event.url.absoluteString.UTF8String
+                                   : "nil");
+        break;
       case ArktEngineEventKindExtensionActionsChanged:
         LOG(WARNING) << "ARKT selftest extensionActionsChanged window="
                      << window;
         [self logActionsOf:event.browser];
+        break;
+      case ArktEngineEventKindDownloadCreated:
+      case ArktEngineEventKindDownloadUpdated:
+      case ArktEngineEventKindDownloadRemoved:
+        // The self-test shows no downloads.
         break;
     }
   }

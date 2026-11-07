@@ -159,6 +159,7 @@ class Embedder : public FacadeDelegate {
   Embedder& operator=(const Embedder&) = delete;
 
   void SetProfile(Profile* profile) { profile_ = profile; }
+  Profile* profile() const { return profile_; }
   bool present() const { return embedder_ != nil; }
 
   void Start() {
@@ -673,6 +674,10 @@ Embedder& GetEmbedder() {
 
 void SetEmbedderProfile(Profile* profile) {
   GetEmbedder().SetProfile(profile);
+}
+
+Profile* EmbedderProfile() {
+  return GetEmbedder().profile();
 }
 
 void StartEmbedder() {
