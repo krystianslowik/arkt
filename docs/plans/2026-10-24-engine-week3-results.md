@@ -4790,13 +4790,17 @@ option A as decided in the issue; overlay, facade header and Swift unchanged.
 
 ### What landed
 
-Patch 0012 `Arkt: find a non-BrowserView window for a WebContents`, 2 files, 14 insertions, 8 deletions:
+Patch 0012 `Arkt: find a non-BrowserView window for a WebContents`, 2 files, 13 insertions, 4 deletions (after the
+review rework below; the first version had 14 and 8):
 
-- `FindBrowserWindowWithWebContents`: when the top-level widget holds no `BrowserView`, it no longer returns nullptr
-  but falls through to the tab lookup, which now returns `BrowserWindow::FromBrowser(FindBrowserWithTab(...))`.
-  `FromBrowser` tries `BrowserView` first and ends in `GetWindow()`, the Arkt window. For a `BrowserView` window the
-  result is unchanged. Contents that are not a tab (WebUI bubbles, dialogs) in a non-`BrowserView` widget still get
-  nullptr, as before.
+- `FindBrowserWindowWithWebContents`, tab lookup: before the old return line, the tab's window from
+  `BrowserWindow::FromBrowser(browser)` is returned when it is not a `BrowserView` (the `browser` local is no longer
+  const). `FromBrowser` ends in `GetWindow()`, the Arkt window. A `BrowserView` window, including one being torn down
+  (when `FromBrowser` reaches it through `GetWindow()`), takes the old return line. A `WebUIBrowserWindow` also
+  changes: it was nullptr from the tab lookup and is now returned.
+- The widget branch is not patched. Arkt tabs sit in Arkt's own `NSWindow`, not in a Views widget, so their lookup
+  reaches the tab branch: the smoke below passes without a widget hunk. Contents that are not a tab (WebUI bubbles,
+  dialogs) in a non-`BrowserView` widget still get nullptr.
 - `MaybeShowIOSDektopAddressPromo`: returns when `AsBrowserView()` is nullptr instead of dereferencing it. Only reached
   after the user accepts the save prompt (`OnUserDecision`, kAccepted), which the no-op handler never does, so it is
   covered by construction, not by the smoke.
@@ -4805,14 +4809,17 @@ Patch 0012 `Arkt: find a non-BrowserView window for a WebContents`, 2 files, 14 
 
 | Step | Result | Numbers |
 |---|---|---|
-| `nice -n 15 autoninja -j 4 -C out/Spike chrome` (patch) | `The build has finished successfully.`, `FAILED:` 0 | incremental |
+| `nice -n 15 autoninja -j 4 -C out/Spike chrome` (first version) | `The build has finished successfully.`, `FAILED:` 0 | incremental |
 | Deliberate break 1: `browser_view.cc` back to the pinned version (`git checkout HEAD~1 --`), rebuilt | finished, `FAILED:` 0 | 47 s |
 | Deliberate break 2: patch in, overlay `PostAddressClosed` returning before it posts, rebuilt | finished, `FAILED:` 0 | 46 s |
 | Both restored, rebuilt | finished, `FAILED:` 0; `git status` clean in both trees | 30 s |
+| Review rework: tab-lookup hunk reworked, widget hunk dropped (arkt commit amended), rebuilt | finished, `FAILED:` 0 | 47 s |
+| Break 3: `browser_view.cc` back to the pinned version, rebuilt | finished, `FAILED:` 0 | 44 s |
+| Restored, rebuilt | finished, `FAILED:` 0; `git status` clean | 46 s |
 
 Load average 3 to 6 (other lanes' work; nothing added).
 
-### Smoke (`out/Spike/Chromium.app`, fresh profiles under `profiles/768-20261107/`, `--use-mock-keychain`, form on `127.0.0.1:8768`, fields typed with `Input.insertText` over the DevTools protocol)
+### Smoke (run1, run2, break 1 and break 2 on the first version; run3 and break 3 on the reworked patch; `out/Spike/Chromium.app`, fresh profiles under `profiles/768-20261107/`, `--use-mock-keychain`, form on `127.0.0.1:8768`, fields typed with `Input.insertText` over the DevTools protocol)
 
 Every run starts with `ARKT: browsers normal=1 arkt=1 views=0`: the form tab is on an Arkt window. Saved addresses for
 the update rows are written through `chrome.autofillPrivate.saveAddress` on `chrome://settings/addresses` (no phone),
@@ -4820,16 +4827,17 @@ then the form is submitted with the same name and address plus a phone. All subm
 
 | Run | Check | Result |
 |---|---|---|
-| run1, run2 | full US address (name, street, city, state, ZIP, country, phone, email) | `ARKT: autofill bubble SaveAddressProfile not shown`, no crash |
-| run1, run2 | second and third different addresses, same tab | `SaveAddressProfile not shown` each time: the posted `OnBubbleClosed()` ran and the controller let go of the no-op bubble |
-| run1, run2 | stored address submitted again with a new phone | `ARKT: autofill bubble UpdateAddressProfile not shown`, no crash |
-| run2 | the same update a second time, same tab | `UpdateAddressProfile not shown` again |
-| run1, run2 | tab closed | `ARKT: native window destroyed`, no crash |
+| run1, run2, run3 | full US address (name, street, city, state, ZIP, country, phone, email) | `ARKT: autofill bubble SaveAddressProfile not shown`, no crash |
+| run1, run2, run3 | second and third different addresses, same tab | `SaveAddressProfile not shown` each time: the posted `OnBubbleClosed()` ran and the controller let go of the no-op bubble |
+| run1, run2, run3 | stored address submitted again with a new phone | `ARKT: autofill bubble UpdateAddressProfile not shown`, no crash |
+| run2, run3 | the same update a second time, same tab | `UpdateAddressProfile not shown` again |
+| run1, run2, run3 | tab closed | `ARKT: native window destroyed`, no crash |
 | break 1 | first address submit | `Received signal 11 SEGV_ACCERR 000000000000`; crash report top frame `autofill::(anonymous namespace)::ShowSaveBubble`, then `AddressBubblesController::DoShowBubble` |
+| break 3 (tab-lookup change reverted) | first address submit | the same crash: `Received signal 11 SEGV_ACCERR 000000000000`, top frame `ShowSaveBubble`, then `AddressBubblesController::DoShowBubble` |
 | break 2 | three different addresses, same tab | only the first `SaveAddressProfile not shown`; the next two prompts are not shown: without the posted close the controller keeps the no-op bubble |
 
-`FATAL`, `NOTREACHED`, `Check failed` and `Received signal` lines in run1 and run2: 0. In run1 and break 1 the submit was a
-synthetic mouse click; in run2 and break 2 the window was occluded (`visibilityState` hidden) and dropped synthetic
+`FATAL`, `NOTREACHED`, `Check failed` and `Received signal` lines in run1, run2 and run3: 0. In run1 and break 1 the submit was a
+synthetic mouse click; in the later runs the window was occluded (`visibilityState` hidden) and dropped synthetic
 clicks, so the button was clicked from script (`click()` with a user gesture); the typed values are the same.
 
 ### Other callers of `FindBrowserWindowWithWebContents`
@@ -4840,8 +4848,8 @@ when the contents are a tab of an Arkt window:
 | Caller | Needs | On an Arkt window |
 |---|---|---|
 | `managed_profile_required_navigation_throttle.cc:213-215` (`->Show()`) | an enterprise sign-in that creates a managed profile | the enterprise action tab now finds the Arkt window (by construction) |
-| `access_code_cast_dialog.cc:65-66` (`->GetBounds()`) | the access code Cast policy | if the dialog host has a Views widget (`:58`), the lookup now finds the Arkt window; not checked (by construction) |
-| `webui_contents_wrapper.cc:195-196` (`->OpenEyeDropper()`) | a WebUI bubble with an eye dropper | unchanged: bubble contents are not a tab, so the lookup is still nullptr |
+| `access_code_cast_dialog.cc:65-66` (`->GetBounds()`) | the access code Cast policy | if `web_contents` is a tab of an Arkt window, the lookup now finds the Arkt window; not checked (by construction) |
+| `webui_contents_wrapper.cc:195-196` (`->OpenEyeDropper()`) | a WebUI bubble with an eye dropper | still nullptr: bubble contents are not a tab |
 
 ### Patch budget
 
