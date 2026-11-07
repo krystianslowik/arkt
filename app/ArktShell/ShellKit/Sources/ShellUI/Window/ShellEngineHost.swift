@@ -36,10 +36,11 @@ public final class ShellEngineHost: EngineWindowHosting {
     return controller.peek.decide(activation)
   }
 
-  /// An Esc the page did not use closes an open Peek (Esc goes to the page first, decided 2026-10-25).
+  /// An Esc the page did not use closes an open Peek (Esc goes to the page first, decided 2026-10-25); otherwise it
+  /// stops the page while it loads, unless another Esc owner is open (KB-055, #614).
   public func handleUnhandledKeyDown(_ event: NSEvent, in tab: TabID?) -> Bool {
     guard event.keyCode == 53, let controller else { return false }
-    return controller.peek.handleEscape(in: tab)
+    return controller.peek.handleEscape(in: tab) || controller.stopLoadingOnEscape(event, in: tab)
   }
 
   /// A command from a menu item or key equivalent: the shell runs the commands it claims, the engine the rest.
