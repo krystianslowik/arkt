@@ -1,5 +1,7 @@
 import AppKit
+import EngineAPITestSupport
 import XCTest
+@testable import ShellUI
 
 /// Fails a GUI test run when a test class finishes with windows it opened still alive (#805).
 ///
@@ -19,8 +21,13 @@ final class WindowLeakGuard {
   /// Windows the system opens on its own (the text input window); never a test's leak.
   static let systemWindowTypes: Set<String> = ["TUINSWindow"]
 
-  /// Test classes that still leave windows open, each with the issue that tracks its fix. Keep it short.
-  static let knownLeakyClasses: Set<String> = []
+  /// Test classes whose windows outlive the test although `tearDown` closes them and clears its properties: something
+  /// outside the test still holds them. Each entry names the issue that tracks its fix. Keep it short.
+  static let knownLeakyClasses: [String: Int] = [
+    "CrashedLittleArktTests": 817,
+    "DownloadsWindowTests": 817,
+    "LittleArktEscapeStopTests": 817,
+  ]
 
   private let record: (String) -> Void
   private let printsLeaks: Bool
@@ -41,7 +48,7 @@ final class WindowLeakGuard {
     let left = Self.leftOpen(before: openAtStart.removeValue(forKey: name) ?? [], after: windows)
     guard !left.isEmpty else { return }
     if printsLeaks { print("window.leak class=\(name) windows=\(left.count) kinds=[\(Self.kinds(left))]") }
-    guard !Self.knownLeakyClasses.contains(name) else { return }
+    guard Self.knownLeakyClasses[name] == nil else { return }
     record("\(name) left \(left.count) window(s) open after its last test: \(Self.kinds(left)). "
       + "Close them and clear the properties that hold them in tearDown (#805).")
   }
@@ -95,5 +102,17 @@ final class WindowLeakObserver: NSObject, @preconcurrency XCTestObservation {
     guard let first = suite.tests.first as? XCTestCase,
           suite.tests.allSatisfy({ type(of: $0) == type(of: first) }) else { return nil }
     return String(describing: type(of: first))
+  }
+}
+
+extension ShellWindowSet {
+  /// Closes the set's windows and, on an `InMemoryEngine`, its engine windows. The engine keeps each window's host and
+  /// the host keeps the engine, so without the engine-side close the windows outlive the test (#805).
+  func closeAllForTesting() {
+    if let engine = engine as? InMemoryEngine {
+      for id in engine.windowIDs { engine.closeWindow(id) }
+    }
+    for little in littleArkts { little.window.close() }
+    for controller in controllers { controller.close() }
   }
 }

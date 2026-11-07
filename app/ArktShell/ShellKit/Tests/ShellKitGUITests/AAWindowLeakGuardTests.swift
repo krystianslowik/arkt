@@ -95,6 +95,15 @@ final class AAWindowLeakGuardTests: XCTestCase {
     XCTAssertTrue(recorded.first?.hasPrefix("FirstTests ") ?? false, "\(recorded)")
   }
 
+  func testAKnownLeakyClassIsReportedButDoesNotFail() throws {
+    let name = try XCTUnwrap(WindowLeakGuard.knownLeakyClasses.keys.sorted().first)
+    let leakGuard = makeGuard()
+    leakGuard.classWillStart(name)
+    kept.append(makeWindow())
+    leakGuard.classDidFinish(name)
+    XCTAssertEqual(recorded, [])
+  }
+
   func testSystemWindowTypesAreAllowed() {
     XCTAssertTrue(WindowLeakGuard.systemWindowTypes.contains("TUINSWindow"))
     XCTAssertFalse(WindowLeakGuard.systemWindowTypes.contains("NSWindow"))
