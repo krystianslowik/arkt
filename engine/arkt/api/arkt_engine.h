@@ -636,6 +636,15 @@ NS_SWIFT_UI_ACTOR
 // The 16 pt icon at 2x, PNG.
 @property(nonatomic, readonly, nullable, copy) NSData* iconPNG;
 @property(nonatomic, readonly) BOOL isEnabled;
+// The user may uninstall the extension (#721): the management policy lets
+// the user change it and does not keep it installed (not policy-installed,
+// not a component). The shell offers Remove only then; uninstallExtension
+// refuses the others anyway.
+@property(nonatomic, readonly) BOOL canUninstall;
+// The extension updates from the Chrome Web Store, so it has a report page
+// there (#721). The shell offers Report abuse only then; uninstallExtension
+// opens no report page for the others anyway.
+@property(nonatomic, readonly) BOOL canReportAbuse;
 @end
 
 // One back or forward history entry of a tab.
@@ -1156,6 +1165,31 @@ NS_SWIFT_UI_ACTOR
 // was already confirmed finishes with its real result. Does nothing when no
 // batch is running.
 - (void)cancelExtensionInstalls NS_SWIFT_NAME(cancelExtensionInstalls());
+// Uninstalls an extension of the profile the engine started with (#721) as
+// the user's own choice (UNINSTALL_REASON_USER_INITIATED), with no prompt of
+// the engine's: the shell asked already. Built on ExtensionRegistrar's
+// UninstallExtension, the call Chrome's own uninstall dialog makes; that
+// dialog is not shown. Every other uninstall path (chrome.management, for
+// one) keeps its dialog. `completion` runs on the main thread, never inside
+// the call, and always arrives except when the engine shuts down first:
+// `uninstalled` YES once the extension is gone, or NO with a short sentence
+// that holds no id or name ("unknown extension" for an id the profile does
+// not have, "not removable" for one the user may not uninstall, see
+// canUninstall); nothing changed then. The removal reaches the sinks as
+// ExtensionActionsChanged for every window that listed the action.
+// `reportAbuse`: after a successful uninstall the Web Store's report page for
+// the extension opens in a new foreground tab of `browser` (the window of the
+// shell's sheet), as Chrome does after its dialog; when `browser` is nil or
+// has closed meanwhile, of the last active window. Only for an extension
+// whose canReportAbuse is YES; for any other no tab opens.
+- (void)uninstallExtension:(NSString*)extensionID
+               reportAbuse:(BOOL)reportAbuse
+                 inBrowser:(nullable id<ArktBrowserHandle>)browser
+                completion:(void (^)(BOOL uninstalled,
+                                     NSString* _Nullable failureReason))
+                               completion
+    NS_SWIFT_NAME(uninstallExtension(_:reportAbuse:in:completion:))
+        NS_SWIFT_DISABLE_ASYNC;
 
 // Downloads (#132), of the profile the engine started with. The events are
 // DownloadCreated, DownloadUpdated and DownloadRemoved (no tab, no window).

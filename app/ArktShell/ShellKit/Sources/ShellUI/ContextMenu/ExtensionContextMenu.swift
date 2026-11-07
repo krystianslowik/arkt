@@ -10,6 +10,7 @@ import EngineAPI
 /// A chosen item goes back to the engine through `performExtensionContextCommand`, except `manage` and `remove`,
 /// which the shell runs itself (`ExtensionContextCommand`): `onManage` opens the extension's entry in Settings,
 /// Extensions (#600) and `onRemove` opens the remove sheet. Both get the action as it was when the menu was built.
+/// Remove from Arkt... is left out for an extension the user may not uninstall (`canUninstall` false, #721).
 ///
 /// The menu holds the engine weakly: a menu that outlives its engine drops selections quietly.
 @MainActor
@@ -19,7 +20,9 @@ public enum ExtensionContextMenu {
                           onManage: @escaping @MainActor (ExtensionAction) -> Void,
                           onRemove: @escaping @MainActor (ExtensionAction) -> Void) -> NSMenu? {
     guard let action = engine.extensionActions(in: window).first(where: { $0.id == id }) else { return nil }
-    let items = engine.extensionContextMenu(forAction: id, in: window)
+    let items = engine.extensionContextMenu(forAction: id, in: window).filter { item in
+      action.canUninstall || item.kind != .command(ExtensionContextCommand.remove)
+    }
     guard !items.isEmpty else { return nil }
     return EngineMenuBuilder.menu(items, title: action.name) { [weak engine] command in
       switch command {

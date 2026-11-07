@@ -39,6 +39,10 @@ public struct EngineHarness {
   public typealias RaiseInfobar = @MainActor (_ engine: any EngineClient, _ id: TabID, _ message: String) async throws
     -> Void
 
+  /// Makes every window of `windows` list an extension the user may uninstall, and returns its extension id (rule 27).
+  public typealias RemovableExtension = @MainActor (_ engine: any EngineClient, _ windows: [EngineWindowID])
+    async throws -> String
+
   /// A page with `occurrences` copies of `EngineContract.findWord` in its text and one link, with the text
   /// `EngineContract.findLinkText`, to `link` (rules 22, 23).
   public typealias FindPage = @MainActor (_ occurrences: Int, _ link: URL) throws -> URL
@@ -93,6 +97,8 @@ public struct EngineHarness {
   public let downloads: DownloadDrivers?
   /// Makes the page process of `id` go away (rule 25, #576): a crash or a kill. Nil: not applicable.
   public let crashTab: EngineTabAction?
+  /// An extension the engine can uninstall, listed in the given windows (rule 27, #721). Nil: not applicable.
+  public let removableExtension: RemovableExtension?
 
   public init(makeEngine: @escaping @MainActor () -> any EngineClient,
               pageURL: @escaping @MainActor (String) throws -> URL,
@@ -116,7 +122,8 @@ public struct EngineHarness {
               hoverLink: EngineTabAction? = nil,
               leaveLink: EngineTabAction? = nil,
               downloads: DownloadDrivers? = nil,
-              crashTab: EngineTabAction? = nil) {
+              crashTab: EngineTabAction? = nil,
+              removableExtension: RemovableExtension? = nil) {
     self.makeEngine = makeEngine; self.pageURL = pageURL; self.settle = settle
     self.retitle = retitle; self.pagesOnTwoHosts = pagesOnTwoHosts; self.makeWindowHost = makeWindowHost
     self.engineCreateTab = engineCreateTab; self.engineCloseTab = engineCloseTab
@@ -130,6 +137,7 @@ public struct EngineHarness {
     self.hoverLink = hoverLink; self.leaveLink = leaveLink
     self.downloads = downloads
     self.crashTab = crashTab
+    self.removableExtension = removableExtension
   }
 
   /// In-memory pages: the title is the last path component; every finished load carries a favicon. Every driver is
@@ -180,7 +188,13 @@ public struct EngineHarness {
       hoverLink: { engine, id in try inMemory(engine).hoverLink(id) },
       leaveLink: { engine, id in try inMemory(engine).leaveLink(id) },
       downloads: .inMemory(),
-      crashTab: { engine, id in try inMemory(engine).crash(id, status: .crashed) }
+      crashTab: { engine, id in try inMemory(engine).crash(id, status: .crashed) },
+      removableExtension: { engine, windows in
+        let engine = try inMemory(engine)
+        let action = ExtensionAction(id: "contract-removable", name: "Contract removable")
+        for window in windows { engine.setExtensionActions(engine.extensionActions(in: window) + [action], in: window) }
+        return action.extensionID
+      }
     )
   }
 
@@ -289,6 +303,11 @@ public struct EngineHarness {
 ///     settings, and reset restores the default. Nothing is raised while the panel is open; `pageInfoDidClose(tab:)`
 ///     after changes from that tab raises the reload infobar once, on that tab only. Not applicable to an engine whose
 ///     `siteSettings` is nil.
+///
+/// 27. Uninstalling an extension (#721). `uninstallExtension` of an extension the user may remove takes its action out
+///     of every window that listed it, announced with `.extensionActionsChanged` on each; with Report abuse off it
+///     opens no tab. An id the engine does not have changes nothing. Not applicable to an engine without
+///     `EngineExtensions` or without the `removableExtension` driver.
 ///
 /// Engines may deliver events one main-actor turn after the call that caused them (the Chromium engine does, except
 /// for the synchronous parts of rules 1 and 4), so rules 11-16 wait for events and snapshot values.
