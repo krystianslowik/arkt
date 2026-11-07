@@ -14,13 +14,20 @@ public struct ExtensionAction: Equatable, Sendable, Identifiable {
   /// The extension has an options page (the context menu's Options... item).
   public var hasOptionsPage: Bool
   public var siteAccess: ExtensionSiteAccess
+  /// The user may uninstall the extension (#721): not installed by policy, not part of the engine. The shell offers
+  /// Remove from Arkt... only then; `uninstallExtension` refuses the others anyway.
+  public var canUninstall: Bool
+  /// The extension comes from the Chrome Web Store, so it has a report page there (#721). The remove sheet offers
+  /// Report abuse only then; `uninstallExtension` opens no report page for the others anyway.
+  public var canReportAbuse: Bool
 
   /// `extensionID` defaults to `id`: Chromium's action ids are extension ids.
   public init(id: String, name: String, iconPNG: Data? = nil, isEnabled: Bool = true, extensionID: String? = nil,
-              isPinned: Bool = false, hasOptionsPage: Bool = false, siteAccess: ExtensionSiteAccess = .noSiteAccess) {
+              isPinned: Bool = false, hasOptionsPage: Bool = false, siteAccess: ExtensionSiteAccess = .noSiteAccess,
+              canUninstall: Bool = true, canReportAbuse: Bool = true) {
     self.id = id; self.name = name; self.iconPNG = iconPNG; self.isEnabled = isEnabled
     self.extensionID = extensionID ?? id; self.isPinned = isPinned; self.hasOptionsPage = hasOptionsPage
-    self.siteAccess = siteAccess
+    self.siteAccess = siteAccess; self.canUninstall = canUninstall; self.canReportAbuse = canReportAbuse
   }
 }
 
@@ -67,6 +74,10 @@ public protocol EngineExtensions: AnyObject {
   /// (its pin goes with it) and `.commandsChanged` when it had commands. An unknown id or an extension the user
   /// cannot remove changes nothing. Default: a no-op (the Chromium side is #721).
   func uninstallExtension(_ extensionID: String, reportAbuse: Bool)
+  /// `uninstallExtension(_:reportAbuse:)` from the remove sheet of `window`: the Web Store's report page opens in that
+  /// window (#721). Nil, or a window that has closed, leaves the choice to the engine (its last active window).
+  /// Default: the call without a window.
+  func uninstallExtension(_ extensionID: String, reportAbuse: Bool, in window: EngineWindowID?)
   /// Profile-wide extension events, through the same FIFO as `observe`. Default: none are delivered.
   func observeExtensions(_ handler: @escaping @MainActor (EngineExtensionEvent) -> Void) -> EngineObservation
 }
@@ -83,6 +94,9 @@ extension EngineExtensions {
                                           scope: ExtensionCommandScope,
                                           replacingConflict: Bool) -> ExtensionShortcutResult { .unknownCommand }
   public func uninstallExtension(_ extensionID: String, reportAbuse: Bool) {}
+  public func uninstallExtension(_ extensionID: String, reportAbuse: Bool, in window: EngineWindowID?) {
+    uninstallExtension(extensionID, reportAbuse: reportAbuse)
+  }
   public func observeExtensions(_ handler: @escaping @MainActor (EngineExtensionEvent) -> Void) -> EngineObservation {
     EngineObservation {}
   }

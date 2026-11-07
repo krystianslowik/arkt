@@ -146,10 +146,13 @@ public final class ExtensionsPanelController: NSObject {
   // MARK: Remove from Arkt... (#720)
 
   /// Asks before removing `action`'s extension: the panel closes and the remove sheet hangs from the panel's window,
-  /// which it never blocks for other windows. Remove uninstalls through the engine with the Report abuse state; Cancel
-  /// and Escape do nothing. Nothing happens while a sheet is already up on the window.
+  /// which it never blocks for other windows. Remove uninstalls through the engine with the Report abuse state, naming
+  /// the panel's engine window so a report page opens there (#721); Cancel and Escape do nothing. Nothing happens while
+  /// a sheet is already up on the window, or for an extension the user may not uninstall.
   public func presentRemoveSheet(for action: ExtensionAction) {
-    guard removeSheet == nil, let parent = button?.window, parent.attachedSheet == nil else { return }
+    guard action.canUninstall, removeSheet == nil, let parent = button?.window, parent.attachedSheet == nil else {
+      return
+    }
     hide(keyboard: false)
     let sheet = ExtensionRemoveSheet(action: action)
     let extensionID = sheet.extensionID              // not the sheet: it owns this closure
@@ -157,7 +160,7 @@ public final class ExtensionsPanelController: NSObject {
       guard let self else { return }
       self.removeSheet = nil
       guard let reportAbuse else { return }
-      self.extensions?.uninstallExtension(extensionID, reportAbuse: reportAbuse)
+      self.extensions?.uninstallExtension(extensionID, reportAbuse: reportAbuse, in: self.engineWindow())
     }
     removeSheet = sheet
     sheet.begin(on: parent)

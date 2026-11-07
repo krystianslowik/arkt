@@ -5154,3 +5154,103 @@ In sync, and the 12 commits export to the committed patch files unchanged; nothi
 Both Chromium runs stopped by exact PID (`ps -p` prints nothing). Deleted: the throwaway profiles under
 `profiles/721-20261107/` and the build log. The fixtures and run logs lived in a temporary folder outside the repo.
 Nothing under `~/Applications/ArktTest` or `/Applications/Arkt.app` was touched.
+
+### #721 review fixes (PR #792)
+
+Same branch, `origin/main` merged (`d3a9120`, no conflicts). Still no patch; `.patches` 12, in sync.
+
+- **What the user may do is listed.** `ArktExtensionAction` gains `canUninstall` (the management policy's
+  `UserMayModifySettings` and not `MustRemainInstalled`, no error text) and `canReportAbuse`
+  (`ExtensionManagement::UpdatesFromWebstore`), both copies `cmp` identical. One helper
+  (`arkt::GetUninstallAbility`) answers the listing and the uninstall gate, so they cannot drift; the gate stays as the
+  safety net. `ExtensionAction` mirrors both (default true, so FakeEngine, which has no extensions, and existing
+  callers keep their behaviour); InMemoryEngine refuses an action whose `canUninstall` is false. The shell leaves
+  Remove from Arkt... out of the context menu and does not open the sheet when `canUninstall` is false, and builds
+  the sheet without the Report abuse checkbox when `canReportAbuse` is false.
+- **The window is named.** The facade method is now `uninstallExtension:reportAbuse:inBrowser:completion:` (nullable
+  browser), and `EngineExtensions` gains `uninstallExtension(_:reportAbuse:in:)`, whose default forwards to the call
+  without a window. The panel passes its engine window; ChromiumEngine maps it to the browser handle. The report
+  page uses `NavigateParams(browser, url, ...)`; a nil browser, one of another profile, or one closed during a
+  deferral falls back to the last active window. The window is not brought forward, as with Chrome's dialog.
+- Header: the completion "always arrives except when the engine shuts down first".
+- `TestEngine` (ABI conformance) posts its completion; its test waits for it and checks it did not run inside the
+  call. `ScriptedFacade` documents its "unknown extension" model (a window lists the action; the real facade asks the
+  profile's registry).
+- **Rule 27** (`uninstallRemovesTheExtensionFromEveryWindow`, `ContractCheck` 57 checks, rules 1 to 27): two windows
+  list a removable extension (driver `removableExtension`); an unknown id changes nothing; the uninstall from the
+  first window takes the action out of both, announced on each, and opens no tab. InMemoryEngine, the scripted facade
+  and the app's runner (which now also loads `engine/test-extensions/action-probe`, uninstalled by the rule) provide
+  the driver.
+
+#### Tests (`nice -n 20`, `-j 2`, in `app/ArktShell/ShellKit`)
+
+| Command | Result |
+|---|---|
+| `swift test --filter "ChromiumEngineKitTests\|ArktEngineABITests\|EngineAPITests"` | 168 + 33 + 285 passed, 0 failed (was 163 + 32 + 279): ChromiumExtensionUninstallTests 8 tests (flags, window, closed window, no report page), ABI flag test, InMemoryEngine window, refusal and default-forwarding tests, rule 27 on InMemoryEngine and over both facade scripts |
+| `swift test --filter "ExtensionRemoveSheetTests\|ExtensionContextMenu"` | 15 passed (3 new: Remove left out, sheet not opened, no checkbox); existing checks now include the sheet's window |
+| `swift test --filter ExtensionsPanelTests` | 36 passed |
+
+Deliberate breaks, each restored and green again:
+
+| Break | Fails |
+|---|---|
+| `ExtensionContextMenu`'s filter returns `true` | `testRemoveFromArktIsLeftOutForAnExtensionTheUserMayNotRemove` |
+| `FacadeValues.swift` maps `canUninstall: true` | `theListingCarriesWhatTheUserMayDo` (2 of 4 cases) |
+| InMemoryEngine records `window: nil` | 3 `ExtensionRemoveSheetTests` (the window the sheet names) |
+
+#### Build
+
+| Step | Result |
+|---|---|
+| `nice -n 20 autoninja -C out/Spike chrome -j 4` | finished successfully, `FAILED:` 0 |
+| `gn check` (`//arkt/browser:window`, `//arkt/api:embedder`) | the pre-existing errors only |
+| Engine app, `xcodebuild -scheme ArktShell -configuration Engine PRODUCT_BUNDLE_IDENTIFIER=dev.arkt.Arkt.try721 -jobs 2` (`nice -n 20`, `CONFIGURATION_BUILD_DIR=$CHROMIUM_ROOT/embed-721`, component dylibs cloned next to it) | `BUILD SUCCEEDED`, `Engine framework copied: Chromium Framework.framework 156.0.8078.48` |
+
+#### Self-test run 3 (`out/Spike`, fresh profile `profiles/721-20261107/run3`, `--use-mock-keychain`, four unpacked probes: one plain, three with the Web Store `update_url`, one of them calling `chrome.runtime.setUninstallURL("http://127.0.0.1:8721/bye")`)
+
+| Check | Result |
+|---|---|
+| Listing flags | plain `canUninstall=1 canReportAbuse=0`; the three store copies `1 1` |
+| Two windows, window 2 last active (`chrome.windows.create`), uninstall with Report abuse naming window 1 | `report page in the given window`; ONE report tab in window 1, active; nothing in window 2 |
+| Extension with an uninstall URL, Report abuse, naming window 1 | the uninstall URL tab opens first in the last active window (window 2; Chromium's `RuntimeAPI`, user-initiated reason), then the report tab in window 1, active |
+| No window named (`nowin`) | the report tab goes to the last active window (window 2) |
+| Plain extension, Report abuse | uninstalled, `report page skipped`, no tab |
+| Unknown id; component extension (PDF viewer) | `unknown extension`; `uninstall refused: the user may not remove it`, `not removable` (the new gate, before the registrar) |
+
+6 tabs in all (the first page, window 2's, three report pages, the uninstall URL); 0 `FATAL`, `NOTREACHED` or
+`Check failed`; 0 `dialog sheet shown`.
+
+#### In-app contract (`dev.arkt.Arkt.try721`, Engine app on `out/Spike`, `--arkt-engine-contract --arkt-engine-test-api`, tabs probe and action probe, throwaway profile, `ARKT_DATA_DIR`, `ARKT_ARC_DIR` and `ARKT_DEFAULTS_SUITE` per run, `--use-mock-keychain`)
+
+| Check | Result |
+|---|---|
+| Rule 27 `uninstallRemovesTheExtensionFromEveryWindow` | PASS (167 ms): `ChromiumEngine.uninstallExtension(_:reportAbuse:in:)` through EngineAPI, no clicks |
+| Rules 25, 26 | PASS |
+| Result | `23/27`, exit 1: rules 19, 20, 21 and 24 NOT-APPLICABLE as before; 40 checks PASS, 0 FAIL; no `DEFERRED` line; 0 `FATAL` |
+
+#### Gaps recorded
+
+- **Forced-install policy.** Not reproduced: `ExtensionManagement` loads `ExtensionInstallForcelist` only from a
+  managed preference (`LoadPreference(..., force_managed = true)` needs `pref->IsManaged()`), which on macOS needs MDM
+  or root-owned managed preferences; a user-level `defaults` value is only recommended, and the command-line policy
+  provider exists only on Android. The refusal path is the same gate (`UserMayModifySettings`), shown with a component
+  extension. No extension with a toolbar action and `canUninstall` false exists in a test profile, so the false flag
+  is covered by the Swift tests only.
+- **Criterion 4 in a Chromium build.** ChromiumEngine has no `extensionContextMenu` yet, so the shell's context menu,
+  and with it Remove from Arkt..., does not exist in a Chromium build. The click path is covered by
+  `ExtensionRemoveSheetTests` against InMemoryEngine and the engine side by rule 27 in the app; the end-to-end click
+  waits for the Chromium context menu (the engine side of #596).
+- **Pins and commands** (criterion 1) moved to #591 as the acceptance check "uninstall leaves no pin and no command".
+
+#### Patch budget
+
+| Source | Count |
+|---|---|
+| `.patches` lines | 12 |
+| `arkt` commits above `156.0.8078.48` | 12 |
+
+#### Cleanup
+
+Run 3 stopped by exact PID; the contract run exited on its own (`ps` shows no `embed-721` process). Deleted: the
+profiles under `profiles/721-20261107/`, the `embed-721` folder, the derived data folder `arkt-shell-dd/721`, the
+build logs and the run's defaults suite.

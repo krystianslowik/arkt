@@ -180,8 +180,12 @@ final class ScriptedAction: NSObject, ArktExtensionAction {
   let name: String
   let iconPNG: Data?
   let isEnabled: Bool
-  init(actionId: String, name: String, iconPNG: Data? = nil, isEnabled: Bool = true) {
+  let canUninstall: Bool
+  let canReportAbuse: Bool
+  init(actionId: String, name: String, iconPNG: Data? = nil, isEnabled: Bool = true, canUninstall: Bool = true,
+       canReportAbuse: Bool = true) {
     self.actionId = actionId; self.name = name; self.iconPNG = iconPNG; self.isEnabled = isEnabled
+    self.canUninstall = canUninstall; self.canReportAbuse = canReportAbuse
   }
 }
 
@@ -1235,34 +1239,48 @@ final class ScriptedFacade: NSObject, ArktEngine {
     Task { @MainActor in held.completion(results) }
   }
 
-  /// What each `uninstallExtension` call received, in order (#721).
-  private(set) var uninstallCalls: [(extensionID: String, reportAbuse: Bool)] = []
-  /// Extensions the profile keeps installed (policy, the browser's own): their uninstall fails with "not removable".
-  var nonRemovableExtensions: Set<String> = []
+  /// What each `uninstallExtension` call received, in order (#721): the id, the Report abuse state and the window
+  /// id of the browser it named (nil for none).
+  private(set) var uninstallCalls: [(extensionID: String, reportAbuse: Bool, window: Int32?)] = []
   /// What each `uninstallExtension` completion answered, in order.
   private(set) var uninstallAnswers: [(uninstalled: Bool, reason: String?)] = []
+  /// The window ids that received a report page, one per page, in order.
+  private(set) var reportPageWindows: [Int32] = []
 
-  /// What the real facade does: an id no window lists fails with "unknown extension", a kept one with "not
-  /// removable", both changing nothing; otherwise the action leaves every window that listed it (one
-  /// `ExtensionActionsChanged` each, inside the call, as `OnToolbarActionRemoved` fires inside `UninstallExtension`).
-  /// The completion runs on a later turn.
+  /// What the real facade does, as far as ChromiumEngine can tell:
+  /// - "unknown extension": the scripted model has no profile, so an extension is known while a window lists its
+  ///   action. The real facade asks the profile's registry, which also knows an installed extension no window lists
+  ///   (a disabled one, one without an action); no ChromiumEngine behaviour depends on that difference.
+  /// - "not removable": the listed action's `canUninstall` is false, the flag the real facade lists from the same
+  ///   management policy check its gate applies.
+  /// Both change nothing. Otherwise the action leaves every window that listed it (one `ExtensionActionsChanged`
+  /// each, inside the call, as `OnToolbarActionRemoved` fires inside `UninstallExtension`) and, with `reportAbuse`
+  /// and `canReportAbuse`, one report page goes to the named browser (the last listed one when none is named). The
+  /// completion runs on a later turn.
   func uninstallExtension(
-    _ extensionID: String, reportAbuse: Bool, completion: @escaping (Bool, String?) -> Void
+    _ extensionID: String, reportAbuse: Bool, in browser: (any ArktBrowserHandle)?,
+    completion: @escaping (Bool, String?) -> Void
   ) {
-    uninstallCalls.append((extensionID, reportAbuse))
+    uninstallCalls.append((extensionID, reportAbuse, browser?.windowId))
     let listing = browserList.filter { browser in
       actions[ObjectIdentifier(browser)]?.contains { $0.actionId == extensionID } == true
     }
+    let action = listing.first.flatMap { browser in
+      actions[ObjectIdentifier(browser)]?.first { $0.actionId == extensionID }
+    }
     let answer: (Bool, String?)
-    if listing.isEmpty {
-      answer = (false, "unknown extension")
-    } else if nonRemovableExtensions.contains(extensionID) {
+    if let action, !action.canUninstall {
       answer = (false, "not removable")
-    } else {
+    } else if let action {
       for browser in listing {
         setActions(actions[ObjectIdentifier(browser)]?.filter { $0.actionId != extensionID } ?? [], in: browser)
       }
+      if reportAbuse, action.canReportAbuse, let target = (browser as? ScriptedBrowser) ?? browsers.last {
+        reportPageWindows.append(target.windowId)
+      }
       answer = (true, nil)
+    } else {
+      answer = (false, "unknown extension")
     }
     Task { @MainActor in
       self.uninstallAnswers.append(answer)

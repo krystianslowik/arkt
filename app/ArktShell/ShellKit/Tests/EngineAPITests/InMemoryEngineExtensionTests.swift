@@ -514,6 +514,58 @@ struct InMemoryEngineExtensionTests {
     #expect(engine.uninstalledExtensions == [.init(extensionID: "zz", reportAbuse: false)], "the call is recorded")
     token.cancel()
   }
+
+  // MARK: - Uninstall from a window, and what the user may do (#721)
+
+  @Test func actionsDefaultToRemovableWithAReportPage() {
+    let plain = ExtensionAction(id: "a", name: "A")
+    #expect(plain.canUninstall && plain.canReportAbuse)
+  }
+
+  @Test func uninstallRecordsTheWindowItCameFrom() {
+    let (engine, window) = engineWithActions(["a", "b"])
+    engine.uninstallExtension("a", reportAbuse: true, in: window)
+    #expect(listed(engine, window) == ["b"])
+    #expect(engine.uninstalledExtensions == [.init(extensionID: "a", reportAbuse: true, window: window)])
+  }
+
+  @Test func theCallWithoutAWindowRecordsNone() {
+    let (engine, window) = engineWithActions(["a"])
+    let extensions: any EngineExtensions = engine
+    extensions.uninstallExtension("a", reportAbuse: false)
+    #expect(listed(engine, window).isEmpty)
+    #expect(engine.uninstalledExtensions == [.init(extensionID: "a", reportAbuse: false, window: nil)])
+  }
+
+  @Test func anExtensionTheUserMayNotRemoveStays() {
+    let engine = InMemoryEngine()
+    let window = engine.createWindow(host: StubWindowHost())
+    engine.setExtensionActions([ExtensionAction(id: "kept", name: "Kept", canUninstall: false),
+                                ExtensionAction(id: "b", name: "B")], in: window)
+    let recorder = EventRecorder(engine)
+    engine.uninstallExtension("kept", reportAbuse: true, in: window)
+    #expect(listed(engine, window) == ["kept", "b"])
+    #expect(recorder.windowEvents.isEmpty)
+    #expect(engine.uninstalledExtensions == [.init(extensionID: "kept", reportAbuse: true, window: window)],
+            "the call is recorded")
+  }
+
+  /// An engine that implements only the call without a window still hears the remove sheet's call.
+  @Test func theWindowVariantDefaultsToTheCallWithoutAWindow() {
+    let engine = WindowlessUninstallEngine()
+    let extensions: any EngineExtensions = engine
+    extensions.uninstallExtension("a", reportAbuse: true, in: EngineWindowID())
+    #expect(engine.calls.map(\.0) == ["a"] && engine.calls.map(\.1) == [true])
+  }
+}
+
+/// An engine that implements uninstall without the window variant (an engine written before #721).
+@MainActor
+private final class WindowlessUninstallEngine: EngineExtensions {
+  private(set) var calls: [(String, Bool)] = []
+  func extensionActions(in window: EngineWindowID) -> [ExtensionAction] { [] }
+  func runExtensionAction(_ id: String, in window: EngineWindowID, anchor: NSView) {}
+  func uninstallExtension(_ extensionID: String, reportAbuse: Bool) { calls.append((extensionID, reportAbuse)) }
 }
 
 /// An engine that implements only the two required `EngineExtensions` members.

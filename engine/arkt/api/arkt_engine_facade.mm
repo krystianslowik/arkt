@@ -1093,6 +1093,8 @@ NSArray<id<ArktSitePermission>>* SitePermissionObjects(
 @property(nonatomic, copy) NSString* name;
 @property(nonatomic, nullable, copy) NSData* iconPNG;
 @property(nonatomic) BOOL isEnabled;
+@property(nonatomic) BOOL canUninstall;
+@property(nonatomic) BOOL canReportAbuse;
 @end
 
 @implementation ArktFacadeExtensionAction
@@ -1100,6 +1102,8 @@ NSArray<id<ArktSitePermission>>* SitePermissionObjects(
 @synthesize name = _name;
 @synthesize iconPNG = _iconPNG;
 @synthesize isEnabled = _isEnabled;
+@synthesize canUninstall = _canUninstall;
+@synthesize canReportAbuse = _canReportAbuse;
 @end
 
 // -----------------------------------------------------------------------------
@@ -3869,6 +3873,11 @@ void DeliverImportResult(void (^completion)(id<ArktImportResult>),
     action.name = base::SysUTF16ToNSString(info.name);
     action.iconPNG = arkt::ActionIconPNG(icons, info.id, info.icon);
     action.isEnabled = info.enabled;
+    // The same answer the uninstall gate applies (#721).
+    const arkt::UninstallAbility ability = arkt::GetUninstallAbility(
+        interface ? interface->GetProfile() : nullptr, info.id);
+    action.canUninstall = ability.can_uninstall;
+    action.canReportAbuse = ability.can_report_abuse;
     [actions addObject:action];
   }
   return actions;
@@ -4210,23 +4219,32 @@ void DeliverImportResult(void (^completion)(id<ArktImportResult>),
 
 - (void)uninstallExtension:(NSString*)extensionID
                reportAbuse:(BOOL)reportAbuse
+                 inBrowser:(nullable id<ArktBrowserHandle>)browser
                 completion:(void (^)(BOOL uninstalled,
                                      NSString* _Nullable failureReason))
                                completion {
   arkt::CheckFacadeEntry();
+  ArktFacadeBrowser* window = [browser isKindOfClass:[ArktFacadeBrowser class]]
+                                  ? static_cast<ArktFacadeBrowser*>(browser)
+                                  : nil;
   // Deferred out of a nested run loop like the other mutators; the
   // completion is posted either way, so it never runs inside the call.
   arkt::RunOrDefer(
       "uninstallExtension",
       base::BindOnce(
           [](std::string extension_id, bool report_abuse,
-             void (^completion)(BOOL, NSString*)) {
+             ArktFacadeBrowser* window, void (^completion)(BOOL, NSString*)) {
+            // Read when the work runs: after a deferral the window may have
+            // closed, and the report page then goes to the last active one.
+            BrowserWindowInterface* interface =
+                window ? window.browserInterface : nullptr;
             std::string failure;
             const bool uninstalled = arkt::UninstallExtensionForUser(
                 arkt::EmbedderProfile(), extension_id, report_abuse,
-                &failure);
+                interface, &failure);
             LOG(WARNING) << "ARKT: facade uninstallExtension report_abuse="
-                         << report_abuse << " "
+                         << report_abuse << " window="
+                         << (interface ? window.windowId : -1) << " "
                          << (uninstalled ? "uninstalled" : failure);
             base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
                 FROM_HERE,
@@ -4240,7 +4258,7 @@ void DeliverImportResult(void (^completion)(id<ArktImportResult>),
                     },
                     completion, uninstalled, std::move(failure)));
           },
-          base::SysNSStringToUTF8(extensionID), reportAbuse == YES,
+          base::SysNSStringToUTF8(extensionID), reportAbuse == YES, window,
           completion));
 }
 

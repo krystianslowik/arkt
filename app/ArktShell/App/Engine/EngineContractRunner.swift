@@ -6,7 +6,8 @@ import EngineAPITestSupport
 
 /// The shared engine contract against the real engine, in the app (week-3 plan, Task W3-9 step 1). Runs with
 /// `--arkt-engine-contract` and `--arkt-engine-test-api` (plus the tabs probe extension loaded with
-/// `--load-extension`); the shell's session is not started. Every check gets a fresh `ChromiumEngine` from
+/// `--load-extension`, and the action probe next to it for rule 27, which uninstalls it from the throwaway profile);
+/// the shell's session is not started. Every check gets a fresh `ChromiumEngine` from
 /// `ChromiumEmbedding.makeEngine()`, its own windows, and pages from a loopback server. Prints one
 /// `ARKT_CONTRACT` line per check and per rule, then exits: 0 when every rule it ran passes, 1 when any check fails
 /// or reports not applicable, 2 when the runner cannot start. The plain switch runs `ContractCheck.chromiumChecks`
@@ -38,6 +39,8 @@ final class EngineContractRunner {
   }
 
   static let tabsProbeName = "Arkt tabs probe"
+  /// Rule 27 uninstalls it (#721): one run of that rule per launch.
+  static let removableProbeName = "Arkt action probe"
 
   private let server: ContractPageServer
   private let control: ChromiumEngine
@@ -252,6 +255,23 @@ final class EngineContractRunner {
         // A typed navigation to chrome://crash is a renderer debug URL: content kills the tab's renderer without
         // committing anything (rule 25, #577).
         engine.navigate(id, to: URL(string: "chrome://crash")!)
+      },
+      removableExtension: { [unowned self] engine, windows in
+        // The action probe, loaded with --load-extension: Chromium lists every extension's action in every window.
+        let chromium = try chromium(engine)
+        var id: String?
+        do {
+          try await EngineContract.waitUntil(timeout: .seconds(10)) {
+            let found = windows.map { window in
+              chromium.extensionActions(in: window).first { $0.name == EngineContractRunner.removableProbeName }
+            }
+            id = found.allSatisfy { $0 != nil } ? found.first??.extensionID : nil
+            return id != nil
+          }
+        } catch {
+          throw RunnerError("the action probe is not listed (--load-extension=<engine/test-extensions/action-probe>)")
+        }
+        return id!
       }
     )
   }
