@@ -43,6 +43,22 @@ struct ShellTypeTests {
     #expect(style.font == NSFont.systemFont(ofSize: 12, weight: .semibold))
   }
 
+  /// Sizes that fit no role keep their values under their own names in their surfaces.
+  @Test @MainActor func namedSizesArePinned() {
+    #expect(CommandBarCellView.titleFontSize == 14)
+    #expect(CommandBarPreviewColumn.titleFontSize == 14)
+    #expect(CommandBarPreviewButton.titleFontSize == 12.5)
+    #expect(ExtensionsPanelView.emptyTitleFontSize == 14)
+    #expect(ExtensionsPanelView.emptyBodyFontSize == 12.5)
+    #expect(EmptyStateView.headingFontSize == 22)
+    #expect(LittleArktLookupView.fieldFontSize == 18)
+    #expect(DialogIconView.emojiFontSize == 17)
+    #expect(SettingsMonogram.letterFontSize == 11)
+    #expect(SettingsPaneItemView.labelFontSize == 11)
+    #expect(DownloadsPopoverView.keycapsFontSize == 11)
+    #expect(SettingsKeycapsView.fontSizeAtKeycapHeight == 12)
+  }
+
   /// The sidebar keeps its own measured metrics (tab titles 14 medium, #186); the roles do not move them.
   @Test func sidebarKeepsItsMeasuredMetrics() {
     #expect(SidebarMetrics.titleFontSize == 14)
@@ -69,7 +85,7 @@ struct SystemFontLintTests {
     .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
     .appending(path: "Sources/ShellUI")
 
-  static let pattern = #"systemFont\(ofSize:\s*[0-9.]"#
+  static let pattern = #"systemFont\(ofSize:\s*(CGFloat\()?[0-9.]"#
   /// Onboarding artwork: fixed-scale miniatures whose every size is part of the drawing, not chrome.
   static let exempt = ["Onboarding/OnboardingStage.swift", "Onboarding/OnboardingThemeViews.swift"]
 
@@ -100,6 +116,7 @@ struct SystemFontLintTests {
     #expect(Self.literalCalls(in: "label.font = .systemFont(ofSize: 13)").count == 1)
     #expect(Self.literalCalls(in: "NSFont.systemFont(ofSize: 11.5, weight: .medium)").count == 1)
     #expect(Self.literalCalls(in: ".systemFont(ofSize: 12 * capHeight / keycapHeight)").count == 1)
+    #expect(Self.literalCalls(in: ".systemFont(ofSize: CGFloat(13))").count == 1)
     #expect(Self.literalCalls(in: "label.font = ShellType.body.font").isEmpty)
     #expect(Self.literalCalls(in: ".systemFont(ofSize: SidebarMetrics.titleFontSize, weight: .medium)").isEmpty)
     #expect(Self.literalCalls(in: ".systemFont(ofSize: size, weight: weight)").isEmpty)
