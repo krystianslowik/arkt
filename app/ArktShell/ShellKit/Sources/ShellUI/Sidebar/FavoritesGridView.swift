@@ -86,8 +86,8 @@ public final class FavoriteTileView: NSView {
     IncreasedContrast.observe(self, selector: #selector(displayOptionsChanged(_:)))
     fillLayer.cornerRadius = FavoritesLayout.tileCornerRadius
     fillLayer.cornerCurve = .continuous
-    fillLayer.shadowRadius = 2
-    fillLayer.shadowOffset = CGSize(width: 0, height: -1)
+    fillLayer.shadowRadius = ShellTokens.rowLiftShadow.radius
+    fillLayer.shadowOffset = ShellTokens.rowLiftShadow.unflippedOffset
     faviconView.imageScaling = .scaleProportionallyUpOrDown
     faviconView.autoresizingMask = []
     faviconView.setAccessibilityElement(false)
@@ -119,10 +119,8 @@ public final class FavoriteTileView: NSView {
     fillLayer.cornerCurve = .continuous
     fillLayer.backgroundColor = displayedFill.cgColor
     IncreasedContrast.setEdge(on: fillLayer, increased: increaseContrast(), flavor: flavor)
-    let shadow = ShellTokens.tabCurrentShadow.resolve(flavor)
+    let shadow = ShellTokens.rowLiftShadow.color.resolve(flavor)
     fillLayer.shadowColor = shadow.cgColor
-    fillLayer.shadowRadius = 2
-    fillLayer.shadowOffset = CGSize(width: 0, height: -1)
     fillLayer.shadowOpacity = isCurrent && shadow.alpha > 0 ? 1 : 0
     updateFillShadowPath()
     fillLayer.opacity = Float(isCurrent ? selectionAlpha : 1)

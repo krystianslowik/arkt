@@ -204,8 +204,8 @@ final class ArchiveRowView: NSTableRowView {
     wantsLayer = true
     fillLayer.cornerRadius = SidebarMetrics.rowCornerRadius
     fillLayer.cornerCurve = .continuous
-    fillLayer.shadowRadius = 2
-    fillLayer.shadowOffset = CGSize(width: 0, height: -1)
+    fillLayer.shadowRadius = ShellTokens.rowLiftShadow.radius
+    fillLayer.shadowOffset = ShellTokens.rowLiftShadow.unflippedOffset
     setAccessibilityElement(true)
     setAccessibilityRole(.row)
     setAccessibilityIdentifier(AXID.Archive.row)
@@ -237,7 +237,7 @@ final class ArchiveRowView: NSTableRowView {
     ArchiveMotion.set {
       fillLayer.frame = fillRect
       fillLayer.backgroundColor = displayedFill?.cgColor
-      let shadow = ShellTokens.tabCurrentShadow.resolve(flavor)
+      let shadow = ShellTokens.rowLiftShadow.color.resolve(flavor)
       fillLayer.shadowColor = shadow.cgColor
       fillLayer.shadowOpacity = isInteractive && isSelected && shadow.alpha > 0 ? 1 : 0
       // Increase Contrast: the selected row gets the 1 pt edge (in dark it has no shadow to lift it).

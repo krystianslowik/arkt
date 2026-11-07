@@ -17,6 +17,16 @@ public enum SettingsTokens {
                                                 dark: BrandTokens.Palette.graphite.atAlpha(0.80))
   /// Group, pop-up and search field edges under Increase Contrast: the shell's.
   public static let separatorIncreasedContrast = ShellTokens.increasedContrastEdge
+  /// The switch knob's lift. An on knob in dark draws none (the switch skips it).
+  public static let switchKnobShadow = ShadowToken(color: TokenPair(light: .black(0.22), dark: .black(0.40)),
+                                                   radius: 1, offsetY: 1)
+  /// The selected segment's plate: light only.
+  public static let segmentPlateShadow = ShadowToken(color: TokenPair(light: .black(0.10), dark: .black(0)),
+                                                     radius: 1, offsetY: 1)
+  /// The selected pane item's plate: half the current tab's shadow, light only.
+  public static let paneItemPlateShadow = ShadowToken(
+    color: TokenPair(light: .black(ShellTokens.tabCurrentShadow.light.alpha * 0.5), dark: .black(0)),
+    radius: 1.5, offsetY: 1)
   /// A disabled control's opacity (decision 4: rows for features not built yet).
   public static let disabledControlAlpha: CGFloat = 0.42
 }
