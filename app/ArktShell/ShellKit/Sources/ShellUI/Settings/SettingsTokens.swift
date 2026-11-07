@@ -71,7 +71,7 @@ public enum SettingsMetrics {
   static let switchSize = NSSize(width: 32, height: 20)
   static let knob: CGFloat = 16
   static let popUpHeight: CGFloat = 26
-  static let popUpRadius: CGFloat = 8
+  static let popUpRadius = ShellRadius.control
   static let keycapHeight: CGFloat = 22
   static let keycapRadius: CGFloat = 6
   static let segmentedRadius: CGFloat = 9

@@ -37,7 +37,7 @@ enum ArchiveMetrics {
   static let filterButtonTrailing: CGFloat = 10
   static let fieldToFilterButton: CGFloat = 8
   static let chipHeight: CGFloat = 24
-  static let chipRemoveRadius: CGFloat = 8
+  static let chipRemoveRadius = ShellRadius.control
   static let chipBelow: CGFloat = 10
   static let sideMargin: CGFloat = 12
   static let chipSpacing: CGFloat = 6

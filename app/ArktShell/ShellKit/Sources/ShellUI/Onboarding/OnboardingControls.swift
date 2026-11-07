@@ -222,7 +222,7 @@ final class SwatchView: NSView {
       ring.path = circle(6)
       focus.path = circle(9)
       badge.frame = CGRect(x: bounds.width - 12, y: bounds.height - 12, width: 14, height: 14)
-      badge.cornerRadius = ShellRadius.pill(height: badge.frame.height)
+      badge.cornerRadius = ShellRadius.pill(height: badge.bounds.height)
     }
   }
 
@@ -603,7 +603,7 @@ final class OptionPillView: NSView {
       body.position = CGPoint(x: bounds.midX, y: bounds.midY)
       body.cornerRadius = bounds.height / 2
       check.frame = CGRect(x: 14, y: (bounds.height - 20) / 2, width: 20, height: 20)
-      check.cornerRadius = ShellRadius.pill(height: check.frame.height)
+      check.cornerRadius = ShellRadius.pill(height: check.bounds.height)
       let path = CGMutablePath()
       path.move(to: CGPoint(x: 5.5, y: 10.5))
       path.addLine(to: CGPoint(x: 8.8, y: 13.6))

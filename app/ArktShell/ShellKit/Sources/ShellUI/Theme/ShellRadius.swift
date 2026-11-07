@@ -6,6 +6,9 @@ import CoreGraphics
 public enum ShellRadius {
   /// Row-shaped fills: sidebar and Settings rows, the command bar's selected row, the sidebar drop slot.
   public static let row: CGFloat = 9  // TODO(measure): Arc's row radius (#77)
+  /// Small controls: the Settings pop-up button, the dialog input, the Little Arkt split button, the command bar
+  /// preview button, the Archive chip's remove button.
+  public static let control: CGFloat = 8
   /// Recessed fields that hold rows or text: Settings groups, the Archive list, the dialog list, the import field.
   public static let field: CGFloat = 10
   /// Empty-state tiles (Archive, Library, Extensions, Settings) and other glyph tiles.

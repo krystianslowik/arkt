@@ -419,7 +419,7 @@ enum DialogMetrics {
   static let sheetCornerRadius = ShellRadius.sheet
   static let panelCornerRadius = ShellRadius.popover
   static let alertCornerRadius = ShellRadius.sheet
-  static let inputRadius: CGFloat = 8
+  static let inputRadius = ShellRadius.control
 }
 
 // MARK: - Icon

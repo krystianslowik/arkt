@@ -37,7 +37,7 @@ public enum CommandBarGeometry {
   public static let previewThumbnailHeight: CGFloat = 116
   public static let previewThumbnailRadius = ShellRadius.card
   public static let previewButtonHeight: CGFloat = 30
-  public static let previewButtonRadius: CGFloat = 8
+  public static let previewButtonRadius = ShellRadius.control
   static let scopeChipRadius: CGFloat = 6
   public static let previewOpenDot: CGFloat = 6
 

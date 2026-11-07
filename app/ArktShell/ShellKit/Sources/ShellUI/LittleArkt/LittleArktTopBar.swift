@@ -164,7 +164,7 @@ final class LittleArktTopBar: WindowDragView {
 @MainActor
 final class LittleArktSegmentButton: NSButton {
   /// The split button's radius; the segment's focus ring follows it.
-  static let cornerRadius: CGFloat = 8
+  static let cornerRadius = ShellRadius.control
   var textColor: NSColor = .labelColor { didSet { applyTitleColor() } }
   /// Shown while the segment has keyboard focus, on its edge; the bar sets its tone.
   private(set) lazy var keyboardFocusRing = KeyboardFocusRingView.attach(inside: self, radius: Self.cornerRadius)

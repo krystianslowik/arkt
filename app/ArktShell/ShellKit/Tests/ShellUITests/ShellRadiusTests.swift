@@ -9,6 +9,7 @@ import Testing
 struct ShellRadiusTests {
   @Test func scaleValuesArePinned() {
     #expect(ShellRadius.row == 9)
+    #expect(ShellRadius.control == 8)
     #expect(ShellRadius.field == 10)
     #expect(ShellRadius.tile == 12)
     #expect(ShellRadius.card == 10)
@@ -25,6 +26,14 @@ struct ShellRadiusTests {
     #expect(SettingsMetrics.rowRadius == ShellRadius.row)
     #expect(SettingsMetrics.paneItemRadius == ShellRadius.row)
     #expect(CommandBarGeometry.selectedRowRadius == ShellRadius.row)
+  }
+
+  @Test func smallControlsFollowTheControlToken() {
+    #expect(SettingsMetrics.popUpRadius == ShellRadius.control)
+    #expect(DialogMetrics.inputRadius == ShellRadius.control)
+    #expect(LittleArktSegmentButton.cornerRadius == ShellRadius.control)
+    #expect(CommandBarGeometry.previewButtonRadius == ShellRadius.control)
+    #expect(ArchiveMetrics.chipRemoveRadius == ShellRadius.control)
   }
 
   @Test func recessedFieldsFollowTheFieldToken() {
@@ -45,9 +54,27 @@ struct ShellRadiusTests {
     #expect(DialogMetrics.alertCornerRadius == ShellRadius.sheet)
   }
 
-  @Test func pillsAreHalfTheirHeight() {
-    #expect(ZoomPillLayout.cornerRadius == ShellRadius.pill(height: ZoomPillLayout.height))
-    #expect(FindBarLayout.cornerRadius == ShellRadius.pill(height: FindBarLayout.height))
+  @Test func pillRadiiArePinned() {
+    #expect(ZoomPillLayout.cornerRadius == 18)
+    #expect(FindBarLayout.cornerRadius == 18)
+    #expect(SettingsMetrics.capsuleHeight == 24)
+    #expect(ToastView.dismissSize == 24)
+  }
+
+  /// Radii that fit no role keep their own names; their values are the literals they replaced (#620).
+  @Test func surfaceRadiiArePinned() {
+    #expect(SettingsMetrics.segmentedRadius == 9)
+    #expect(SettingsMetrics.segmentedPlateRadius == 7)
+    #expect(SettingsMetrics.keycapRadius == 6)
+    #expect(SettingsMetrics.swatchRadius == 6)
+    #expect(ArchiveMetrics.bannerRadius == 12)
+    #expect(PeekLayout.grabberRadius == 3)
+    #expect(CommandBarGeometry.scopeChipRadius == 6)
+    #expect(ExtensionsPanelMetrics.dotRadius == 4)
+    #expect(ExtensionsPanelMetrics.insertionLineRadius == 1)
+    #expect(PrivatePageRowView.buttonRadius == 4)
+    #expect(LittleArktIconButton.cornerRadius == 7)
+    #expect(ImportCheckbox.cornerRadius == 4.5)
   }
 }
 
