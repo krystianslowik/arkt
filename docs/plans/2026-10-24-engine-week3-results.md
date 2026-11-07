@@ -5254,3 +5254,153 @@ Deliberate breaks, each restored and green again:
 Run 3 stopped by exact PID; the contract run exited on its own (`ps` shows no `embed-721` process). Deleted: the
 profiles under `profiles/721-20261107/`, the `embed-721` folder, the derived data folder `arkt-shell-dd/721`, the
 build logs and the run's defaults suite.
+
+## E1: crash guards (patches 0013 and 0014)
+
+Date 2026-11-07. Branch `engine/e1-crash-guards` from `origin/main` (`e7bccbf`). Batch E1 of the engine connector
+design (`docs/plans/2026-11-07-engine-connector-design.md`, PR #795, sections 2.3 and 3 "E1. Crash guards"). No issue
+yet; the batch issue list waits for the maintainer. Guards and one generalization only, no hook: the hooks question
+(design section 1.2) is still open.
+
+### Gate
+
+- Why patches: the five crash sites dereference `BrowserView::GetBrowserViewForBrowser`, which is always nullptr on
+  an Arkt window; no overlay seam reaches inside them. The toast site `CHECK`s that only tests lack an anchor.
+- Facade header: unchanged (`cmp` identical). `.patches`: 12 to 14; no open engine pull request touches it.
+- Overlay link checked before every build: `$CR/arkt` points at this worktree's `engine/arkt`; branch `arkt` in
+  sync with `.patches` before the work (12 = 12).
+- Build: `nice -n 15 autoninja -j 4 -C out/Spike chrome`; Chromium disk 1.9 TB free, internal 36 GB, swap 2.9 of
+  4 GB. Load average 2 to 6 (other lanes' work; nothing added).
+
+### What landed
+
+Two patch files, one per theme (design section 2.3), 4 upstream files, 57 insertions, 9 deletions:
+
+| Patch | Site | Change |
+|---|---|---|
+| 0013 guards | `ui/views/storage/storage_pressure_bubble_view.cc` (row 1) | `ShowBubble` returns when the last active window has no `BrowserView` (4 lines) |
+| 0013 | `ui/browser_actions.cc` Cut, Copy, Paste (rows 3-5) | without a `BrowserView`, the action calls the active tab's `WebContents::Cut/Copy/Paste` (3 hunks, 8 lines each) |
+| 0013 | `ui/toasts/toast_controller.cc` `CreateToast` (row T) | no anchor and an initialized-never `BrowserElementsViews` (no primary window widget, an embedder's window): the toast is dropped as if it closed at once (timer stopped, close callback run, current id cleared) instead of `CHECK_IS_TEST()`. Unit tests (no browser) and Webium keep their paths |
+| 0014 generalization | `ui/browser_commands.cc` `CloseTab` (row 2) | the Close Tab accelerator comes from `BrowserWindow::FromBrowser(browser)->GetAcceleratorProvider()`; no provider or no `IDC_CLOSE_TAB` shortcut: close without the confirmation toast; a toast the window could not show: close too. `kClosePinnedTab` is actionable, so in Chrome a toast is always showing or queued after `MaybeShowToast` and the last branch never runs there |
+
+- `GetAnchorView` needed no guard: `BrowserElementsViewsImpl` exists for every window (`browser_window_features.cc:357`)
+  and returns no view on an Arkt window, so the crash was in `CreateToast` (`toast_controller.cc:327`), not where the
+  design expected (`:442-452`).
+- Why the toast state is cleared: the first version only skipped the `CHECK`. `ShowToast` sets the current toast id
+  before `CreateToast`, and only the widget's destruction clears it, so after one dropped toast every later toast was
+  queued forever, and a pinned tab could never be closed with `IDC_CLOSE_TAB` (run `after-a` v1: two Copy URL toasts,
+  then close-tab twice, tab still open).
+- Overlay: `ArktAcceleratorProvider` (`arkt_browser_window_parts`), returned by `ArktBrowserWindow::GetAcceleratorProvider`
+  (was an `ARKT_STUB`). It reads the main menu: the first `commandDispatch:` item tagged with the command id that has
+  a key equivalent (the shell's page commands, `MainMenu.swift`). The app's Cmd-W is Archive Tab, so the app has no
+  `IDC_CLOSE_TAB` accelerator and a pinned tab closes without a toast.
+- Overlay comment: `arkt_browser_window.h` now names the three browser types Arkt takes (design section 2.1).
+- Self-test (test-only): `arkt-selftest chrome-command copy-url|close-tab|cut|copy|paste|pin` sends the Chromium
+  command through the host's `executeCommand`, as a menu item would.
+
+### Gated sites (design section 2.3, "The 15 gated dereferences")
+
+No patch. Checked against the pinned source with a fresh profile, no sign-in and no policy:
+
+| Site | Switch | Evidence |
+|---|---|---|
+| WebAuthn ambient sign-in (`ambient_signin_controller.cc:120`) | `--disable-features=WebAuthenticationAmbientSignin` (shell launch list) | already `FEATURE_DISABLED_BY_DEFAULT` (`device/fido/public/features.cc:92-94`); the switch also wins over `--enable-experimental-web-platform-features` |
+| Media remoting dialog (`media_remoting_dialog_view.cc:49`) | `--disable-features=MediaRouter` (shell launch list) | reached while casting a tab; `kMediaRouter` is enabled by default. The remoting pref cannot be set by a default value (`cast_remoting_connector.cc:447-452`). This turns Cast off until E2 draws its device list (#653) |
+| glic (`browser_conditions.cc:191`, `glic_metrics.cc:1003`, `context_sharing_border_view.cc:109`) | `--disable-features=Glic` (shell launch list) | `kGlic` is enabled by default on Mac; glic stays inert without a capable signed-in account, the switch removes it |
+| iOS promos (`ios_promo_controller.cc:125`, `ios_promos_utils.cc:172`) | local-state default `browser.promotions_enabled` = false (`PreProfileInit`, next to the quit confirmation default; the PromotionsEnabled policy still wins) | needs active sync otherwise; the pref also stops the extensions zero-state promo |
+| Lens region search (`lens_region_search_controller.cc:40`) | none needed | not compiled: `ENABLE_LENS_DESKTOP_GOOGLE_BRANDED_FEATURES` is 0 in an unbranded build |
+| Relaunch notification (`relaunch_recommended_bubble_view.cc:47`) | none needed | `browser.relaunch_notification` defaults to 0, which never shows the bubble |
+| Idle timeout (`idle_bubble.cc:67`) | none needed | `idle_timeout` defaults to zero: no polling |
+| DICE interception (`dice_web_signin_interception_bubble_view.cc:504`) | none needed | the support check returns false without a `BrowserView` and the interceptor aborts before the bubble |
+| Batch upload (`batch_upload_service.cc:382`) | none needed | needs a signed-in primary account |
+| Web app update review (`web_app_update_review_dialog.cc:143`, `:148`, `:262`) | none needed on Arkt windows | only app windows (`TYPE_APP`) reach it, and those stay Views windows with a `BrowserView` |
+| HaTS | none needed | Arkt overrides `ShowHatsDialog` (design) |
+
+The three feature names join `DestroyProfileOnBrowserClose` in `EngineLaunchArguments.requiredDisabledFeatures`,
+so every engine launch from the shell carries them; a caller's own `--disable-features` list is extended.
+
+### Tests first
+
+`EngineLaunchArgumentsTests` (ChromiumEngineKitTests): the expected list gained the three names, and two tests were
+added (`keepsFeaturesWithoutNativeUIOff`, `addsOnlyTheFeaturesACallerDidNotName`). Before the change:
+`nice -n 20 swift test -j 2 --filter EngineLaunchArgumentsTests` failed with 7 issues; after: 9 tests in 1 suite
+passed. The full suite is left to CI.
+
+### Build
+
+| Step | Result | Time |
+|---|---|---|
+| Before: `main` plus the self-test command, no new patch | `The build has finished successfully.`, `FAILED:` 0 (one earlier attempt failed on `-Wexit-time-destructors` in the self-test command, fixed) | 35 s |
+| Patches 0013 and 0014 (first toast guard) and the overlay | finished, `FAILED:` 0 | 50 s |
+| Toast state cleared, CloseTab falls back when no toast shows | finished, `FAILED:` 0 | 40 s |
+| Break 1: 0013's three files back to 0012 (working tree only) | finished, `FAILED:` 0 | 43 s |
+| Break 2: 0013 restored, `browser_commands.cc` back to 0013 | finished, `FAILED:` 0 | 42 s |
+| Restored, promotions default added | finished, `FAILED:` 0; `git status` clean in `$CR` | 41 s |
+
+### Smoke (`out/Spike/Chromium.app`, `--no-startup-window --arkt-facade-selftest --arkt-engine-test-api --remote-debugging-port=9333`, fresh profiles under `profiles/e1-20261107/`, `--use-mock-keychain`, a page with two text fields on `127.0.0.1:8791`, commands through the page title over the DevTools protocol; Chromium's main menu unless `--arkt-menu-probe` is named)
+
+Every run starts with `ARKT: browsers normal=1 arkt=1 views=0`.
+
+| Run | Check | Result |
+|---|---|---|
+| before | `chrome-command copy-url` (Copy URL toast) | `FATAL toast_controller.cc:327 Check failed: base::internal::get_is_test_impl()`, stack `CreateToast` < `ShowToast` < `MaybeShowToast` < `chrome::CopyURL` |
+| before | Clear Browsing Data from `chrome://settings` (`clearBrowsingData` message) | no crash, no toast: `kClearBrowsingDataToast` is disabled by default |
+| before | storage pressure (`chrome://quota-internals`, Simulate) | `Received signal 11 SEGV_ACCERR`; crash report top frames `BrowserView::toolbar_button_provider()` < `StoragePressureBubbleView::ShowBubble` |
+| before | `pin`, then `close-tab` | `FATAL browser_commands.cc:1516 Check failed: browser_view.` |
+| before | `cut`, `copy`, `paste` (one launch each, text selected in a field) | `FATAL browser_actions.cc:2270`, `:2288`, `:2306 Check failed: *BrowserView::GetBrowserViewForBrowser(bwi).` |
+| after-a | `copy-url` twice | no crash; the clipboard holds the page URL |
+| after-a | `copy`, `paste`, `cut`, twice each | clipboard `alpha`, second field `alpha`, clipboard `beta` and the first field `alpha `: the commands act on the focused field |
+| after-a | storage pressure twice | no crash (the second is inside the throttling interval) |
+| after-a | `pin`, then `close-tab` once (after two dropped toasts) | `facade tab closed ... reason page`, `native window destroyed`: closed on the first command, no crash |
+| after-b (`--arkt-menu-probe`: Cmd-W is Archive Tab, no `IDC_CLOSE_TAB` item) | `copy-url`, `pin`, `close-tab` | closed on the first command, no crash |
+| after-final (with `--disable-features=DestroyProfileOnBrowserClose,WebAuthenticationAmbientSignin,MediaRouter,Glic`, as the shell launches) | every check of after-a once, then pin and close | the same results, 0 `FATAL`, `Check failed`, `NOTREACHED` or `Received signal` lines |
+| break 1, Chromium menu | `pin`, `close-tab` | `Check failed: base::internal::get_is_test_impl()`: the provider found Cmd-W in Chromium's menu and the toast path ran |
+| break 1, probe menu | `pin`, `close-tab` | closed, no crash: the provider found no `IDC_CLOSE_TAB` item and the tab closed before the toast |
+| break 1 | `copy-url`; `cut`; `copy`; `paste`; storage pressure (one launch each) | the before crashes again: `toast_controller.cc` `CHECK_IS_TEST`; `browser_actions.cc` `CHECK_DEREF` for each; `SEGV_ACCERR` |
+| break 2, both menus | `pin`, `close-tab` | `Check failed: browser_view.` |
+
+`after-a` v1 (the first toast guard, which only skipped the `CHECK`) is the run that found the stuck toast id: two
+Copy URL toasts, then `close-tab` twice, and the pinned tab stayed open with no crash.
+
+Not checked directly: that the three disabled features and the promotions default are off at run time
+(`chrome://local-state` lists only changed values, and the debug pages are disabled); they rest on the switch
+reaching the command line and on the code paths in the table above.
+
+### Patch budget
+
+| Source | Count |
+|---|---|
+| `.patches` lines | 14 |
+| `arkt` commits above `156.0.8078.48` | 14 |
+
+In sync. Export added 0013 and 0014 and changed only `.patches` otherwise (0001 to 0012 byte-identical). Facade header
+copies `cmp` identical.
+
+| Gate (design section 2.5) | Before | After E1 |
+|---|---|---|
+| Patch files | 12 | 14 |
+| Upstream files outside 0001-0004 | 15 | 19 |
+| Seam patch files | 4 | 6 |
+| Hunks in `browser_actions.cc` and `browser_commands.cc` | 0 | 4 (3 and 1; the proposed cap) |
+| Hot-file hunks (`browser_window_features.cc`, `tab_features.cc`) | 0 | 0 |
+| Widely included headers changed | 0 | 0 |
+
+### Left open
+
+- **Low-disk notice.** Patch 0013 only stops the crash; nothing tells the user. The overlay disk watcher needs a
+  facade event (an additive header change both lanes agree to in an issue) and a native notice designed first
+  (`arkt-design-first`). Follow-up, with the E1 issue.
+- **Toasts are dropped, not shown.** Routing them to the shell is a hook in `ToastController` and waits for the hooks
+  answer (design section 2.4).
+- **0004's subject** still says "normal windows" (design section 2.1); rewording it rewrites the `arkt` history under
+  eight later commits, so it waits for the next rebase.
+- **Cast is off** with `MediaRouter` until E2 draws the device list (#653).
+- **Upstream unit tests** with a `TestBrowserWindow` and a real `CreateToast` now get the dropped-toast path instead of a
+  toast that stays current; none were run (they are not part of `arkt_patch_unittests`).
+
+### Cleanup
+
+Every Chromium run stopped by exact PID or exited when it crashed or closed its last tab (`ps -p` prints nothing for
+each); the loopback server stopped by PID. Deleted: the throwaway profiles under `profiles/e1-20261107/`, the build
+logs, and the crash reports the crashing runs wrote. The runs wrote to the system clipboard (it held no text before);
+it was cleared afterwards. Nothing under `~/Applications/ArktTest` or `/Applications/Arkt.app` was touched.

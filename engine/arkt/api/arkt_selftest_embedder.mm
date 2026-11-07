@@ -1096,6 +1096,30 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
                  << " id=" << command_id
                  << " enabled=" << (enabled ? "yes" : "no")
                  << " tab=" << tab.sessionId << " now=" << tab.zoomPercent;
+  } else if (command == "chrome-command") {
+    // E1 crash guards: Chromium commands the shell does not send today, sent
+    // through the host as a menu item would send them:
+    // copy-url|close-tab|cut|copy|paste|pin.
+    const int command_id = argument == "copy-url"    ? IDC_COPY_URL
+                           : argument == "close-tab" ? IDC_CLOSE_TAB
+                           : argument == "cut"       ? IDC_CUT
+                           : argument == "copy"      ? IDC_COPY
+                           : argument == "paste"     ? IDC_PASTE
+                           : argument == "pin"       ? IDC_WINDOW_PIN_TAB
+                                                     : 0;
+    id<ArktWindowHost> host = tab.browser.host;
+    BOOL enabled = command_id && host.validateCommand &&
+                   host.validateCommand(command_id);
+    LOG(WARNING) << "ARKT selftest chrome-command " << argument
+                 << " id=" << command_id
+                 << " enabled=" << (enabled ? "yes" : "no")
+                 << " tab=" << tab.sessionId;
+    if (enabled && host.executeCommand) {
+      host.executeCommand(command_id,
+                          static_cast<NSInteger>(
+                              WindowOpenDisposition::CURRENT_TAB));
+    }
+    LOG(WARNING) << "ARKT selftest chrome-command " << argument << " done";
   } else if (command == "fullscreen") {
     // #577: HTML fullscreen of the page's body, with a user gesture as a
     // click gives it; "exit" leaves it from script.
