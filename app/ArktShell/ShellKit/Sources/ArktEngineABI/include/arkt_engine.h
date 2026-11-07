@@ -41,7 +41,10 @@ NS_ASSUME_NONNULL_BEGIN
 @protocol ArktInfobar;
 @protocol ArktJavaScriptDialog;
 @protocol ArktLinkActivation;
+@protocol ArktPageInfo;
 @protocol ArktPermissionRequest;
+@protocol ArktSitePermission;
+@protocol ArktSitePermissions;
 @protocol ArktTabHandle;
 @protocol ArktWindowHost;
 @protocol ArktWindowRequest;
@@ -216,6 +219,13 @@ typedef NS_ENUM(NSInteger, ArktEngineEventKind) {
   // isTabFullscreen. Not sent for the window's own full screen. The engine
   // reserves no infobar height while the tab is fullscreen.
   ArktEngineEventKindTabFullscreenChanged = 29,
+  // The tab's page info changed (#583): a content setting of its site
+  // changed in its profile (from this facade, Chromium's settings pages or an
+  // extension), its connection's security state changed, or the site data
+  // count it waits for arrived. No values: the handle's pageInfo has the new
+  // state. Sent only for tabs whose last committed origin the change matches;
+  // one call of this facade that changes settings reports once per tab.
+  ArktEngineEventKindPageInfoChanged = 30,
 };
 
 // Why a tab's page process went away (#577), folded from
@@ -238,6 +248,59 @@ typedef NS_ENUM(NSInteger, ArktZoomCommand) {
   ArktZoomCommandZoomIn = 0,
   ArktZoomCommandZoomOut = 1,
   ArktZoomCommandReset = 2,
+};
+
+// How a page reached the browser (#583), from the tab's security level and
+// visible security state (chrome_security_state) and the URL's scheme:
+// SECURE is Secure; DANGEROUS with a Safe Browsing verdict
+// (malicious_content_status set) is Flagged, else with a certificate error
+// (cert_status) CertificateError, else NotSecure; any other level on https
+// with mixed content (displayed_mixed_content, contained_mixed_form,
+// ran_mixed_content) is NotFullySecure, else NotSecure. file is LocalFile;
+// every scheme other than http, https and file (chrome, chrome-extension,
+// devtools, view-source, about, data) is InternalPage.
+typedef NS_ENUM(NSInteger, ArktPageConnection) {
+  ArktPageConnectionSecure = 0,
+  ArktPageConnectionNotSecure = 1,
+  ArktPageConnectionNotFullySecure = 2,
+  ArktPageConnectionCertificateError = 3,
+  ArktPageConnectionFlagged = 4,
+  ArktPageConnectionLocalFile = 5,
+  ArktPageConnectionInternalPage = 6,
+};
+
+// A content setting as page info offers it (#583): CONTENT_SETTING_ALLOW,
+// _ASK and _BLOCK.
+typedef NS_ENUM(NSInteger, ArktPermissionSetting) {
+  ArktPermissionSettingAllow = 0,
+  ArktPermissionSettingAsk = 1,
+  ArktPermissionSettingBlock = 2,
+};
+
+// The permissions page info lists (#583), each one ContentSettingsType.
+typedef NS_ENUM(NSInteger, ArktSitePermissionKind) {
+  ArktSitePermissionKindLocation = 0,            // GEOLOCATION
+  ArktSitePermissionKindCamera = 1,              // MEDIASTREAM_CAMERA
+  ArktSitePermissionKindMicrophone = 2,          // MEDIASTREAM_MIC
+  ArktSitePermissionKindNotifications = 3,       // NOTIFICATIONS
+  ArktSitePermissionKindPopups = 4,              // POPUPS
+  ArktSitePermissionKindSound = 5,               // SOUND
+  ArktSitePermissionKindJavaScript = 6,          // JAVASCRIPT
+  ArktSitePermissionKindImages = 7,              // IMAGES
+  ArktSitePermissionKindAutomaticDownloads = 8,  // AUTOMATIC_DOWNLOADS
+  ArktSitePermissionKindClipboard = 9,           // CLIPBOARD_READ_WRITE
+  ArktSitePermissionKindMidiDevices = 10,        // MIDI_SYSEX
+  ArktSitePermissionKindMotionSensors = 11,      // SENSORS
+  ArktSitePermissionKindUsbDevices = 12,         // USB_GUARD
+  ArktSitePermissionKindSerialPorts = 13,        // SERIAL_GUARD
+  ArktSitePermissionKindHidDevices = 14,         // HID_GUARD
+  ArktSitePermissionKindBluetoothDevices = 15,   // BLUETOOTH_GUARD
+  ArktSitePermissionKindFileEditing = 16,        // FILE_SYSTEM_WRITE_GUARD
+  ArktSitePermissionKindWindowManagement = 17,   // WINDOW_MANAGEMENT
+  ArktSitePermissionKindLocalFonts = 18,         // LOCAL_FONTS
+  ArktSitePermissionKindIdleDetection = 19,      // IDLE_DETECTION
+  ArktSitePermissionKindBackgroundSync = 20,     // BACKGROUND_SYNC
+  ArktSitePermissionKindInsecureContent = 21,    // MIXEDSCRIPT
 };
 
 // Why the engine asks the embedder for a window host.
@@ -711,6 +774,68 @@ NS_SWIFT_UI_ACTOR
 @property(nonatomic, readonly) NSInteger disposition;
 @end
 
+// One permission of a site as page info shows it (#583), read from the
+// profile's HostContentSettingsMap as chrome://settings/content/siteDetails
+// reads it.
+NS_SWIFT_UI_ACTOR
+@protocol ArktSitePermission <NSObject>
+@property(nonatomic, readonly) ArktSitePermissionKind kind;
+// Chromium's name for it (PageInfoUI::PermissionTypeToUIString).
+@property(nonatomic, readonly, copy) NSString* title;
+// The effective setting: the site's exception, else the default; an
+// embargoed permission reads Block.
+@property(nonatomic, readonly) ArktPermissionSetting setting;
+// No exception for the site: the setting is the default.
+@property(nonatomic, readonly) BOOL isDefault;
+// ArktPermissionSetting values the permission takes, in Allow, Ask, Block
+// order (the content settings registry's valid settings). Contains setting.
+@property(nonatomic, readonly, copy) NSArray<NSNumber*>* options;
+@end
+
+// A tab's page info as plain values (#583), read when the property is read.
+NS_SWIFT_UI_ACTOR
+@protocol ArktPageInfo <NSObject>
+// The site's origin, url::Origin::Serialize() ("https://example.com",
+// "http://127.0.0.1:8080"); "file://" for a local file; the URL for an
+// internal page.
+@property(nonatomic, readonly, copy) NSString* origin;
+// The host as Chromium shows it (url_formatter::IDNToUnicode, which keeps
+// punycode when its spoof checks decline), the file name for a local file,
+// the URL for an internal page.
+@property(nonatomic, readonly, copy) NSString* host;
+@property(nonatomic, readonly) ArktPageConnection connection;
+// The certificate of a Secure connection: the subject's common name, the
+// issuer's organization (else common name) and the expiry; nil otherwise.
+@property(nonatomic, readonly, nullable, copy) NSString* certificateIssuedTo;
+@property(nonatomic, readonly, nullable, copy) NSString* certificateIssuedBy;
+@property(nonatomic, readonly, nullable, copy) NSDate* certificateValidUntil;
+// Site data as chrome://settings/content/siteDetails counts it
+// (BrowsingDataModel entries matching the origin: their storage bytes and
+// first-party cookies). NO before the profile's first count has arrived;
+// PageInfoChanged follows when it does. A count older than 10 s is recounted
+// when read: the old count is reported meanwhile, and PageInfoChanged
+// follows when the new one differs from what the tab read. NO for a page
+// without site settings.
+@property(nonatomic, readonly) BOOL hasSiteData;
+@property(nonatomic, readonly) NSInteger siteDataCookies;
+@property(nonatomic, readonly) int64_t siteDataBytes;
+// Location, camera, microphone and notifications first, then every other
+// kind that has an exception for the site, is embargoed or in use, in
+// ArktSitePermissionKind order. Empty for a local file or an internal page.
+@property(nonatomic, readonly, copy)
+    NSArray<id<ArktSitePermission>>* permissions;
+@end
+
+// A site with at least one exception in the profile (#583).
+NS_SWIFT_UI_ACTOR
+@protocol ArktSitePermissions <NSObject>
+@property(nonatomic, readonly, copy) NSString* origin;
+@property(nonatomic, readonly, copy) NSString* host;
+// Only the kinds with an exception, in ArktSitePermissionKind order.
+@property(nonatomic, readonly, copy)
+    NSArray<id<ArktSitePermission>>* permissions;
+@end
+
 // The embedder seam of an engine window (week 2's protocol, moved here).
 // The engine never creates or lays out the window: it asks its host for the
 // NSWindow and for the fallback view, and sets the blocks below.
@@ -863,6 +988,36 @@ NS_SWIFT_UI_ACTOR
                                             NSSize pixelSize,
                                             CGFloat scale))completion
     NS_SWIFT_NAME(copyFrame(maxPixelSize:completion:)) NS_SWIFT_DISABLE_ASYNC;
+// Page info (#583) of the tab's last committed page, in the tab's profile;
+// nil for a closed tab or one without a committed page. Reading it starts
+// the site data count when the profile's count is older than 10 s.
+@property(nonatomic, readonly, nullable) id<ArktPageInfo> pageInfo;
+// Sets one permission of `origin` in the tab's profile, as Chromium's page
+// info does (PageInfo::OnSitePermissionChanged: the narrowest pattern,
+// embargo cleared when it is not Block). The default setting removes the
+// exception. A setting the kind does not take, or the one it has, does
+// nothing. When `origin` is the tab's own, the change counts for the reload
+// infobar of -pageInfoDidClose. Reported with PageInfoChanged on the tabs of
+// that origin.
+- (void)setPermission:(ArktSitePermissionKind)kind
+            toSetting:(ArktPermissionSetting)setting
+            forOrigin:(NSString*)origin
+    NS_SWIFT_NAME(setPermission(_:to:forOrigin:));
+// Removes the origin-scoped exceptions and the embargoes of `origin`'s
+// permissions in the tab's profile, as setting each to its default
+// (SetNarrowestContentSetting). A broader user exception (a [*.]host pattern)
+// stays, as with Chromium's page info. Cookies and site data stay.
+- (void)resetPermissionsForOrigin:(NSString*)origin
+    NS_SWIFT_NAME(resetPermissions(forOrigin:));
+// The shell's page info panel of this tab closed (PageInfo::OnUIClosing).
+// After a change from this tab that needs a reload (any kind but sound),
+// Chromium's reload infobar (ArktInfobarKindReload) is added to this tab,
+// once; otherwise nothing happens.
+- (void)pageInfoDidClose;
+// Opens chrome://settings/content/siteDetails for `origin` in the tab's
+// window, as page info's Site settings link does.
+- (void)openSiteSettingsForOrigin:(NSString*)origin
+    NS_SWIFT_NAME(openSiteSettings(forOrigin:));
 @end
 
 // An engine window (one Browser).
@@ -1044,6 +1199,11 @@ NS_SWIFT_UI_ACTOR
 // The shell answered the prompt: lastSessionCrashed is NO for the rest of the
 // run. A second call does nothing.
 - (void)dismissLastSession;
+
+// Every site with a permission exception (a user-set pattern for one origin)
+// in the profile the engine started with (#583), sorted by host.
+@property(nonatomic, readonly, copy)
+    NSArray<id<ArktSitePermissions>>* sitesWithPermissions;
 @end
 
 // Implemented by the Swift app: @objc(ArktShellEmbedder), in the main

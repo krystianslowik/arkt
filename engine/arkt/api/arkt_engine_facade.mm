@@ -13,6 +13,7 @@
 #include "arkt/api/arkt_downloads.h"
 #include "arkt/api/arkt_embedder.h"
 #include "arkt/api/arkt_import_writer.h"
+#include "arkt/api/arkt_page_info.h"
 #include "arkt/browser/arkt_browser_window.h"
 #include "arkt/browser/arkt_extension_batch_install.h"
 #include "arkt/browser/arkt_extension_calls.h"
@@ -356,6 +357,8 @@ const char* KindName(ArktEngineEventKind kind) {
       return "ZoomChanged";
     case ArktEngineEventKindTabFullscreenChanged:
       return "TabFullscreenChanged";
+    case ArktEngineEventKindPageInfoChanged:
+      return "PageInfoChanged";
   }
   return "unknown";
 }
@@ -862,6 +865,160 @@ NSData* PNGForInfobarIcon(NSImage* image) {
 @end
 
 // A link activation as plain values (#313).
+// Page info values (#583), copied when the handle's pageInfo is read.
+@interface ArktFacadeSitePermission : NSObject <ArktSitePermission>
+- (instancetype)initWithValues:(const arkt::SitePermissionValues&)values;
+@end
+
+@implementation ArktFacadeSitePermission {
+  NSString* _title;
+  NSArray<NSNumber*>* _options;
+}
+
+@synthesize kind = _kind;
+@synthesize setting = _setting;
+@synthesize isDefault = _isDefault;
+
+- (instancetype)initWithValues:(const arkt::SitePermissionValues&)values {
+  if ((self = [super init])) {
+    _kind = static_cast<ArktSitePermissionKind>(values.kind);
+    _title = base::SysUTF16ToNSString(values.title);
+    _setting = static_cast<ArktPermissionSetting>(values.setting);
+    _isDefault = values.is_default;
+    NSMutableArray<NSNumber*>* options = [NSMutableArray array];
+    for (arkt::PermissionValue option : values.options) {
+      [options addObject:@(static_cast<NSInteger>(option))];
+    }
+    _options = [options copy];
+  }
+  return self;
+}
+
+- (NSString*)title {
+  return _title;
+}
+
+- (NSArray<NSNumber*>*)options {
+  return _options;
+}
+
+@end
+
+namespace {
+
+NSArray<id<ArktSitePermission>>* SitePermissionObjects(
+    const std::vector<arkt::SitePermissionValues>& list) {
+  NSMutableArray<id<ArktSitePermission>>* permissions = [NSMutableArray array];
+  for (const arkt::SitePermissionValues& values : list) {
+    [permissions
+        addObject:[[ArktFacadeSitePermission alloc] initWithValues:values]];
+  }
+  return [permissions copy];
+}
+
+}  // namespace
+
+@interface ArktFacadePageInfo : NSObject <ArktPageInfo>
+- (instancetype)initWithValues:(const arkt::PageInfoValues&)values;
+@end
+
+@implementation ArktFacadePageInfo {
+  NSString* _origin;
+  NSString* _host;
+  NSString* _certificateIssuedTo;
+  NSString* _certificateIssuedBy;
+  NSDate* _certificateValidUntil;
+  NSArray<id<ArktSitePermission>>* _permissions;
+}
+
+@synthesize connection = _connection;
+@synthesize hasSiteData = _hasSiteData;
+@synthesize siteDataCookies = _siteDataCookies;
+@synthesize siteDataBytes = _siteDataBytes;
+
+- (instancetype)initWithValues:(const arkt::PageInfoValues&)values {
+  if ((self = [super init])) {
+    _origin = base::SysUTF8ToNSString(values.origin);
+    _host = base::SysUTF16ToNSString(values.host);
+    _connection = static_cast<ArktPageConnection>(values.connection);
+    if (values.issued_to) {
+      _certificateIssuedTo = base::SysUTF8ToNSString(*values.issued_to);
+    }
+    if (values.issued_by) {
+      _certificateIssuedBy = base::SysUTF8ToNSString(*values.issued_by);
+    }
+    if (values.valid_until && !values.valid_until->is_null()) {
+      _certificateValidUntil = values.valid_until->ToNSDate();
+    }
+    _hasSiteData = values.site_data.has_value();
+    if (values.site_data) {
+      _siteDataCookies = static_cast<NSInteger>(values.site_data->cookies);
+      _siteDataBytes = values.site_data->bytes;
+    }
+    _permissions = SitePermissionObjects(values.permissions);
+  }
+  return self;
+}
+
+- (NSString*)origin {
+  return _origin;
+}
+
+- (NSString*)host {
+  return _host;
+}
+
+- (NSString*)certificateIssuedTo {
+  return _certificateIssuedTo;
+}
+
+- (NSString*)certificateIssuedBy {
+  return _certificateIssuedBy;
+}
+
+- (NSDate*)certificateValidUntil {
+  return _certificateValidUntil;
+}
+
+- (NSArray<id<ArktSitePermission>>*)permissions {
+  return _permissions;
+}
+
+@end
+
+@interface ArktFacadeSitePermissions : NSObject <ArktSitePermissions>
+- (instancetype)initWithValues:(const arkt::SitePermissionsValues&)values;
+@end
+
+@implementation ArktFacadeSitePermissions {
+  NSString* _origin;
+  NSString* _host;
+  NSArray<id<ArktSitePermission>>* _permissions;
+}
+
+- (instancetype)initWithValues:(const arkt::SitePermissionsValues&)values {
+  if ((self = [super init])) {
+    _origin = base::SysUTF8ToNSString(values.origin);
+    _host = base::SysUTF16ToNSString(values.host);
+    _permissions = SitePermissionObjects(values.permissions);
+  }
+  return self;
+}
+
+- (NSString*)origin {
+  return _origin;
+}
+
+- (NSString*)host {
+  return _host;
+}
+
+- (NSArray<id<ArktSitePermission>>*)permissions {
+  return _permissions;
+}
+
+@end
+
 @interface ArktFacadeLinkActivation : NSObject <ArktLinkActivation>
 @property(nonatomic, copy) NSURL* url;
 @property(nonatomic) id<ArktTabHandle> tab;
@@ -1030,6 +1187,9 @@ class Facade : public BrowserCollectionObserver,
         &Facade::PresentPermission, base::Unretained(this)));
     SetInfobarSink(base::BindRepeating(&Facade::PresentInfobars,
                                        base::Unretained(this)));
+    page_info_ = std::make_unique<PageInfoHub>(
+        base::BindRepeating(&Facade::PageInfoChanged, base::Unretained(this)),
+        base::BindRepeating(&Facade::TabContents, base::Unretained(this)));
     observation_.Observe(GlobalBrowserCollection::GetInstance());
     GlobalBrowserCollection::GetInstance()->ForEach(
         [this](BrowserWindowInterface* browser) {
@@ -1052,6 +1212,9 @@ class Facade : public BrowserCollectionObserver,
 
   // The downloads of the embedder profile (#132), or null without one.
   DownloadWatcher* downloads() { return downloads_.get(); }
+
+  // Page info and per-site permissions (#583).
+  PageInfoHub* page_info() { return page_info_.get(); }
 
   // The crashed-session prompt (#577): the previous run crashed and the shell
   // has not dismissed it yet.
@@ -1372,6 +1535,34 @@ class Facade : public BrowserCollectionObserver,
         [pending_ removeObjectAtIndex:static_cast<NSUInteger>(i)];
       }
     }
+  }
+
+  // A tab's page info changed (#583): a settings change matched its site
+  // (inside the map's notification, or after a facade call), or its site data
+  // count arrived.
+  void PageInfoChanged(content::WebContents* contents) {
+    tabs::TabInterface* tab =
+        contents ? tabs::TabInterface::MaybeGetFromContents(contents) : nullptr;
+    ArktFacadeTab* handle = tab ? HandleForTab(tab) : nil;
+    if (!handle) {
+      return;
+    }
+    ArktFacadeEvent* event = [[ArktFacadeEvent alloc] init];
+    event.kind = ArktEngineEventKindPageInfoChanged;
+    event.tab = handle;
+    event.browser = handle.browser;
+    RecordFromNotification(event);
+  }
+
+  // The contents of every tab the facade has a handle for.
+  std::vector<content::WebContents*> TabContents() {
+    std::vector<content::WebContents*> contents;
+    for (auto& [tab, handle] : tab_handles_) {
+      if (content::WebContents* tab_contents = tab->GetContents()) {
+        contents.push_back(tab_contents);
+      }
+    }
+    return contents;
   }
 
   // Keeps the Objective-C dialog alive until its request ends.
@@ -1806,6 +1997,7 @@ class Facade : public BrowserCollectionObserver,
 
   const raw_ptr<FacadeDelegate> delegate_;
   std::unique_ptr<DownloadWatcher> downloads_;
+  std::unique_ptr<PageInfoHub> page_info_;
   bool last_session_crashed_ = false;
   int in_notification_ = 0;
   bool posted_ = false;
@@ -1976,6 +2168,9 @@ class TabObserver : public content::WebContentsObserver,
     zoom_percent_ = ZoomPercent();
     zoom_is_default_ = ZoomIsDefault();
     fullscreen_ = contents->IsFullscreen();
+    // Page info (#583): the connection as TabCreated's handle reads it, so
+    // the first security state change reported is a real one.
+    connection_ = static_cast<int>(ReadConnection(contents));
   }
 
   void ReportAll() {
@@ -2067,6 +2262,21 @@ class TabObserver : public content::WebContentsObserver,
     if (new_host && new_host->IsInPrimaryMainFrame()) {
       ReportRecovery();
     }
+  }
+
+  // The connection's security state changed (#583): mixed content, a
+  // certificate decision, a Safe Browsing verdict. Reported when the page
+  // info connection it gives differs from the last one reported.
+  void DidChangeVisibleSecurityState() override {
+    if (!g_facade || !g_facade->page_info()) {
+      return;
+    }
+    const int connection = static_cast<int>(ReadConnection(web_contents()));
+    if (connection == connection_) {
+      return;
+    }
+    connection_ = connection;
+    Emit(NewEvent(ArktEngineEventKindPageInfoChanged));
   }
 
   // HTML fullscreen (#577): WebContents notifies after its delegate entered
@@ -2357,6 +2567,8 @@ class TabObserver : public content::WebContentsObserver,
   int zoom_percent_ = 100;
   bool zoom_is_default_ = true;
   bool fullscreen_ = false;
+  // The last page info connection reported (#583), seeded at bind.
+  int connection_ = -1;
   base::ScopedObservation<favicon::FaviconDriver,
                           favicon::FaviconDriverObserver>
       favicon_observation_{this};
@@ -3049,6 +3261,73 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
                        self, zoom)];
 }
 
+// Page info (#583). Reads are plain reads of the profile's settings; the
+// changes run as every queued call, so a pending handle's run after its
+// insert.
+- (id<ArktPageInfo>)pageInfo {
+  arkt::CheckFacadeEntry();
+  content::WebContents* contents = self.contents;
+  if (!contents || !arkt::g_facade->page_info()) {
+    return nil;
+  }
+  std::optional<arkt::PageInfoValues> values =
+      arkt::g_facade->page_info()->Read(contents);
+  return values ? [[ArktFacadePageInfo alloc] initWithValues:*values] : nil;
+}
+
+- (void)setPermission:(ArktSitePermissionKind)kind
+            toSetting:(ArktPermissionSetting)setting
+            forOrigin:(NSString*)origin {
+  [self runOrQueue:"setPermission"
+              work:base::BindOnce(
+                       [](ArktFacadeTab* that, int kind,
+                          arkt::PermissionValue value, std::string origin) {
+                         if (that.contents && arkt::g_facade->page_info()) {
+                           arkt::g_facade->page_info()->SetPermission(
+                               that.contents, kind, value, origin);
+                         }
+                       },
+                       self, static_cast<int>(kind),
+                       static_cast<arkt::PermissionValue>(setting),
+                       base::SysNSStringToUTF8(origin))];
+}
+
+- (void)resetPermissionsForOrigin:(NSString*)origin {
+  [self runOrQueue:"resetPermissions"
+              work:base::BindOnce(
+                       [](ArktFacadeTab* that, std::string origin) {
+                         if (that.contents && arkt::g_facade->page_info()) {
+                           arkt::g_facade->page_info()->ResetPermissions(
+                               that.contents, origin);
+                         }
+                       },
+                       self, base::SysNSStringToUTF8(origin))];
+}
+
+- (void)pageInfoDidClose {
+  [self runOrQueue:"pageInfoDidClose"
+              work:base::BindOnce(
+                       [](ArktFacadeTab* that) {
+                         if (that.contents && arkt::g_facade->page_info()) {
+                           arkt::g_facade->page_info()->PageInfoClosed(
+                               that.contents);
+                         }
+                       },
+                       self)];
+}
+
+- (void)openSiteSettingsForOrigin:(NSString*)origin {
+  [self runOrQueue:"openSiteSettings"
+              work:base::BindOnce(
+                       [](ArktFacadeTab* that, std::string origin) {
+                         if (that.contents && arkt::g_facade->page_info()) {
+                           arkt::g_facade->page_info()->OpenSiteSettings(
+                               that.contents, origin);
+                         }
+                       },
+                       self, base::SysNSStringToUTF8(origin))];
+}
+
 - (void)setMuted:(BOOL)muted {
   // WebContents::SetAudioMuted notifies DidUpdateAudioMutingState only when
   // the state changes; the observer records MutedChanged from there.
@@ -3715,6 +3994,20 @@ void DeliverImportResult(void (^completion)(id<ArktImportResult>),
 - (void)dismissLastSession {
   arkt::CheckFacadeEntry();
   arkt::g_facade->DismissLastSession();
+}
+
+- (NSArray<id<ArktSitePermissions>>*)sitesWithPermissions {
+  arkt::CheckFacadeEntry();
+  NSMutableArray<id<ArktSitePermissions>>* sites = [NSMutableArray array];
+  if (arkt::g_facade->page_info()) {
+    for (const arkt::SitePermissionsValues& values :
+         arkt::g_facade->page_info()->SitesWithPermissions(
+             arkt::EmbedderProfile())) {
+      [sites addObject:[[ArktFacadeSitePermissions alloc]
+                           initWithValues:values]];
+    }
+  }
+  return [sites copy];
 }
 
 // Closes the tab's pending JavaScript dialog (alert, confirm, prompt,

@@ -250,6 +250,75 @@ final class RestorePagesWindowTests: XCTestCase {
     }
   }
 
+  func testReopenedPrivateWindowNeverReceivesPendingOffer() throws {
+    _ = NSApplication.shared
+    for (kind, presentation) in [(ShellWindowSet.WindowKind.incognito, SidebarPresentation.incognito),
+                                 (.blank, .blank)] {
+      let engine = InMemoryEngine()
+      engine.crashedSession.recoveryPages = [RecoveryPage(title: "Page", url: URL(string: "https://example.invalid/")!, kind: .peek)]
+      engine.crashedSession.simulateCrashedExit()
+      let set = ShellWindowSet(engine: engine, sidebar: StubSidebar.sample())
+      set.beginSessionRecovery(engine.crashedSession)
+      var sawPanel = false
+      var sawNotice = false
+      set.didPresentPendingRecoveryForTesting = { window in
+        sawPanel = sawPanel || window.rootView.subviews.contains { $0 is RestorePagesView }
+        sawNotice = sawNotice || window.toasts.current != nil
+      }
+      let original = set.openWindow(kind: kind)
+      original.window?.isReleasedWhenClosed = false
+      original.openPrivately(URL(string: "https://example.invalid/private")!)
+      original.close()
+      XCTAssertTrue(set.canReopenClosedPrivateWindow)
+      let reopened = try XCTUnwrap(set.reopenClosedPrivateWindow())
+      reopened.window?.isReleasedWhenClosed = false
+      defer { original.close(); reopened.close() }
+      XCTAssertEqual(reopened.sidebarController.presentation, presentation)
+      XCTAssertFalse(sawPanel, "private creation must never temporarily own the offer")
+      XCTAssertFalse(sawNotice)
+      XCTAssertFalse(reopened.rootView.subviews.contains { $0 is RestorePagesView })
+      XCTAssertNil(reopened.toasts.current)
+      XCTAssertEqual(engine.crashedSession.dismissals, 0)
+      let regular = set.openWindow()
+      regular.window?.isReleasedWhenClosed = false
+      defer { regular.close() }
+      XCTAssertEqual(regular.rootView.subviews.filter { $0 is RestorePagesView }.count, 1)
+      XCTAssertEqual(engine.crashedSession.dismissals, 0)
+    }
+  }
+
+  func testReopenedPrivateWindowDoesNotConsumeCrashNotice() throws {
+    _ = NSApplication.shared
+    for (kind, presentation) in [(ShellWindowSet.WindowKind.incognito, SidebarPresentation.incognito),
+                                 (.blank, .blank)] {
+      let engine = InMemoryEngine()
+      engine.crashedSession.simulateCrashedExit()
+      let set = ShellWindowSet(engine: engine, sidebar: StubSidebar.sample())
+      set.beginSessionRecovery(engine.crashedSession)
+      var sawNotice = false
+      set.didPresentPendingRecoveryForTesting = { window in
+        sawNotice = sawNotice || window.toasts.current != nil
+      }
+      let original = set.openWindow(kind: kind)
+      original.window?.isReleasedWhenClosed = false
+      original.openPrivately(URL(string: "https://example.invalid/private")!)
+      original.close()
+      let reopened = try XCTUnwrap(set.reopenClosedPrivateWindow())
+      reopened.window?.isReleasedWhenClosed = false
+      defer { original.close(); reopened.close() }
+      XCTAssertEqual(reopened.sidebarController.presentation, presentation)
+      XCTAssertFalse(sawNotice, "private creation must not consume the crash notice")
+      XCTAssertNil(reopened.toasts.current)
+      XCTAssertFalse(reopened.rootView.subviews.contains { $0 is RestorePagesView })
+      XCTAssertEqual(engine.crashedSession.dismissals, 1)
+      let regular = set.openWindow()
+      regular.window?.isReleasedWhenClosed = false
+      defer { regular.close() }
+      XCTAssertEqual(regular.toasts.current?.kind, .recovery)
+      XCTAssertEqual(engine.crashedSession.dismissals, 1)
+    }
+  }
+
   func testChangingOwnerToPrivateTransfersOffer() throws {
     _ = NSApplication.shared
     let engine = InMemoryEngine()

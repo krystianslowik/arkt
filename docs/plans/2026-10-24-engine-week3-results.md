@@ -4868,6 +4868,189 @@ nothing); the loopback server stopped by PID. Deleted: the throwaway profiles un
 logs and the one crash report break 1 wrote. Nothing under `~/Applications/ArktTest` or `/Applications/Arkt.app` was
 touched.
 
+## #583: page info and per-site permissions in the facade
+
+Date 2026-11-07. Branch `engine/583-page-info-seam` from `origin/main` (`a1f49a5`). Engine side of #582 (PR #691).
+Overlay and facade only: no patch. Contract rule 26, deferred to this issue by #770, now runs against Chromium.
+
+### Gate
+
+- Seams: a new overlay file pair `arkt/api/arkt_page_info.{h,cc}` (`PageInfoHub`), reached from the facade's tab handle
+  and engine; the facade's `TabObserver` for the security state. No upstream file is touched.
+- Facade header: additive only, both copies `cmp` identical. One event kind after 29 (`PageInfoChanged` 30, no values),
+  three enums (`ArktPageConnection`, `ArktPermissionSetting`, `ArktSitePermissionKind`, the last in `SitePermissionKind`
+  order), three value protocols (`ArktSitePermission`, `ArktPageInfo`, `ArktSitePermissions`), on the tab handle
+  `pageInfo`, `setPermission:toSetting:forOrigin:`, `resetPermissionsForOrigin:`, `pageInfoDidClose` and
+  `openSiteSettingsForOrigin:`, on the engine `sitesWithPermissions`. Required members, as #577 added its own: the
+  Swift doubles (`ScriptedFacade`, the ABI conformance doubles) grew them.
+- `.patches`: unchanged (12). New deps of `//arkt/api:embedder`: `//components/browsing_data/content`,
+  `//components/content_settings/{browser,core/browser,core/common}`, `//components/page_info`,
+  `//components/permissions`, `//components/security_state/core`, `//components/strings`, `//components/url_formatter`.
+  The `chrome/browser` headers (`ChromePageInfoDelegate`, `ChromeBrowsingDataModelDelegate`, the content settings and
+  auto blocker factories, `chrome_security_state_util.h`, `profile_observer.h`) are included with `nogncheck`, as the
+  facade already does for `//chrome/browser` code.
+- Build: `nice -n 20 autoninja -C out/Spike chrome -j 4`; 1.9 TB free on the Chromium disk, 40 GB on `/`.
+
+### What landed
+
+- **Reads are plain reads** (`PageInfoHub::Read`), cheap enough for the shell's pill, which reads the current tab's page
+  info on every address refresh. Nothing is created per read: no Chromium `PageInfo`, no metrics.
+  - Connection: `chrome_security_state::GetSecurityLevel` and `GetVisibleSecurityState` of the tab, folded as the
+    header says (`SECURE` secure; `DANGEROUS` with a Safe Browsing status flagged, with a certificate error
+    certificate error; `NONE`/`WARNING` on https with mixed content not fully secure, else not secure). `file:` is a
+    local file; every scheme other than http and https is a page of the browser itself.
+  - Host: `url_formatter::IDNToUnicode` (punycode when its spoof checks decline). Origin: `url::Origin::Serialize()`,
+    the same string `sitesWithPermissions` uses, so the two can be matched.
+  - Certificate of a secure page: subject common name, issuer organization (else common name), expiry.
+  - Permissions: each kind's `HostContentSettingsMap::GetContentSetting` for the origin; default when the rule is
+    the wildcard pair (as `PageInfo::PopulatePermissionInfo`); an embargoed Ask reads Block; options from the content
+    settings registry's valid settings; titles from `PageInfoUI::PermissionTypeToUIString` (insecure content has no
+    page info row, so it takes the site settings label `IDS_SITE_SETTINGS_TYPE_INSECURE_CONTENT`). Listed: location,
+    camera, microphone and notifications always, then every other kind with an exception, an embargo, in use
+    (`PageSpecificContentSettings::IsInUse`), or sound once the tab played audio, as page info lists them.
+  - Site data: as `chrome://settings/content/siteDetails` totals it (`BrowsingDataModel::BuildFromDisk`, entries
+    matching the origin, their storage bytes and first-party cookies). The model is per profile and reused for 10 s; a
+    read of an older one starts a new count, keeps answering the old one meanwhile, and the tab hears
+    `PageInfoChanged` when the new count differs from what it read. Before the first count the value is absent
+    (`siteData` nil in Swift, "still counting").
+- **Changes go through Chromium's own page info.** The first change from a tab to its own site opens a `PageInfo` for
+  it (with `ChromePageInfoDelegate` and a page info UI that is never shown) and calls `OnSitePermissionChanged`: the
+  narrowest pattern, embargo cleared, constraints, and the reload infobar bookkeeping (any kind but sound needs it).
+  `pageInfoDidClose` calls `OnUIClosing`, which adds Chromium's `PageInfoInfoBarDelegate` to the tab once
+  (`ArktInfobarKindReload`, already mapped since #400); the session ends there, so a second close adds nothing. A
+  change to another site (Settings' per-site list, #133) writes the same setting directly and raises no infobar. The
+  default setting removes the exception. Reset sets every kind with an exception or an embargo back to the default
+  (the origin-scoped exceptions; a broader `[*.]host` user exception stays, as with Chromium's page info).
+  `openSiteSettings` runs `ChromePageInfoDelegate::ShowSiteSettings` (siteDetails in a tab of the Arkt window).
+- **Announcements.** Each profile's `HostContentSettingsMap` is observed once read. A change from one facade call is
+  reported once per tab of the matching origin, after the call (a reset of 21 kinds is one event). A change made
+  elsewhere (siteDetails, an extension) comes as one notification per kind; the tabs it touched are reported once,
+  from a posted task. Tabs of other origins hear nothing. The connection's security state is reported when the
+  folded connection changes (`DidChangeVisibleSecurityState`).
+- **ChromiumEngine** (`ChromiumEngine+PageInfo.swift`): `siteSettings` is the engine; maps the values and the four
+  calls, and `PageInfoChanged` to `.pageInfoChanged`. A permission kind this build does not know is left out.
+  `ContractCheck.chromiumDeferredRules` is empty: `chromiumChecks` is rules 1 to 26, and the app runner prints no
+  `DEFERRED` line.
+- Self-test embedder: logs `pageInfoChanged`; commands `pageinfo`, `setperm <kind> allow|ask|block`, `resetperm`,
+  `pageinfo-close`, `sitesettings` and `sites`.
+
+### Tests first
+
+`ChromiumPageInfoTests` (16 cases), the scripted facade's page info (`ScriptedPageInfo.swift`) and `PageInfoABITests`
+(3) were written against the new header. Without `ChromiumEngine+PageInfo.swift` the test target does not compile
+(`ChromiumEngine` has no `pageInfo(of:)`, no `siteSettings`): the red run. The mapping itself was written before the
+tests, not after them (deviation). `ChromiumPageInfoDefaultsTests` (ChromiumEngine has no site settings, rule 26 not
+applicable) is removed. Deliberate break: with ChromiumEngine's `hub.emit(.pageInfoChanged(id))` replaced by `break`,
+three `ChromiumPageInfoTests` and four contract cases of rule 26 fail (8 issues); restored and green again.
+
+### Swift tests (`nice -n 20`, `-j 2`, in `app/ArktShell/ShellKit`)
+
+| Command | Result |
+|---|---|
+| `swift test --filter "ChromiumEngineKitTests\|ArktEngineABITests\|EngineAPITests"` | 158 + 31 + 279 passed, 0 failed. ChromiumEngineKitTests: 16 new `ChromiumPageInfoTests` (one with 5 arguments), rule 26 in `contract(_:_:)` over both facade scripts (112 cases, was 106), 2 defaults tests removed. ArktEngineABITests: 3 new `PageInfoABITests` |
+| Full suite (`swift test --skip ShellKitGUITests`) | not run locally (several lanes building on this Mac); CI's Swift tests job |
+
+### Build
+
+| Step | Result | Numbers |
+|---|---|---|
+| `nice -n 20 autoninja -C out/Spike chrome -j 4` | `The build has finished successfully.`, `FAILED:` 0 (first tries failed on a missing `switch` case in the self-test, `-Wunsafe-buffer-usage` on C array indexing and a refcounted bound argument; fixed) | 30 s for the last full step |
+| `gn check out/Spike //arkt/api:embedder` | the 4 pre-existing errors only (`find_in_page` headers in the facade); none for the new file | |
+| Engine app, `xcodebuild -scheme ArktShell -configuration Engine PRODUCT_BUNDLE_IDENTIFIER=dev.arkt.Arkt.try583 -jobs 2` (`nice -n 20`, `CONFIGURATION_BUILD_DIR=$CHROMIUM_ROOT/embed-583`) | `BUILD SUCCEEDED`, `Engine framework copied: Chromium Framework.framework 156.0.8078.48` | 522 component dylibs cloned next to the bundle (`cp -c`) |
+
+Load average 3 to 6 while building and running (other lanes' work; nothing added).
+
+### Self-test runs (`out/Spike/Chromium.app`, `--no-startup-window --arkt-facade-selftest --arkt-engine-test-api --remote-debugging-port=9333`, fresh profiles under `profiles/583-20261107/`, `--use-mock-keychain`, pages from a loopback server on `127.0.0.1:8583` that sets two cookies and 2 KB of local storage, commands through the page title over the DevTools protocol)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Read on `http://127.0.0.1:8583/a` | PASS | `origin=http://127.0.0.1:8583 host=127.0.0.1 connection=1` (not secure), location, camera, microphone, notifications at Ask, default, options Allow, Ask, Block; `siteData=counting`, then one `pageInfoChanged` with `2 cookies 2055 bytes` |
+| Two changes (location Allow, camera Block) | PASS | read back at once (`setting=0 default=no`, `setting=2 default=no`), one `pageInfoChanged` per change on the tab; the `localhost:8583` tab of the same window hears nothing |
+| No-ops | PASS | camera Block again, and Ask for pop-ups (not offered): nothing changes, no event |
+| Per-site list | PASS | `sites count=1`: `http://127.0.0.1:8583` with location Allow and camera Block |
+| Values against `chrome://settings/content/siteDetails?site=http%3A%2F%2F127.0.0.1%3A8583` (opened by `sitesettings`, a tab of the Arkt window; read with the page's own `getOriginPermissions` and `fetchUsageTotal`) | PASS, one difference | camera, microphone, notifications, pop-ups, sound and JavaScript as changed or default agree, each `preference` where page info says not default and `default` where it says default; usage `2,055 B`, `2 cookies` = page info's count. Location: siteDetails `ask (preference)`, page info Allow. siteDetails asks the permission controller, and `GeolocationPermissionContextSystem` turns an Allow into Ask while macOS has not decided location access for the app (`kNotDetermined`, the test build never asked); page info, Chromium's bubble included, shows the stored setting. See "Needs the maintainer" |
+| Reload infobar | PASS | close with no change: nothing. Location Allow and notifications Block, then close: `infobarsChanged count=1`, the tab's page 600 -> 560 high; a second close: nothing. Sound Block on the other tab, then close: no infobar (Chromium needs no reload for sound) |
+| Changes made in siteDetails | PASS | one kind (`setOriginPermissions` for the microphone): one `pageInfoChanged` on the site's tab; every kind reset from there (22 notifications): one `pageInfoChanged`; the other site's tab: nothing |
+| Reset from the facade | PASS | after 21 kinds were blocked: one `pageInfoChanged`, the four common kinds at their default, `sites count=0` |
+| Local file, internal page, certificate error | PASS | `file://.../Local%20Notes.html`: `origin=file:// host=Local Notes.html connection=5`, no permissions, no site data; `chrome://version/`: `connection=6`, no permissions; `https://127.0.0.1:8584/` with a self-signed certificate (the interstitial): `connection=3` (certificate error) |
+
+`FATAL`, `NOTREACHED`, `Check failed` lines: 0 in the final runs. Earlier runs found two things: the first version asked
+`PageInfoUI::PermissionTypeToUIString` for insecure content, which page info has no row for (`NOTREACHED`, fixed with
+the site settings label); and one run was ended by the smoke itself, which passed siteDetails a type name it does not
+know (`geolocation` for `location`, a `CHECK` in the settings handler, not in the facade). A command sent while the
+first navigation had not committed yet read no page info (`GetLastCommittedURL` empty), as it should; the runs wait
+for the commit first.
+
+### In-app contract (`dev.arkt.Arkt.try583`, Engine app on `out/Spike`, `--arkt-engine-contract --arkt-engine-test-api`, tabs probe, throwaway profile, `ARKT_DATA_DIR`, `ARKT_ARC_DIR` and `ARKT_DEFAULTS_SUITE` per run, `--use-mock-keychain`)
+
+| Check | Result |
+|---|---|
+| Rule 26 `pageInfoNamesTheSiteItShows` (`127.0.0.1` and `localhost` pages) | PASS (109 ms) |
+| Rule 26 `permissionChangeIsReadBackAndResetRestoresTheDefault` | PASS (116 ms) |
+| Rule 26 `permissionChangeRaisesTheReloadInfobarOnce` | PASS (147 ms) |
+| Rule 25 (3 checks) | PASS (92, 599, 3750 ms) |
+| Result | `22/26`, exit 1: rules 19, 20, 21 and 24 are NOT-APPLICABLE as before (no `raiseDialog`, `raisePermission`, `raiseInfobar` or `downloads` driver in the runner); every other rule PASS; no `DEFERRED` line; 0 `FATAL` |
+
+### Patch budget
+
+| Source | Count |
+|---|---|
+| `.patches` lines | 12 |
+| `arkt` commits above `156.0.8078.48` | 12 |
+
+In sync, and the 12 commits export to the committed patch files unchanged; nothing exported. Facade header copies
+`cmp` identical.
+
+### Left open
+
+- Location while macOS has not decided location access: page info shows the stored setting, siteDetails the effective
+  one (maintainer question in the pull request).
+- Site data is counted from the whole profile's `BrowsingDataModel`, at most once per 10 s, when the pill or the
+  panel reads page info; an open signal from the shell would let the engine count only for an open panel.
+- A host-scoped exception (a `[*.]host` pattern) lists under `http://host` in `sitesWithPermissions`, the origin its
+  pattern stands for; exceptions this facade writes are origin-scoped.
+
+### Cleanup
+
+Every Chromium and app run stopped by exact PID or exited on its own (the contract runner exits; two self-test runs
+crashed as described above); `ps -p` prints nothing for any of them. The loopback and TLS servers stopped by PID.
+Deleted: the throwaway profiles under `profiles/583-20261107/` (with the crash reports the two crashed runs wrote), the
+`embed-583` folder, the build logs and the run's defaults suite. Nothing under `~/Applications/ArktTest` or
+`/Applications/Arkt.app` was touched.
+
+### #583 review fixes (PR #778)
+
+- **A page info session ends with its page.** `Session` now also ends on `PrimaryPageChanged` (a committed
+  cross-document navigation of the primary main frame: reload, link, back and forward, an activation), without
+  `OnUIClosing`, so closing the panel after a change and a navigation adds no reload infobar. The scripted facade ends
+  its pending reload when a new page commits; `ChromiumPageInfoTests.aNewPageEndsThePanelsChangesSoACloseRaisesNoInfobar`
+  covers it. Deliberate breaks: without the scripted end the test fails; with the facade's `PrimaryPageChanged` body
+  emptied, the self-test's change, `reload`, `pageinfo-close` adds `infobarsChanged count=1`. Restored: nothing.
+- **The connection is seeded when the tab is bound** (`TabObserver::Seed`), so the first security state change that
+  differs is reported (the first commit after the initial empty document is one: `pageInfoChanged connection=1` right
+  after the load starts). Scripted case `theConnectionIsSeededWhenTheTabIsBound`; with the scripted seed removed it
+  fails.
+- Comments: `ArktPageConnection` (both header copies) and `PageConnection` now say what the code does (`DANGEROUS`
+  with neither a Safe Browsing verdict nor a certificate error is not secure; `ran_mixed_content` counts);
+  `hasSiteData` says the old count is reported while a recount runs; reset says it removes origin-scoped exceptions
+  only. `cmp` identical.
+- `TabStateTests.defaultsKeepAnEngineWithoutTabStateUnchanged` checks that an engine without page info has no
+  `siteSettings`.
+- `engine/REBASE.md`, section 5: a check of `kApproximateGeolocationPermission` (`GEOLOCATION` vs
+  `GEOLOCATION_WITH_OPTIONS`) and of the page info string table for every listed kind.
+- `origin/main` merged (`ced72fd`, no conflicts).
+
+| Check | Result |
+|---|---|
+| `swift test --filter "ChromiumEngineKitTests\|ArktEngineABITests\|EngineAPITests"` (`nice -n 20`, `-j 2`) | 160 + 31 + 279 passed, 0 failed (2 new `ChromiumPageInfoTests`; the `siteSettings` default check is in an existing test) |
+| `nice -n 20 autoninja -C out/Spike chrome -j 4` | finished successfully, `FAILED:` 0 |
+| Self-test, fresh profiles: location Allow, `reload`, close; then notifications Block, close | no infobar after the reload; `infobarsChanged count=1` after the second close; 0 `FATAL` |
+| Engine app and in-app contract (`dev.arkt.Arkt.try583`, throwaway profile, `--use-mock-keychain`) | `BUILD SUCCEEDED`; rule 26 PASS (105, 108, 139 ms), rule 25 PASS, `22/26` with the same four NOT-APPLICABLE rules |
+| `.patches` | 12 = 12, in sync |
+
+Cleanup: every run stopped by PID or exited; the loopback server stopped by PID; the profiles, the `embed-583` folder,
+the build logs and the defaults suite deleted.
+
 ### Restore pages Swift boundary (#580)
 
 The Swift recovery contract carries only non-private Little Arkt and Peek page titles, URLs and kinds, and supplies the list to the shell, which requests reopening outside the sidebar. The shell presents the offer after its own window
@@ -4935,3 +5118,12 @@ validate the subsequent merge head, which requires new CI.
 The multi-Peek routing decision is tracked in [#776](https://github.com/krystianslowik/arkt/issues/776)
 (`status:needs-user`); the maximum-one-Peek safety remains in place. #577 shipped crash state and dismissal, but
 recoverable page payload and source grouping integration and feature-level killed-process validation remain missing.
+
+Test-first integration of #777: private-window reopen coverage observes recovery routing during creation and checks
+that a separate empty-crash notice remains available to a regular window. Both private kinds are covered. The current
+`makePrivateWindow` creates a regular window before converting it, so CI is expected to expose the regression; this
+has not yet been observed. Production routing remains unchanged pending that red run. Local tests were not executed:
+the installed toolchain cannot compile baseline ShellKit. Swift source parsing and diff checks passed. The prior green
+for this integration is attributable only to `22d4906e12ddb3cd053b4f836e3be00810c0e1d1`: 2,454 pure tests in 278
+suites, 2,038 GUI tests executed, 51 skipped, zero failures, and all eight reported checks passed. Those results do not
+validate this test-first merge. The PR stays draft while #776 awaits the maintainer; maximum-one-Peek safety remains.

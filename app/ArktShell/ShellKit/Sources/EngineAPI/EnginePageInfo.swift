@@ -2,8 +2,8 @@ import Foundation
 
 // Page info and per-site permissions (#582, part of #122): what the page info panel shows for a tab (host, connection,
 // cookies and site data, the site's permissions) and the per-site permission calls that panel and Settings' per-site
-// list (#133) share. `EngineClient.siteSettings` is nil by default, so an engine that has none of this (ChromiumEngine
-// until its engine partner, #583, lands) offers no panel and the address pill stays as it is.
+// list (#133) share. `EngineClient.siteSettings` is nil by default, so an engine that has none of this offers no panel
+// and the address pill stays as it is. ChromiumEngine reports it from the facade since #583.
 //
 // Every call is keyed by the site's origin as the engine names it (`PageInfo.origin`), never by a URL the shell
 // parses: the engine decides what a site is (Chromium keys content settings by origin pattern). The calls that change
@@ -12,12 +12,12 @@ import Foundation
 
 /// How the page reached the browser, folded to what the panel tells apart.
 ///
-/// Chromium's `security_state::SecurityLevel`, `VisibleSecurityState` and URL scheme map as: `SECURE` and
-/// `SECURE_WITH_POLICY_INSTALLED_CERT` to `secure`; `NONE` or `WARNING` on `http:` to `notSecure`; `NONE` or `WARNING`
-/// on `https:` with mixed content (`displayed_mixed_content`, `contained_mixed_form`) to `notFullySecure`; `DANGEROUS`
-/// with a certificate error (`cert_status` has an error) to `certificateError`; `DANGEROUS` from Safe Browsing
-/// (`malicious_content_status` set) to `flagged`; `file:` to `localFile`; `chrome:`, `chrome-extension:`, `about:`,
-/// `devtools:` and the new tab page to `internalPage`.
+/// Chromium's `security_state::SecurityLevel`, `VisibleSecurityState` and URL scheme map as: `SECURE` to `secure`;
+/// `DANGEROUS` from Safe Browsing (`malicious_content_status` set) to `flagged`, else with a certificate error
+/// (`cert_status` has an error) to `certificateError`, else to `notSecure`; any other level on `https:` with mixed
+/// content (`displayed_mixed_content`, `contained_mixed_form`, `ran_mixed_content`) to `notFullySecure`, else to
+/// `notSecure`; `file:` to `localFile`; every other scheme than `http:`, `https:` and `file:` (`chrome:`,
+/// `chrome-extension:`, `about:`, `devtools:`, the new tab page) to `internalPage`.
 public enum PageConnection: Equatable, Sendable {
   /// An encrypted connection with a valid certificate.
   case secure
@@ -199,7 +199,9 @@ public protocol EngineSiteSettings: AnyObject {
   /// the site in that profile.
   func setPermission(_ kind: SitePermissionKind, to setting: PermissionSetting, forOrigin origin: String,
                      from tab: TabID)
-  /// Puts every permission of the site in the profile of `tab` back to the default. Cookies and site data stay.
+  /// Puts every permission of the site in the profile of `tab` back to the default: the site's own exceptions go (in
+  /// Chromium the origin-scoped ones; a broader `[*.]host` exception stays, as with its page info). Cookies and site
+  /// data stay.
   func resetPermissions(forOrigin origin: String, from tab: TabID)
   /// The page info panel of `tab` closed. If a setting of its site changed while it was open, the engine raises the
   /// reload infobar (`InfobarKind.reload`) once, on that tab; otherwise nothing happens.

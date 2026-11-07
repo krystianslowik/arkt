@@ -321,6 +321,9 @@ final class SidebarHideTests: XCTestCase {
 
   // MARK: Frame-time gate (BH-004 reveal overlay)
 
+  /// NOT-MEASURABLE below 120 Hz or under load (`PacingEnvironment`); the 1-minute load is read again after measuring.
+  /// The hitch count is asserted only with `ARKT_PACING_GATE=1` or when this class runs alone
+  /// (`PacingEnvironment.gateAsserts`), as in `SplitReflowPacingTests` (#775).
   func testRevealPacing() async throws {
     try PacingEnvironment.skipIfNotMeasurable(screen: controller.window?.screen)
     controller.toggleSidebarVisibility(nil)
@@ -347,6 +350,8 @@ final class SidebarHideTests: XCTestCase {
     var load = [0.0]
     let cores = ProcessInfo.processInfo.activeProcessorCount
     let loaded = getloadavg(&load, 1) != 1 || load[0] >= Double(cores)
+    let gated = PacingEnvironment.gateAsserts(for: Self.self)
+    print("sidebar.pacing gate=\(gated ? "asserts" : "reports")")
     let fps = NSScreen.main?.maximumFramesPerSecond ?? 0
     for (label, stats) in results {
       let hitches = stats.intervals.enumerated().filter { $0.element > stats.hitchThreshold }
@@ -355,7 +360,7 @@ final class SidebarHideTests: XCTestCase {
         format: "sidebar.pacing label=%@ screenMaxFPS=%d frames=%d over8.6=%d overBudgetPct=%.2f maxMs=%.2f "
           + "p99Ms=%.2f leadInMs=%.2f load1=%.2f cores=%d asserted=%@ hitchesMs=[%@]",
         label, fps, stats.frameCount, stats.hitchCount, stats.overBudgetRatio * 100, stats.maxInterval * 1000,
-        stats.p99 * 1000, (stats.leadInInterval ?? 0) * 1000, load[0], cores, loaded ? "no" : "yes",
+        stats.p99 * 1000, (stats.leadInInterval ?? 0) * 1000, load[0], cores, loaded || !gated ? "no" : "yes",
         hitches.joined(separator: ","))
       print(summary)
       let attachment = XCTAttachment(string: summary)
@@ -365,6 +370,8 @@ final class SidebarHideTests: XCTestCase {
       XCTAssertGreaterThan(stats.frameCount, 10, "\(label): the display link ran (is the display awake?)")
       if loaded {
         print("sidebar.pacing skipped assert: 1-minute load \(load[0]) >= \(cores) active cores")
+      } else if !gated {
+        print("sidebar.pacing reported only: set ARKT_PACING_GATE=1 or run SidebarHideTests alone")
       } else {
         XCTAssertEqual(stats.hitchCount, 0, "\(label): frames over 8.6 ms")
       }

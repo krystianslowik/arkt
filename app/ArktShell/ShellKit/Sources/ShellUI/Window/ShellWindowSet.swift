@@ -82,6 +82,11 @@ public final class ShellWindowSet {
   private var closedLittleArkts: [(closed: LittleArktClosedWindow, archiveID: UUID?)] = []
   /// How many closed Little Arkt windows Reopen Closed Tab can bring back. [I]
   static let closedLittleArktLimit = 50
+  /// Closed blank and incognito windows for Reopen Closed Tab in a private window (#746), the most recent last. In
+  /// memory only: nothing is written, and nothing is kept after quit.
+  private var closedPrivateWindows: [ClosedPrivateWindow] = []
+  /// How many closed private windows Reopen Closed Tab can bring back. [I]
+  static let closedPrivateWindowLimit = 20
 
   /// `hostLookup` is needed only for an engine that asks for windows of its own (a host provider); FakeEngine never
   /// does.
@@ -125,6 +130,9 @@ public final class ShellWindowSet {
     }
     return open.first
   }
+
+  // Test observation after initial recovery routing, before the caller can change the window.
+  var didPresentPendingRecoveryForTesting: ((ShellWindowController) -> Void)?
 
   private var recoveryStarted = false
   private var pendingRecovery: RestorePagesModel?
@@ -458,6 +466,35 @@ public final class ShellWindowSet {
     return nil
   }
 
+  // MARK: Private window reopen (#746)
+
+  private func privateWindowClosed(_ closed: ClosedPrivateWindow) {
+    closedPrivateWindows.append(closed)
+    if closedPrivateWindows.count > Self.closedPrivateWindowLimit {
+      closedPrivateWindows.removeFirst(closedPrivateWindows.count - Self.closedPrivateWindowLimit)
+    }
+  }
+
+  /// A blank or incognito window closed with pages this session.
+  public var canReopenClosedPrivateWindow: Bool { !closedPrivateWindows.isEmpty }
+
+  /// Reopen Closed Tab in a private window with nothing of its own (#746): the last closed private window comes back,
+  /// as the same kind, at its last frame (moved onto a screen when that frame is on none now), with its pages in their
+  /// order and the one it showed shown. Its pages' history did not survive the close. Nil when none closed.
+  @discardableResult
+  public func reopenClosedPrivateWindow() -> ShellWindowController? {
+    guard let closed = closedPrivateWindows.popLast() else { return nil }
+    let controller = makePrivateWindow(closed.presentation, bounds: nil, near: primary?.window)
+    if let window = controller.window {
+      let frame = WindowFramePlacement.restoredFrame(saved: closed.frame, savedScreen: nil, screens: screens(),
+                                                     minSize: window.minSize) ?? closed.frame
+      window.setFrame(frame, display: false)
+    }
+    controller.showWindow(nil)
+    controller.restorePages(of: closed)
+    return controller
+  }
+
   /// The open Little Arkt windows the idle timer may close (BH-137), with the last time the user was in each. A window
   /// the user is in, a page playing sound (BH-076) and a page that would ask before leaving count as active now: they
   /// are left out, and their idle time starts again when that ends.
@@ -548,6 +585,9 @@ public final class ShellWindowSet {
     controller.onMoveToLittleArkt = { [weak self] node, url in self?.moveToLittleArkt(node, url: url) ?? false }
     controller.reopenLittleArkt = { [weak self] in self?.reopenClosedLittleArkt() }      // #355
     controller.canReopenLittleArkt = { [weak self] in self?.canReopenClosedLittleArkt ?? false }
+    controller.onPrivateWindowClosed = { [weak self] closed in self?.privateWindowClosed(closed) }    // #746
+    controller.reopenPrivateWindow = { [weak self] in self?.reopenClosedPrivateWindow() }
+    controller.canReopenPrivateWindow = { [weak self] in self?.canReopenClosedPrivateWindow ?? false }
     controller.otherWindowsVisibleNodes = { [weak self, weak controller] in
       (self?.controllers ?? []).filter { $0 !== controller }.reduce(into: []) { $0.formUnion($1.visibleNodes) }
     }
@@ -567,6 +607,7 @@ public final class ShellWindowSet {
     trackMain(controller)
     configure?(controller)
     presentPendingRecovery()
+    didPresentPendingRecoveryForTesting?(controller)
     downloads?.attach(to: controller)
     sidebarBanner?.attach(to: controller)
     // #331: the session's first window is the one a relaunch restores; it opens on the saved sidebar state. Later

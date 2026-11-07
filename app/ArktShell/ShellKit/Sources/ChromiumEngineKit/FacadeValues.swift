@@ -142,3 +142,97 @@ public enum ScriptValue: Equatable, Sendable {
     }
   }
 }
+
+// MARK: Page info (#583)
+
+extension PageConnection {
+  init(facade connection: ArktPageConnection) {
+    switch connection {
+    case .secure: self = .secure
+    case .notSecure: self = .notSecure
+    case .notFullySecure: self = .notFullySecure
+    case .certificateError: self = .certificateError
+    case .flagged: self = .flagged
+    case .localFile: self = .localFile
+    case .internalPage: self = .internalPage
+    @unknown default: self = .notSecure
+    }
+  }
+}
+
+extension PermissionSetting {
+  init(facade setting: ArktPermissionSetting) {
+    switch setting {
+    case .allow: self = .allow
+    case .block: self = .block
+    case .ask: self = .ask
+    @unknown default: self = .ask
+    }
+  }
+
+  var facade: ArktPermissionSetting {
+    switch self {
+    case .allow: .allow
+    case .ask: .ask
+    case .block: .block
+    }
+  }
+}
+
+extension SitePermissionKind {
+  /// Nil for a kind added to the facade after this build.
+  init?(facade kind: ArktSitePermissionKind) {
+    switch kind {
+    case .location: self = .location
+    case .camera: self = .camera
+    case .microphone: self = .microphone
+    case .notifications: self = .notifications
+    case .popups: self = .popups
+    case .sound: self = .sound
+    case .javaScript: self = .javascript
+    case .images: self = .images
+    case .automaticDownloads: self = .automaticDownloads
+    case .clipboard: self = .clipboard
+    case .midiDevices: self = .midiDevices
+    case .motionSensors: self = .motionSensors
+    case .usbDevices: self = .usbDevices
+    case .serialPorts: self = .serialPorts
+    case .hidDevices: self = .hidDevices
+    case .bluetoothDevices: self = .bluetoothDevices
+    case .fileEditing: self = .fileEditing
+    case .windowManagement: self = .windowManagement
+    case .localFonts: self = .localFonts
+    case .idleDetection: self = .idleDetection
+    case .backgroundSync: self = .backgroundSync
+    case .insecureContent: self = .insecureContent
+    @unknown default: return nil
+    }
+  }
+
+  var facade: ArktSitePermissionKind {
+    switch self {
+    case .location: .location
+    case .camera: .camera
+    case .microphone: .microphone
+    case .notifications: .notifications
+    case .popups: .popups
+    case .sound: .sound
+    case .javascript: .javaScript
+    case .images: .images
+    case .automaticDownloads: .automaticDownloads
+    case .clipboard: .clipboard
+    case .midiDevices: .midiDevices
+    case .motionSensors: .motionSensors
+    case .usbDevices: .usbDevices
+    case .serialPorts: .serialPorts
+    case .hidDevices: .hidDevices
+    case .bluetoothDevices: .bluetoothDevices
+    case .fileEditing: .fileEditing
+    case .windowManagement: .windowManagement
+    case .localFonts: .localFonts
+    case .idleDetection: .idleDetection
+    case .backgroundSync: .backgroundSync
+    case .insecureContent: .insecureContent
+    }
+  }
+}

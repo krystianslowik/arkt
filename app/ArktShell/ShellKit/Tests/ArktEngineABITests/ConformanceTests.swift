@@ -225,6 +225,24 @@ final class TestTab: NSObject, ArktTabHandle {
       completion(hasFrame ? Data("png".utf8) : nil, hasFrame ? NSSize(width: 2, height: 1) : .zero, hasFrame ? 1 : 0)
     }
   }
+  /// Page info (#583): one site permission whose setting the calls change; a close records itself.
+  var permissionSetting: ArktPermissionSetting = .ask
+  private(set) var pageInfoCloses = 0
+  private(set) var openedSiteSettings: [String] = []
+  var pageInfo: (any ArktPageInfo)? {
+    guard let url, let host = url.host else { return nil }
+    return TestPageInfo(origin: "\(url.scheme ?? "https")://\(host)", host: host, permissions: [
+      TestSitePermission(kind: .camera, setting: permissionSetting, isDefault: permissionSetting == .ask)
+    ])
+  }
+  func setPermission(_ kind: ArktSitePermissionKind, to setting: ArktPermissionSetting, forOrigin origin: String) {
+    guard kind == .camera, setting != permissionSetting else { return }
+    permissionSetting = setting
+    owner?.engine.record(TestEvent(.pageInfoChanged, tab: self, browser: owner))
+  }
+  func resetPermissions(forOrigin origin: String) { setPermission(.camera, to: .ask, forOrigin: origin) }
+  func pageInfoDidClose() { pageInfoCloses += 1 }
+  func openSiteSettings(forOrigin origin: String) { openedSiteSettings.append(origin) }
   func duplicate() -> (any ArktTabHandle)? {
     guard let owner else { return nil }
     let copy = owner.insertTab(url: url, active: false, opener: self, origin: .client)
@@ -421,6 +439,9 @@ final class TestEngine: NSObject, ArktEngine {
   var lastSessionCrashed = false
   func dismissLastSession() { lastSessionCrashed = false }
 
+  /// Page info (#583): the sites a test sets.
+  var sitesWithPermissions: [any ArktSitePermissions] = []
+
   // Downloads (#132): a list the tests fill, and the commands and prefs the shell sets.
   var downloads: [any ArktDownloadItem] = []
   private(set) var downloadCommands: [(command: ArktDownloadCommand, guid: String)] = []
@@ -477,6 +498,45 @@ final class TestEngine: NSObject, ArktEngine {
 }
 
 /// The app's embedder, as `ArktShellEmbedder` will be: found by name, never linked by the engine.
+final class TestSitePermission: NSObject, ArktSitePermission {
+  let kind: ArktSitePermissionKind
+  let title = "Camera"
+  let setting: ArktPermissionSetting
+  let isDefault: Bool
+  let options: [NSNumber] = [ArktPermissionSetting.allow, .ask, .block].map { NSNumber(value: $0.rawValue) }
+
+  init(kind: ArktSitePermissionKind, setting: ArktPermissionSetting, isDefault: Bool) {
+    self.kind = kind; self.setting = setting; self.isDefault = isDefault
+  }
+}
+
+final class TestPageInfo: NSObject, ArktPageInfo {
+  let origin: String
+  let host: String
+  let connection: ArktPageConnection = .secure
+  let certificateIssuedTo: String? = nil
+  let certificateIssuedBy: String? = nil
+  let certificateValidUntil: Date? = nil
+  let hasSiteData = false
+  let siteDataCookies = 0
+  let siteDataBytes: Int64 = 0
+  let permissions: [any ArktSitePermission]
+
+  init(origin: String, host: String, permissions: [any ArktSitePermission]) {
+    self.origin = origin; self.host = host; self.permissions = permissions
+  }
+}
+
+final class TestSitePermissions: NSObject, ArktSitePermissions {
+  let origin: String
+  let host: String
+  let permissions: [any ArktSitePermission]
+
+  init(origin: String, host: String, permissions: [any ArktSitePermission]) {
+    self.origin = origin; self.host = host; self.permissions = permissions
+  }
+}
+
 @objc(ArktEngineABITestEmbedder)
 final class TestEmbedder: NSObject, ArktEngineEmbedder {
   static let shared = TestEmbedder()
@@ -841,6 +901,52 @@ struct TabStateABITests {
     engine.dismissLastSession()
     engine.dismissLastSession()
     #expect(!engine.lastSessionCrashed)
+  }
+}
+
+/// Page info (#583): the handle's page info values, the four calls, the change event and the engine's per-site list are
+/// part of the ABI.
+@MainActor
+struct PageInfoABITests {
+  @Test func aPermissionChangeIsReadBackAndAnnouncedOnce() throws {
+    let engine = TestEngine()
+    var batches: [[any ArktEngineEvent]] = []
+    let token = engine.addEventSink { batches.append($0) }
+    defer { engine.removeEventSink(token) }
+    let tab = engine.createBrowser(host: TestWindowHost()).createTab(url: URL(string: "https://example.com/a"),
+                                                                      active: true)
+    engine.flush()
+    let info = try #require(tab.pageInfo)
+    #expect(info.origin == "https://example.com" && info.connection == .secure && !info.hasSiteData)
+
+    tab.setPermission(.camera, to: .block, forOrigin: info.origin)
+    tab.setPermission(.camera, to: .block, forOrigin: info.origin)
+    tab.pageInfoDidClose()
+    tab.openSiteSettings(forOrigin: info.origin)
+    engine.flush()
+
+    let camera = try #require(tab.pageInfo?.permissions.first)
+    #expect(camera.kind == .camera && camera.setting == .block && !camera.isDefault)
+    #expect(camera.options.map(\.intValue) == [0, 1, 2])
+    #expect(try #require(batches.last).map(\.kind) == [.pageInfoChanged])
+  }
+
+  @Test func theNewKindsAndValuesKeepTheirHeaderNumbers() {
+    #expect(ArktEngineEventKind.pageInfoChanged.rawValue == 30)
+    let connections: [ArktPageConnection] = [.secure, .notSecure, .notFullySecure, .certificateError, .flagged,
+                                             .localFile, .internalPage]
+    #expect(connections.map(\.rawValue) == Array(0...6))
+    #expect([ArktPermissionSetting.allow, .ask, .block].map(\.rawValue) == [0, 1, 2])
+    #expect(ArktSitePermissionKind.location.rawValue == 0 && ArktSitePermissionKind.javaScript.rawValue == 6)
+    #expect(ArktSitePermissionKind.insecureContent.rawValue == 21)
+  }
+
+  @Test func theEngineListsSitesWithPermissions() {
+    let engine = TestEngine()
+    engine.sitesWithPermissions = [TestSitePermissions(origin: "https://example.com", host: "example.com", permissions: [
+      TestSitePermission(kind: .camera, setting: .block, isDefault: false)
+    ])]
+    #expect(engine.sitesWithPermissions.map(\.origin) == ["https://example.com"])
   }
 }
 

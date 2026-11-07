@@ -94,7 +94,7 @@ extension ShellWindowController {
   }
 
   /// Shows `tab`, one of this window's private pages, and makes it the one a command-bar visit navigates.
-  private func showPrivatePage(_ tab: TabID) {
+  func showPrivatePage(_ tab: TabID) {
     privateTabs.removeAll { $0 == tab }
     privateTabs.append(tab)
     hideSplit()
@@ -119,10 +119,13 @@ extension ShellWindowController {
     return closePrivatePage(shown)
   }
 
-  /// Closes `tab`, one of this window's private pages, unless it is the last one. False when it is not closed here.
+  /// Closes `tab`, one of this window's private pages, unless it is the last one. False when it is not closed here. A
+  /// page whose close is already held at its leave-site prompt is left to that prompt: true, and nothing is pushed.
   @discardableResult
   func closePrivatePage(_ tab: TabID) -> Bool {
     guard privateTabs.contains(tab), privateTabs.count > 1 else { return false }
+    guard engine.snapshot(of: tab)?.isClosing != true else { return true }
+    rememberPrivateClose(of: tab)                   // #746: Cmd-Shift-T brings it back in this window
     engine.closeTab(tab)
     return true
   }
@@ -151,6 +154,7 @@ extension ShellWindowController {
                                    audio: TabAudio(isAudible: snapshot.isAudible, isMuted: snapshot.isMuted))
     }
     sidebarController.view.privatePages.setPages(rows)
+    privatePageURLs = rows.reduce(into: [:]) { urls, row in urls[row.tab] = row.url }    // #746
   }
 
   /// The page Close Oldest would close now: the earliest-opened page that is neither shown nor playing sound.
@@ -173,7 +177,7 @@ extension ShellWindowController {
 
   func closeOldestPrivatePage() {
     guard let oldest = privatePageToCloseOldest else { return }
-    engine.closeTab(oldest)
+    closePrivatePage(oldest)
   }
 
   /// The events of the private pages, which have no row to route them through. The address bar and the Back and
@@ -194,9 +198,12 @@ extension ShellWindowController {
     case .tabClosed(_, let reason):
       privateTabClosed(tab, reason: reason)
     case .closeCancelled:
-      // The user stayed on the page: the window close is off, as for a row (`closeWasCancelled`).
+      // The user stayed on the page: the window close is off, as for a row (`closeWasCancelled`), and so is the
+      // page's or the window's place on the reopen stack (#746).
       isWindowCloseRequested = false
       stampsShownTabsOnWindowClose = false
+      closingPrivateWindow = nil
+      forgetPrivateClose(of: tab)
     default:
       return false
     }
@@ -204,6 +211,7 @@ extension ShellWindowController {
   }
 
   private func privateTabClosed(_ tab: TabID, reason: CloseReason) {
+    if reason == .windowClosing { holdClosingPrivateWindow() }   // #746: also the engine's own Close Window
     privateTabs.removeAll { $0 == tab }
     privatePageOrder.remove(tab)
     if tab == engineActiveTab { engineActiveTab = nil }

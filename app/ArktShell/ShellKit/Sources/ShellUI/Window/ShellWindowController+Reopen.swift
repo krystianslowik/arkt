@@ -16,13 +16,16 @@ extension ShellWindowController {
 
   /// File > Reopen Closed Tab (Cmd-Shift-T, KB-010). With nothing of this window's to reopen, the last closed Little
   /// Arkt window comes back (#355), except in a blank or incognito window (#726): it reopens only its own closes and
-  /// never a page of normal browsing or its Archive entry.
+  /// never a page of normal browsing or its Archive entry; with none left, the last closed private window (#746).
   @objc public func reopenClosedTab(_ sender: Any?) {
-    if !reopenClosed(), reopensLittleArkt { reopenLittleArkt?() }
+    guard !reopenClosed() else { return }
+    if reopensLittleArkt { reopenLittleArkt?() } else { reopenPrivateWindow?() }
   }
 
-  /// Whether Reopen Closed Tab is on: a close of this window's, or a closed Little Arkt it falls through to.
-  var canReopenClosedTab: Bool { canReopenClosed || (reopensLittleArkt && canReopenLittleArkt()) }
+  /// Whether Reopen Closed Tab is on: a close of this window's, or the closed window it falls through to.
+  var canReopenClosedTab: Bool {
+    canReopenClosed || (reopensLittleArkt ? canReopenLittleArkt() : canReopenPrivateWindow())
+  }
 
   /// Whether Reopen Closed Tab falls through to the last closed Little Arkt: never in a blank or incognito window.
   private var reopensLittleArkt: Bool { !isPrivateWindow }
@@ -165,6 +168,8 @@ extension ShellWindowController {
     case .peek(let closed):
       return reopen(closed)
     case .node(let closed):
+      return reopen(closed)
+    case .privatePage(let closed):
       return reopen(closed)
     case .batch(let batch):
       // Newest close first, as single undos would run, so each row lands back at the index it left. Nothing is

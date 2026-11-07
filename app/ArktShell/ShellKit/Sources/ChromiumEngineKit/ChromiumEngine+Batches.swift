@@ -234,6 +234,9 @@ extension ChromiumEngine {
       hub.emit(.targetURLChanged(id, event.url))
     case .tabCrashed, .tabRecovered, .zoomChanged, .tabFullscreenChanged:
       tabStateChanged(id, event, handle: handle)
+    case .pageInfoChanged:
+      // No values: the shell reads the handle's page info again (#583).
+      hub.emit(.pageInfoChanged(id))
     default:
       // TabReplaced: the handle and its container stay (Decision 5, 6); nothing changes for the shell.
       break

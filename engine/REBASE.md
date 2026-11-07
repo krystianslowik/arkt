@@ -166,6 +166,21 @@ One hunk (five lines) in `BrowserWebContentsDelegate::UpdateTargetURL` (`browser
 cast); and that `rule 23` of the in-app contract runner (`--arkt-engine-contract=hoveredLinkReportsItsTargetURL`) passes.
 If upstream adds a target URL observer to `WebContentsObserver`, drop the patch and observe it in the facade instead.
 
+### Page info seam (#583, overlay only)
+
+`arkt/api/arkt_page_info.cc` lists location as `ContentSettingsType::GEOLOCATION`. While
+`content_settings::features::kApproximateGeolocationPermission` is off on desktop (its default at 156), that is the
+type Chromium's page info and siteDetails show and its value is a plain `ContentSetting`. On a rebase check the
+feature's default in `components/content_settings/core/common/features.cc`:
+
+    git -C $CR grep -n -A4 'BASE_FEATURE(kApproximateGeolocationPermission' -- components/content_settings/core/common/features.cc
+
+If it is enabled on Mac, page info shows `GEOLOCATION_WITH_OPTIONS` instead (a `GeolocationSetting`, not a
+`ContentSetting`): move the location row to that type and read it with `GetPermissionSetting` before shipping. Also
+check that `PageInfoUI::PermissionTypeToUIString` still has a row for every kind the overlay lists (it `NOTREACHED`s
+otherwise; insecure content already uses the site settings label), and that rule 26 of the in-app contract runner
+passes.
+
 ## 6. Patch budget gate
 
 Run after Export and before the verification:

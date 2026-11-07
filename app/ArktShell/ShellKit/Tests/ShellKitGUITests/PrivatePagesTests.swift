@@ -329,7 +329,9 @@ final class PrivatePagesTests: XCTestCase {
     XCTAssertNil(f.engine.snapshot(of: order[2]), "the earliest page neither shown nor playing closes")
     XCTAssertNotNil(f.engine.snapshot(of: order[0]))
     XCTAssertNotNil(f.engine.snapshot(of: order[1]))
-    XCTAssertEqual(Set(f.engine.tabIDs), tabsBefore.subtracting([order[2]]), "the refused page does not open")
+    XCTAssertEqual(window.parkedTabs.count, 1, "the closed page is parked for Cmd-Shift-T (#746)")
+    XCTAssertEqual(Set(f.engine.tabIDs).subtracting(window.parkedTabs), tabsBefore.subtracting([order[2]]),
+                   "the refused page does not open")
     XCTAssertEqual(window.currentTab, order[0])
     XCTAssertEqual(rowTabs(window), order.filter { $0 != order[2] })
     XCTAssertNil(window.toasts.current, "the toast goes")
