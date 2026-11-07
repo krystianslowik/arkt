@@ -2,7 +2,7 @@ import AppKit
 import Testing
 @testable import ShellUI
 
-/// The four lifts drawn on flipped views (#767) cast their shadow down on screen, not up. A literal offset cannot
+/// The lifts drawn on flipped views (#767, #773) cast their shadow down on screen, not up. A literal offset cannot
 /// show that: the sign that means "down" depends on the layer's flip. Each control's layer tree is hosted under a
 /// plain unflipped layer (the window's own orientation) and drawn with Core Animation; the shadow must darken the band
 /// just below the element more than the band just above it, in light and dark.
@@ -70,6 +70,60 @@ struct ShadowDirectionTests {
     content.backgroundColor = CGColor(gray: 0.5, alpha: 1)
     layer.addSublayer(content)
     try host.expectCastsDown(layer, band: 4)
+  }
+
+  // MARK: #773: Settings controls and row lifts
+
+  /// Off, the knob carries its lift in both appearances.
+  @Test(arguments: [NSAppearance.Name.aqua, .darkAqua])
+  func theSettingsSwitchKnobCastsDown(appearance: NSAppearance.Name) throws {
+    let toggle = SettingsSwitch(frame: .zero)
+    toggle.appearance = NSAppearance(named: appearance)
+    let host = Host(toggle, dark: appearance == .darkAqua)
+    toggle.updateLayer()
+    let knob = try #require(host.layers().first { $0 is ShadowPathLayer }, "the knob")
+    try host.expectCastsDown(knob, band: 1)   // 2 pt of track around the knob: the bands stay on the track
+  }
+
+  // The plates and row lifts below draw a shadow in light only; dark has none to point anywhere.
+
+  @Test func theSelectedSegmentPlateCastsDown() throws {
+    let control = SettingsSegmentedControl(segments: ["Light", "Dark", "Auto"], selected: 0)
+    control.frame = NSRect(origin: .zero, size: control.intrinsicContentSize)
+    control.appearance = NSAppearance(named: .aqua)
+    let host = Host(control, dark: false)
+    control.layout()
+    let plate = try #require(host.layers().first { $0 is ShadowPathLayer }, "the plate")
+    try host.expectCastsDown(plate, band: 1.5)
+  }
+
+  @Test func theSelectedSettingsPaneItemCastsDown() throws {
+    let item = SettingsPaneItemView(pane: .general)
+    item.appearance = NSAppearance(named: .aqua)
+    item.setSelected(true, animated: false)
+    let host = Host(item, dark: false)
+    item.layout()
+    let plate = try #require(host.layers().first { $0 is ShadowPathLayer }, "the plate")
+    try host.expectCastsDown(plate, band: 1.5)
+  }
+
+  @Test func theCurrentSidebarRowCastsDown() throws {
+    let row = SidebarRowView(frame: NSRect(x: 0, y: 0, width: 220, height: 41))
+    row.state = .current
+    row.flavor = .light
+    let host = Host(row, dark: false)
+    row.updateLayer()
+    try host.expectCastsDown(row.backgroundLayer, band: 1.5)
+  }
+
+  @Test func theSelectedArchiveRowCastsDown() throws {
+    let row = ArchiveRowView(frame: NSRect(x: 0, y: 0, width: 220, height: 37))
+    row.appearance = NSAppearance(named: .aqua)
+    row.isSelected = true
+    let host = Host(row, dark: false)
+    row.updateLayer()
+    let fill = try #require(row.layer?.sublayers?.first { $0.shadowOpacity > 0 }, "the selected fill")
+    try host.expectCastsDown(fill, band: 1.5)
   }
 
   /// The renderer keeps the window's orientation: a marker placed near the top of the host lands in the top rows of

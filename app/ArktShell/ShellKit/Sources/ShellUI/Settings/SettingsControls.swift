@@ -75,7 +75,7 @@ public final class SettingsSwitch: NSButton {
     }
     knob.cornerRadius = SettingsMetrics.knob / 2
     knob.anchorPoint = CGPoint(x: 0, y: 0.5)          // stretches from its leading edge
-    knob.shadowOffset = SettingsTokens.switchKnobShadow.unflippedOffset
+    knob.shadowOffset = SettingsTokens.switchKnobShadow.flippedOffset   // NSButton is flipped
     knob.shadowRadius = SettingsTokens.switchKnobShadow.radius
     track.addSublayer(onFill)
     track.addSublayer(knob)
@@ -349,7 +349,7 @@ final class SettingsSegmentedControl: NSControl {
     plate.cornerRadius = 7
     plate.cornerCurve = .continuous
     plate.anchorPoint = .zero
-    plate.shadowOffset = SettingsTokens.segmentPlateShadow.unflippedOffset
+    plate.shadowOffset = SettingsTokens.segmentPlateShadow.flippedOffset   // a sublayer of this flipped view
     plate.shadowRadius = SettingsTokens.segmentPlateShadow.radius
     layer?.addSublayer(plate)
     labels.forEach {
