@@ -1257,3 +1257,15 @@ Executed 4 tests, with 0 failures (0 unexpected) in 111.307 (111.313) seconds. T
 
 `cd app/ArktShell/ShellKit && swift test -j 2 --skip ShellKitGUITests` was not run. ShellKit production and ShellKit
 tests were not changed. ArktCore was not run for the same reason.
+
+### U15 Split View coverage (#180)
+
+Six XCUITest scenarios exercise the imported split, focused navigation, adding and selecting panes, separation,
+page drag, and relaunch and Archive behavior. The sidebar scenario records bounded accessibility snapshots after
+right-click and, if needed, control-click; a missing menu alone does not establish an app defect. Divider drag checks
+only the accessibility value. The unimplemented parity behaviors remain listed in `parity-deferred.txt`, as do the
+new scenarios until their focused CI results are observed.
+
+Local executable tests and app build were not run: full Xcode is unavailable and the standalone toolchain cannot
+build the baseline ShellKit. The full UI suite has a separate import/onboarding timeout tracked in #799. A manual UI
+workflow filter permits a focused run while the default remains the full suite. Results for this head are pending.
