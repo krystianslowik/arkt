@@ -105,8 +105,14 @@ final class FoldWatchStage: OnboardingStage {
 final class ManualOnboardingSchedule {
   private(set) var delays: [TimeInterval] = []
   private var pending: [@MainActor () -> Void] = []
+  /// The overlay of the flow it was installed on; it outlives the controller until the fold ends.
+  private weak var view: OnboardingView?
+
+  /// Whether that flow runs under Reduce Motion: the system's setting, so a runner can have it on.
+  var reducesMotion: Bool { view?.appearanceModel.reduceMotion ?? false }
 
   func install(on onboarding: OnboardingController) {
+    view = onboarding.view
     onboarding.schedule = { [weak self] delay, work in
       self?.delays.append(delay)
       self?.pending.append(work)
@@ -155,11 +161,10 @@ final class OnboardingTests: XCTestCase {
   }
 
   /// The finish scheduled its reveal and browser handoff: runs both as if their delays had passed, and checks the
-  /// window hands back to the browser. The overlay waits for them, never for wall time. Under Reduce Motion the
-  /// reveal is at once and the handoff after 50 ms.
-  private func handOff(_ window: ShellWindowController, reduceMotion: Bool = false,
-                       file: StaticString = #filePath, line: UInt = #line) {
-    XCTAssertEqual(handoff.delays, reduceMotion ? [0, 0.05] : [0.65, 0.9],
+  /// window hands back to the browser. The overlay waits for them, never for wall time. Under Reduce Motion (the
+  /// system's, or a test's) the reveal is at once and the handoff after 50 ms.
+  private func handOff(_ window: ShellWindowController, file: StaticString = #filePath, line: UInt = #line) {
+    XCTAssertEqual(handoff.delays, handoff.reducesMotion ? [0, 0.05] : [0.65, 0.9],
                    "the finish scheduled the reveal and the handoff", file: file, line: line)
     XCTAssertTrue(window.isShowingOnboarding, "the browser waits for its delay", file: file, line: line)
     handoff.runAll()
@@ -767,7 +772,8 @@ final class OnboardingTests: XCTestCase {
     onboarding.view.onSkipSetup?()
     let result = try XCTUnwrap(seen, "the fold began")
     XCTAssertEqual(result.progress, shownProgress, "the progress fades with its text, it does not blank first")
-    handOff(window, reduceMotion: reduceMotion)
+    XCTAssertEqual(handoff.reducesMotion, reduceMotion)
+    handOff(window)
     window.commandBar.hide()
     window.close()
     return result
