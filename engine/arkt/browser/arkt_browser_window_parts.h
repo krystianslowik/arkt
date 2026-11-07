@@ -15,6 +15,7 @@
 #include "chrome/browser/ui/location_bar/location_bar.h"
 #include "chrome/browser/ui/side_panel/side_panel_ui.h"
 #include "components/web_modal/web_contents_modal_dialog_host.h"
+#include "ui/base/accelerators/accelerator.h"
 #include "ui/base/unowned_user_data/scoped_unowned_user_data.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_observer.h"
@@ -32,6 +33,23 @@ class ArktBrowserWindow;
 void LogStubOnce(const char* scope, const char* method);
 
 #define ARKT_STUB(scope) ::arkt::LogStubOnce(scope, __func__)
+
+// The key equivalents of Chromium commands in the app's main menu: a
+// commandDispatch: item whose tag is the command id (the shell's page
+// commands, MainMenu.swift). Arkt's Cmd-W is Archive Tab, not IDC_CLOSE_TAB,
+// so the app has no accelerator for IDC_CLOSE_TAB and callers fall back to
+// closing without the pinned-tab confirmation.
+class ArktAcceleratorProvider : public ui::AcceleratorProvider {
+ public:
+  ArktAcceleratorProvider() = default;
+  ArktAcceleratorProvider(const ArktAcceleratorProvider&) = delete;
+  ArktAcceleratorProvider& operator=(const ArktAcceleratorProvider&) = delete;
+  ~ArktAcceleratorProvider() override = default;
+
+  // ui::AcceleratorProvider:
+  bool GetAcceleratorForCommandId(int command_id,
+                                  ui::Accelerator* accelerator) const override;
+};
 
 // Fullscreen through the host window's native fullscreen. There is no
 // exclusive access bubble this week.

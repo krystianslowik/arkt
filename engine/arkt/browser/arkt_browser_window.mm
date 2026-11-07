@@ -1459,8 +1459,10 @@ bool ArktBrowserWindow::ForwardUnhandledKeyDown(NSEvent* event) {
 }
 
 ui::AcceleratorProvider* ArktBrowserWindow::GetAcceleratorProvider() {
-  ARKT_STUB("BrowserWindow");
-  return nullptr;
+  if (!accelerator_provider_) {
+    accelerator_provider_ = std::make_unique<ArktAcceleratorProvider>();
+  }
+  return accelerator_provider_.get();
 }
 
 // BrowserWindow: toolbar and location bar (Arkt has neither) ------------------

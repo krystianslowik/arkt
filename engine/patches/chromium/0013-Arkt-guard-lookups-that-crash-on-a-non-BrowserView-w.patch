@@ -1,0 +1,111 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Arkt contributors <noreply@arkt.invalid>
+Date: Sat, 7 Nov 2026 19:35:01 +0100
+Subject: [PATCH] Arkt: guard lookups that crash on a non-BrowserView window
+
+Storage pressure bubble, Cut, Copy and Paste actions, and toasts: return or
+act on the active tab instead of dereferencing a missing BrowserView or
+checking that only tests lack a toast anchor.
+---
+ chrome/browser/ui/browser_actions.cc          | 27 ++++++++++++++++---
+ chrome/browser/ui/toasts/toast_controller.cc  | 18 +++++++++++--
+ .../storage/storage_pressure_bubble_view.cc   |  4 +++
+ 3 files changed, 44 insertions(+), 5 deletions(-)
+
+diff --git a/chrome/browser/ui/browser_actions.cc b/chrome/browser/ui/browser_actions.cc
+index 0f7a326019..1ade26772f 100644
+--- a/chrome/browser/ui/browser_actions.cc
++++ b/chrome/browser/ui/browser_actions.cc
+@@ -2267,7 +2267,14 @@ void BrowserActions::InitializeToolbarAndMiscActions() {
+           base::BindRepeating(
+               [](BrowserWindowInterface* bwi, actions::ActionItem* item,
+                  actions::ActionInvocationContext context) {
+-                CHECK_DEREF(BrowserView::GetBrowserViewForBrowser(bwi)).Cut();
++                if (auto* browser_view =
++                        BrowserView::GetBrowserViewForBrowser(bwi)) {
++                  browser_view->Cut();
++                } else if (auto* contents = bwi->GetTabStripModel()
++                                                ->GetActiveWebContents()) {
++                  // An embedder's window without a BrowserView.
++                  contents->Cut();
++                }
+               },
+               bwi))
+           .SetActionId(actions::kActionCut)
+@@ -2285,7 +2292,14 @@ void BrowserActions::InitializeToolbarAndMiscActions() {
+           base::BindRepeating(
+               [](BrowserWindowInterface* bwi, actions::ActionItem* item,
+                  actions::ActionInvocationContext context) {
+-                CHECK_DEREF(BrowserView::GetBrowserViewForBrowser(bwi)).Copy();
++                if (auto* browser_view =
++                        BrowserView::GetBrowserViewForBrowser(bwi)) {
++                  browser_view->Copy();
++                } else if (auto* contents = bwi->GetTabStripModel()
++                                                ->GetActiveWebContents()) {
++                  // An embedder's window without a BrowserView.
++                  contents->Copy();
++                }
+               },
+               bwi))
+           .SetActionId(actions::kActionCopy)
+@@ -2303,7 +2317,14 @@ void BrowserActions::InitializeToolbarAndMiscActions() {
+           base::BindRepeating(
+               [](BrowserWindowInterface* bwi, actions::ActionItem* item,
+                  actions::ActionInvocationContext context) {
+-                CHECK_DEREF(BrowserView::GetBrowserViewForBrowser(bwi)).Paste();
++                if (auto* browser_view =
++                        BrowserView::GetBrowserViewForBrowser(bwi)) {
++                  browser_view->Paste();
++                } else if (auto* contents = bwi->GetTabStripModel()
++                                                ->GetActiveWebContents()) {
++                  // An embedder's window without a BrowserView.
++                  contents->Paste();
++                }
+               },
+               bwi))
+           .SetActionId(actions::kActionPaste)
+diff --git a/chrome/browser/ui/toasts/toast_controller.cc b/chrome/browser/ui/toasts/toast_controller.cc
+index 4b17a93554..143c5c7fb6 100644
+--- a/chrome/browser/ui/toasts/toast_controller.cc
++++ b/chrome/browser/ui/toasts/toast_controller.cc
+@@ -323,9 +323,23 @@ void ToastController::CreateToast(ToastParams params,
+   if (!anchor_view) {
+     // Don't actually create the toast in unit tests
+     // TODO(webium): show toast in webui browser.
+-    if (!webui_browser::IsWebUIBrowserEnabled()) {
+-      CHECK_IS_TEST();
++    if (webui_browser::IsWebUIBrowserEnabled()) {
++      return;
+     }
++    // An embedder's window without a Views widget drops the toast as if it
++    // closed at once, so later toasts are not queued behind it.
++    BrowserElementsViews* const elements =
++        browser_window_interface_
++            ? BrowserElementsViews::From(browser_window_interface_)
++            : nullptr;
++    if (elements && !elements->GetPrimaryWindowWidget()) {
++      toast_close_timer_.Stop();
++      currently_showing_toast_close_callback_.RunAndReset();
++      on_widget_destroyed_callbacks_.Notify(*currently_showing_toast_id_);
++      currently_showing_toast_id_ = std::nullopt;
++      return;
++    }
++    CHECK_IS_TEST();
+     return;
+   }
+ 
+diff --git a/chrome/browser/ui/views/storage/storage_pressure_bubble_view.cc b/chrome/browser/ui/views/storage/storage_pressure_bubble_view.cc
+index e055aa36ff..c868bbaf4e 100644
+--- a/chrome/browser/ui/views/storage/storage_pressure_bubble_view.cc
++++ b/chrome/browser/ui/views/storage/storage_pressure_bubble_view.cc
+@@ -45,6 +45,10 @@ void StoragePressureBubbleView::ShowBubble(const url::Origin& origin) {
+   }
+ 
+   auto* browser_view = BrowserView::GetBrowserViewForBrowser(bwi);
++  if (!browser_view) {
++    // An embedder's window without a BrowserView has no anchor for the bubble.
++    return;
++  }
+   auto* control = browser_view->toolbar_button_provider()->GetAppMenuControl();
+   views::BubbleAnchor anchor =
+       control ? control->GetAnchor() : views::BubbleAnchor();

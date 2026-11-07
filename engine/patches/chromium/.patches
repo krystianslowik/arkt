@@ -10,3 +10,5 @@
 0010-Arkt-report-the-link-under-the-pointer-from-UpdateTa.patch
 0011-Arkt-keep-imported-visits-out-of-history-sync.patch
 0012-Arkt-find-a-non-BrowserView-window-for-a-WebContents.patch
+0013-Arkt-guard-lookups-that-crash-on-a-non-BrowserView-w.patch
+0014-Arkt-take-the-Close-Tab-shortcut-from-the-window-s-a.patch
