@@ -1,3 +1,5 @@
+import("//testing/test.gni")
+
 # Lets //arkt/browser create normal browser windows. Dependency-free on
 # purpose: //chrome/browser/ui/views/frame:browser_window_factory depends on it
 # (patch 0004), and depending on //arkt/browser there would be a GN cycle.
@@ -177,5 +179,16 @@ source_set("window") {
   frameworks = [
     "AppKit.framework",
     "QuartzCore.framework",
+  ]
+}
+
+# Upstream unit tests that cover Arkt patches, linked on their own so a check
+# does not need all of components_unittests. Defined in this file because GN
+# loads it from //chrome/browser. Run with a --gtest_filter, for example
+# HistorySyncBridgeTest.* for the history sync patch.
+test("arkt_patch_unittests") {
+  deps = [
+    "//base/test:run_all_unittests",
+    "//components/history/core/browser:unit_tests",
   ]
 }
