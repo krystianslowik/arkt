@@ -99,6 +99,11 @@ final class TestEvent: NSObject, ArktEngineEvent {
   var findCount = 0
   var findIsFinal = false
   var download: (any ArktDownloadItem)?
+  var terminationStatus: ArktTerminationStatus = .none
+  var zoomPercent = 0
+  var zoomIsDefault = false
+  var zoomIsUserInitiated = false
+  var isTabFullscreen = false
   init(_ kind: ArktEngineEventKind, tab: (any ArktTabHandle)?, browser: (any ArktBrowserHandle)?) {
     self.kind = kind; self.tab = tab; self.browser = browser
   }
@@ -125,6 +130,10 @@ final class TestTab: NSObject, ArktTabHandle {
   var wouldHoldClose = false
   var isAudible = false
   private(set) var isMuted = false
+  var terminationStatus: ArktTerminationStatus = .none
+  private(set) var zoomPercent = 100
+  var zoomIsDefault: Bool { zoomPercent == 100 }
+  var isTabFullscreen = false
 
   init(sessionId: Int32, owner: TestBrowser, url: URL?, opener: (any ArktTabHandle)?, origin: ArktTabOrigin) {
     self.sessionId = sessionId; self.owner = owner; self.url = url; self.opener = opener; self.origin = origin
@@ -170,6 +179,22 @@ final class TestTab: NSObject, ArktTabHandle {
     isMuted = muted
     let event = TestEvent(.mutedChanged, tab: self, browser: owner)
     event.isMuted = muted
+    owner?.engine.record(event)
+  }
+  /// Zoom (#577): ten points a step between 50 and 200, one `ZoomChanged` per change.
+  func zoom(_ command: ArktZoomCommand) {
+    let next = switch command {
+    case .zoomIn: min(zoomPercent + 10, 200)
+    case .zoomOut: max(zoomPercent - 10, 50)
+    case .reset: 100
+    @unknown default: zoomPercent
+    }
+    guard next != zoomPercent else { return }
+    zoomPercent = next
+    let event = TestEvent(.zoomChanged, tab: self, browser: owner)
+    event.zoomPercent = next
+    event.zoomIsDefault = zoomIsDefault
+    event.zoomIsUserInitiated = true
     owner?.engine.record(event)
   }
   /// The find (#134): the calls as received, and one final reply of 1 of 1 per non-empty text.
@@ -391,6 +416,10 @@ final class TestEngine: NSObject, ArktEngine {
   }
 
   func answerDialog(in tab: any ArktTabHandle, accept: Bool) -> Bool { false }
+
+  /// The crashed-session prompt (#577).
+  var lastSessionCrashed = false
+  func dismissLastSession() { lastSessionCrashed = false }
 
   // Downloads (#132): a list the tests fill, and the commands and prefs the shell sets.
   var downloads: [any ArktDownloadItem] = []
@@ -769,6 +798,49 @@ struct MuteABITests {
     let events = try #require(batches.last)
     #expect(events.map(\.kind) == [.mutedChanged])
     #expect(events.first?.isMuted == true && events.first?.tab === tab)
+  }
+}
+
+/// Tab state (#577): the handle's crash, zoom and fullscreen values, the zoom call, the four events' plain values and
+/// the crashed-session prompt are part of the ABI.
+@MainActor
+struct TabStateABITests {
+  @Test func zoomChangesTheHandleAndRecordsOnePlainEventPerChange() throws {
+    let engine = TestEngine()
+    var batches: [[any ArktEngineEvent]] = []
+    let token = engine.addEventSink { batches.append($0) }
+    defer { engine.removeEventSink(token) }
+    let tab = engine.createBrowser(host: TestWindowHost()).createTab(url: nil, active: true)
+    engine.flush()
+    #expect(tab.zoomPercent == 100 && tab.zoomIsDefault && tab.terminationStatus == .none && !tab.isTabFullscreen)
+
+    tab.zoom(.zoomIn)
+    tab.zoom(.reset)
+    tab.zoom(.reset)
+    engine.flush()
+
+    let events = try #require(batches.last)
+    #expect(events.map(\.kind) == [.zoomChanged, .zoomChanged])
+    #expect(events.map(\.zoomPercent) == [110, 100] && events.map(\.zoomIsDefault) == [false, true])
+    #expect(events.allSatisfy { $0.zoomIsUserInitiated && $0.tab === tab })
+  }
+
+  @Test func theNewKindsAndValuesKeepTheirHeaderNumbers() {
+    #expect(ArktEngineEventKind.tabCrashed.rawValue == 26 && ArktEngineEventKind.tabRecovered.rawValue == 27)
+    #expect(ArktEngineEventKind.zoomChanged.rawValue == 28 && ArktEngineEventKind.tabFullscreenChanged.rawValue == 29)
+    let statuses: [ArktTerminationStatus] = [.none, .crashed, .killed, .outOfMemory, .launchFailed]
+    #expect(statuses.map(\.rawValue) == [0, 1, 2, 3, 4])
+    #expect([ArktZoomCommand.zoomIn, .zoomOut, .reset].map(\.rawValue) == [0, 1, 2])
+    let event = TestEvent(.tabCrashed, tab: nil, browser: nil)
+    #expect(event.terminationStatus == .none && event.zoomPercent == 0 && !event.isTabFullscreen)
+  }
+
+  @Test func dismissingTheCrashedSessionAnswersItForTheRun() {
+    let engine = TestEngine()
+    engine.lastSessionCrashed = true
+    engine.dismissLastSession()
+    engine.dismissLastSession()
+    #expect(!engine.lastSessionCrashed)
   }
 }
 

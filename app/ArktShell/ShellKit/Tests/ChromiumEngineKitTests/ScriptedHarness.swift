@@ -112,7 +112,13 @@ enum ScriptedHarness {
         tab.hover(nil)
         try await delivered(chromium)
       },
-      downloads: .scripted()
+      downloads: .scripted(),
+      crashTab: { engine, id in
+        // A scripted RenderProcessGone (#577); the app runner navigates the tab to chrome://crash instead.
+        let (chromium, tab) = try parts(engine, id)
+        tab.crash(status: .crashed)
+        try await delivered(chromium)
+      }
     )
   }
 

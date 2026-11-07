@@ -186,6 +186,26 @@ struct TabStateTests {
     ])
   }
 
+  /// The shell reads `snapshot(of:)?.isTabFullscreen` when `.tabFullscreenChanged` arrives (#581), so the snapshot
+  /// inside the handler already carries the event's value.
+  @Test func theSnapshotInsideTheHandlerCarriesTheFullscreenValue() {
+    let engine = InMemoryEngine()
+    let tab = tabInWindow(engine)
+    var seen: [(event: Bool, snapshot: Bool?)] = []
+    let token = engine.observe { event in
+      if case .tabFullscreenChanged(let id, let fullscreen) = event {
+        seen.append((fullscreen, engine.snapshot(of: id)?.isTabFullscreen))
+      }
+    }
+    defer { token.cancel() }
+
+    engine.setTabFullscreen(tab, true)
+    engine.setTabFullscreen(tab, false)
+
+    #expect(seen.map(\.event) == [true, false])
+    #expect(seen.map(\.snapshot) == [true, false])
+  }
+
   @Test func navigationEndsHTMLFullscreen() throws {
     let engine = InMemoryEngine()
     let tab = tabInWindow(engine)

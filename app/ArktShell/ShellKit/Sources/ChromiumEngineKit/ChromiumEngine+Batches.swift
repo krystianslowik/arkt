@@ -225,6 +225,8 @@ extension ChromiumEngine {
                            isFinal: event.findIsFinal))
     case .targetURLChanged:
       hub.emit(.targetURLChanged(id, event.url))
+    case .tabCrashed, .tabRecovered, .zoomChanged, .tabFullscreenChanged:
+      tabStateChanged(id, event, handle: handle)
     default:
       // TabReplaced: the handle and its container stay (Decision 5, 6); nothing changes for the shell.
       break

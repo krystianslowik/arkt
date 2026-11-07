@@ -190,6 +190,52 @@ typedef NS_ENUM(NSInteger, ArktEngineEventKind) {
   // The download left the list (#132); its file stays unless it was deleted.
   // Values: download, as it was last. Nothing follows for that guid.
   ArktEngineEventKindDownloadRemoved = 25,
+  // The page's process went away (#577), from
+  // WebContentsObserver::PrimaryMainFrameRenderProcessGone. Values:
+  // terminationStatus. The tab stays listed with its URL and history. A load
+  // in progress is reported ended (LoadingChanged NO) and HTML fullscreen left
+  // (TabFullscreenChanged NO) before it. Reported once until TabRecovered.
+  ArktEngineEventKindTabCrashed = 26,
+  // A crashed tab has a live page process again (#577): its primary main
+  // frame was created or swapped in, at the latest when the reload or the new
+  // navigation commits. Reported once per TabCrashed.
+  ArktEngineEventKindTabRecovered = 27,
+  // The tab's page zoom changed (#577), from the tab's zoom::ZoomController.
+  // Values: zoomPercent, zoomIsDefault and zoomIsUserInitiated, as recorded;
+  // the handle has the live zoom. User initiated means the change was made
+  // through this tab's zoom controller (zoomIn, zoomOut and resetZoom here,
+  // Chromium's zoom commands, an extension's chrome.tabs.setZoom). A site's
+  // saved zoom applied on navigation, another tab of the same host zoomed, or
+  // a new default zoom are not. Only changes of percent or default are
+  // reported.
+  ArktEngineEventKindZoomChanged = 28,
+  // An element of the page entered or left HTML fullscreen (#577), from
+  // WebContentsObserver::DidToggleFullscreenModeForTab. Values:
+  // isTabFullscreen. Not sent for the window's own full screen. The engine
+  // reserves no infobar height while the tab is fullscreen.
+  ArktEngineEventKindTabFullscreenChanged = 29,
+};
+
+// Why a tab's page process went away (#577), folded from
+// base::TerminationStatus: PROCESS_CRASHED and ABNORMAL_TERMINATION are
+// Crashed, PROCESS_WAS_KILLED is Killed, OOM and EVICTED_FOR_MEMORY are
+// OutOfMemory, LAUNCH_FAILED is LaunchFailed. None while the page is alive,
+// and on every event other than TabCrashed.
+typedef NS_ENUM(NSInteger, ArktTerminationStatus) {
+  ArktTerminationStatusNone = 0,
+  ArktTerminationStatusCrashed = 1,
+  ArktTerminationStatusKilled = 2,
+  ArktTerminationStatusOutOfMemory = 3,
+  ArktTerminationStatusLaunchFailed = 4,
+};
+
+// A page zoom step (#577), as content::PageZoom through zoom::PageZoom::Zoom:
+// ZoomIn and ZoomOut walk Chromium's preset zoom levels (with the default
+// level among them), Reset returns to the default zoom.
+typedef NS_ENUM(NSInteger, ArktZoomCommand) {
+  ArktZoomCommandZoomIn = 0,
+  ArktZoomCommandZoomOut = 1,
+  ArktZoomCommandReset = 2,
 };
 
 // Why the engine asks the embedder for a window host.
@@ -354,6 +400,15 @@ NS_SWIFT_UI_ACTOR
 // DownloadCreated, DownloadUpdated and DownloadRemoved; nil on every other
 // kind.
 @property(nonatomic, readonly, nullable) id<ArktDownloadItem> download;
+// TabCrashed; None on every other kind (#577).
+@property(nonatomic, readonly) ArktTerminationStatus terminationStatus;
+// ZoomChanged; 0, NO and NO on every other kind (#577). The percent is
+// zoom::ZoomController::GetZoomPercent(), rounded.
+@property(nonatomic, readonly) NSInteger zoomPercent;
+@property(nonatomic, readonly) BOOL zoomIsDefault;
+@property(nonatomic, readonly) BOOL zoomIsUserInitiated;
+// TabFullscreenChanged; NO on every other kind (#577).
+@property(nonatomic, readonly) BOOL isTabFullscreen;
 @end
 
 // One download as plain values, read when the event was recorded (#132).
@@ -732,6 +787,16 @@ NS_SWIFT_UI_ACTOR
 @property(nonatomic, readonly) BOOL isAudible;
 // The tab's sound is muted (WebContents::IsAudioMuted).
 @property(nonatomic, readonly) BOOL isMuted;
+// Why the page's process went away, None while it is alive
+// (WebContents::IsCrashed and GetCrashedStatus, #577).
+@property(nonatomic, readonly) ArktTerminationStatus terminationStatus;
+// The page zoom (#577): zoom::ZoomController::GetZoomPercent() and
+// IsAtDefaultZoom(); 100 and YES for a closed tab.
+@property(nonatomic, readonly) NSInteger zoomPercent;
+@property(nonatomic, readonly) BOOL zoomIsDefault;
+// An element of the page is in HTML fullscreen, or about to be
+// (WebContents::IsFullscreen, #577).
+@property(nonatomic, readonly) BOOL isTabFullscreen;
 
 - (void)navigateToURL:(NSURL*)url;
 - (void)reload;
@@ -760,6 +825,12 @@ NS_SWIFT_UI_ACTOR
 // Mutes or unmutes the tab's sound (WebContents::SetAudioMuted), reported
 // with MutedChanged when the state changes (#364).
 - (void)setMuted:(BOOL)muted NS_SWIFT_NAME(setMuted(_:));
+// One zoom step (#577), reported with ZoomChanged (user initiated) when the
+// zoom changes; nothing at either end of the steps or when Reset finds the
+// default. The handle's zoomPercent and zoomIsDefault have the new zoom when
+// the call returns. A no-op for a closed or crashed tab (Chromium does not
+// zoom a page without a live process).
+- (void)zoomWithCommand:(ArktZoomCommand)command NS_SWIFT_NAME(zoom(_:));
 // Starts or continues a find in the tab's page (#134), as
 // FindTabHelper::StartFinding with find_match set: a new text or case starts
 // a new search at the first match; the same text and case again moves to the
@@ -959,6 +1030,18 @@ NS_SWIFT_UI_ACTOR
 @property(nonatomic, copy, nullable) void (^downloadDestinationHandler)
     (NSString* suggestedFilename, NSURL* directory,
      void (^answer)(NSURL* _Nullable chosen));
+
+// The crashed-session prompt (#577), for the profile the engine started with.
+// YES when the previous run of that profile ended without a clean quit
+// (ExitTypeService's last session exit type is kCrashed, read once at start)
+// and the shell has not dismissed it in this run. Chromium's own "restore
+// pages" bubble needs a BrowserView, so it never shows on an engine window:
+// the shell is the only one that asks. NO for a profile without an exit type
+// service.
+@property(nonatomic, readonly) BOOL lastSessionCrashed;
+// The shell answered the prompt: lastSessionCrashed is NO for the rest of the
+// run. A second call does nothing.
+- (void)dismissLastSession;
 @end
 
 // Implemented by the Swift app: @objc(ArktShellEmbedder), in the main

@@ -23,6 +23,20 @@ extension FindStopAction {
   }
 }
 
+extension TabTerminationStatus {
+  /// Nil for `None`: the page is alive.
+  init?(facade status: ArktTerminationStatus) {
+    switch status {
+    case .none: return nil
+    case .crashed: self = .crashed
+    case .killed: self = .killed
+    case .outOfMemory: self = .outOfMemory
+    case .launchFailed: self = .launchFailed
+    @unknown default: self = .crashed
+    }
+  }
+}
+
 extension CloseReason {
   /// `ArktCloseReasonNone` never arrives on a `TabClosed` from the real facade; a close nobody claimed is the
   /// page's own (Decision 12's default).

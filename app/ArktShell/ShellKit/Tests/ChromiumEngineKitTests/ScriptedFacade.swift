@@ -1,6 +1,7 @@
 import AppKit
 import ImageIO
 import ArktEngineABI
+import EngineAPI
 import EngineAPITestSupport
 
 // A scripted Swift implementation of the facade protocols (arkt_engine.h), modelled on the real facade's recorded
@@ -34,6 +35,11 @@ final class ScriptedEvent: NSObject, ArktEngineEvent {
   var findCount = 0
   var findIsFinal = false
   var download: (any ArktDownloadItem)?
+  var terminationStatus: ArktTerminationStatus = .none
+  var zoomPercent = 0
+  var zoomIsDefault = false
+  var zoomIsUserInitiated = false
+  var isTabFullscreen = false
 
   init(_ kind: ArktEngineEventKind, tab: (any ArktTabHandle)?, browser: (any ArktBrowserHandle)?) {
     self.kind = kind; self.tab = tab; self.browser = browser
@@ -229,6 +235,12 @@ final class ScriptedTab: NSObject, ArktTabHandle {
   /// Sound (#364). Set directly, they model a tab that was already playing or muted when it was inserted.
   var isAudible = false
   var isMuted = false
+  /// Tab state (#577). Set directly, they model a tab that was already crashed, zoomed or fullscreen when it was
+  /// inserted; the methods under "Tab state" record the events.
+  var terminationStatus: ArktTerminationStatus = .none
+  var zoomPercent = 100
+  var zoomIsDefault: Bool { zoomPercent == 100 }
+  var isTabFullscreen = false
   var dialog: PendingDialog?
   /// Inserted later (a deferred createTab); calls queue until then.
   var isPending = false
@@ -381,11 +393,68 @@ final class ScriptedTab: NSObject, ArktTabHandle {
     if isPending { queued.append(call) } else { call() }
   }
 
+  // MARK: Tab state (#577)
+
+  /// `PrimaryMainFrameRenderProcessGone` as the facade reports it: HTML fullscreen left (Chromium exits it before the
+  /// observers hear of the crash) and a load in progress ended, then one `TabCrashed`. A no-op for a crashed tab.
+  func crash(status: ArktTerminationStatus = .crashed) {
+    guard owner != nil, terminationStatus == .none, status != .none else { return }
+    setTabFullscreen(false)
+    if isLoading {
+      isLoading = false
+      record(.loadingChanged) { $0.isLoading = false }
+    }
+    terminationStatus = status
+    record(.tabCrashed) { $0.terminationStatus = status }
+  }
+
+  /// A new live page process for a crashed tab (the reload's or navigation's frame host), reported once.
+  private func recoverIfCrashed() {
+    guard terminationStatus != .none else { return }
+    terminationStatus = .none
+    record(.tabRecovered)
+  }
+
+  /// `zoom::PageZoom::Zoom` on Chromium's preset steps: one user-initiated `ZoomChanged` per change, nothing at
+  /// either end, for a reset at the default, or for a crashed page.
+  func zoom(_ command: ArktZoomCommand) {
+    whenInserted { [self] in
+      guard owner != nil, terminationStatus == .none else { return }
+      let steps = TabZoom.steps
+      let next: Int? = switch command {
+      case .zoomIn: steps.first { $0 > zoomPercent }
+      case .zoomOut: steps.last { $0 < zoomPercent }
+      case .reset: 100
+      @unknown default: nil
+      }
+      guard let next, next != zoomPercent else { return }
+      setZoom(next, userInitiated: true)
+    }
+  }
+
+  /// The zoom changes as Chromium reports it: by this tab's own zoom controller (`userInitiated`), or from the host
+  /// zoom map (a site's saved zoom, another tab of the host zoomed).
+  func setZoom(_ percent: Int, userInitiated: Bool) {
+    zoomPercent = percent
+    let isDefault = zoomIsDefault
+    record(.zoomChanged) {
+      $0.zoomPercent = percent; $0.zoomIsDefault = isDefault; $0.zoomIsUserInitiated = userInitiated
+    }
+  }
+
+  /// `DidToggleFullscreenModeForTab`: one `TabFullscreenChanged` per change.
+  func setTabFullscreen(_ fullscreen: Bool) {
+    guard isTabFullscreen != fullscreen else { return }
+    isTabFullscreen = fullscreen
+    record(.tabFullscreenChanged) { $0.isTabFullscreen = fullscreen }
+  }
+
   // MARK: Loads
 
   func startLoad(_ target: URL, title: String?) {
     isInitialBlank = false
     endFindAndHover()
+    setTabFullscreen(false)       // a navigation leaves HTML fullscreen
     url = target
     loadingTitle = title
     record(.urlChanged) { $0.url = target }
@@ -393,6 +462,7 @@ final class ScriptedTab: NSObject, ArktTabHandle {
       isLoading = true
       record(.loadingChanged) { $0.isLoading = true }
     }
+    recoverIfCrashed()            // the navigation's frame host is live before it commits
     reportHistory()
   }
 
@@ -461,6 +531,7 @@ final class ScriptedTab: NSObject, ArktTabHandle {
       guard owner != nil, url != nil, !isLoading else { return }
       isLoading = true
       record(.loadingChanged) { $0.isLoading = true }
+      recoverIfCrashed()
     }
   }
 
@@ -857,6 +928,13 @@ final class ScriptedFacade: NSObject, ArktEngine {
   var revealedDownloads: [String] = []
   var downloadPromptsForLocation = false
   var downloadDestinationHandler: ((String, URL, @escaping (URL?) -> Void) -> Void)?
+  /// The crashed-session prompt (#577): set to model a profile whose last run crashed.
+  var lastSessionCrashed = false
+  private(set) var sessionDismissals = 0
+  func dismissLastSession() {
+    sessionDismissals += 1
+    lastSessionCrashed = false
+  }
   /// The default folder is a fresh temporary one, so a test never writes to the real Downloads folder.
   let defaultDownloadDirectory = FileManager.default.temporaryDirectory
     .appending(path: "arkt-scripted-downloads-\(UUID().uuidString)")

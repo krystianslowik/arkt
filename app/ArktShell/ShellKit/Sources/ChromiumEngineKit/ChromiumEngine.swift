@@ -62,6 +62,8 @@ public final class ChromiumEngine: EngineClient, EngineExtensions, EngineDownloa
 
   let facade: any ArktEngine
   let hub = EngineEventHub()
+  /// The crashed-session prompt over the facade (#577), one object for the engine's life.
+  lazy var chromiumSessionRecovery = ChromiumSessionRecovery(facade: facade)
   /// Downloads (#132, `ChromiumEngine+Downloads.swift`): the list kept from the facade's download events, and the
   /// shell's save-location choice, pushed to the profile's download prefs.
   var downloadTable: [DownloadID: DownloadItem] = [:]
@@ -366,7 +368,9 @@ public final class ChromiumEngine: EngineClient, EngineExtensions, EngineDownloa
     TabSnapshot(id: id, url: handle.url, title: handle.title, faviconData: handle.faviconPNG,
                 isLoading: handle.isLoading, canGoBack: handle.canGoBack, canGoForward: handle.canGoForward,
                 window: window, opener: handle.opener.flatMap { tabByHandle[ObjectIdentifier($0)] },
-                origin: origin, isAudible: handle.isAudible, isMuted: handle.isMuted)
+                origin: origin, isAudible: handle.isAudible, isMuted: handle.isMuted,
+                crash: TabTerminationStatus(facade: handle.terminationStatus), zoom: Self.zoom(of: handle),
+                isTabFullscreen: handle.isTabFullscreen)
   }
 
   func insert(_ handle: any ArktTabHandle, snapshot: TabSnapshot) {

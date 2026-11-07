@@ -8,8 +8,9 @@ import EngineAPITestSupport
 /// `--arkt-engine-contract` and `--arkt-engine-test-api` (plus the tabs probe extension loaded with
 /// `--load-extension`); the shell's session is not started. Every check gets a fresh `ChromiumEngine` from
 /// `ChromiumEmbedding.makeEngine()`, its own windows, and pages from a loopback server. Prints one
-/// `ARKT_CONTRACT` line per check and per rule, then exits: 0 when all 18 rules pass, 1 when any check fails or
-/// reports not applicable, 2 when the runner cannot start.
+/// `ARKT_CONTRACT` line per check and per rule, then exits: 0 when every rule it ran passes, 1 when any check fails
+/// or reports not applicable, 2 when the runner cannot start. The plain switch runs `ContractCheck.chromiumChecks`
+/// and prints one `DEFERRED` line per check the Chromium engine does not run yet, with the issue it waits for.
 ///
 /// The switch is a Chromium-style switch, not `-ArktEngineContract YES` as the plan wrote it: Chromium reads every
 /// argument that is not a switch as a URL to open at startup (`YES` became a queued startup window).
@@ -20,6 +21,8 @@ final class EngineContractRunner {
 
   /// `--arkt-engine-contract=<check>,<check>` runs only the named checks (diagnostics); the plain switch runs all.
   /// A name that is not a check, or an empty list, is an error: a typo must never run nothing and pass.
+  static var isFiltered: Bool { CommandLine.arguments.contains { $0.hasPrefix(switchName + "=") } }
+
   static func selectedChecks() throws -> [ContractCheck] {
     guard let argument = CommandLine.arguments.first(where: { $0.hasPrefix(switchName + "=") }) else {
       return ContractCheck.chromiumChecks
@@ -123,6 +126,11 @@ final class EngineContractRunner {
         // The engine smoke's size and time (#370): sizes only, never the page.
         let took = duration.components.seconds * 1000 + duration.components.attoseconds / 1_000_000_000_000_000
         print("ARKT_CONTRACT page image \(image) in \(took) ms")
+      }
+    }
+    if !Self.isFiltered {
+      for (check, issue) in ContractCheck.chromiumDeferred {
+        print("ARKT_CONTRACT rule \(check.rule) \(check.rawValue) DEFERRED (#\(issue))")
       }
     }
     let rules = Set(checks.map(\.rule)).sorted()
@@ -238,7 +246,12 @@ final class EngineContractRunner {
         return text
       },
       hoverLink: { [unowned self] engine, id in try await movePointer(engine, id, overLink: true) },
-      leaveLink: { [unowned self] engine, id in try await movePointer(engine, id, overLink: false) }
+      leaveLink: { [unowned self] engine, id in try await movePointer(engine, id, overLink: false) },
+      crashTab: { engine, id in
+        // A typed navigation to chrome://crash is a renderer debug URL: content kills the tab's renderer without
+        // committing anything (rule 25, #577).
+        engine.navigate(id, to: URL(string: "chrome://crash")!)
+      }
     )
   }
 

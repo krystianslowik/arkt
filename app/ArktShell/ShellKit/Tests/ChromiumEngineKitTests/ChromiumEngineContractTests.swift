@@ -30,7 +30,7 @@ struct ChromiumEngineContractTests {
     #expect(harness.makeAudible != nil && harness.engineCloseWindow != nil && harness.showPage != nil)
     #expect(harness.findPage != nil && harness.selectedText != nil)
     #expect(harness.hoverLink != nil && harness.leaveLink != nil)
-    #expect(harness.downloads != nil)
+    #expect(harness.downloads != nil && harness.crashTab != nil)
   }
 
   /// The list names every public check of `EngineContract` (read from its sources), so a new rule cannot be left out.
@@ -49,6 +49,7 @@ struct ChromiumEngineContractTests {
     #expect(names.count == 56)
     #expect(names == Set(ContractCheck.allCases.map(\.rawValue)))
     #expect(Set(ContractCheck.allCases.map(\.rule)) == Set(1...26))
-    #expect(Set(ContractCheck.chromiumChecks.map(\.rule)) == Set(1...24), "rule 25 joins with #577, rule 26 with #583")
+    #expect(Set(ContractCheck.chromiumChecks.map(\.rule)) == Set(1...25), "rule 26 joins with #583")
+    #expect(ContractCheck.chromiumDeferred.map(\.check.rule).allSatisfy { $0 == 26 })
   }
 }

@@ -274,7 +274,8 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
 }
 
 - (void)ready {
-  LOG(WARNING) << "ARKT selftest embedderReady";
+  LOG(WARNING) << "ARKT selftest embedderReady lastSessionCrashed="
+               << (_engine.lastSessionCrashed ? "yes" : "no");
   [_engine embedderReady];
   // The shell's own window, as ShellUI does at launch and on Cmd-N: build the
   // window, then ask for a Browser in it.
@@ -630,6 +631,36 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
       case ArktEngineEventKindDownloadRemoved:
         // The self-test shows no downloads.
         break;
+      case ArktEngineEventKindTabCrashed:
+        LOG(WARNING) << "ARKT selftest tabCrashed tab=" << tab
+                     << " status=" << event.terminationStatus
+                     << " live=" << event.tab.terminationStatus
+                     << " loading=" << (event.tab.isLoading ? "yes" : "no")
+                     << " listed=" << ([event.browser.tabs
+                                           containsObject:event.tab]
+                                           ? "yes"
+                                           : "no");
+        break;
+      case ArktEngineEventKindTabRecovered:
+        LOG(WARNING) << "ARKT selftest tabRecovered tab=" << tab
+                     << " live=" << event.tab.terminationStatus
+                     << " loading=" << (event.tab.isLoading ? "yes" : "no");
+        break;
+      case ArktEngineEventKindZoomChanged:
+        LOG(WARNING) << "ARKT selftest zoomChanged tab=" << tab
+                     << " percent=" << event.zoomPercent
+                     << " default=" << (event.zoomIsDefault ? "yes" : "no")
+                     << " user=" << (event.zoomIsUserInitiated ? "yes" : "no")
+                     << " live=" << event.tab.zoomPercent;
+        break;
+      case ArktEngineEventKindTabFullscreenChanged: {
+        NSView* container = event.tab.containerView;
+        LOG(WARNING) << "ARKT selftest tabFullscreenChanged tab=" << tab
+                     << " fullscreen=" << (event.isTabFullscreen ? "yes" : "no")
+                     << " live=" << (event.tab.isTabFullscreen ? "yes" : "no")
+                     << " container subviews=" << container.subviews.count;
+        break;
+      }
     }
   }
   if (windows_changed) {
@@ -657,6 +688,10 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
                << (tab.faviconPNG ? base::NumberToString(tab.faviconPNG.length)
                                   : std::string("none"))
                << " opener=" << (tab.opener ? tab.opener.sessionId : -1)
+               << " crash=" << tab.terminationStatus
+               << " zoom=" << tab.zoomPercent
+               << (tab.zoomIsDefault ? "(default)" : "")
+               << " fullscreen=" << (tab.isTabFullscreen ? "yes" : "no")
                << " container=" << (__bridge void*)container
                << " subviews=" << container.subviews.count
                << " inWindow=" << (container.window ? "yes" : "no");
@@ -980,6 +1015,52 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
     LOG(WARNING) << "ARKT selftest answer tab=" << sessionId
                  << " accept=" << (accept ? "yes" : "no")
                  << " answered=" << (answered ? "yes" : "no");
+  } else if (command == "zoom") {
+    // #577: zoom in|out|reset on this tab, or on the tab with session id
+    // `@<id>` (a crashed page cannot set its own title).
+    ArktZoomCommand zoom = argument == "in"    ? ArktZoomCommandZoomIn
+                           : argument == "out" ? ArktZoomCommandZoomOut
+                                               : ArktZoomCommandReset;
+    [tab zoomWithCommand:zoom];
+    LOG(WARNING) << "ARKT selftest zoom " << argument
+                 << " tab=" << tab.sessionId << " now=" << tab.zoomPercent
+                 << (tab.zoomIsDefault ? "(default)" : "");
+  } else if (command == "zoom-command") {
+    // #577: Chromium's own zoom commands, as the main menu's Zoom In (Cmd-+),
+    // Zoom Out (Cmd--) and Actual Size (Cmd-0) send them to the host:
+    // plus|minus|normal.
+    int command_id = argument == "plus"    ? IDC_ZOOM_PLUS
+                     : argument == "minus" ? IDC_ZOOM_MINUS
+                                           : IDC_ZOOM_NORMAL;
+    id<ArktWindowHost> host = tab.browser.host;
+    BOOL enabled = host.validateCommand && host.validateCommand(command_id);
+    if (enabled && host.executeCommand) {
+      host.executeCommand(command_id,
+                          static_cast<NSInteger>(
+                              WindowOpenDisposition::CURRENT_TAB));
+    }
+    LOG(WARNING) << "ARKT selftest zoom-command " << argument
+                 << " id=" << command_id
+                 << " enabled=" << (enabled ? "yes" : "no")
+                 << " tab=" << tab.sessionId << " now=" << tab.zoomPercent;
+  } else if (command == "fullscreen") {
+    // #577: HTML fullscreen of the page's body, with a user gesture as a
+    // click gives it; "exit" leaves it from script.
+    [self evaluate:argument == "exit"
+                       ? @"document.exitFullscreen().then(() => 'left', "
+                         @"e => 'error: ' + e.message)"
+                       : @"document.documentElement.requestFullscreen()"
+                         @".then(() => 'entered', e => 'error: ' + e.message)"
+             inTab:tab
+       userGesture:YES
+             label:"fullscreen"];
+  } else if (command == "session") {
+    // #577: the crashed-session prompt's state; "dismiss" answers it.
+    if (argument == "dismiss") {
+      [_engine dismissLastSession];
+    }
+    LOG(WARNING) << "ARKT selftest session lastSessionCrashed="
+                 << (_engine.lastSessionCrashed ? "yes" : "no");
   } else if (command == "devtools") {
     id<ArktWindowHost> host = tab.browser.host;
     if (host.executeCommand) {
