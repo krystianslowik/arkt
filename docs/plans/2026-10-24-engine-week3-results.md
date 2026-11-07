@@ -5481,7 +5481,7 @@ New: `PageInfoTests.openAndCloseAreRecordedPerTab` (EngineAPITests),
 `ChromiumPageInfoTests.openingThePanelTellsTheFacade`, the open call in `callsForAnUnknownTabDoNothing`,
 `FakeEnginePageInfoTests.engineOffersSiteSettings` calling it, and
 `PageInfoPanelTests.testTheEngineCountsSiteDataOnlyWhileThePanelIsOpen` (GUI). Red run: `swift build --build-tests`
-failed to compile (`InMemoryEngine` has no member `openPageInfoPanels`, no `pageInfoDidOpen`). Deliberate break: with
+failed to compile (`InMemoryEngine` has no member `openPageInfoPanels`). Deliberate break: with
 the controller's `pageInfoDidOpen` call commented out, the GUI test fails ("the panel tells the engine it opened");
 restored.
 
