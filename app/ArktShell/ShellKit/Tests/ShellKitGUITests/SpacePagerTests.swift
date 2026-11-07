@@ -17,7 +17,12 @@ final class SpacePagerTests: XCTestCase {
     controller.window?.contentView?.layoutSubtreeIfNeeded()
   }
 
-  override func tearDown() async throws { controller.close() }
+  // XCTest keeps each test case object until the run ends: release the window too, not only close it (#805).
+  override func tearDown() async throws {
+    controller.close()
+    controller = nil
+    sidebar = nil
+  }
 
   private func awaitSettle(_ body: () -> Void) async {
     let settled = expectation(description: "settled")
