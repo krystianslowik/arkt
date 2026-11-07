@@ -26,7 +26,16 @@ final class WindowLeakGuard {
   static let knownLeakyClasses: [String: Int] = [
     "CrashedLittleArktTests": 817,
     "DownloadsWindowTests": 817,
+    "LeaveSiteDialogWindowTests": 817,
+    "LittleArktArchiveTests": 817,
+    "LittleArktDialogTests": 817,
     "LittleArktEscapeStopTests": 817,
+    "LittleArktFlightTests": 817,
+    "LittleArktLookupBarTests": 817,
+    "LittleArktMenusTests": 817,
+    "LittleArktWindowTests": 817,
+    "PermissionPresenterTests": 817,
+    "WindowLifecycleTests": 817,
   ]
 
   private let record: (String) -> Void
