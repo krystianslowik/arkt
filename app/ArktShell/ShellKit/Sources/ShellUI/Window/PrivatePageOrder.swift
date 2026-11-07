@@ -21,6 +21,15 @@ struct PrivatePageOrder: Equatable {
     return true
   }
 
+  /// Adds `tab` at `row`, clamped to the list, so a reopened page comes back where it closed from (#789). False, as
+  /// for `append(_:)`, when it is listed already or the window is full.
+  @discardableResult
+  mutating func insert(_ tab: TabID, at row: Int) -> Bool {
+    guard !isFull, !pages.contains(tab) else { return false }
+    pages.insert(tab, at: min(max(row, 0), pages.count))
+    return true
+  }
+
   mutating func remove(_ tab: TabID) {
     pages.removeAll { $0 == tab }
   }

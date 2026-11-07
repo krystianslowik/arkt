@@ -209,4 +209,13 @@ struct ReopenStackTests {
     #expect(stack.parkedTabs.isEmpty)
     #expect(stack.pop() == .privatePage(ClosedPrivatePage(tab: page, parked: nil, url: Self.url)))
   }
+
+  /// #789: the row a private page closed from stays on its entry when its parked copy goes.
+  @Test func `a private page keeps its row when its parked copy closes`() {
+    var stack = ReopenStack()
+    let (page, parked) = (TabID(), TabID())
+    _ = stack.push(.privatePage(ClosedPrivatePage(tab: page, parked: parked, url: Self.url, row: 2)))
+    stack.forget(parked: parked)
+    #expect(stack.pop() == .privatePage(ClosedPrivatePage(tab: page, parked: nil, url: Self.url, row: 2)))
+  }
 }

@@ -26,10 +26,12 @@ public struct ClosedPrivateWindow: Equatable, Sendable {
 extension ShellWindowController {
   // MARK: Pages
 
-  /// A user close of private page `tab` is about to happen: parks a copy of it and puts the close on the stack.
+  /// A user close of private page `tab` is about to happen: parks a copy of it and puts the close on the stack, with
+  /// the row it closes from (#789).
   func rememberPrivateClose(of tab: TabID) {
     guard isPrivateWindow else { return }
-    let closed = ClosedPrivatePage(tab: tab, parked: park(tab), url: engine.snapshot(of: tab)?.url)
+    let closed = ClosedPrivatePage(tab: tab, parked: park(tab), url: engine.snapshot(of: tab)?.url,
+                                   row: privatePageOrder.pages.firstIndex(of: tab))
     closeParked(reopenStack.push(.privatePage(closed)))
   }
 
@@ -38,9 +40,10 @@ extension ShellWindowController {
     closeParked(reopenStack.remove(privatePage: tab))
   }
 
-  /// Brings a closed private page back as this window's shown page, at the bottom of the Pages list: its parked copy
-  /// when that is still open, else a new page on its URL. At the cap nothing opens: the cap toast says why and the
-  /// close goes back on the stack. True when something happened that ends the reopen.
+  /// Brings a closed private page back as this window's shown page, at the row it closed from (#789; the bottom when
+  /// the list is shorter now): its parked copy when that is still open, else a new page on its URL. At the cap nothing
+  /// opens: the cap toast says why and the close goes back on the stack. True when something happened that ends the
+  /// reopen.
   func reopen(_ closed: ClosedPrivatePage) -> Bool {
     guard isPrivateWindow else {
       assertionFailure("a private page's close is only ever on a private window's stack")
@@ -55,14 +58,14 @@ extension ShellWindowController {
     if let copy = closed.parked {
       parkedTabs.remove(copy)
       if engine.snapshot(of: copy) != nil {
-        privatePageOrder.append(copy)
+        privatePageOrder.insert(copy, at: closed.row ?? privatePageOrder.pages.count)
         showPrivatePage(copy)
         activateEngineTab(copy)
         return true
       }
     }
     guard let url = closed.url else { return false }
-    openPrivately(url, inNewPage: true)
+    openPrivately(url, inNewPage: true, atRow: closed.row)
     return true
   }
 
