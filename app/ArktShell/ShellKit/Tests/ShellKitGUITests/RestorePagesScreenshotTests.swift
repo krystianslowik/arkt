@@ -23,6 +23,7 @@ final class RestorePagesScreenshotTests: XCTestCase {
       defer { controller.close() }
       let window = try XCTUnwrap(controller.window)
       window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+      controller.themeContextObserver?.notify()
       window.setFrame(NSRect(x: 80, y: 80, width: 1000, height: 700), display: true)
       controller.showWindow(nil)
       let titles = ["A very long synthetic page title that should truncate neatly inside the restore panel",
@@ -37,14 +38,11 @@ final class RestorePagesScreenshotTests: XCTestCase {
       controller.rootView.layoutSubtreeIfNeeded()
       window.displayIfNeeded()
       let file = folder.appendingPathComponent("restore-pages-\(dark ? "dark" : "light").png")
-      let capture = Process()
-      capture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-      capture.arguments = ["-x", "-o", "-l", String(window.windowNumber), file.path]
-      try capture.run()
-      capture.waitUntilExit()
-      XCTAssertEqual(capture.terminationStatus, 0)
-      let imageData = try Data(contentsOf: file)
-      let bitmap = try XCTUnwrap(NSBitmapImageRep(data: imageData))
+      let view = try XCTUnwrap(window.contentView)
+      let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+      view.cacheDisplay(in: view.bounds, to: bitmap)
+      let imageData = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+      try imageData.write(to: file)
       XCTAssertGreaterThan(bitmap.pixelsWide, 0)
       XCTAssertGreaterThan(bitmap.pixelsHigh, 0)
       var colors = Set<String>()
