@@ -29,7 +29,7 @@ final class ArchiveChipView: NSView {
     layer?.cornerRadius = ArchiveMetrics.chipHeight / 2
     layer?.cornerCurve = .continuous
     label.stringValue = name
-    label.font = .systemFont(ofSize: 12, weight: .medium)
+    label.font = ShellType.chip.font
     label.lineBreakMode = .byTruncatingTail
     label.setAccessibilityElement(false)
     label.cell?.setAccessibilityElement(false)
@@ -72,7 +72,7 @@ final class ArchiveChipView: NSView {
   }
 
   var preferredWidth: CGFloat {
-    let font = label.font ?? .systemFont(ofSize: 12, weight: .medium)
+    let font = label.font ?? ShellType.chip.font
     let text = ceil((filterName as NSString).size(withAttributes: [.font: font]).width) + 4
     return 10 + markWidth + 6 + text + 6 + 16 + 5
   }
@@ -212,9 +212,9 @@ final class ArchiveBannerView: NSView {
     tileLayer.cornerCurve = .continuous
     layer?.addSublayer(tileLayer)
     headline.stringValue = banner.headline
-    headline.font = .systemFont(ofSize: 12, weight: .semibold)
+    headline.font = ShellType.captionEmphasis.font
     detail.stringValue = banner.detail
-    detail.font = .systemFont(ofSize: 12)
+    detail.font = ShellType.caption.font
     for field in [headline, detail] {
       field.isSelectable = false
       field.setAccessibilityElement(false)

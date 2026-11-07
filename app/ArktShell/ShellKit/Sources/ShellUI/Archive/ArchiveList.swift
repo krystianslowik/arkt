@@ -280,7 +280,7 @@ final class ArchiveRowView: NSTableRowView {
 final class ArchiveTitleView: NSView {
   private(set) var text = ""
   private(set) var highlights: [Range<String.Index>] = []
-  private var font = NSFont.systemFont(ofSize: 13, weight: .medium)
+  private var font = ShellType.rowTitle.font
   private var color = RGBA.black(1)
   private var highlight = RGBA.black(0)
 
@@ -356,7 +356,7 @@ final class ArchiveRowCellView: NSTableCellView {
     identifier = Self.identifier
     for view in [chevron, icon, placeView] { view.imageScaling = .scaleNone }
     icon.imageScaling = .scaleProportionallyUpOrDown
-    countField.font = .systemFont(ofSize: 13)
+    countField.font = ShellType.body.font
     timeField.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
     timeField.lineBreakMode = .byClipping
     [chevron, icon, titleView, countField, placeView, timeField].forEach(addSubview)
@@ -380,7 +380,7 @@ final class ArchiveRowCellView: NSTableCellView {
   func show(_ row: ArchiveRow, query: String, favicon: NSImage?, flavor: ThemeFlavor, scale: CGFloat) {
     opened = !row.matchedChildren.isEmpty
     indent = 0
-    titleView.show(row.title, query: query, font: .systemFont(ofSize: 13, weight: .medium),
+    titleView.show(row.title, query: query, font: ShellType.rowTitle.font,
                    color: ShellTokens.primaryText.resolve(flavor), highlight: ArchiveTokens.matchHighlight.resolve(flavor))
     chevron.isHidden = !opened
     chevron.image = opened ? SymbolImageCache.shared.symbol(
@@ -427,7 +427,7 @@ final class ArchiveRowCellView: NSTableCellView {
                  scale: CGFloat) {
     opened = false
     indent = ArchiveMetrics.childIndent
-    titleView.show(child.title, query: query, font: .systemFont(ofSize: 13, weight: .medium),
+    titleView.show(child.title, query: query, font: ShellType.rowTitle.font,
                    color: ShellTokens.primaryText.resolve(flavor), highlight: ArchiveTokens.matchHighlight.resolve(flavor))
     chevron.isHidden = true
     icon.image = favicon ?? SidebarGlyphs.letter(for: child.title, url: child.url, flavor: flavor,
@@ -482,7 +482,7 @@ final class ArchiveLoadingCellView: NSTableCellView {
     spinner.style = .spinning
     spinner.controlSize = .small
     spinner.isDisplayedWhenStopped = false
-    label.font = .systemFont(ofSize: 12)
+    label.font = ShellType.caption.font
     addSubview(spinner)
     addSubview(label)
     label.setAccessibilityElement(false)
@@ -529,9 +529,9 @@ final class ArchiveEmptyStateView: NSView {
     tile.cornerCurve = .continuous
     layer?.addSublayer(tile)
     glyph.imageScaling = .scaleNone
-    titleField.font = .systemFont(ofSize: 15, weight: .semibold)
+    titleField.font = ShellType.dialogTitle.font
     titleField.alignment = .center
-    detailField.font = .systemFont(ofSize: 12)
+    detailField.font = ShellType.caption.font
     detailField.alignment = .center
     detailField.isSelectable = false
     [glyph, titleField, detailField].forEach(addSubview)

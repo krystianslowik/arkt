@@ -247,7 +247,7 @@ public final class SettingsPopUpButton: NSButton {
     return resigned
   }
 
-  private static let font = NSFont.systemFont(ofSize: 13)
+  private static let font = ShellType.body.font
 
   override public var intrinsicContentSize: NSSize {
     let text = ceil((selectedTitle as NSString).size(withAttributes: [.font: Self.font]).width)
@@ -403,7 +403,7 @@ final class SettingsSegmentedControl: NSControl {
       for (index, label) in labels.enumerated() {
         let selected = index == selectedIndex
         label.string = NSAttributedString(string: segments[index], attributes: [
-          .font: NSFont.systemFont(ofSize: 12, weight: selected ? .semibold : .regular),
+          .font: ShellType.caption.weight(selected ? .semibold : .regular).font,
           .foregroundColor: (selected ? ShellTokens.primaryText : ShellTokens.secondaryText).resolve(flavor).nsColor(),
         ])
         label.contentsScale = scale
@@ -427,6 +427,8 @@ final class SettingsSegmentedControl: NSControl {
 /// VoiceOver reads the keys as words ("Shift Command D").
 @MainActor
 final class SettingsKeycapsView: NSView {
+  /// The key label's size on a keycap of `SettingsMetrics.keycapHeight`; it scales with the cap.
+  static let fontSizeAtKeycapHeight: CGFloat = 12
   let keys: [String]
   private let capHeight: CGFloat
   private var caps: [(layer: CALayer, text: CATextLayer, width: CGFloat)] = []
@@ -455,7 +457,7 @@ final class SettingsKeycapsView: NSView {
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-  private var font: NSFont { .systemFont(ofSize: 12 * capHeight / SettingsMetrics.keycapHeight, weight: .medium) }
+  private var font: NSFont { .systemFont(ofSize: Self.fontSizeAtKeycapHeight * capHeight / SettingsMetrics.keycapHeight, weight: .medium) }
 
   override var isFlipped: Bool { true }
 
@@ -514,7 +516,7 @@ final class SettingsDefaultCapsule: NSView {
     wantsLayer = true
     layer?.cornerRadius = 12
     layer?.cornerCurve = .continuous
-    label.font = .systemFont(ofSize: 12, weight: .semibold)
+    label.font = ShellType.captionEmphasis.font
     addSubview(check)
     addSubview(label)
     setAccessibilityElement(true)

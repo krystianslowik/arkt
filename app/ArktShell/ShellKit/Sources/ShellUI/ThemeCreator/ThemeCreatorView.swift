@@ -45,9 +45,9 @@ final class ThemeCreatorView: NSView {
     surface.lineWidth = 0.5
     dropShadow.fillColor = CGColor.black
     contactShadow.fillColor = CGColor.black
-    titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+    titleLabel.font = ShellType.bodyEmphasis.font
     titleLabel.lineBreakMode = .byTruncatingTail
-    for label in [textureLabel, opacityLabel] { label.font = .systemFont(ofSize: 12, weight: .semibold) }
+    for label in [textureLabel, opacityLabel] { label.font = ShellType.captionEmphasis.font }
     for label in [titleLabel, textureLabel, opacityLabel] {
       label.setAccessibilityElement(label === titleLabel)
       addSubview(label)

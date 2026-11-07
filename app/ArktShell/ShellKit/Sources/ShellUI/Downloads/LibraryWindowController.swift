@@ -82,7 +82,7 @@ final class LibraryRailItem: NSButton {
     let glyph = SymbolImageCache.shared.symbol(section.symbolName, box: 16, color: color, scale: shellBackingScale)
     glyph.draw(in: NSRect(x: 9, y: ((bounds.height - 16) / 2).rounded(), width: 16, height: 16))
     let text = NSAttributedString(string: section.title, attributes: [
-      .font: NSFont.systemFont(ofSize: 13), .foregroundColor: ShellTokens.primaryText.resolve(flavor).nsColor(),
+      .font: ShellType.body.font, .foregroundColor: ShellTokens.primaryText.resolve(flavor).nsColor(),
     ])
     text.draw(at: NSPoint(x: 9 + 16 + 9, y: ((bounds.height - text.size().height) / 2).rounded()))
   }
@@ -321,7 +321,7 @@ public final class LibraryWindowController: NSWindowController, NSSearchFieldDel
     content.frame = NSRect(origin: .zero, size: window.frame.size)
     content.onLayout = { [weak self] in self?.layoutContent() }
     content.onAppearanceChange = { [weak self] in self?.appearanceDidChange() }
-    titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+    titleLabel.font = ShellType.bodyEmphasis.font
     titleLabel.setAccessibilityElement(false)
     searchField.delegate = self
     searchField.setAccessibilityIdentifier(AXID.Downloads.librarySearch)
@@ -338,7 +338,7 @@ public final class LibraryWindowController: NSWindowController, NSSearchFieldDel
     scrollView.hasVerticalScroller = true
     scrollView.autohidesScrollers = true
     scrollView.documentView = listView
-    savingLabel.font = .systemFont(ofSize: 12)
+    savingLabel.font = ShellType.caption.font
     savingLabel.lineBreakMode = .byTruncatingMiddle
     savingLabel.setAccessibilityIdentifier(AXID.Downloads.libraryFooter)
     changeLink.target = self
@@ -347,9 +347,9 @@ public final class LibraryWindowController: NSWindowController, NSSearchFieldDel
     clearLink.target = self
     clearLink.action = #selector(clearPressed(_:))
     clearLink.setAccessibilityIdentifierWithCell(AXID.Downloads.libraryClear)
-    emptyTitle.font = .systemFont(ofSize: 15, weight: .semibold)
+    emptyTitle.font = ShellType.dialogTitle.font
     emptyTitle.alignment = .center
-    emptyDetail.font = .systemFont(ofSize: 12)
+    emptyDetail.font = ShellType.caption.font
     emptyDetail.alignment = .center
     emptyDetail.isSelectable = false
     emptyTile.cornerRadius = 12

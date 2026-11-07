@@ -79,7 +79,7 @@ final class ToastView: NSView {
     glyphView.setAccessibilityElement(false)
     glyphView.cell?.setAccessibilityElement(false)        // decorative: the text says it
     addSubview(glyphView)
-    label.font = .systemFont(ofSize: 13, weight: .medium)
+    label.font = ShellType.rowTitle.font
     label.isSelectable = false
     label.setAccessibilityElement(false)
     label.cell?.setAccessibilityElement(false)      // AppKit exposes the cell, not the field
@@ -172,7 +172,7 @@ final class ToastView: NSView {
       paragraph.maximumLineHeight = Self.lineHeight
     }
     return NSAttributedString(string: text, attributes: [
-      .font: NSFont.systemFont(ofSize: 13, weight: .medium),
+      .font: ShellType.rowTitle.font,
       .foregroundColor: ShellTokens.toastText.resolve(flavor).nsColor(),
       .paragraphStyle: paragraph,
     ])
@@ -185,7 +185,7 @@ final class ToastView: NSView {
   /// The text's own one-line width, plus the field's insets.
   private var naturalTextWidth: CGFloat {
     ceil(NSAttributedString(string: label.stringValue, attributes: [
-      .font: NSFont.systemFont(ofSize: 13, weight: .medium),
+      .font: ShellType.rowTitle.font,
     ]).size().width) + 2 * Self.labelInset
   }
 
