@@ -108,7 +108,9 @@ final class PrivatePagesView: NSView {
   func setPages(_ contents: [PrivatePageRowContent]) {
     let previousShown = self.contents.first(where: \.isShown)?.tab
     let byTab = Dictionary(rows.map { ($0.tab, $0) }, uniquingKeysWith: { first, _ in first })
-    let before = Dictionary(rows.map { ($0.tab, $0.layer?.position) }, uniquingKeysWith: { first, _ in first })
+    // Where each row is on screen: mid-motion (two closes within 0.20 s) that is not its frame yet.
+    let before = Dictionary(rows.map { ($0.tab, $0.layer.map { $0.presentation()?.position ?? $0.position }) },
+                            uniquingKeysWith: { first, _ in first })
     var next: [PrivatePageRowView] = []
     var added: [PrivatePageRowView] = []
     for content in contents {

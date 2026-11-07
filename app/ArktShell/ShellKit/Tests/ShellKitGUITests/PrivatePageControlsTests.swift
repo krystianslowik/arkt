@@ -170,4 +170,39 @@ final class PrivatePageControlsTests: XCTestCase {
     XCTAssertTrue(children.allSatisfy { $0.accessibilityRole() == .button })
     window.window?.performClose(nil)
   }
+
+  /// Two closes within the 0.20 s motion: the second one moves the rows on from where they are on screen, not from
+  /// where the first one left their frames, so they never jump. The list's clock is frozen (layer speed 0), so the
+  /// on-screen place is the first move's start, without waiting.
+  func testASecondCloseMidMotionMovesOnFromTheScreen() throws {
+    let tabs = (0..<5).map { _ in TabID() }
+    func contents(_ tabs: [TabID]) -> [PrivatePageRowContent] {
+      tabs.map { PrivatePageRowContent(tab: $0, title: "Page", url: nil, favicon: nil, isShown: false) }
+    }
+    let list = PrivatePagesView(frame: NSRect(x: 0, y: 0, width: 200, height: 400))
+    list.reduceMotion = { false }
+    let host = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 400), styleMask: [.borderless],
+                        backing: .buffered, defer: false)
+    host.isReleasedWhenClosed = false
+    host.contentView = list
+    host.orderFront(nil)
+    defer { host.orderOut(nil) }
+    list.setPages(contents(tabs))
+    list.layoutSubtreeIfNeeded()
+    host.displayIfNeeded()
+    let documentLayer = try XCTUnwrap(list.rows.first?.layer?.superlayer, "the rows' layers are in the tree")
+    documentLayer.speed = 0                                   // frozen: every motion stays at its start
+    documentLayer.timeOffset = 0
+    host.displayIfNeeded()
+    CATransaction.flush()
+    let row = try XCTUnwrap(list.rows.first { $0.tab == tabs[4] })
+    let onScreenAtStart = try XCTUnwrap(row.layer?.position)
+
+    list.setPages(contents(Array(tabs.dropFirst())))          // the first close: row 4 starts moving up one row
+    CATransaction.flush()
+    list.setPages(contents(Array(tabs.dropFirst(2))))         // the second close, while the first move has not run
+    let move = try XCTUnwrap(row.layer?.animation(forKey: PrivatePagesMotion.moveKey) as? CABasicAnimation)
+    let from = try XCTUnwrap((move.fromValue as? NSValue)?.pointValue)
+    XCTAssertEqual(from.y, onScreenAtStart.y, accuracy: 0.5, "the second move starts where the row is on screen")
+  }
 }
