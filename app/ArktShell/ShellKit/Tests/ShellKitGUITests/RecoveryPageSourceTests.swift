@@ -256,6 +256,30 @@ final class RecoveryPageSourceTests: XCTestCase {
     XCTAssertEqual(engine.crashedSession.dismissals, 1)
   }
 
+  func testCancelledQuitRebuildsRecordsAfterSuspendedChanges() throws {
+    _ = NSApplication.shared
+    let engine = InMemoryEngine()
+    let records = RecordingRecoveryPages([])
+    let set = ShellWindowSet(engine: engine, sidebar: StubSidebar.sample(), recoveryPageSource: records)
+    let closed = set.openLittleArkt(url: URL(string: "https://example.invalid/closed")!)
+    let surviving = set.openLittleArkt(url: URL(string: "https://example.invalid/surviving")!)
+    defer { closed.window.close(); surviving.window.close() }
+    let tab = try XCTUnwrap(surviving.shownTab)
+    let beforeQuit = records.pages
+    // The App freezes writes until Chromium's potentially cancellable teardown finishes.
+    records.isSuspended = true
+    closed.window.close()
+    let updatedURL = URL(string: "https://example.invalid/updated")!
+    engine.navigate(tab, to: updatedURL)
+    engine.setDocumentTitle(tab, "Updated")
+    XCTAssertEqual(records.pages, beforeQuit)
+
+    records.isSuspended = false
+    set.finishSessionRecovery(cleanQuit: false)
+    // No further page event is needed to repair the snapshot after cancellation.
+    XCTAssertEqual(records.pages, [ShellRecoveryPage(title: "Updated", url: updatedURL, kind: .littleArkt)])
+  }
+
   func testCleanQuitClearsRecordsButCancelledQuitDoesNot() {
     _ = NSApplication.shared
     let records = RecordingRecoveryPages([])
@@ -282,6 +306,15 @@ final class RecoveryPageSourceTests: XCTestCase {
 @MainActor
 private final class RecordingRecoveryPages: RecoveryPageSource {
   var writes = 0
-  var pages: [ShellRecoveryPage] { didSet { writes += 1 } }
-  init(_ pages: [ShellRecoveryPage]) { self.pages = pages }
+  var isSuspended = false
+  private var storedPages: [ShellRecoveryPage]
+  var pages: [ShellRecoveryPage] {
+    get { storedPages }
+    set {
+      guard !isSuspended else { return }
+      storedPages = newValue
+      writes += 1
+    }
+  }
+  init(_ pages: [ShellRecoveryPage]) { storedPages = pages }
 }
