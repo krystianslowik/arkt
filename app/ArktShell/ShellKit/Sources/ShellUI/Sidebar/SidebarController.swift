@@ -257,18 +257,20 @@ public final class SidebarController {
       view.setCurrent(page: nil)
       onEmptySpace?()
     }
+    let pagesBefore = pagedSpaces
     syncPages()
     view.favorites.isHidden = hidesItems
     view.spaceDots.isHidden = hidesItems
     view.pager.isHidden = hidesItems
     view.setPrivateKind(presentation)
-    if hidesItems { refreshSpaceDetails() }             // the neutral backdrop's flavor, and the window's themes
+    // The neutral backdrop's flavor and the window's themes; `syncPages` has refreshed them when it dropped pages.
+    if hidesItems, pagesBefore.isEmpty { refreshSpaceDetails() }
     if presentation == .standard, let first = spaces.first { showSpace(first) }
   }
 
   /// A blank or incognito window's neutral backdrop (#766) as the window draws it in `themeContext`; nil in a normal
   /// window. These windows show no Spaces, so no Space's theme says anything about them.
-  public var privateBackdrop: SpaceThemeInfo? {
+  var privateBackdrop: SpaceThemeInfo? {
     guard presentation != .standard else { return nil }
     return ThemeContrast.drawn(PrivateBackdrop.theme(for: themeContext.appearance), in: themeContext)
   }

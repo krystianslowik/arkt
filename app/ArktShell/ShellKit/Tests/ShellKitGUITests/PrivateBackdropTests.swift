@@ -101,6 +101,17 @@ final class PrivateBackdropTests: XCTestCase {
     }
   }
 
+  /// A window with no Spaces at all made private draws the backdrop too.
+  func testPrivateWindowWithoutSpacesDrawsTheBackdrop() throws {
+    let engine = InMemoryEngine()
+    let set = ShellWindowSet(engine: engine, sidebar: StubSidebar(), hostLookup: { [engine] in engine.host(of: $0) })
+    sets.append(set)
+    let controller = set.openWindow(opensFirstTab: false)
+    try setAppearance(controller, dark: true)
+    controller.makeBlank()
+    assertBackdrop(controller, dark: true)
+  }
+
   /// The appearance changes while the window is open: the backdrop and the chrome's flavor switch with it.
   func testAppearanceChangeSwitchesTheBackdropLive() throws {
     let f = makeFixture()
