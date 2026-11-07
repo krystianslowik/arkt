@@ -5369,6 +5369,12 @@ Independent review found that changes ignored during a cancellable quit left sta
 cancellation. The test-first GUI run 42378422902 at `8a9f1df` executed 2,069 tests, with 53 skipped and one failure:
 `testCancelledQuitRebuildsRecordsAfterSuspendedChanges` retained a closed Little Arkt and the old metadata of a
 surviving page. Cancellation now immediately rebuilds records after tracking resumes, without waiting for another
-page event. Current main is merged with both results histories preserved. Source parsing and diff checks are static
-validation; the refresh fix and integrated head require fresh CI. Manual appearance, VoiceOver, Reduce Motion and
+page event. Current main is merged with both results histories preserved. At `98e63f7`, [CI run 42380522535](https://github.com/krystianslowik/arkt/actions/runs/42380522535) passed all eight reported checks: ArktCore 579 tests in 47 suites, ShellKit pure 2,508 tests in 282 suites, GUI 2,075 executed, 53 skipped and zero failures (including the cancellation regression), app build, lint and the required gate. Optional UI tests were skipped. These results apply to `98e63f7`; the subsequent screenshot fixture head requires fresh CI and a manual workflow for XCUITest. Manual appearance, VoiceOver, Reduce Motion and
 killed-process validation, plus the documented SIGTERM and failed-flush limits, remain outstanding.
+
+
+### Restore pages screenshot evidence (#580)
+
+`RestorePagesScreenshotTests` exports synthetic light and dark window captures with a long title and overflow when
+`ARKT_RESTORE_SHOTS_DIR` is set. The existing GUI CI job exports `restore-pages-screenshots` as a seven-day artifact.
+Rendering, visual inspection and the manually dispatched XCUITest workflow remain pending on the evidence head.
