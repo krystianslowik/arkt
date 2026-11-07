@@ -49,7 +49,7 @@ struct ChromiumEngineContractTests {
     #expect(names.count == 56)
     #expect(names == Set(ContractCheck.allCases.map(\.rawValue)))
     #expect(Set(ContractCheck.allCases.map(\.rule)) == Set(1...26))
-    #expect(Set(ContractCheck.chromiumChecks.map(\.rule)) == Set(1...25), "rule 26 joins with #583")
-    #expect(ContractCheck.chromiumDeferred.map(\.check.rule).allSatisfy { $0 == 26 })
+    #expect(Set(ContractCheck.chromiumChecks.map(\.rule)) == Set(1...26))
+    #expect(ContractCheck.chromiumDeferred.isEmpty)
   }
 }

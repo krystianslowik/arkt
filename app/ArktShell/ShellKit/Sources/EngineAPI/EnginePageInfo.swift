@@ -2,8 +2,8 @@ import Foundation
 
 // Page info and per-site permissions (#582, part of #122): what the page info panel shows for a tab (host, connection,
 // cookies and site data, the site's permissions) and the per-site permission calls that panel and Settings' per-site
-// list (#133) share. `EngineClient.siteSettings` is nil by default, so an engine that has none of this (ChromiumEngine
-// until its engine partner, #583, lands) offers no panel and the address pill stays as it is.
+// list (#133) share. `EngineClient.siteSettings` is nil by default, so an engine that has none of this offers no panel
+// and the address pill stays as it is. ChromiumEngine reports it from the facade since #583.
 //
 // Every call is keyed by the site's origin as the engine names it (`PageInfo.origin`), never by a URL the shell
 // parses: the engine decides what a site is (Chromium keys content settings by origin pattern). The calls that change

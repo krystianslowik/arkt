@@ -930,6 +930,8 @@ final class ScriptedFacade: NSObject, ArktEngine {
   var revealedDownloads: [String] = []
   var downloadPromptsForLocation = false
   var downloadDestinationHandler: ((String, URL, @escaping (URL?) -> Void) -> Void)?
+  /// Page info and per-site permissions (#583, `ScriptedPageInfo.swift`): the profile's content settings.
+  let siteSettings = ScriptedSiteSettings()
   /// The crashed-session prompt (#577): set to model a profile whose last run crashed.
   var lastSessionCrashed = false
   private(set) var sessionDismissals = 0

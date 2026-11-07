@@ -661,6 +661,19 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
                      << " container subviews=" << container.subviews.count;
         break;
       }
+      case ArktEngineEventKindPageInfoChanged: {
+        id<ArktPageInfo> info = event.tab.pageInfo;
+        LOG(WARNING) << "ARKT selftest pageInfoChanged tab=" << tab
+                     << " connection=" << (info ? info.connection : -1)
+                     << " siteData="
+                     << (info && info.hasSiteData
+                             ? base::NumberToString(info.siteDataCookies) +
+                                   " cookies " +
+                                   base::NumberToString(info.siteDataBytes) +
+                                   " bytes"
+                             : std::string("none"));
+        break;
+      }
     }
   }
   if (windows_changed) {
@@ -669,6 +682,44 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
       ids += (ids.empty() ? "" : ",") + std::to_string(browser.windowId);
     }
     LOG(WARNING) << "ARKT selftest windows ids=" << (ids.empty() ? "none" : ids);
+  }
+}
+
+// #583: the page info as the shell would read it.
+- (void)logPageInfoOf:(id<ArktTabHandle>)tab {
+  id<ArktPageInfo> info = tab.pageInfo;
+  if (!info) {
+    LOG(WARNING) << "ARKT selftest pageinfo tab=" << tab.sessionId << " none";
+    return;
+  }
+  LOG(WARNING) << "ARKT selftest pageinfo tab=" << tab.sessionId
+               << " origin=" << base::SysNSStringToUTF8(info.origin)
+               << " host=" << base::SysNSStringToUTF8(info.host)
+               << " connection=" << info.connection << " cert="
+               << (info.certificateIssuedTo
+                       ? base::SysNSStringToUTF8(info.certificateIssuedTo) +
+                             " by " +
+                             base::SysNSStringToUTF8(info.certificateIssuedBy)
+                       : std::string("none"))
+               << " siteData="
+               << (info.hasSiteData
+                       ? base::NumberToString(info.siteDataCookies) +
+                             " cookies " +
+                             base::NumberToString(info.siteDataBytes) +
+                             " bytes"
+                       : std::string("counting"))
+               << " permissions=" << info.permissions.count;
+  for (id<ArktSitePermission> permission in info.permissions) {
+    std::string options;
+    for (NSNumber* option in permission.options) {
+      options += (options.empty() ? "" : ",") +
+                 base::NumberToString(option.integerValue);
+    }
+    LOG(WARNING) << "ARKT selftest permission kind=" << permission.kind
+                 << " title=" << base::SysNSStringToUTF8(permission.title)
+                 << " setting=" << permission.setting
+                 << " default=" << (permission.isDefault ? "yes" : "no")
+                 << " options=" << options;
   }
 }
 
@@ -1061,6 +1112,55 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
     }
     LOG(WARNING) << "ARKT selftest session lastSessionCrashed="
                  << (_engine.lastSessionCrashed ? "yes" : "no");
+  } else if (command == "pageinfo") {
+    // #583: the tab's page info, one line per permission.
+    [self logPageInfoOf:tab];
+  } else if (command == "setperm") {
+    // #583: setperm <kind number> allow|ask|block, for this tab's origin.
+    int kind = 0;
+    NSString* origin = tab.pageInfo.origin;
+    if (origin && base::StringToInt(argument, &kind) && words.size() > 2) {
+      ArktPermissionSetting setting = words[2] == "allow"
+                                          ? ArktPermissionSettingAllow
+                                      : words[2] == "block"
+                                          ? ArktPermissionSettingBlock
+                                          : ArktPermissionSettingAsk;
+      [tab setPermission:static_cast<ArktSitePermissionKind>(kind)
+               toSetting:setting
+               forOrigin:origin];
+      LOG(WARNING) << "ARKT selftest setperm kind=" << kind << " to "
+                   << words[2] << " origin="
+                   << base::SysNSStringToUTF8(origin);
+      [self logPageInfoOf:tab];
+    }
+  } else if (command == "resetperm") {
+    if (NSString* origin = tab.pageInfo.origin) {
+      [tab resetPermissionsForOrigin:origin];
+      LOG(WARNING) << "ARKT selftest resetperm origin="
+                   << base::SysNSStringToUTF8(origin);
+      [self logPageInfoOf:tab];
+    }
+  } else if (command == "pageinfo-close") {
+    [tab pageInfoDidClose];
+    LOG(WARNING) << "ARKT selftest pageinfo-close tab=" << tab.sessionId;
+  } else if (command == "sitesettings") {
+    if (NSString* origin = tab.pageInfo.origin) {
+      [tab openSiteSettingsForOrigin:origin];
+      LOG(WARNING) << "ARKT selftest sitesettings origin="
+                   << base::SysNSStringToUTF8(origin);
+    }
+  } else if (command == "sites") {
+    NSArray<id<ArktSitePermissions>>* sites = _engine.sitesWithPermissions;
+    LOG(WARNING) << "ARKT selftest sites count=" << sites.count;
+    for (id<ArktSitePermissions> site in sites) {
+      for (id<ArktSitePermission> permission in site.permissions) {
+        LOG(WARNING) << "ARKT selftest site "
+                     << base::SysNSStringToUTF8(site.origin)
+                     << " host=" << base::SysNSStringToUTF8(site.host)
+                     << " kind=" << permission.kind
+                     << " setting=" << permission.setting;
+      }
+    }
   } else if (command == "devtools") {
     id<ArktWindowHost> host = tab.browser.host;
     if (host.executeCommand) {
