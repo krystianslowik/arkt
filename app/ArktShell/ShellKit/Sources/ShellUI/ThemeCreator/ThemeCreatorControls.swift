@@ -44,6 +44,23 @@ enum ThemeCreatorMetrics {
   static var arrowCenterY: CGFloat { padding + headerHeight / 2 }
 }
 
+/// Shadows of the theme creator's controls (#764). One black in both appearances: they sit on the popover's own
+/// surface, not on the window. Values are the ones the controls drew before they were named.
+enum ThemeCreatorTokens {
+  /// The slider knob's lift, drawn at (0, -2).
+  static let sliderKnobShadow = ShadowToken(color: TokenPair(light: .black(0.25), dark: .black(0.25)),
+                                            radius: 3, offsetY: 2)
+  /// The pad's inner shadow along its top edge.
+  static let padInnerShadow = ShadowToken(color: TokenPair(light: .black(0.12), dark: .black(0.12)),
+                                          radius: 7, offsetY: 3)
+  /// A colour dot resting on the pad.
+  static let dotRestShadow = ShadowToken(color: TokenPair(light: .black(0.35), dark: .black(0.35)),
+                                         radius: 4, offsetY: 2)
+  /// A colour dot picked up off the pad; it fades in over `dotRestShadow`.
+  static let dotLiftShadow = ShadowToken(color: TokenPair(light: .black(0.38), dark: .black(0.38)),
+                                         radius: 11, offsetY: 8)
+}
+
 /// Motion of the theme creator (README, "Motion"): transform and opacity only.
 public enum ThemeCreatorMotion {
   /// Popover open: scale 0.96 to 1 and fade in from the arrow.
@@ -211,10 +228,10 @@ final class ThemeSliderView: ThemeFocusableView {
     trackEdge.borderWidth = 0.5
     knob.cornerRadius = ThemeCreatorMetrics.knob / 2
     knob.backgroundColor = CGColor.white
-    knob.shadowColor = CGColor.black
-    knob.shadowOpacity = 0.25
-    knob.shadowRadius = 3
-    knob.shadowOffset = CGSize(width: 0, height: -2)
+    knob.shadowColor = ThemeCreatorTokens.sliderKnobShadow.color.light.cgColor
+    knob.shadowOpacity = 1
+    knob.shadowRadius = ThemeCreatorTokens.sliderKnobShadow.radius
+    knob.shadowOffset = ThemeCreatorTokens.sliderKnobShadow.unflippedOffset
     knobEdge.cornerRadius = ThemeCreatorMetrics.knob / 2
     knobEdge.borderWidth = 0.5
     knobEdge.borderColor = CGColor(gray: 0, alpha: 0.2)

@@ -27,6 +27,7 @@ class NewTabFooterController;
 
 namespace arkt {
 
+class ArktAutofillBubbleHandler;
 class ArktExclusiveAccessContext;
 class ArktExtensionsContainer;
 class ArktInfobarPresenter;
@@ -343,6 +344,8 @@ class ArktBrowserWindow : public BrowserWindow,
   std::unique_ptr<ArktExtensionsContainer> extensions_container_;
   std::unique_ptr<ui::ScopedUnownedUserData<ExtensionsContainer>>
       scoped_extensions_container_;
+  // Registers itself in the browser's unowned user data (#575).
+  std::unique_ptr<ArktAutofillBubbleHandler> autofill_bubble_handler_;
   // The window frame when native fullscreen began (GetRestoredBounds).
   gfx::Rect bounds_before_fullscreen_;
   bool show_held_ = false;

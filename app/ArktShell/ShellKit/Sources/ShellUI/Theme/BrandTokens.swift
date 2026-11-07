@@ -63,6 +63,12 @@ public enum BrandTokens {
   /// Pressed fills of the glass and quiet buttons.
   public static let brandControlFillPressed = TokenPair(light: .srgb(hex: 0x202321, alpha: 0.10),
                                                         dark: .srgb(hex: 0xFAF9F5, alpha: 0.12))
+  /// The appearance control's thumb: a hairline lift, the same black in both appearances, drawn at (0, -1).
+  public static let appearanceThumbShadow = ShadowToken(color: TokenPair(light: .black(0.12), dark: .black(0.12)),
+                                                        radius: 1, offsetY: 1)
+  /// The Space preview card on Make it yours: a deep drop, the same black in both appearances.
+  public static let spacePreviewShadow = ShadowToken(color: TokenPair(light: .black(0.45), dark: .black(0.45)),
+                                                     radius: 24, offsetY: 14)
 
   /// Source-over of a translucent `top` on an opaque `bottom`, both read as sRGB; the result is opaque. For contrast
   /// checks of the translucent tokens above.
