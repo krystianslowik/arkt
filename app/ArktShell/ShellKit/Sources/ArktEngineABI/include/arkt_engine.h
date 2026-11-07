@@ -250,14 +250,15 @@ typedef NS_ENUM(NSInteger, ArktZoomCommand) {
   ArktZoomCommandReset = 2,
 };
 
-// How a page reached the browser (#583), from SecurityStateTabHelper's
-// security level and visible security state and the URL's scheme: SECURE and
-// SECURE_WITH_POLICY_INSTALLED_CERT are Secure; NONE or WARNING on https
-// with mixed content (displayed_mixed_content, contained_mixed_form) is
-// NotFullySecure, on any other site NotSecure; DANGEROUS with a certificate
-// error is CertificateError, else Flagged (Safe Browsing); file is
-// LocalFile; chrome, chrome-extension, chrome-untrusted, devtools,
-// view-source and about are InternalPage.
+// How a page reached the browser (#583), from the tab's security level and
+// visible security state (chrome_security_state) and the URL's scheme:
+// SECURE is Secure; DANGEROUS with a Safe Browsing verdict
+// (malicious_content_status set) is Flagged, else with a certificate error
+// (cert_status) CertificateError, else NotSecure; any other level on https
+// with mixed content (displayed_mixed_content, contained_mixed_form,
+// ran_mixed_content) is NotFullySecure, else NotSecure. file is LocalFile;
+// every scheme other than http, https and file (chrome, chrome-extension,
+// devtools, view-source, about, data) is InternalPage.
 typedef NS_ENUM(NSInteger, ArktPageConnection) {
   ArktPageConnectionSecure = 0,
   ArktPageConnectionNotSecure = 1,
@@ -810,8 +811,11 @@ NS_SWIFT_UI_ACTOR
 @property(nonatomic, readonly, nullable, copy) NSDate* certificateValidUntil;
 // Site data as chrome://settings/content/siteDetails counts it
 // (BrowsingDataModel entries matching the origin: their storage bytes and
-// first-party cookies). NO while it is being counted: PageInfoChanged
-// follows when it arrives. NO for a page without site settings.
+// first-party cookies). NO before the profile's first count has arrived;
+// PageInfoChanged follows when it does. A count older than 10 s is recounted
+// when read: the old count is reported meanwhile, and PageInfoChanged
+// follows when the new one differs from what the tab read. NO for a page
+// without site settings.
 @property(nonatomic, readonly) BOOL hasSiteData;
 @property(nonatomic, readonly) NSInteger siteDataCookies;
 @property(nonatomic, readonly) int64_t siteDataBytes;
@@ -999,8 +1003,10 @@ NS_SWIFT_UI_ACTOR
             toSetting:(ArktPermissionSetting)setting
             forOrigin:(NSString*)origin
     NS_SWIFT_NAME(setPermission(_:to:forOrigin:));
-// Removes every exception and embargo of `origin`'s permissions in the
-// tab's profile, as setting each to its default. Cookies and site data stay.
+// Removes the origin-scoped exceptions and the embargoes of `origin`'s
+// permissions in the tab's profile, as setting each to its default
+// (SetNarrowestContentSetting). A broader user exception (a [*.]host pattern)
+// stays, as with Chromium's page info. Cookies and site data stay.
 - (void)resetPermissionsForOrigin:(NSString*)origin
     NS_SWIFT_NAME(resetPermissions(forOrigin:));
 // The shell's page info panel of this tab closed (PageInfo::OnUIClosing).

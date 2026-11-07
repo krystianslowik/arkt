@@ -457,6 +457,7 @@ final class ScriptedTab: NSObject, ArktTabHandle {
     setTabFullscreen(false)       // a navigation leaves HTML fullscreen
     recoverIfCrashed()            // the frame host is live again (RenderFrameCreated) before the URL and load start
     url = target
+    facade.siteSettings.primaryPageChanged(self)  // the page info session of the old page ends (#583)
     loadingTitle = title
     record(.urlChanged) { $0.url = target }
     if !isLoading {
@@ -804,6 +805,7 @@ final class ScriptedBrowser: NSObject, ArktBrowserHandle {
       tab.isInitialBlank = true
     }
     tabList.append(tab)
+    facade.siteSettings.bound(tab)  // the facade seeds the tab's connection when it binds it (#583)
     let created = ScriptedEvent(.tabCreated, tab: tab, browser: self)
     created.url = tab.url; created.title = tab.title; created.opener = tab.opener; created.origin = tab.origin
     facade.record(created)

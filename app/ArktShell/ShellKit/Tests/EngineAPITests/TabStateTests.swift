@@ -285,6 +285,7 @@ struct TabStateTests {
     engine.zoomOut(tab)
     engine.resetZoom(tab)
     #expect(engine.sessionRecovery == nil)
+    #expect(engine.siteSettings == nil)  // page info (#582): no panel without it
   }
 }
 

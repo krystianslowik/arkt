@@ -60,6 +60,8 @@ final class ScriptedSiteSettings {
   /// Tabs with a change of their own site since their panel last closed.
   var pendingReloads: Set<ObjectIdentifier> = []
   private(set) var openedSiteSettings: [(origin: String, tab: Int32)] = []
+  /// The connection last reported per tab, seeded when the tab is bound (the facade's `TabObserver::Seed`).
+  private var reportedConnections: [ObjectIdentifier: ArktPageConnection?] = [:]
   private(set) var closes = 0
 
   static let commonKinds: [ArktSitePermissionKind] = [.location, .camera, .microphone, .notifications]
@@ -155,6 +157,25 @@ final class ScriptedSiteSettings {
     changed(origin, from: tab, needsReload: true)
   }
 
+  func connection(of tab: ScriptedTab) -> ArktPageConnection? { pageInfo(of: tab)?.connection }
+
+  func bound(_ tab: ScriptedTab) { reportedConnections[ObjectIdentifier(tab)] = connection(of: tab) }
+
+  /// A committed cross-document navigation of the primary main frame (`PrimaryPageChanged`): the tab's page info
+  /// session ends without its reload infobar.
+  func primaryPageChanged(_ tab: ScriptedTab) { pendingReloads.remove(ObjectIdentifier(tab)) }
+
+  /// `DidChangeVisibleSecurityState`: `PageInfoChanged` when the folded connection differs from the last one reported.
+  func securityStateChanged(_ tab: ScriptedTab) {
+    let now = connection(of: tab)
+    let key = ObjectIdentifier(tab)
+    // An unseeded tab only takes the first report as its baseline, as the facade did before the seed.
+    guard let reported = reportedConnections[key] else { reportedConnections[key] = now; return }
+    guard reported != now else { return }
+    reportedConnections[key] = now
+    tab.record(.pageInfoChanged)
+  }
+
   func closed(_ tab: ScriptedTab) {
     closes += 1
     guard pendingReloads.remove(ObjectIdentifier(tab)) != nil, tab.owner != nil else { return }
@@ -189,8 +210,11 @@ extension ScriptedTab {
 
   func openSiteSettings(forOrigin origin: String) { facade.siteSettings.openSiteSettings(origin: origin, from: self) }
 
-  /// The site data count arrived, or the connection's security state changed: `PageInfoChanged` on this tab.
+  /// The site data count arrived: `PageInfoChanged` on this tab.
   func pageInfoUpdated() { record(.pageInfoChanged) }
+
+  /// The connection's security state changed (mixed content, a certificate decision, a Safe Browsing verdict).
+  func securityStateChanged() { facade.siteSettings.securityStateChanged(self) }
 }
 
 extension ScriptedFacade {

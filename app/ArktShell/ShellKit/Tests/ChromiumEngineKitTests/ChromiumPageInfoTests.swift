@@ -155,6 +155,43 @@ struct ChromiumPageInfoTests {
     #expect(facade.siteSettings.closes == 2)
   }
 
+  @Test func aNewPageEndsThePanelsChangesSoACloseRaisesNoInfobar() throws {
+    let (engine, id, tab) = makeEngine()
+    let recorder = EventRecorder(engine)
+    engine.setPermission(.location, to: .allow, forOrigin: "https://fieldguide.example", from: id)
+    engine.navigate(id, to: URL(string: "https://fieldguide.example/maps")!)  // same site, a new page
+    facade.flush()
+    tab.finishLoad()
+    engine.pageInfoDidClose(tab: id)
+    facade.flush()
+
+    #expect(!recorder.events.contains { if case .infobarsChanged = $0 { true } else { false } })
+    #expect(engine.pageInfo(of: id)?.permissions.first { $0.kind == .location }?.setting == .allow)
+  }
+
+  @Test func theConnectionIsSeededWhenTheTabIsBound() throws {
+    facade.holdsBatches = true
+    let engine = ChromiumEngine(facade: facade)
+    let id = engine.createTab(url: URL(string: "https://fieldguide.example/trail")!,
+                              in: engine.createWindow(host: StubWindowHost()))
+    facade.flush()
+    let tab = try #require(engine.handle(of: id) as? ScriptedTab)
+    tab.finishLoad()
+    facade.flush()
+    let recorder = EventRecorder(engine)
+
+    // Bound on the initial empty document (a page of the browser itself), so the first report, at the commit, is a
+    // change and is announced; without the seed it would only set the baseline.
+    tab.securityStateChanged()
+    tab.securityStateChanged()                 // the same connection again: nothing
+    facade.siteSettings.connections[ObjectIdentifier(tab)] = .notFullySecure
+    tab.securityStateChanged()                 // mixed content arrived: once
+    facade.flush()
+
+    #expect(recorder.events == [.pageInfoChanged(id), .pageInfoChanged(id)])
+    #expect(engine.pageInfo(of: id)?.connection == .notFullySecure)
+  }
+
   @Test func openSiteSettingsNamesTheSiteAndTheTab() {
     let (engine, id, tab) = makeEngine()
     engine.openSiteSettings(forOrigin: "https://fieldguide.example", from: id)

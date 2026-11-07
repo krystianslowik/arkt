@@ -4919,7 +4919,8 @@ Overlay and facade only: no patch. Contract rule 26, deferred to this issue by #
   `pageInfoDidClose` calls `OnUIClosing`, which adds Chromium's `PageInfoInfoBarDelegate` to the tab once
   (`ArktInfobarKindReload`, already mapped since #400); the session ends there, so a second close adds nothing. A
   change to another site (Settings' per-site list, #133) writes the same setting directly and raises no infobar. The
-  default setting removes the exception. Reset sets every kind with an exception or an embargo back to the default.
+  default setting removes the exception. Reset sets every kind with an exception or an embargo back to the default
+  (the origin-scoped exceptions; a broader `[*.]host` user exception stays, as with Chromium's page info).
   `openSiteSettings` runs `ChromePageInfoDelegate::ShowSiteSettings` (siteDetails in a tab of the Arkt window).
 - **Announcements.** Each profile's `HostContentSettingsMap` is observed once read. A change from one facade call is
   reported once per tab of the matching origin, after the call (a reset of 21 kinds is one event). A change made
@@ -5016,3 +5017,36 @@ crashed as described above); `ps -p` prints nothing for any of them. The loopbac
 Deleted: the throwaway profiles under `profiles/583-20261107/` (with the crash reports the two crashed runs wrote), the
 `embed-583` folder, the build logs and the run's defaults suite. Nothing under `~/Applications/ArktTest` or
 `/Applications/Arkt.app` was touched.
+
+### #583 review fixes (PR #778)
+
+- **A page info session ends with its page.** `Session` now also ends on `PrimaryPageChanged` (a committed
+  cross-document navigation of the primary main frame: reload, link, back and forward, an activation), without
+  `OnUIClosing`, so closing the panel after a change and a navigation adds no reload infobar. The scripted facade ends
+  its pending reload when a new page commits; `ChromiumPageInfoTests.aNewPageEndsThePanelsChangesSoACloseRaisesNoInfobar`
+  covers it. Deliberate breaks: without the scripted end the test fails; with the facade's `PrimaryPageChanged` body
+  emptied, the self-test's change, `reload`, `pageinfo-close` adds `infobarsChanged count=1`. Restored: nothing.
+- **The connection is seeded when the tab is bound** (`TabObserver::Seed`), so the first security state change that
+  differs is reported (the first commit after the initial empty document is one: `pageInfoChanged connection=1` right
+  after the load starts). Scripted case `theConnectionIsSeededWhenTheTabIsBound`; with the scripted seed removed it
+  fails.
+- Comments: `ArktPageConnection` (both header copies) and `PageConnection` now say what the code does (`DANGEROUS`
+  with neither a Safe Browsing verdict nor a certificate error is not secure; `ran_mixed_content` counts);
+  `hasSiteData` says the old count is reported while a recount runs; reset says it removes origin-scoped exceptions
+  only. `cmp` identical.
+- `TabStateTests.defaultsKeepAnEngineWithoutTabStateUnchanged` checks that an engine without page info has no
+  `siteSettings`.
+- `engine/REBASE.md`, section 5: a check of `kApproximateGeolocationPermission` (`GEOLOCATION` vs
+  `GEOLOCATION_WITH_OPTIONS`) and of the page info string table for every listed kind.
+- `origin/main` merged (`ced72fd`, no conflicts).
+
+| Check | Result |
+|---|---|
+| `swift test --filter "ChromiumEngineKitTests\|ArktEngineABITests\|EngineAPITests"` (`nice -n 20`, `-j 2`) | 160 + 31 + 279 passed, 0 failed (2 new `ChromiumPageInfoTests`; the `siteSettings` default check is in an existing test) |
+| `nice -n 20 autoninja -C out/Spike chrome -j 4` | finished successfully, `FAILED:` 0 |
+| Self-test, fresh profiles: location Allow, `reload`, close; then notifications Block, close | no infobar after the reload; `infobarsChanged count=1` after the second close; 0 `FATAL` |
+| Engine app and in-app contract (`dev.arkt.Arkt.try583`, throwaway profile, `--use-mock-keychain`) | `BUILD SUCCEEDED`; rule 26 PASS (105, 108, 139 ms), rule 25 PASS, `22/26` with the same four NOT-APPLICABLE rules |
+| `.patches` | 12 = 12, in sync |
+
+Cleanup: every run stopped by PID or exited; the loopback server stopped by PID; the profiles, the `embed-583` folder,
+the build logs and the defaults suite deleted.

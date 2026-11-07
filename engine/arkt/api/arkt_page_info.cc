@@ -241,7 +241,15 @@ class PageInfoHub::Session : public content::WebContentsObserver {
   PageInfo* page_info() { return page_info_.get(); }
   const url::Origin& origin() const { return origin_; }
 
-  // content::WebContentsObserver: the session ends with its contents.
+  // content::WebContentsObserver. The session ends with its contents, and
+  // with the page it was opened for: a committed cross-document navigation
+  // of the primary main frame (a reload, a link, back and forward, a
+  // prerender or back-forward cache activation) needs no reload infobar, so
+  // a later close of the panel adds none. Ending here skips OnUIClosing.
+  void PrimaryPageChanged(content::Page& page) override {
+    hub_->EndSession(web_contents());  // Deletes this.
+  }
+
   void WebContentsDestroyed() override {
     hub_->EndSession(web_contents());  // Deletes this.
   }

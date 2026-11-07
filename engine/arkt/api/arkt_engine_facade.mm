@@ -2168,6 +2168,9 @@ class TabObserver : public content::WebContentsObserver,
     zoom_percent_ = ZoomPercent();
     zoom_is_default_ = ZoomIsDefault();
     fullscreen_ = contents->IsFullscreen();
+    // Page info (#583): the connection as TabCreated's handle reads it, so
+    // the first security state change reported is a real one.
+    connection_ = static_cast<int>(ReadConnection(contents));
   }
 
   void ReportAll() {
@@ -2272,11 +2275,8 @@ class TabObserver : public content::WebContentsObserver,
     if (connection == connection_) {
       return;
     }
-    const bool first = connection_ < 0;
     connection_ = connection;
-    if (!first) {
-      Emit(NewEvent(ArktEngineEventKindPageInfoChanged));
-    }
+    Emit(NewEvent(ArktEngineEventKindPageInfoChanged));
   }
 
   // HTML fullscreen (#577): WebContents notifies after its delegate entered
@@ -2567,7 +2567,7 @@ class TabObserver : public content::WebContentsObserver,
   int zoom_percent_ = 100;
   bool zoom_is_default_ = true;
   bool fullscreen_ = false;
-  // The last page info connection seen (#583), -1 before the first.
+  // The last page info connection reported (#583), seeded at bind.
   int connection_ = -1;
   base::ScopedObservation<favicon::FaviconDriver,
                           favicon::FaviconDriverObserver>
