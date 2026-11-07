@@ -381,7 +381,16 @@ final class SplitPaneCloseTests: XCTestCase {
     /// Each right mouse-down and -up, with its location in the container's window.
     private(set) var rightMouseDowns: [NSPoint] = []
     private(set) var rightMouseUps = 0
-    override func mouseDown(with event: NSEvent) { mouseDowns += 1 }
+    /// Each mouse-down's location in the container's window and its modifier flags.
+    private(set) var mouseDownEvents: [(location: NSPoint, flags: NSEvent.ModifierFlags)] = []
+    private(set) var mouseDraggeds = 0
+    private(set) var mouseUps = 0
+    override func mouseDown(with event: NSEvent) {
+      mouseDowns += 1
+      mouseDownEvents.append((event.locationInWindow, event.modifierFlags))
+    }
+    override func mouseDragged(with event: NSEvent) { mouseDraggeds += 1 }
+    override func mouseUp(with event: NSEvent) { mouseUps += 1 }
     override func scrollWheel(with event: NSEvent) { scrolls.append((event.phase, event.momentumPhase)) }
     override func rightMouseDown(with event: NSEvent) { rightMouseDowns.append(event.locationInWindow) }
     override func rightMouseUp(with event: NSEvent) { rightMouseUps += 1 }
@@ -703,6 +712,188 @@ final class SplitPaneCloseTests: XCTestCase {
 
     XCTAssertEqual(c.rightMouseDowns.count, 1)
     XCTAssertEqual(c.rightMouseUps, 0)
+  }
+
+  // MARK: Control-click mid-flight (#715)
+
+  /// A left mouse event at `point` (in `container`) with `flags`, for the container's window. The events of one click
+  /// share their event number, as the mouse-down and mouse-up of a real click do; each click has its own.
+  private func mouseEvent(_ type: NSEvent.EventType, at point: NSPoint, in container: SplitContainerView,
+                          flags: NSEvent.ModifierFlags = .control, number: Int = 1) throws -> NSEvent {
+    let window = try XCTUnwrap(container.window)
+    return try XCTUnwrap(NSEvent.mouseEvent(
+      with: type, location: container.convert(point, to: nil), modifierFlags: flags, timestamp: 0,
+      windowNumber: window.windowNumber, context: nil, eventNumber: number, clickCount: 1, pressure: 1))
+  }
+
+  /// AppKit turns a Control-click into a context menu only for a hit view that gives one from `menu(for:)`; the
+  /// container gives none mid-flight, so its mouse-down runs. (This checks the container only, not the page's menu.)
+  func testControlClickMidFlightIsNotTurnedIntoAMenuOfTheContainer() throws {
+    let (container, _, _, point) = try midFlightOnADrawnPane()
+
+    XCTAssertNil(container.menu(for: try mouseEvent(.leftMouseDown, at: point, in: container)))
+  }
+
+  /// A Control-click on a drawn pane mid-flight is a secondary click, like a right-click: it ends the reflow at rest
+  /// first, then reaches that pane's page at the spot it was drawn under the pointer, with Control still set, so the
+  /// page opens its context menu; the drag and mouse-up follow it there. It does not focus the pane as a click does.
+  func testControlClickMidFlightEndsTheReflowAndReachesTheDrawnPanesPage() throws {
+    let (container, a, c, point) = try midFlightOnADrawnPane()
+    var focusRequests: [Int] = []
+    container.onFocusRequest = { focusRequests.append($0) }
+    let card = container.paneCards[1]
+    let shift = try onScreen(card).minX - card.frame.minX
+    let target = try scrollTarget(at: point, in: container)
+
+    target.mouseDown(with: try mouseEvent(.leftMouseDown, at: point, in: container))
+
+    XCTAssertFalse(container.isReflowing)
+    try assertAtRest(container.paneCards)
+    XCTAssertEqual(c.mouseDownEvents.count, 1)
+    XCTAssertEqual(a.mouseDowns, 0)
+    XCTAssertEqual(focusRequests, [])
+    let down = try XCTUnwrap(c.mouseDownEvents.first)
+    XCTAssertTrue(down.flags.contains(.control))
+    let atRest = container.convert(down.location, from: nil)
+    XCTAssertEqual(atRest.x, point.x - shift, accuracy: 1e-6, "the same spot of the page")
+    XCTAssertEqual(atRest.y, point.y, accuracy: 1e-6)
+    target.mouseDragged(with: try mouseEvent(.leftMouseDragged, at: point, in: container))
+    target.mouseUp(with: try mouseEvent(.leftMouseUp, at: point, in: container))
+    XCTAssertEqual(c.mouseDraggeds, 1)
+    XCTAssertEqual(c.mouseUps, 1)
+    XCTAssertEqual(a.mouseUps, 0)
+  }
+
+  /// A context menu's own loop can take the mouse-up of a Control-click forwarded mid-flight; the next click does not
+  /// send its drag or mouse-up to that old page.
+  func testControlClickWhoseMouseUpWasTakenLeavesNoStaleTarget() throws {
+    let (container, _, c, point) = try midFlightOnADrawnPane()
+    container.mouseDown(with: try mouseEvent(.leftMouseDown, at: point, in: container))
+    XCTAssertEqual(c.mouseDowns, 1)
+
+    let gap = container.dividers[0].frame
+    let inGap = NSPoint(x: gap.midX, y: gap.midY)
+    container.mouseDown(with: try mouseEvent(.leftMouseDown, at: inGap, in: container, flags: [], number: 2))
+    container.mouseDragged(with: try mouseEvent(.leftMouseDragged, at: inGap, in: container, flags: [], number: 2))
+    container.mouseUp(with: try mouseEvent(.leftMouseUp, at: inGap, in: container, flags: [], number: 2))
+
+    XCTAssertEqual(c.mouseDowns, 1)
+    XCTAssertEqual(c.mouseDraggeds, 0)
+    XCTAssertEqual(c.mouseUps, 0)
+  }
+
+  /// The view of type `T` in `view`'s subtree.
+  private func descendant<T: NSView>(_ type: T.Type, in view: NSView) -> T? {
+    for subview in view.subviews {
+      if let match = subview as? T ?? descendant(type, in: subview) { return match }
+    }
+    return nil
+  }
+
+  /// A context menu's loop took the mouse-up of a Control-click forwarded mid-flight; then a click on a closed pane's
+  /// placeholder ("Reopen page"), whose mouse-down never reaches the container: its drag and mouse-up do not go on
+  /// up to the old page.
+  func testClickOnAPlaceholderAfterAControlClickWhoseMouseUpWasTakenDoesNotReachTheOldPage() throws {
+    let (container, a, c, point) = try midFlightOnADrawnPane()
+    container.mouseDown(with: try mouseEvent(.leftMouseDown, at: point, in: container))
+    XCTAssertEqual(c.mouseDowns, 1)
+    show(container, [a, nil, c])
+    let placeholder = try XCTUnwrap(descendant(SplitPanePlaceholderView.self, in: container.paneCards[1]))
+    var reopenRequests: [Int] = []
+    container.onFocusRequest = { reopenRequests.append($0) }
+    let center = placeholder.convert(NSPoint(x: placeholder.bounds.midX, y: placeholder.bounds.midY), to: container)
+
+    placeholder.mouseDown(with: try mouseEvent(.leftMouseDown, at: center, in: container, flags: [], number: 2))
+    placeholder.mouseDragged(with: try mouseEvent(.leftMouseDragged, at: center, in: container, flags: [], number: 2))
+    placeholder.mouseUp(with: try mouseEvent(.leftMouseUp, at: center, in: container, flags: [], number: 2))
+
+    XCTAssertEqual(reopenRequests, [1], "the placeholder took its click")
+    XCTAssertEqual(c.mouseDraggeds, 0)
+    XCTAssertEqual(c.mouseUps, 0)
+    XCTAssertEqual(a.mouseUps, 0)
+  }
+
+  /// The drag and mouse-up of another click, which reach the container from a view that took that click's mouse-down,
+  /// do not go to the page a Control-click was forwarded to: they carry another event number.
+  func testDragAndMouseUpOfAnotherClickDoNotReachTheControlClickedPage() throws {
+    let (container, _, c, point) = try midFlightOnADrawnPane()
+    container.mouseDown(with: try mouseEvent(.leftMouseDown, at: point, in: container))
+    XCTAssertEqual(c.mouseDowns, 1)
+
+    container.mouseDragged(with: try mouseEvent(.leftMouseDragged, at: point, in: container, flags: [], number: 2))
+    container.mouseUp(with: try mouseEvent(.leftMouseUp, at: point, in: container, flags: [], number: 2))
+
+    XCTAssertEqual(c.mouseDraggeds, 0)
+    XCTAssertEqual(c.mouseUps, 0)
+  }
+
+  /// A responder that records the drags and mouse-ups passed up to it.
+  private final class RecordingResponder: NSResponder {
+    private(set) var passedUp = 0
+    override func mouseDragged(with event: NSEvent) { passedUp += 1 }
+    override func mouseUp(with event: NSEvent) { passedUp += 1 }
+  }
+
+  /// A closed pane's placeholder takes its click whole: its drag and mouse-up do not go on up its responder chain.
+  func testPlaceholderDoesNotPassItsDragOrMouseUpUp() throws {
+    let container = makeClickableContainer()
+    show(container, [ClickRecordingPage(), nil])
+    let placeholder = try XCTUnwrap(descendant(SplitPanePlaceholderView.self, in: container.paneCards[1]))
+    let next = RecordingResponder()
+    placeholder.nextResponder = next
+    let center = placeholder.convert(NSPoint(x: placeholder.bounds.midX, y: placeholder.bounds.midY), to: container)
+
+    placeholder.mouseDragged(with: try mouseEvent(.leftMouseDragged, at: center, in: container, flags: []))
+    placeholder.mouseUp(with: try mouseEvent(.leftMouseUp, at: center, in: container, flags: []))
+
+    XCTAssertEqual(next.passedUp, 0)
+  }
+
+  /// A page that does not take a mouse-down and passes it up its responder chain.
+  private final class PassingClickPage: NSView {
+    private(set) var mouseDowns = 0
+    override func mouseDown(with event: NSEvent) {
+      mouseDowns += 1
+      super.mouseDown(with: event)
+    }
+  }
+
+  /// A Control-click forwarded mid-flight that its page passes up comes back through the container and goes on up from
+  /// there, once; it is not forwarded round again and focuses no pane.
+  func testForwardedControlClickThatThePagePassesUpIsNotForwardedAgain() throws {
+    let container = makeClickableContainer()
+    let (a, b, c) = (PassingClickPage(), PassingClickPage(), PassingClickPage())
+    show(container, [a, b, c])
+    var focusRequests: [Int] = []
+    container.onFocusRequest = { focusRequests.append($0) }
+    show(container, [a, c], animated: true)
+    container.reflowDriver.tick(at: 100.06)
+    let drawn = try onScreen(container.paneCards[1])
+    let point = NSPoint(x: drawn.minX + 20, y: drawn.midY)
+
+    container.mouseDown(with: try mouseEvent(.leftMouseDown, at: point, in: container))
+
+    XCTAssertEqual(c.mouseDowns, 1)
+    XCTAssertEqual(a.mouseDowns, 0)
+    XCTAssertEqual(focusRequests, [])
+  }
+
+  /// A Control-click on a drawn close button mid-flight closes that pane, as a Control-click on the button does at
+  /// rest (it has no menu); the page does not get it.
+  func testControlClickOnADrawnCloseButtonMidFlightClosesThatPane() throws {
+    let container = makeClickableContainer()
+    let (a, b, c) = (ClickRecordingPage(), ClickRecordingPage(), ClickRecordingPage())
+    show(container, [a, c])
+    var requests: [Int] = []
+    container.onCloseRequest = { requests.append($0) }
+    show(container, [a, b, c], animated: true)
+    container.reflowDriver.tick(at: 100.06)
+    let x = try drawnCloseButtonCenter(container, pane: 2)
+
+    container.mouseDown(with: try mouseEvent(.leftMouseDown, at: x, in: container))
+
+    XCTAssertEqual(requests, [2])
+    XCTAssertEqual(c.mouseDowns, 0)
   }
 
   /// #602: each reflow is measured on its own pacing session, "split-reflow", ended when it settles.
