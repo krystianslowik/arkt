@@ -431,6 +431,7 @@ public final class SplitContainerView: NSView {
       guard let click = atRestTarget(for: event, at: point) else { return super.mouseDown(with: event) }
       controlClickTarget = click.view
       controlClickOffset = click.offset
+      controlClickNumber = event.eventNumber
       forward { click.view.mouseDown(with: click.event) }
     } else if index != focusedIndex {
       onFocusRequest?(index)
@@ -438,7 +439,7 @@ public final class SplitContainerView: NSView {
   }
 
   public override func mouseDragged(with event: NSEvent) {
-    guard !isForwardingEvent, let target = controlClickTarget,
+    guard !isForwardingEvent, let target = controlClickTarget, event.eventNumber == controlClickNumber,
           let moved = Self.mouseEvent(event, movedBy: controlClickOffset) else {
       return super.mouseDragged(with: event)
     }
@@ -448,7 +449,7 @@ public final class SplitContainerView: NSView {
   public override func mouseUp(with event: NSEvent) {
     let target = isForwardingEvent ? nil : controlClickTarget
     if !isForwardingEvent { controlClickTarget = nil }
-    guard let target, let moved = Self.mouseEvent(event, movedBy: controlClickOffset) else {
+    guard let target, event.eventNumber == controlClickNumber, let moved = Self.mouseEvent(event, movedBy: controlClickOffset) else {
       return super.mouseUp(with: event)
     }
     forward { target.mouseUp(with: moved) }
@@ -463,9 +464,13 @@ public final class SplitContainerView: NSView {
   /// The view a right-click mid-reflow went to, and how far its location was moved, so its mouse-up follows it.
   private weak var rightClickTarget: NSView?
   private var rightClickOffset = CGVector.zero
-  /// The same for a Control-click mid-reflow (#715), so its drag and mouse-up follow it.
+  /// The same for a Control-click mid-reflow (#715), so its drag and mouse-up follow it, and its mouse-down's event
+  /// number: a mouse-up carries its own mouse-down's number, so one of another click (whose mouse-down a subview
+  /// took, after a menu loop took this click's mouse-up) passes up and does not reach the old target. A drag is held to
+  /// it too; at worst a drag of a secondary click is dropped, and a context menu's loop tracks those itself.
   private weak var controlClickTarget: NSView?
   private var controlClickOffset = CGVector.zero
+  private var controlClickNumber = 0
   /// An event is being forwarded: a target that does not take it passes it up its responder chain, back here, and
   /// it then goes on up from this view instead of round again.
   private var isForwardingEvent = false
@@ -608,6 +613,10 @@ final class SplitPanePlaceholderView: NSView {
   override var mouseDownCanMoveWindow: Bool { false }
 
   override func mouseDown(with event: NSEvent) { onClick?() }
+  /// The placeholder takes its own click whole: its drag and mouse-up do not go on up the responder chain to the
+  /// container, where they could reach a page.
+  override func mouseDragged(with event: NSEvent) {}
+  override func mouseUp(with event: NSEvent) {}
 
   override func accessibilityPerformPress() -> Bool {
     onClick?()
