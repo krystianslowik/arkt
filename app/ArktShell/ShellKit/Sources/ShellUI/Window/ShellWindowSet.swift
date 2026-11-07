@@ -170,6 +170,7 @@ public final class ShellWindowSet {
       if recoveryPageSource?.pages.isEmpty == false { recoveryPageSource?.pages = [] }
     } else {
       recoveryRecordingStopped = false
+      recordRecoveryPages()
     }
   }
 

@@ -160,12 +160,22 @@ extension InMemoryEngine {
 
   // MARK: - Uninstall (#720)
 
+  public func uninstallExtension(_ extensionID: String, reportAbuse: Bool) {
+    uninstallExtension(extensionID, reportAbuse: reportAbuse, in: nil)
+  }
+
   /// Removes the extension's action from every window, its pin and its commands, then reports
   /// `.extensionActionsChanged` for each window that listed it and `.commandsChanged` when it had commands. The engine
-  /// forgets it, so a later install starts unpinned. Every call is recorded; an unknown id changes nothing else.
-  public func uninstallExtension(_ extensionID: String, reportAbuse: Bool) {
-    uninstalledExtensions.append(ExtensionUninstall(extensionID: extensionID, reportAbuse: reportAbuse))
+  /// forgets it, so a later install starts unpinned. Every call is recorded with its window; an unknown id, and one
+  /// whose action says `canUninstall` false (the Chromium engine's safety net, #721), change nothing else.
+  public func uninstallExtension(_ extensionID: String, reportAbuse: Bool, in window: EngineWindowID?) {
+    uninstalledExtensions.append(ExtensionUninstall(extensionID: extensionID, reportAbuse: reportAbuse,
+                                                    window: window))
     let listing = windowIDs.filter { actions[$0]?.contains(where: { $0.extensionID == extensionID }) == true }
+    let removable = listing.allSatisfy { window in
+      actions[window]?.allSatisfy { $0.extensionID != extensionID || $0.canUninstall } ?? true
+    }
+    guard removable else { return }
     let hadCommands = extensionCommands.contains { $0.id.extensionID == extensionID }
     knownExtensionIDs.remove(extensionID)
     pinnedExtensionIDs.removeAll { $0 == extensionID }
@@ -204,11 +214,12 @@ extension InMemoryEngine {
   }
 }
 
-/// One `uninstallExtension` call InMemoryEngine recorded (#720).
+/// One `uninstallExtension` call InMemoryEngine recorded (#720), with the window it named (#721; nil for none).
 public struct ExtensionUninstall: Equatable, Sendable {
   public var extensionID: String
   public var reportAbuse: Bool
-  public init(extensionID: String, reportAbuse: Bool) {
-    self.extensionID = extensionID; self.reportAbuse = reportAbuse
+  public var window: EngineWindowID?
+  public init(extensionID: String, reportAbuse: Bool, window: EngineWindowID? = nil) {
+    self.extensionID = extensionID; self.reportAbuse = reportAbuse; self.window = window
   }
 }

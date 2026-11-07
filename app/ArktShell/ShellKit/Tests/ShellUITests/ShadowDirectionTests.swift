@@ -1,4 +1,5 @@
 import AppKit
+import EngineAPI
 import Testing
 @testable import ShellUI
 
@@ -124,6 +125,33 @@ struct ShadowDirectionTests {
     row.updateLayer()
     let fill = try #require(row.layer?.sublayers?.first { $0.shadowOpacity > 0 }, "the selected fill")
     try host.expectCastsDown(fill, band: 1.5)
+  }
+
+  // MARK: #794: the shown private page's row and the lifted extensions row
+
+  /// The shown page's row carries the current row's lift, light only (`tabCurrentShadow` is clear in dark).
+  @Test func theShownPrivatePageRowCastsDown() throws {
+    let tab = TabID()
+    let row = PrivatePageRowView(tab: tab)
+    row.frame = NSRect(x: 0, y: 0, width: 220, height: 32)
+    row.flavor = .light
+    row.apply(PrivatePageRowContent(tab: tab, title: "Private", url: nil, favicon: nil, isShown: true), favicon: nil)
+    let host = Host(row, dark: false)
+    row.layout()
+    let fill = try #require(row.layer?.sublayers?.first { $0.shadowOpacity > 0 }, "the shown row's fill")
+    try host.expectCastsDown(fill, band: 1.5)
+  }
+
+  /// The row lifted by its grip during a drag carries half the overlay shadow, in light and dark.
+  @Test(arguments: [NSAppearance.Name.aqua, .darkAqua])
+  func theLiftedExtensionsRowCastsDown(appearance: NSAppearance.Name) throws {
+    let row = ExtensionsPanelRow(action: ExtensionAction(id: "test.extension", name: "Test Extension"))
+    row.appearance = NSAppearance(named: appearance)
+    row.setLifted(true)
+    let host = Host(row, dark: appearance == .darkAqua)
+    row.layout()
+    let fill = try #require(row.layer?.sublayers?.first { $0.shadowOpacity > 0 }, "the lifted row's fill")
+    try host.expectCastsDown(fill, band: 4)
   }
 
   /// The renderer keeps the window's orientation: a marker placed near the top of the host lands in the top rows of
