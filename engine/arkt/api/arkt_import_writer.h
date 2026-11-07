@@ -99,6 +99,9 @@ void ImportLogins(Profile* profile,
 // (when it is not null), older than the history retention window, or of a
 // URL the history refuses (not http, https, ftp or file) is skipped. `done`
 // runs after the history thread processed the writes, never inside the call.
+// The visits are counted written only once that answer arrives; if the history
+// service shuts down or drops the request first, they are counted failed
+// ("no answer from the history store") and `done` still runs.
 void ImportHistory(Profile* profile,
                    std::vector<ImportHistoryEntry> entries,
                    base::Time after,
