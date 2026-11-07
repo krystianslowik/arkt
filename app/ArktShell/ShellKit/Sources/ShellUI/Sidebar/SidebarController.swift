@@ -244,7 +244,9 @@ public final class SidebarController {
     return source.spaceOrder.filter { source.space($0)?.profile == profile }
   }
 
-  /// Draws this window's sidebar as a normal, blank or incognito window. Does not change the shared source.
+  /// Draws this window's sidebar as a normal, blank or incognito window. Does not change the shared source. Blank and
+  /// incognito are one-way: only `makeBlank` and `makeIncognito` call this, once, and a private window never goes
+  /// back to `.standard`.
   public func present(_ presentation: SidebarPresentation) {
     guard presentation != self.presentation else { return }
     self.presentation = presentation

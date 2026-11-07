@@ -70,10 +70,20 @@ final class PrivateBackdropTests: XCTestCase {
                         in: ThemeContext(appearance: dark ? .dark : .light))
   }
 
+  /// The window draws the backdrop for its own theme context, so the check holds whatever the machine's Increase
+  /// Contrast setting is.
   private func assertBackdrop(_ controller: ShellWindowController, dark: Bool,
                               file: StaticString = #filePath, line: UInt = #line) {
-    XCTAssertEqual(controller.themeBackground.themes, [drawnBackdrop(dark: dark)], file: file, line: line)
+    let context = controller.sidebarController.themeContext
+    XCTAssertEqual(context.appearance, dark ? .dark : .light, file: file, line: line)
+    let expected = ThemeContrast.drawn(PrivateBackdrop.theme(for: context.appearance), in: context)
+    XCTAssertEqual(controller.themeBackground.themes, [expected], file: file, line: line)
     XCTAssertEqual(controller.sidebarController.view.flavor, dark ? .dark : .light, file: file, line: line)
+  }
+
+  /// The largest spread between a color's red, green and blue: near 0 for a grey.
+  private static func spread(_ color: RGBA) -> Double {
+    max(color.red, color.green, color.blue) - min(color.red, color.green, color.blue)
   }
 
   // MARK: The backdrop
@@ -87,6 +97,29 @@ final class PrivateBackdropTests: XCTestCase {
     // The automatic contrast rule leaves them as they are without Increase Contrast.
     XCTAssertEqual(drawnBackdrop(dark: false).baseColors, PrivateBackdrop.theme(for: .light).baseColors)
     XCTAssertEqual(drawnBackdrop(dark: true).baseColors, PrivateBackdrop.theme(for: .dark).baseColors)
+  }
+
+  /// Under Increase Contrast the backdrop keeps its tone and stays a neutral grey, in the window too.
+  func testBackdropUnderIncreaseContrastKeepsItsFlavorAndStaysNeutral() throws {
+    for flavor in [ThemeFlavor.light, .dark] {
+      let stored = PrivateBackdrop.theme(for: flavor)
+      let drawn = ThemeContrast.drawn(stored, in: ThemeContext(appearance: flavor, increaseContrast: true))
+      XCTAssertEqual(drawn.flavor, flavor)
+      XCTAssertEqual(drawn.baseColors.count, stored.baseColors.count)
+      // The greys already reach 7:1 under the sidebar text, so the rule leaves them as the design gives them.
+      XCTAssertEqual(drawn.baseColors, stored.baseColors)
+      for color in drawn.baseColors {
+        XCTAssertLessThan(Self.spread(color), 0.04, "\(flavor): \(color) is not a neutral grey")
+      }
+    }
+    let f = makeFixture()
+    for dark in [false, true] {
+      let controller = try privateWindow(f, on: dark ? f.red : f.blue, dark: dark)
+      controller.sidebarController.themeContext = ThemeContext(appearance: dark ? .dark : .light,
+                                                               increaseContrast: true)
+      assertBackdrop(controller, dark: dark)
+      controller.close()
+    }
   }
 
   /// Opened from a light or a dark Space theme, in a light or a dark appearance, Blank or Incognito: the window
