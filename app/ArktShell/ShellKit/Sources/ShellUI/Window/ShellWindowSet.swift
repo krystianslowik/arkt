@@ -44,6 +44,8 @@ public final class ShellWindowSet {
   private let hostLookup: HostLookup?
   private let recoveryPageSource: (any RecoveryPageSource)?
   private let priorRecoveryPages: [ShellRecoveryPage]
+  private var recoveryTabOrder: [TabID] = []
+  private var recoveryRecordingStopped = false
   private var windows: [ShellWindowController] = []
   /// True once the session's first window adopted the saved sidebar state (#331); later windows keep the defaults.
   private var adoptedSavedSidebarState = false
@@ -162,7 +164,37 @@ public final class ShellWindowSet {
 
   /// A clean termination clears the persisted records; a cancelled quit keeps them.
   public func finishSessionRecovery(cleanQuit: Bool) {
-    if cleanQuit { recoveryPageSource?.pages = [] }
+    if cleanQuit {
+      recoveryRecordingStopped = true
+      recoveryTabOrder = []
+      if recoveryPageSource?.pages.isEmpty == false { recoveryPageSource?.pages = [] }
+    } else {
+      recoveryRecordingStopped = false
+    }
+  }
+
+  /// Rebuild from owned pages only; retain tab order across hide/restore and metadata changes.
+  private func recordRecoveryPages() {
+    guard !recoveryRecordingStopped, let source = recoveryPageSource else { return }
+    var live: [TabID: ShellRecoveryPage] = [:]
+    var discovered: [TabID] = []
+    func add(_ tab: TabID, kind: ShellRecoveryPage.Kind, node: NodeID? = nil) {
+      guard let snapshot = engine.snapshot(of: tab), let url = snapshot.url else { return }
+      if live[tab] == nil { discovered.append(tab) }
+      live[tab] = ShellRecoveryPage(title: snapshot.title, url: url, kind: kind, sourceNode: node)
+    }
+    for window in windows where !window.isClosed && !window.isPrivateWindow {
+      for (tab, node) in window.peek.recoveryTabs { add(tab, kind: .peek, node: node) }
+    }
+    for little in littleArktWindows where !little.isClosed {
+      if let tab = little.shownTab, let window = little.engineWindow, engine.snapshot(of: tab)?.window == window {
+        add(tab, kind: .littleArkt)
+      }
+    }
+    recoveryTabOrder.removeAll { live[$0] == nil }
+    for tab in discovered where !recoveryTabOrder.contains(tab) { recoveryTabOrder.append(tab) }
+    let pages = recoveryTabOrder.compactMap { live[$0] }
+    if pages != source.pages { source.pages = pages }
   }
 
   private func restoreRecoveryPages(_ pages: [ShellRecoveryPage]) -> Bool {
@@ -467,7 +499,11 @@ public final class ShellWindowSet {
     }
     little.flightDestination = { [weak self] in self?.primary }        // #352: an open main window only
     little.onResize = { [weak self] size in self?.littleArktSize = size }
-    little.onClosed = { [weak self] closed in self?.littleArktWindows.removeAll { $0 === closed } }
+    little.onClosed = { [weak self] closed in
+      self?.littleArktWindows.removeAll { $0 === closed }
+      self?.recordRecoveryPages()
+    }
+    little.onRecoveryPageChanged = { [weak self] in self?.recordRecoveryPages() }
     little.onArchiveClose = { [weak self] closed in self?.littleArktClosed(closed) }
     little.onReopenClosed = { [weak self] in self?.reopenClosedLittleArkt() }
     little.canReopenClosed = { [weak self] in self?.canReopenClosedLittleArkt ?? false }
@@ -629,14 +665,19 @@ public final class ShellWindowSet {
       (self?.controllers ?? []).filter { $0 !== controller }.reduce(into: []) { $0.formUnion($1.visibleNodes) }
     }
     windows.append(controller)
+    controller.peek.onRecoveryPagesChanged = { [weak self] in self?.recordRecoveryPages() }
     controller.onRecoveryWindowClosed = { [weak self, weak controller] in
-      guard let self, self.recoveryWindow === controller else { return }
+      guard let self else { return }
+      self.recordRecoveryPages()
+      guard self.recoveryWindow === controller else { return }
       self.recoveryWindow = nil
       self.presentPendingRecovery()
     }
     controller.onRecoveryEligibilityChanged = { [weak self] in self?.presentPendingRecovery() }
     controller.onBecomingPrivate = { [weak self, weak controller] in
-      guard let self, let controller, self.recoveryWindow === controller else { return }
+      guard let self, let controller else { return }
+      self.recordRecoveryPages()
+      guard self.recoveryWindow === controller else { return }
       controller.rootView.subviews.filter { $0 is RestorePagesView }.forEach { $0.removeFromSuperview() }
       self.recoveryWindow = nil
       self.presentPendingRecovery()

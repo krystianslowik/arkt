@@ -98,6 +98,7 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
   var onResize: @MainActor (CGSize) -> Void = { _ in }
   /// The window closed; the set forgets it.
   var onClosed: @MainActor (LittleArktWindowController) -> Void = { _ in }
+  var onRecoveryPageChanged: (@MainActor () -> Void)?
   /// A close the user or the idle timer asked for ended: the page goes to the Archive and the window can be reopened.
   /// Runs before `onClosed`.
   var onArchiveClose: @MainActor (LittleArktClosedWindow) -> Void = { _ in }
@@ -200,10 +201,12 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
       mount(tab)
     case .urlChanged(let tab, _) where tab == shownTab:
       refreshTopBar()
+      onRecoveryPageChanged?()
     case .closeCancelled(let tab) where tab == shownTab:
       requestedClose = nil                                    // the user stayed at the leave-site prompt
     case .titleChanged(let tab, let title) where tab == shownTab:
       window.title = title
+      onRecoveryPageChanged?()
     case .dialogRequested(let dialog) where isCarrying && dialog.tab == shownTab:
       carriedDialog = dialog                                  // raised in the air: it goes with the page
     case .dialogEnded(_, let id) where isCarrying && carriedDialog?.id == id:
@@ -219,6 +222,7 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
       refreshCrashedTab()
     case .tabClosed(let tab, _) where tab == shownTab:
       shownTab = nil
+      onRecoveryPageChanged?()
       if card.contentView?.isDescendant(of: rootView) == true { card.setContent(nil) }
       refreshCrashedTab()
       flight?.abort(.pageClosed)                              // nothing left to land; the engine closes the window
@@ -269,6 +273,7 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
     refreshTopBar()
     refreshCrashedTab()
     if window.isKeyWindow { engine.focusPage(of: tab) }
+    onRecoveryPageChanged?()
   }
 
   /// Its tabs closed already (contract rule 11). A window the user closed or handed off is already moving out; a
@@ -455,6 +460,7 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
 
   private func handedOff(spaceName: String?) {
     phase = .handedOff
+    onRecoveryPageChanged?()
     NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested, userInfo: [
       .announcement: LittleArktCopy.announcement(spaceName: isPopup ? nil : spaceName),
       .priority: NSAccessibilityPriorityLevel.high.rawValue,

@@ -82,6 +82,14 @@ public final class PeekController {
   /// The sidebar row of the open Peek's source, kept for the reopen stack: when the source closes, its row mapping is
   /// gone before the Peek hears of it.
   private var sourceNode: NodeID?
+  /// Notifies the window set after ownership or page metadata changes.
+  var onRecoveryPagesChanged: (@MainActor () -> Void)?
+
+  var recoveryTabs: [(TabID, NodeID?)] {
+    var tabs = hiddenPeeks.values.map { ($0.tab, $0.sourceNode) }
+    if let session { tabs.append((session.tab, sourceNode)) }
+    return tabs
+  }
   /// How long after a close starts the "Peek closed" toast comes in (the motion table: after 140 ms). Tests set 0.
   var closedToastDelay: TimeInterval = 0.14
   /// Runs the "Peek closed" toast after `closedToastDelay`. Tests replace it to run the toast by hand.
@@ -230,7 +238,8 @@ public final class PeekController {
   }
 
   /// Shows `tab` in a new Peek over `source`. False when the tab has no page to show.
-  private func present(_ tab: TabID, url: URL, from source: TabID, motion: Entrance) -> Bool {
+  private func present(_ tab: TabID, url: URL, from source: TabID, motion: Entrance,
+                       preservedSourceNode: NodeID? = nil) -> Bool {
     guard let page = shell.engine.contentView(for: tab) else { return false }
     if hiddenPeeks[source] != nil { closeHidden(of: source, withSource: false) }   // one Peek per source
     let overlay = makeOverlay()
@@ -242,7 +251,7 @@ public final class PeekController {
     case .restore(let offset), .reopen(let offset): offset
     }
     session = PeekSession(tab: tab, source: source, url: url, linkOffset: offset, phase: .opening)
-    sourceNode = shell.nodeByTab[source]
+    sourceNode = preservedSourceNode ?? shell.nodeByTab[source]
     closeGeneration += 1
     hideSourceFromAccessibility()
     refreshSplitControl()
@@ -271,6 +280,7 @@ public final class PeekController {
     shell.refreshCrashedTabs()                                  // #683: a page that crashed while hidden
     let title = shell.engine.snapshot(of: tab)?.title ?? ""
     announce(title.isEmpty ? "Peek opened" : "Peek opened, \(title)", overlay.card)
+    onRecoveryPagesChanged?()
     return true
   }
 
@@ -460,6 +470,7 @@ public final class PeekController {
       hiddenPeeks.removeValue(forKey: source)
       shell.engine.closeTab(tab, mode: .skipUnloadHandlers)
       dropObservationIfIdle()
+      onRecoveryPagesChanged?()
     }
   }
 
@@ -487,6 +498,7 @@ public final class PeekController {
     if closingTab { shell.engine.closeTab(session.tab, mode: .skipUnloadHandlers) }
     if let current = shell.currentTab { shell.activateEngineTab(current) }
     shell.refreshAddress()
+    onRecoveryPagesChanged?()
   }
 
   /// The overlay goes and the source stands back up; the page leaves the card but its tab is untouched.
@@ -545,13 +557,15 @@ public final class PeekController {
     guard let source = shown.first(where: { hiddenPeeks[$0] != nil }),
           let hidden = hiddenPeeks.removeValue(forKey: source) else { return }
     if shell.engine.snapshot(of: hidden.tab) != nil,
-       present(hidden.tab, url: hidden.url, from: source, motion: .restore(linkOffset: hidden.linkOffset)) {
+       present(hidden.tab, url: hidden.url, from: source, motion: .restore(linkOffset: hidden.linkOffset),
+               preservedSourceNode: hidden.sourceNode) {
       if !hidden.wasMuted { shell.engine.setMuted(hidden.tab, muted: false) }
       Self.logger.notice("peek restored")
       return
     }
     shell.engine.closeTab(hidden.tab, mode: .skipUnloadHandlers)
     dropObservationIfIdle()
+    onRecoveryPagesChanged?()
   }
 
   /// Tab Handoff (#300) is moving `source`'s page to another window: its hidden Peek does not go with it; it closes
@@ -572,6 +586,7 @@ public final class PeekController {
     shell.rememberClosedPeek(closed, withSource: withSource)
     shell.engine.closeTab(hidden.tab, mode: .skipUnloadHandlers)
     dropObservationIfIdle()
+    onRecoveryPagesChanged?()
   }
 
   /// Engine events about hidden Peeks. True when `event` was about one.
@@ -581,6 +596,7 @@ public final class PeekController {
       // The hidden page closed itself (or with its window): nothing to bring back.
       hiddenPeeks[source] = nil
       dropObservationIfIdle()
+      onRecoveryPagesChanged?()
       return true
     }
     guard hiddenPeeks[tab] != nil else { return false }
@@ -588,6 +604,7 @@ public final class PeekController {
     case .windowClosing, .appTerminating:
       hiddenPeeks[tab] = nil                                    // the Peek's tab closes with the window
       dropObservationIfIdle()
+      onRecoveryPagesChanged?()
     case .client, .page, .extension:
       closeHidden(of: tab, withSource: true)                    // the source went: both reopen together (#378)
     }
@@ -803,6 +820,11 @@ public final class PeekController {
   }
 
   private func handle(_ event: EngineEvent) {
+    switch event {
+    case .urlChanged(let tab, _), .titleChanged(let tab, _):
+      if hiddenPeeks.values.contains(where: { $0.tab == tab }) { onRecoveryPagesChanged?() }
+    default: break
+    }
     if handleHidden(event) { return }
     guard let session else { return }
     switch event {
@@ -815,8 +837,10 @@ public final class PeekController {
     case .urlChanged(let tab, let url) where tab == session.tab:
       if let url { self.session?.url = url }
       shell.refreshAddress()
+      onRecoveryPagesChanged?()
     case .titleChanged(let tab, _) where tab == session.tab:
       refreshAccessibility()
+      onRecoveryPagesChanged?()
     default:
       break
     }

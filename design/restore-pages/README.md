@@ -64,45 +64,27 @@ The shared toast (`design/alerts-sheets-toasts`), shield glyph, no action, close
 
 Rejected directions: B (one toast with Reopen) and C (a card in the sidebar).
 
-## Recovery contract and implementation plan (#580)
+## Recovery contract and implementation (#580)
 
-The engine's `EngineSessionRecovery` supplies only `lastSessionCrashed` and `dismissLastSession` (#577).
-The shell owns the list: URL, title, kind and, for a Peek, the sidebar `NodeID` of its source. Node IDs survive
-sidebar persistence; engine tab and window IDs do not. No window identity is persisted. Only App imports
-Persistence: expose a small `RecoveryPageSource` in ShellUI, inject it into `ShellWindowSet`, and implement the
-adapter in App. Store durable records through Persistence; map the shell value to its storage representation in App.
-Remove `EnginePageRecovery` and its page transport from EngineAPI when migrating the existing restore tests; keep
-`EngineSessionRecovery` and unrelated engine protocols intact.
+The engine's `EngineSessionRecovery` supplies only crash state and dismissal. The shell owns URL, title, kind and
+Peek source `NodeID` records through an injected `RecoveryPageSource`; only the App imports Persistence. The App
+adapter writes ordered snapshots off the main actor. Engine tab and window identities are not persisted.
 
-Record Little Arkt and Peek open, URL and title changes, and actual close, including hidden Peeks. Never record
-Blank or Incognito pages. Clear live records on successful clean quit, not a cancelled quit. Capture the previous
-records for the launch offer before live-session writes can replace them; keep that immutable offer until Restore,
-Dismiss, or an empty-offer notice acknowledges the crash. An unsuccessful restore keeps the offer and does not
-acknowledge. Persist updates off the main actor in order; a quit must wait for the clearing write.
+The window set captures the prior snapshot at initialization, before live writes. The launch offer uses that immutable
+snapshot even as Little Arkt and Peek lifecycle events update the live records. Open, navigation, title and actual
+close are tracked, including hidden Peeks. Blank, Incognito and sidebar pages are excluded. Unchanged snapshots do
+not write. A confirmed clean quit clears records and stops lifecycle writes; a cancelled quit resumes tracking. The
+App suspends writes during a potentially cancelled teardown to preserve the pre-quit snapshot.
 
-Restore one Peek per source: deduplicate records by source, keeping the last. Prefer an open regular window showing
-the node; otherwise activate it in the host. Use `PeekController.reopen(_:over:)` with a `ClosedPeek` whose parked
-copy is nil. Do not replace a live or hidden Peek. Distinct sources can coexist, including as hidden Peeks. Preserve
-the existing private-window and held-close safeguards. Little Arkt's opening API reports requests, not successful
-page loads. These seams are test-first: ShellKit GUI tests exercise real window routing and the injected record
-boundary; Persistence tests exercise storage across database reopen. `project.yml` has an XCUITest bundle but no
-unit test target for App, and ShellKit does not link Persistence, so these tests do not claim to exercise AppSession
-or its adapter. Feature-level killed-process validation remains necessary.
+At offer time, Peeks without an existing, non-archived sidebar source are excluded. Duplicate Peeks per source keep
+the last record. An empty offer shows the notice and acknowledges the crash. Restore prefers a regular window showing
+the source, otherwise activates it in the host; it never replaces a live or hidden Peek. Distinct sources can coexist.
+An unsuccessful restore retains the offer and does not acknowledge. Little Arkt's opening API reports requests, not
+successful page loads. The decision is hosted only by a regular window and remains pending across host closure or a
+change to private mode.
 
-The test-first seam is a main-actor `RecoveryPageSource.pages` snapshot of `ShellRecoveryPage` values, injected into
-`ShellWindowSet` as `recoveryPageSource`. `beginSessionRecovery` captures that snapshot before starting live writes;
-`finishSessionRecovery(cleanQuit:)` expresses the quit outcome at the shell boundary, with the App adapter flushing
-a successful clear before termination. Persistence's `RecoveryPageState` settings group contains `RecoveryPageRecord`
-values and is mapped by the App adapter. The tests deliberately name these proposed APIs; they do not exist yet.
-Keep failed writes and their retry/quit handling visible rather than claiming a durable clear before it completes.
-During migration update existing `RestorePagesModelTests` and `RestorePagesWindowTests` to supply the shell source,
-replace their old assertion that multiple Peeks must be rejected, and leave their private and held-close cases intact.
-The old source-less cases do not decide the pending #776 edge.
-
-Pending maintainer question (#776): whether a Peek with no source node, or a source that was archived or deleted,
-is excluded from the offer. Do not choose a fallback until answered.
-
-The decision is hosted only by an ordinary regular window, never a Blank, Incognito, Little Arkt or Peek window.
-Its unanswered model stays with the window set if no eligible host exists and moves to a regular window when one
-becomes available. Closing or changing the host to a private mode does not acknowledge the crash. Private window
-creation establishes its final mode before the window set considers recovery presentation.
+On normal confirmed quit the App requests a clear and flushes it; a failed flush is logged and the existing quit flow
+allows failure. SIGTERM has no final confirmed-termination hook, so its flush retains the snapshot. Persistence tests
+and ShellKit tests cover their respective boundaries, not the App adapter or a killed process; feature-level validation
+and CI on the combined head remain necessary. See the maintainer's [contract](https://github.com/krystianslowik/arkt/pull/690#issuecomment-6707149941)
+and [source eligibility decision](https://github.com/krystianslowik/arkt/pull/690#issuecomment-6707374449).

@@ -5135,3 +5135,22 @@ The private-window handover still precedes `isClosed`, and recovery reassignment
 GUI regressions were not run locally because the installed toolchain cannot compile baseline ShellKit. Swift source
 parsing and `git diff --check` passed; they do not establish compilation or runtime behavior. The shell-owned
 recovery migration remains incomplete and the test-first APIs at `781c729` remain missing.
+
+
+### Restore pages combined migration and live recording (#580)
+
+The local combined head includes the App/Persistence snapshot adapter, shell-owned recovery records and source-node
+routing, removal of the engine page payload, and live Little Arkt and Peek recording. Controller events track opens,
+navigation, titles and actual closes, including hidden Peeks. Private windows and sidebar pages are excluded. The
+initial offer remains immutable; at offer time missing or archived Peek sources are excluded and duplicates keep the
+last. Empty offers show the notice and acknowledge. Confirmed clean quit clears and stops further shell writes; a
+cancelled quit resumes tracking. The App suspends writes during teardown and resumes them after the outcome.
+
+There is no final confirmed-termination hook for SIGTERM: its flush retains the snapshot. Normal confirmed quit
+requests a clear; a failed flush is logged and the existing quit flow allows failure. Neither durable clearing nor
+feature completion is guaranteed by this change. Killed-process validation and App adapter integration remain open.
+
+No migration tests or builds were executed locally: the installed toolchain cannot compile the baseline. Source
+parsing, diff and import checks are static checks only; CI on this combined head is pending. Prior CI green at
+`22d4906` (2,454 pure tests; 2,038 GUI executed, 51 skipped) does not validate this head. The `da223` GUI run had
+eight assertion failures; the private creation path was fixed in `b203`, but has not been runtime verified locally.

@@ -175,8 +175,14 @@ final class RecoveryPageSourceTests: XCTestCase {
     XCTAssertEqual(records.pages.filter { $0.kind == .littleArkt }.count, 1)
     XCTAssertEqual(records.pages.first(where: { $0.kind == .peek })?.sourceNode, node)
     host.peek.animator.settleNow()
+    let writesBeforeHide = records.writes
     host.activate(node: other)
+    XCTAssertEqual(records.writes, writesBeforeHide)
     XCTAssertEqual(host.peek.hiddenPeeks.count, 1)
+    engine.navigate(peek, to: URL(string: "https://example.invalid/hidden")!)
+    engine.setDocumentTitle(peek, "Hidden")
+    XCTAssertEqual(records.pages.first(where: { $0.kind == .peek })?.title, "Hidden")
+    XCTAssertEqual(records.pages.first(where: { $0.kind == .peek })?.url.path, "/hidden")
     XCTAssertEqual(records.pages.first(where: { $0.kind == .peek })?.sourceNode, node)
     host.activate(node: node)
     host.peek.animator.settleNow()
@@ -200,6 +206,33 @@ final class RecoveryPageSourceTests: XCTestCase {
     host.peek.animator.settleNow()
     XCTAssertFalse(records.pages.contains { $0.kind == .peek })
     little.window.close()
+    XCTAssertTrue(records.pages.isEmpty)
+  }
+
+  func testHiddenPeekClosesAndUnchangedMetadataDoesNotWrite() throws {
+    _ = NSApplication.shared
+    let engine = InMemoryEngine()
+    let sidebar = StubSidebar()
+    let space = sidebar.addSpace(title: "Test")
+    let first = sidebar.addTab(url: URL(string: "https://example.invalid/a")!, title: "A", in: .today(space))
+    let second = sidebar.addTab(url: URL(string: "https://example.invalid/b")!, title: "B", in: .today(space))
+    let records = RecordingRecoveryPages([])
+    let set = ShellWindowSet(engine: engine, sidebar: sidebar, recoveryPageSource: records)
+    let host = set.openWindow()
+    host.window?.isReleasedWhenClosed = false
+    host.peek.animator.drivesDisplayLink = false
+    defer { host.close() }
+    host.activate(node: first)
+    host.peek.open(URL(string: "https://example.invalid/peek")!, from: try XCTUnwrap(host.currentTab))
+    let tab = try XCTUnwrap(host.peek.session?.tab)
+    engine.setDocumentTitle(tab, "Title")
+    let writes = records.writes
+    engine.setDocumentTitle(tab, "Title")
+    XCTAssertEqual(records.writes, writes)
+    host.peek.animator.settleNow()
+    host.activate(node: second)
+    XCTAssertEqual(records.pages.first?.sourceNode, first)
+    engine.closeTab(tab, mode: .skipUnloadHandlers)
     XCTAssertTrue(records.pages.isEmpty)
   }
 
@@ -232,13 +265,23 @@ final class RecoveryPageSourceTests: XCTestCase {
     XCTAssertEqual(records.pages.count, 1)
     set.finishSessionRecovery(cleanQuit: false)
     XCTAssertEqual(records.pages.count, 1)
+    if let tab = little.shownTab {
+      set.engine.navigate(tab, to: URL(string: "https://example.invalid/resumed")!)
+    }
+    XCTAssertEqual(records.pages.first?.url.path, "/resumed")
     set.finishSessionRecovery(cleanQuit: true)
+    XCTAssertTrue(records.pages.isEmpty)
+    if let tab = little.shownTab {
+      set.engine.navigate(tab, to: URL(string: "https://example.invalid/after-quit")!)
+    }
+    little.window.close()
     XCTAssertTrue(records.pages.isEmpty)
   }
 }
 
 @MainActor
 private final class RecordingRecoveryPages: RecoveryPageSource {
-  var pages: [ShellRecoveryPage]
+  var writes = 0
+  var pages: [ShellRecoveryPage] { didSet { writes += 1 } }
   init(_ pages: [ShellRecoveryPage]) { self.pages = pages }
 }
