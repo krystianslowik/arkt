@@ -61,8 +61,15 @@ extension SettingsWindowController {
     return button
   }
 
-  private func destructiveLink(_ pane: SettingsPane, _ setting: String, _ title: String) -> ArchiveLinkButton {
+  private func destructiveLink(_ pane: SettingsPane, _ setting: String, _ title: String,
+                               action: (@MainActor () -> Void)? = nil) -> ArchiveLinkButton {
     let link = ArchiveLinkButton(style: .destructive, title: title, fontSize: 13)
+    if let action {
+      let target = SettingsActionTarget(action)
+      actionTargets.append(target)               // targets are weak
+      link.target = target
+      link.action = #selector(SettingsActionTarget.fire(_:))
+    }
     identify(link, pane, setting)
     return link
   }
@@ -229,6 +236,8 @@ extension SettingsWindowController {
     let littleArkt = popUp(.spaces, "archiveLittleArktAfter", Self.archiveAfterTitles,
                            rows?.littleArktAfter() ?? "6 hours")
     littleArkt.onChange = { title in rows?.setLittleArktAfter(title) }
+    archiveTabsPopUp = tabs
+    archiveLittleArktPopUp = littleArkt
     return [
       row("Archive Today tabs after", "Tabs you haven\u{2019}t looked at for this long move to the Archive.", [tabs],
           planned: rows == nil),
@@ -445,7 +454,7 @@ extension SettingsWindowController {
       section("Data", [importRow, folderRow]),
       section("Reset", [
         row("Reset all settings", "Your Spaces, tabs and the Archive stay as they are.",
-            [destructiveLink(.advanced, "resetAll", "Reset...")], planned: true),
+            [destructiveLink(.advanced, "resetAll", "Reset...") { [weak self] in self?.askToResetSettings() }]),
       ]),
     ]
   }

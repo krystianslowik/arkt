@@ -30,6 +30,16 @@ public final class AppSettings {
     public static let downloadsFolder = "downloadsFolder"
     /// The Library section last shown (BH-181).
     public static let libraryLastSection = "libraryLastSection"
+
+    /// The preferences the panes edit, the Toolbar's and the Peek switches' keys included: what Reset all settings
+    /// (#617) removes. Not here: window state (`lastPane`, `windowTopLeft`, `libraryLastSection`) and the one-time
+    /// crash ask (`crashReportAskAnswered`), which are state, not preferences (docs/design/settings.md, section 2).
+    @MainActor public static let preferences = [
+      excludeFavoritesInSwitchToNthTab, switchToNinthSidebarItemEnabled, globalLittleBrowserHotkeyEnabled,
+      optionCommandClickLittleArcEntryPointEnabled, sendsCrashReports, shouldWarnBeforeQuitting,
+      downloadsAskWhereToSave, downloadsFolder, PeekLinkSettings.crossSiteKey, PeekLinkSettings.shiftClickKey,
+      ToolbarSetting.defaultsKey, ToolbarSetting.showsFullURLDefaultsKey,
+    ]
   }
 
   /// Show Toolbar and Show the full URL: the instance every window observes.
@@ -182,6 +192,23 @@ public final class AppSettings {
   public var windowTopLeft: CGPoint? {
     get { string(Key.windowTopLeft).flatMap { $0.isEmpty ? nil : NSPointFromString($0) } }
     set { set(newValue.map { NSStringFromPoint($0) } as Any? ?? "", Key.windowTopLeft) }
+  }
+
+  // MARK: Reset
+
+  /// Reset all settings (#617): every key in `Key.preferences` is removed, so each value reads its default again, and
+  /// observers hear one change. Only those keys: the rest of the suite (window sessions, sidebar state, notices) and
+  /// window state stay. The Toolbar is reset through its own properties, so its observers hear it too.
+  public func resetToDefaults() {
+    for key in Key.preferences {
+      if let defaults { defaults.removeObject(forKey: key) } else { memory[key] = nil }
+    }
+    toolbar.isVisible = false
+    toolbar.showsFullURL = true
+    // The Toolbar's setters wrote its defaults back; remove them so a later default applies, as for the others.
+    defaults?.removeObject(forKey: ToolbarSetting.defaultsKey)
+    defaults?.removeObject(forKey: ToolbarSetting.showsFullURLDefaultsKey)
+    notifyObservers()
   }
 
   // MARK: Observers

@@ -80,7 +80,7 @@ engine bridge), **out** (deliberately not offered; see section 9).
 | Advanced | Drag the window from the top of web pages | toggle | `contentWindowDraggingEnabled` | on | planned | BH-168 |
 | Advanced | Import browser data | neutral pill "Import..." (same action as File > Import Browser Data...) | none | n/a | **exists** (E4c) | import |
 | Advanced | Arkt's data folder | button "Show in Finder" (same action as the recovery toast's Show Files) | none | n/a | **exists** (action) | decision 4 |
-| Advanced | Reset all settings | red text link "Reset...", confirmation sheet | all keys above | n/a | planned | none |
+| Advanced | Reset all settings | red text link "Reset...", confirmation sheet | all keys above (not window state or the one-time crash ask); engine-backed rows join through the bridge (#616) | n/a | **exists** (#617) | none |
 
 Not shown as settings (state, not preference, as section 4 of the spec says): `hasHiddenSidebarWithGesture`, upsell
 counters, `LastPiPPosition`, window sizes, collapsed sections, per-host Developer Mode (Ctrl-D, BH-208), per-host PiP
