@@ -497,7 +497,7 @@ final class SettingsWindowTests: XCTestCase {
     XCTAssertEqual(services.revealed, 1)
     XCTAssertEqual(controller.primaryActionCount(in: .advanced), 0)
     let reset = try find(AXID.Settings.control("advanced", "resetAll"), in: controller, as: NSButton.self)
-    XCTAssertFalse(reset.isEnabled)
+    XCTAssertTrue(reset.isEnabled, "Reset all settings is built (#617)")
   }
 
   /// No ad blocking row (decision 3) and no user-facing "Arc" anywhere in Settings.

@@ -276,5 +276,7 @@ public enum AXID {
     public static let shortcutsSearch = "settings.shortcuts.search"
     /// Settings > Spaces and Profiles: a Space's row, by the Space's id.
     public static func spaceRow(_ id: String) -> String { "settings.spaces.space.\(id)" }
+    /// Settings > Advanced > Reset all settings: the sheet's Reset Settings button (#617).
+    public static let resetConfirm = "settings.advanced.resetConfirm"
   }
 }

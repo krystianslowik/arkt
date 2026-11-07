@@ -268,11 +268,18 @@ public final class SettingsPopUpButton: NSButton {
 
   /// Chooses `title` as the menu does: a different title restyles and reports it; the current one does nothing.
   func select(_ title: String) {
-    guard title != selectedTitle, items.contains(title) else { return }
+    guard show(title) else { return }
+    onChange?(selectedTitle)
+  }
+
+  /// Shows `title` without reporting it: the value changed elsewhere (Reset all settings). True when it changed.
+  @discardableResult
+  func show(_ title: String) -> Bool {
+    guard title != selectedTitle, items.contains(title) else { return false }
     selectedTitle = title
     restyle()
     invalidateIntrinsicContentSize()
-    onChange?(selectedTitle)
+    return true
   }
 
   private func restyle() {

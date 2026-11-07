@@ -154,6 +154,7 @@ final class DialogTests: XCTestCase {
       ("Dangerous download", DownloadDangerSheet(item: download, folderName: "Downloads").sheet),
       ("Extension remove", ExtensionRemoveSheet(action: ExtensionAction(id: "a", name: "A")).sheet),
       ("Crash report ask", DialogSheet(content: .crashReportAsk)),
+      ("Reset settings", DialogSheet(content: SettingsWindowController.resetSettingsContent)),
     ]
     let parent = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 700, height: 500), styleMask: [.titled],
                           backing: .buffered, defer: false)

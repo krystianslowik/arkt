@@ -193,6 +193,32 @@ struct ArchiveSettingsModelTests {
     #expect(rows.tabsAfter() == "7 days")
     #expect(rows.littleArktAfter() == "Never")
   }
+
+  /// Reset all settings (#617): the two rows Settings edits go back to 12 hours and 6 hours, in one change that is
+  /// stored; another profile's own threshold is not a row here and stays.
+  @Test func resetReturnsTheTwoRowsToTheirDefaultsAndKeepsOtherProfiles() async {
+    let state = FakeArchiveState()
+    var stored = ArchiveSettings()
+    stored.setTabThreshold(.oneHour, forProfile: ArchiveSettings.defaultProfile, scope: .thisProfile)
+    stored.setTabThreshold(.thirtyDays, forProfile: "work", scope: .thisProfile)
+    stored.littleArcThreshold = .never
+    await state.setSettings(stored)
+    let model = ArchiveSettingsModel(state: state, now: { Self.date })
+    await model.load()
+    var heard: [ArchiveSettings] = []
+    model.onChange = { heard.append($0) }
+
+    model.settingsRows.reset()
+
+    #expect(model.tabThreshold == .tabsDefault)
+    #expect(model.littleArktThreshold == .littleArcDefault)
+    #expect(heard.count == 1, "one change for both rows")
+    await model.flush()
+    let saved = await state.storedSettings
+    #expect(saved.tabThreshold(forProfile: ArchiveSettings.defaultProfile) == .tabsDefault)
+    #expect(saved.littleArcThreshold == .littleArcDefault)
+    #expect(saved.tabThreshold(forProfile: "work") == .thirtyDays)
+  }
 }
 
 /// Yields until `condition` holds; records an issue if it never does.
