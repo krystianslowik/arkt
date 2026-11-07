@@ -33,7 +33,9 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   public var onNewSpace: (@MainActor () -> Void)?
   /// Base of the "Space N" name given to a Space created by New Space or by Cmd-T with no Space (decision on #106).
   public static let newSpaceTitle = "Space"
-  public var isShowingEmptyState: Bool { sidebarController.spaces.isEmpty }
+  /// The welcome card shows while the profile has no Space. A blank or incognito window draws none but shows its own
+  /// pages, which the card would cover (#668).
+  public var isShowingEmptyState: Bool { !isPrivateWindow && sidebarController.spaces.isEmpty }
   private var commandBarPrewarmed = false
   /// When each tab was last shown in this window, for the command bar's "12 min" (not persisted).
   private var viewedAt: [NodeID: Date] = [:]
@@ -121,6 +123,9 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   var privateTabs: [TabID] = []
   /// The private page shown, the one a command-bar visit navigates. Nil when the window shows none.
   var privateTab: TabID? { privateTabs.last }
+  /// The same pages in the order they were opened: the rows of the window's Pages list and Close Oldest's order, at
+  /// most 20 (#668, `PrivatePageOrder`).
+  var privatePageOrder = PrivatePageOrder()
   /// Where Copy Link writes and Paste URL as New Tab reads (#105); tests use a private pasteboard.
   var linkPasteboard: NSPasteboard = .general
   /// Closes the engine tabs of nodes that left the sidebar, whatever removed them.
@@ -415,7 +420,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     }
   }
 
-  private func updateEmptyState() {
+  func updateEmptyState() {
     rootView.card.setEmptyState(isShowingEmptyState ? emptyState : nil)
   }
 
@@ -577,10 +582,12 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// (BH-067, BH-048 [I]). Closing the window's last page keeps the window open on the empty card, also when the
   /// engine closes its emptied engine window (#386). Without a current tab the window closes, as Close Window does
   /// (CF-03, "Close current tab or window"; BH-069, a second Cmd-W unpinning, is NEEDS-RUNTIME-CHECK and not
-  /// implemented).
+  /// implemented). In a blank or incognito window Cmd-W closes the shown page and the page shown before it comes
+  /// back; on the last page it closes the window (#668).
   @objc public func closeTab(_ sender: Any?) {
     if peek.isOpen { peek.close(.keyboard); return }                // KB-078: Cmd-W closes the Peek
     if closeSelection() { return }                                  // BH-072: a multi-selection closes at once
+    if closeShownPrivatePage() { return }                           // #668: a private page, unless it is the last
     guard let node = currentNode else {
       window?.performClose(sender)
       return

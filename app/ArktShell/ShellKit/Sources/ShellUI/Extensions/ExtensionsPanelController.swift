@@ -236,6 +236,7 @@ public final class ExtensionsPanelController: NSObject {
   }
 
   /// Sizes the panel to its content within the window and puts it above the button's bar, 12 pt in from the sidebar.
+  /// In a blank or incognito window the button sits in the sidebar's footer band, so the bar is the sidebar itself.
   private func place(_ window: NSWindow, view: ExtensionsPanelView, in parent: NSWindow,
                      anchoredTo button: ExtensionsButton) {
     let m = ExtensionsPanelMetrics.self

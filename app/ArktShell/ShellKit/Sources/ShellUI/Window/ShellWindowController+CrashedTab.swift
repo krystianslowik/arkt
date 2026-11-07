@@ -149,8 +149,9 @@ extension ShellWindowController {
       return
     }
     guard let node = nodeByTab[tab] else {
-      // A blank or incognito window's page (#487, #667): the window closes, as Cmd-W does there today.
-      if privateTabs.contains(tab) { window?.performClose(nil) }
+      // A blank or incognito window's page (#487, #667): it closes as Cmd-W closes it (#668), the window with the
+      // last page.
+      if privateTabs.contains(tab), !closePrivatePage(tab) { window?.performClose(nil) }
       return
     }
     if let index = splitState.panes.firstIndex(of: node), splitState.split != nil {

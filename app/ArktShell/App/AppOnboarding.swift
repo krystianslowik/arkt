@@ -129,7 +129,10 @@ extension AppSession {
     if EnvironmentOverrides(environment: ProcessInfo.processInfo.environment).skipsOnboarding { return }
     if AppEnvironment.smokePhase != nil { return }
     #endif
-    guard onboardingRecord.showsAutomatically(profileHasSpaces: !window.isShowingEmptyState),
+    // The profile's Spaces, read from the shared source: a blank or incognito window draws none of them.
+    let sidebar = window.sidebarController
+    let profileHasSpaces = sidebar.source.spaceOrder.contains { sidebar.source.space($0)?.profile == sidebar.profile }
+    guard onboardingRecord.showsAutomatically(profileHasSpaces: profileHasSpaces),
           !windows.controllers.contains(where: \.isShowingOnboarding) else { return }
     presentOnboarding(on: window, mode: .firstRun, resume: onboardingRecord.progress)
   }

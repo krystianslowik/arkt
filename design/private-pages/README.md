@@ -48,6 +48,9 @@ Not picked: A (the Ctrl-Tab switcher lists the pages; keyboard only).
   comes back. Cmd-W on the last page closes the window.
 - **Footer**: the window's kind ("Incognito" or "Blank"), 11 pt semibold `sidebarForeground`, centered in a 40 pt band
   at the bottom of the sidebar.
+  The Extensions button sits at the band's trailing end, as in a normal window's bottom bar (same action, label,
+  open-panel fill, flavor and non-key dimming), so extensions stay reachable. Archive, New Tab and Library are not in
+  these windows (maintainer, 2026-11-07).
 
 ## Order
 
@@ -152,3 +155,7 @@ and Close Oldest, when shown, is a button.
 |---|---|
 | `prototype.html` | Single-file prototype of direction B, no network, synthetic titles |
 | `screens/<list\|audio\|cap\|cap-none\|small>-<light\|dark>.png` | 10 screenshots at 2x (5 light, 5 dark) |
+| `shots/private-pages-<state>-<light\|dark>.png` | The build drawn by `PrivatePagesScreenshotTests` (`ARKT_PRIVATE_PAGES_SHOTS_DIR`), synthetic titles |
+
+The test writes full-colour PNGs of up to 2 MB. Quantize them before committing:
+`pngquant --force --nofs --ext .png 32 design/private-pages/shots/*.png` (about 120 KB each).
