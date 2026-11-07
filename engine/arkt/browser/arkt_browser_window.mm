@@ -622,6 +622,12 @@ void ArktBrowserWindow::LayoutInfobars(content::WebContents* contents) {
   auto it = infobar_presenters_.find(contents);
   ArktInfobarStackView* stack =
       it != infobar_presenters_.end() ? it->second->stack() : nil;
+  if (stack && contents->IsFullscreen()) {
+    // HTML fullscreen (#577): the page gets the whole container, and the
+    // rows come back when it leaves (the presenter lays out again then).
+    [stack removeFromSuperview];
+    stack = nil;
+  }
   NSView* view = contents->GetNativeView().GetNativeNSView();
   NSView* holder = view.superview;
   if ([holder isKindOfClass:[ArktTabContainerView class]]) {

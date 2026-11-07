@@ -60,6 +60,7 @@ source_set("embedder") {
     "//components/sessions",
     "//components/tabs:public",
     "//components/viz/common",
+    "//components/zoom",
     "//extensions/common",
     "//content/public/browser",
     "//content/public/common",

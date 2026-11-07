@@ -32,6 +32,7 @@
 #include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/no_destructor.h"
+#include "base/process/kill.h"
 #include "base/scoped_observation.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/string_number_conversions.h"
@@ -42,6 +43,9 @@
 #include "base/time/time.h"
 #include "chrome/browser/download/download_prefs.h"  // nogncheck
 #include "chrome/browser/profiles/profile.h"
+// The service is built into //chrome/browser, which this target cannot depend
+// on (//chrome/browser reaches //arkt); the symbol is in the same framework.
+#include "chrome/browser/sessions/exit_type_service.h"  // nogncheck
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/tab_list/tab_removed_reason.h"
 // //chrome/browser/ui reaches //arkt through //chrome/browser, so this
@@ -69,12 +73,16 @@
 #include "components/sessions/content/session_tab_helper.h"
 #include "components/tabs/public/tab_interface.h"
 #include "components/viz/common/frame_sinks/copy_output_result.h"
+#include "components/zoom/page_zoom.h"
+#include "components/zoom/zoom_controller.h"
+#include "components/zoom/zoom_observer.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/navigation_handle.h"
+#include "content/public/common/page_zoom.h"
 #include "content/public/browser/reload_type.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
@@ -340,8 +348,45 @@ const char* KindName(ArktEngineEventKind kind) {
       return "DownloadUpdated";
     case ArktEngineEventKindDownloadRemoved:
       return "DownloadRemoved";
+    case ArktEngineEventKindTabCrashed:
+      return "TabCrashed";
+    case ArktEngineEventKindTabRecovered:
+      return "TabRecovered";
+    case ArktEngineEventKindZoomChanged:
+      return "ZoomChanged";
+    case ArktEngineEventKindTabFullscreenChanged:
+      return "TabFullscreenChanged";
   }
   return "unknown";
+}
+
+// base::TerminationStatus folded as the header lists it (#577).
+ArktTerminationStatus ToTerminationStatus(base::TerminationStatus status) {
+  switch (status) {
+    case base::TERMINATION_STATUS_NORMAL_TERMINATION:
+    case base::TERMINATION_STATUS_STILL_RUNNING:
+      return ArktTerminationStatusNone;
+    case base::TERMINATION_STATUS_PROCESS_WAS_KILLED:
+      return ArktTerminationStatusKilled;
+    case base::TERMINATION_STATUS_OOM:
+    case base::TERMINATION_STATUS_EVICTED_FOR_MEMORY:
+      return ArktTerminationStatusOutOfMemory;
+    case base::TERMINATION_STATUS_LAUNCH_FAILED:
+      return ArktTerminationStatusLaunchFailed;
+    default:
+      return ArktTerminationStatusCrashed;
+  }
+}
+
+// The tab's crash status now: None while its page process is alive.
+ArktTerminationStatus CrashStatusOf(content::WebContents* contents) {
+  if (!contents || !contents->IsCrashed()) {
+    return ArktTerminationStatusNone;
+  }
+  ArktTerminationStatus status =
+      ToTerminationStatus(contents->GetCrashedStatus());
+  return status == ArktTerminationStatusNone ? ArktTerminationStatusCrashed
+                                             : status;
 }
 
 }  // namespace
@@ -375,6 +420,11 @@ const char* KindName(ArktEngineEventKind kind) {
 @property(nonatomic) NSInteger findCount;
 @property(nonatomic) BOOL findIsFinal;
 @property(nonatomic, nullable) id<ArktDownloadItem> download;
+@property(nonatomic) ArktTerminationStatus terminationStatus;
+@property(nonatomic) NSInteger zoomPercent;
+@property(nonatomic) BOOL zoomIsDefault;
+@property(nonatomic) BOOL zoomIsUserInitiated;
+@property(nonatomic) BOOL isTabFullscreen;
 @end
 
 @implementation ArktFacadeEvent
@@ -402,6 +452,11 @@ const char* KindName(ArktEngineEventKind kind) {
 @synthesize findCount = _findCount;
 @synthesize findIsFinal = _findIsFinal;
 @synthesize download = _download;
+@synthesize terminationStatus = _terminationStatus;
+@synthesize zoomPercent = _zoomPercent;
+@synthesize zoomIsDefault = _zoomIsDefault;
+@synthesize zoomIsUserInitiated = _zoomIsUserInitiated;
+@synthesize isTabFullscreen = _isTabFullscreen;
 @end
 
 // One download as plain values (#132), read from a snapshot when the change
@@ -983,11 +1038,30 @@ class Facade : public BrowserCollectionObserver,
         });
     if (Profile* profile = EmbedderProfile()) {
       downloads_ = std::make_unique<DownloadWatcher>(profile, this);
+      // The previous run's exit type is fixed when the profile's service is
+      // made (#577); Chromium's own acknowledgement (the first tab of a window
+      // made outside the startup flow, which every shell window is) does not
+      // change it.
+      last_session_crashed_ = ExitTypeService::GetInstanceForProfile(profile) &&
+                              ExitTypeService::GetLastSessionExitType(
+                                  profile) == ExitType::kCrashed;
+      LOG(WARNING) << "ARKT: facade last session "
+                   << (last_session_crashed_ ? "crashed" : "clean");
     }
   }
 
   // The downloads of the embedder profile (#132), or null without one.
   DownloadWatcher* downloads() { return downloads_.get(); }
+
+  // The crashed-session prompt (#577): the previous run crashed and the shell
+  // has not dismissed it yet.
+  bool last_session_crashed() const { return last_session_crashed_; }
+  void DismissLastSession() {
+    if (last_session_crashed_) {
+      LOG(WARNING) << "ARKT: facade crashed session dismissed";
+    }
+    last_session_crashed_ = false;
+  }
 
   // DownloadWatcherDelegate, called from Chromium's download notifications.
   // The updates of one download in a batch merge into the last one, so the
@@ -1732,6 +1806,7 @@ class Facade : public BrowserCollectionObserver,
 
   const raw_ptr<FacadeDelegate> delegate_;
   std::unique_ptr<DownloadWatcher> downloads_;
+  bool last_session_crashed_ = false;
   int in_notification_ = 0;
   bool posted_ = false;
   bool terminating_ = false;
@@ -1772,7 +1847,8 @@ bool RunOrDefer(const char* call, base::OnceClosure work) {
 // since the last report. Every callback is a Chromium notification.
 class TabObserver : public content::WebContentsObserver,
                     public favicon::FaviconDriverObserver,
-                    public find_in_page::FindResultObserver {
+                    public find_in_page::FindResultObserver,
+                    public zoom::ZoomObserver {
  public:
   explicit TabObserver(ArktFacadeTab* handle) : handle_(handle) {}
   TabObserver(const TabObserver&) = delete;
@@ -1793,8 +1869,10 @@ class TabObserver : public content::WebContentsObserver,
       favicon_observation_.Observe(driver);
     }
     find_observation_.Reset();
+    zoom_observation_.Reset();
     target_url_ = GURL();
     if (contents) {
+      ObserveZoom();
       // Not created here: the tab helpers may attach it after the tab is
       // bound, and creating it twice is a CHECK. Find() creates a missing one
       // when it is first needed.
@@ -1839,6 +1917,28 @@ class TabObserver : public content::WebContentsObserver,
     ObserveFind()->StopFinding(action);
   }
 
+  // One zoom step (#577) through Chromium's page zoom, as its zoom commands
+  // run it. The zoom controller notifies OnZoomChanged inside the call; the
+  // handle reads the new zoom from it when the call returns.
+  void Zoom(content::PageZoom zoom) {
+    if (!web_contents() || !ObserveZoom()) {
+      return;
+    }
+    zoom::PageZoom::Zoom(web_contents(), zoom);
+  }
+
+  // The zoom now, from the tab's zoom controller; 100 and default without
+  // one.
+  int ZoomPercent() const {
+    zoom::ZoomController* controller = ZoomControllerOf();
+    return controller ? controller->GetZoomPercent() : 100;
+  }
+
+  bool ZoomIsDefault() const {
+    zoom::ZoomController* controller = ZoomControllerOf();
+    return !controller || controller->IsAtDefaultZoom();
+  }
+
   // The link under the pointer changed (#114). Only changes are reported, and
   // a new document or new contents start with no link.
   void ReportTargetURL(const GURL& url) {
@@ -1870,6 +1970,12 @@ class TabObserver : public content::WebContentsObserver,
     target_url_ = GURL();
     host_ = std::string(contents->GetLastCommittedURL().host());
     favicon_ = nil;
+    // Tab state (#577) as TabCreated's handle reads it, so a tab inserted
+    // crashed, zoomed or fullscreen reports nothing until it changes.
+    crash_ = CrashStatusOf(contents);
+    zoom_percent_ = ZoomPercent();
+    zoom_is_default_ = ZoomIsDefault();
+    fullscreen_ = contents->IsFullscreen();
   }
 
   void ReportAll() {
@@ -1889,6 +1995,12 @@ class TabObserver : public content::WebContentsObserver,
     ReportFavicon(driver && driver->FaviconIsValid()
                       ? FaviconPNG(driver->GetFavicon())
                       : nil);
+    ReportFullscreen(contents->IsFullscreen());
+    // New contents may be crashed or live: a crash is reported, and live
+    // contents clear an earlier crash, so the next real crash is not lost.
+    ReportCrash(CrashStatusOf(contents));
+    ReportRecovery();
+    ReportZoom(/*user_initiated=*/false);
   }
 
   NSData* favicon() const { return favicon_; }
@@ -1905,6 +2017,10 @@ class TabObserver : public content::WebContentsObserver,
     if (!navigation->IsInPrimaryMainFrame()) {
       return;
     }
+    // The commit is the latest point a crashed tab's new page is live
+    // (#577); the frame host notifications below usually come first.
+    ReportRecovery();
+    ObserveZoom();
     if (navigation->HasCommitted() && !navigation->IsSameDocument()) {
       // The old document's link is gone with it; Chromium's own clear may not
       // come for a pointer that never moved.
@@ -1921,6 +2037,43 @@ class TabObserver : public content::WebContentsObserver,
     }
     // A failed or redirected navigation can leave another visible URL.
     ReportURL();
+  }
+
+  // Crash (#577). Chromium has already left HTML fullscreen
+  // (WebContentsImpl::RenderViewTerminated exits it before notifying) and
+  // reset the load progress, but the load end may come later or not at all:
+  // it is reported first here, and the later DidStopLoading finds nothing new.
+  void PrimaryMainFrameRenderProcessGone(
+      base::TerminationStatus status) override {
+    ReportFullscreen(web_contents()->IsFullscreen());
+    ReportLoading(false);
+    ArktTerminationStatus crash = ToTerminationStatus(status);
+    ReportCrash(crash == ArktTerminationStatusNone
+                    ? CrashStatusOf(web_contents())
+                    : crash);
+  }
+
+  // A new primary main frame, or one swapped in, has a live process:
+  // WebContentsImpl marks the page alive (NotifyPrimaryMainFrameProcessIsAlive)
+  // right before both notifications.
+  void RenderFrameCreated(content::RenderFrameHost* frame) override {
+    if (frame->IsInPrimaryMainFrame()) {
+      ReportRecovery();
+    }
+  }
+
+  void RenderFrameHostChanged(content::RenderFrameHost* old_host,
+                              content::RenderFrameHost* new_host) override {
+    if (new_host && new_host->IsInPrimaryMainFrame()) {
+      ReportRecovery();
+    }
+  }
+
+  // HTML fullscreen (#577): WebContents notifies after its delegate entered
+  // or left it, with WebContents::IsFullscreen() as the new state.
+  void DidToggleFullscreenModeForTab(bool entered_fullscreen,
+                                     bool will_cause_resize) override {
+    ReportFullscreen(entered_fullscreen);
   }
 
   void DidStartLoading() override {
@@ -1988,6 +2141,23 @@ class TabObserver : public content::WebContentsObserver,
     find_observation_.Reset();
   }
 
+  // zoom::ZoomObserver (#577). A change the tab's own zoom controller made
+  // carries the old and the new level; one that reached it from the host
+  // zoom map (another tab of the host, a site's saved zoom on navigation, a
+  // new default) carries the current level twice.
+  void OnZoomChanged(
+      const zoom::ZoomController::ZoomChangedEventData& data) override {
+    if (data.web_contents != web_contents()) {
+      return;
+    }
+    ReportZoom(data.old_zoom_level != data.new_zoom_level);
+  }
+
+  void OnZoomControllerDestroyed(
+      zoom::ZoomController* zoom_controller) override {
+    zoom_observation_.Reset();
+  }
+
   // favicon::FaviconDriverObserver:
   void OnFaviconUpdated(favicon::FaviconDriver* driver,
                         NotificationIconType type,
@@ -2016,6 +2186,21 @@ class TabObserver : public content::WebContentsObserver,
       find_observation_.Observe(helper);
     }
     return helper;
+  }
+
+  zoom::ZoomController* ZoomControllerOf() const {
+    content::WebContents* contents = web_contents();
+    return contents ? zoom::ZoomController::FromWebContents(contents) : nullptr;
+  }
+
+  // Observes the tab's zoom controller once the tab helpers attached it (not
+  // created here, as FindTabHelper). Returns it, or null.
+  zoom::ZoomController* ObserveZoom() {
+    zoom::ZoomController* controller = ZoomControllerOf();
+    if (controller && !zoom_observation_.IsObserving()) {
+      zoom_observation_.Observe(controller);
+    }
+    return controller;
   }
 
   ArktFacadeEvent* NewEvent(ArktEngineEventKind kind) {
@@ -2101,6 +2286,52 @@ class TabObserver : public content::WebContentsObserver,
     Emit(event);
   }
 
+  void ReportCrash(ArktTerminationStatus status) {
+    if (status == ArktTerminationStatusNone ||
+        crash_ != ArktTerminationStatusNone) {
+      return;
+    }
+    crash_ = status;
+    ArktFacadeEvent* event = NewEvent(ArktEngineEventKindTabCrashed);
+    event.terminationStatus = status;
+    Emit(event);
+  }
+
+  // Once per crash, when the page is alive again.
+  void ReportRecovery() {
+    if (crash_ == ArktTerminationStatusNone || !web_contents() ||
+        web_contents()->IsCrashed()) {
+      return;
+    }
+    crash_ = ArktTerminationStatusNone;
+    Emit(NewEvent(ArktEngineEventKindTabRecovered));
+  }
+
+  void ReportZoom(bool user_initiated) {
+    int percent = ZoomPercent();
+    bool is_default = ZoomIsDefault();
+    if (percent == zoom_percent_ && is_default == zoom_is_default_) {
+      return;
+    }
+    zoom_percent_ = percent;
+    zoom_is_default_ = is_default;
+    ArktFacadeEvent* event = NewEvent(ArktEngineEventKindZoomChanged);
+    event.zoomPercent = percent;
+    event.zoomIsDefault = is_default;
+    event.zoomIsUserInitiated = user_initiated;
+    Emit(event);
+  }
+
+  void ReportFullscreen(bool fullscreen) {
+    if (fullscreen == fullscreen_) {
+      return;
+    }
+    fullscreen_ = fullscreen;
+    ArktFacadeEvent* event = NewEvent(ArktEngineEventKindTabFullscreenChanged);
+    event.isTabFullscreen = fullscreen;
+    Emit(event);
+  }
+
   void ReportFavicon(NSData* png) {
     if (png == favicon_ || [png isEqualToData:favicon_]) {
       return;
@@ -2122,12 +2353,18 @@ class TabObserver : public content::WebContentsObserver,
   std::string host_;
   GURL target_url_;
   NSData* __strong favicon_ = nil;
+  ArktTerminationStatus crash_ = ArktTerminationStatusNone;
+  int zoom_percent_ = 100;
+  bool zoom_is_default_ = true;
+  bool fullscreen_ = false;
   base::ScopedObservation<favicon::FaviconDriver,
                           favicon::FaviconDriverObserver>
       favicon_observation_{this};
   base::ScopedObservation<find_in_page::FindTabHelper,
                           find_in_page::FindResultObserver>
       find_observation_{this};
+  base::ScopedObservation<zoom::ZoomController, zoom::ZoomObserver>
+      zoom_observation_{this};
 };
 
 }  // namespace
@@ -2764,6 +3001,52 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
   arkt::CheckFacadeEntry();
   content::WebContents* contents = self.contents;
   return contents && contents->IsAudioMuted();
+}
+
+- (ArktTerminationStatus)terminationStatus {
+  arkt::CheckFacadeEntry();
+  return arkt::CrashStatusOf(self.contents);
+}
+
+- (NSInteger)zoomPercent {
+  arkt::CheckFacadeEntry();
+  return self.contents && _observer ? _observer->ZoomPercent() : 100;
+}
+
+- (BOOL)zoomIsDefault {
+  arkt::CheckFacadeEntry();
+  return !self.contents || !_observer || _observer->ZoomIsDefault();
+}
+
+- (BOOL)isTabFullscreen {
+  arkt::CheckFacadeEntry();
+  content::WebContents* contents = self.contents;
+  return contents && contents->IsFullscreen();
+}
+
+// zoom::PageZoom::Zoom runs synchronously, so the handle's zoom is the new one
+// when the call returns (ChromiumEngine reports it from there). A pending
+// handle's call runs after the insert, as every queued call.
+- (void)zoomWithCommand:(ArktZoomCommand)command {
+  content::PageZoom zoom = content::PAGE_ZOOM_RESET;
+  switch (command) {
+    case ArktZoomCommandZoomIn:
+      zoom = content::PAGE_ZOOM_IN;
+      break;
+    case ArktZoomCommandZoomOut:
+      zoom = content::PAGE_ZOOM_OUT;
+      break;
+    case ArktZoomCommandReset:
+      break;
+  }
+  [self runOrQueue:"zoom"
+              work:base::BindOnce(
+                       [](ArktFacadeTab* that, content::PageZoom zoom) {
+                         if (that.contents && that->_observer) {
+                           that->_observer->Zoom(zoom);
+                         }
+                       },
+                       self, zoom)];
 }
 
 - (void)setMuted:(BOOL)muted {
@@ -3421,6 +3704,17 @@ void DeliverImportResult(void (^completion)(id<ArktImportResult>),
     frame->ExecuteJavaScriptForTests(source, std::move(done),
                                      content::ISOLATED_WORLD_ID_GLOBAL);
   }
+}
+
+// The crashed-session prompt (#577): the facade's state for the run.
+- (BOOL)lastSessionCrashed {
+  arkt::CheckFacadeEntry();
+  return arkt::g_facade->last_session_crashed();
+}
+
+- (void)dismissLastSession {
+  arkt::CheckFacadeEntry();
+  arkt::g_facade->DismissLastSession();
 }
 
 // Closes the tab's pending JavaScript dialog (alert, confirm, prompt,

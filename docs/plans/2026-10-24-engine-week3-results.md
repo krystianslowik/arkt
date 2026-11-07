@@ -4610,3 +4610,163 @@ In sync; nothing exported. Facade header copies `cmp` identical.
 Every Chromium run stopped by exact PID or crashed (`ps -p` prints nothing); the local HTTP server stopped by PID.
 Deleted: the throwaway profiles under `profiles/575-20261107/`, the logs, and the two crash reports the address runs
 wrote. Nothing under `~/Applications/ArktTest` or `/Applications/Arkt.app` was touched.
+
+## #577: tab state seams in the facade (crash, zoom, HTML fullscreen, crashed session)
+
+Date 2026-11-07. Branch `engine/577-tab-state-seams` from `origin/main` (`d10ec13`). Engine side of #576 (PR #660).
+Overlay and facade only: no patch.
+
+### Gate
+
+- Seams: the facade's per-tab `TabObserver` (crash, recovery, zoom, fullscreen), the facade engine (crashed session),
+  `ArktInfobarPresenter` and `ArktBrowserWindow::LayoutInfobars` (no infobar height while a tab is fullscreen).
+- Facade header: additive only, both copies `cmp` identical. Four event kinds after 25 (`TabCrashed` 26,
+  `TabRecovered` 27, `ZoomChanged` 28, `TabFullscreenChanged` 29), two enums (`ArktTerminationStatus`,
+  `ArktZoomCommand`), five event values, four tab handle values and `zoomWithCommand:`, and on `ArktEngine`
+  `lastSessionCrashed` and `dismissLastSession`. Required members, as #364 added sound: the Swift doubles
+  (`ScriptedFacade`, the ABI conformance doubles) grew them.
+- `.patches`: unchanged (11). `//components/zoom` added to `//arkt/api:embedder`; `exit_type_service.h` is included with
+  `nogncheck` (it is built into `//chrome/browser`).
+- Build: `nice -n 20 autoninja -C out/Spike chrome -j 4`; 1.9 TB free on the Chromium disk, 42 GB on `/`, swap 2.9 GB
+  used before and after.
+
+### What landed
+
+- **Crash.** `PrimaryMainFrameRenderProcessGone`: fullscreen left and the load ended (both reported only if they still
+  differ), then one `TabCrashed` with the folded status. `RenderViewTerminated` exits fullscreen before it notifies, and
+  resets the load progress without a load end, so the facade reports `LoadingChanged NO` itself; the later
+  `DidStopLoading` finds nothing new. `EVICTED_FOR_MEMORY` folds to out of memory (it is in `IsCrashed()`'s set but was
+  not in #576's list).
+- **Recovery.** No observer hears `WebContentsImpl::NotifyPrimaryMainFrameProcessIsAlive`, so the facade checks
+  `IsCrashed()` at `RenderFrameCreated` and `RenderFrameHostChanged` of the primary main frame (both come right after it)
+  and at the commit as a fallback, and reports `TabRecovered` once.
+- **Zoom.** The tab's `zoom::ZoomController` is observed (attached by the tab helpers; observed once it exists).
+  `ZoomChanged` is recorded only when the percent or the default flag changed. User initiated means the change came
+  from this tab's controller (old level differs from new in the event data): the facade's own `zoomWithCommand:`,
+  Chromium's zoom commands, `chrome.tabs.setZoom`. A host zoom map change reaches the other tabs of the host with the
+  current level twice: not user initiated. `can_show_bubble` was not used: it is false for an empty host.
+  `zoomWithCommand:` runs `zoom::PageZoom::Zoom` synchronously, so ChromiumEngine reports the change when its
+  `zoomIn`/`zoomOut`/`resetZoom` returns (contract rule 25) and drops the facade's later event for it (it maps
+  `ZoomChanged` from the handle's live zoom).
+- **`ZoomChangedForActiveTab` (pinned sources).** 156 no longer calls it on `BrowserWindow`: `BrowserView` subscribes to
+  `BrowserWindowZoomObserver` (`browser_view.cc:1072-1076`) and forwards to its toolbar. Nothing reaches
+  `ArktBrowserWindow`; the per-tab controller is the seam.
+- **HTML fullscreen.** `DidToggleFullscreenModeForTab` (with `WebContents::IsFullscreen()`, so a pending enter counts).
+  `ArktInfobarPresenter` now also observes its contents and asks for a layout when fullscreen toggles;
+  `LayoutInfobars` takes the stack out while `contents->IsFullscreen()`, and puts it back after.
+- **Crashed session.** The facade reads `ExitTypeService::GetLastSessionExitType(profile) == kCrashed` once when it
+  starts (the value is fixed when the service is made) and keeps the shell's dismissal for the run. Chromium's own
+  acknowledgement cannot be used: the first tab of a window created outside the startup flow acknowledges the crash
+  (`ExitTypeService::BrowserTabObserverImpl`), and every shell window is one, so Chromium's flag is already cleared
+  when the shell asks. Chromium's bubble needs a `BrowserView` (`SessionCrashedBubbleView::ShowBubble` returns early),
+  so it never shows on an engine window: no double prompt.
+- **ChromiumEngine** (`ChromiumEngine+TabState.swift`): maps the four kinds (snapshot written before the event, the
+  #581 note), seeds a listed tab's snapshot from the handle, forwards the three zoom calls and vends
+  `ChromiumSessionRecovery` (one object; a dismiss when nothing crashed does not reach the facade).
+- **Contract runner and kit tests:** rule 25 runs against Chromium (`chromiumChecks` is every rule below 26). The
+  scripted harness's `crashTab` records a RenderProcessGone batch; the app runner's navigates the tab to
+  `chrome://crash`. With the plain switch the runner prints `ARKT_CONTRACT rule 26 <check> DEFERRED (#583)` for each
+  check it does not run. Header comment fixed (it said "all 18 rules").
+- Self-test embedder: logs the four events and the tab state in `state`; commands `zoom in|out|reset`,
+  `zoom-command plus|minus|normal` (the host's `executeCommand` with `IDC_ZOOM_PLUS`/`MINUS`/`NORMAL`, what the main
+  menu's Cmd-+ and Cmd-0 send), `fullscreen [exit]` and `session [dismiss]`.
+
+### Tests first
+
+`ChromiumTabStateTests` (14 cases) and `TabStateABITests` (3) were written against the new header before ChromiumEngine
+mapped anything: 13 issues failed for the right reason (no events, `sessionRecovery` nil). `ChromiumTabStateDefaultsTests`
+(which asserted that ChromiumEngine reports nothing) was replaced by them. Deliberate breaks: with ChromiumEngine's
+`hub.emit(.tabRecovered(id))` commented out, two `ChromiumTabStateTests` and the contract case
+`reloadRecoversACrashedTabOnce` fail (`recovery reported 0 times, want 1`); with the facade's `TabRecovered` emit
+removed, a self-test reload of a crashed tab logs no `tabRecovered`. Both restored and green again.
+
+### Swift tests (`nice -n 20`, `-j 2`, in `app/ArktShell/ShellKit`)
+
+| Command | Result |
+|---|---|
+| `swift test --filter "ChromiumEngineKitTests\|ArktEngineABITests\|EngineAPITests"` (first version) | 141 + 28 + 279 passed, 0 failed: ChromiumEngineKitTests (14 new `ChromiumTabStateTests`, the rule 25 contract cases over both facade scripts, 1 defaults test removed), ArktEngineABITests (3 new `TabStateABITests`), EngineAPITests (1 new `TabStateTests` case: the snapshot inside the `.tabFullscreenChanged` handler) |
+| Full suite (`swift test --skip ShellKitGUITests`) | not run locally (several lanes building on this Mac); CI's Swift tests job |
+
+### Build
+
+| Step | Result | Numbers |
+|---|---|---|
+| `nice -n 20 autoninja -C out/Spike chrome -j 4` | `The build has finished successfully.`, `FAILED:` 0 | 42 s |
+| `gn check out/Spike //arkt/api:embedder`, `//arkt/browser:window` | the pre-existing errors only (`find_in_page` headers in the facade, `webstore_install_result.h`); none for the new includes | |
+| Engine app, `xcodebuild -scheme ArktShell -configuration Engine PRODUCT_BUNDLE_IDENTIFIER=dev.arkt.Arkt.try577 -jobs 2` (`nice -n 20`, `CONFIGURATION_BUILD_DIR=$CHROMIUM_ROOT/embed-577`) | `BUILD SUCCEEDED`, `Engine framework copied: Chromium Framework.framework 156.0.8078.48` | 3 min; 522 component dylibs cloned next to the bundle (`cp -c`) |
+
+Load average 2 to 9 while building and running (other lanes' work; nothing added).
+
+### Self-test runs (`out/Spike/Chromium.app`, `--no-startup-window --arkt-facade-selftest --arkt-engine-test-api`, fresh profiles under `profiles/577-20261107/`, `--use-mock-keychain`, pages from a loopback server, commands through the page title over the DevTools protocol)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Zoom through the facade | PASS | `zoom in` x3: `zoomChanged percent=110`, `125`, `150`, each `user=yes`; `zoom out`: `125`; `zoom reset`: `100 default=yes`; a second reset: nothing |
+| Chromium's zoom commands (Cmd-+, Cmd-0 path) | PASS | `zoom-command plus` x2: `110`, `125` `user=yes`; `normal`: `100 default=yes`; a second `normal`: `enabled=no`, nothing |
+| Zoom per host | PASS | a `window.open` tab on the same host starts with `zoomChanged percent=110 user=no`; zooming the first tab to 125 reports `125 user=no` on the second; the second navigating to `localhost`: `100 default=yes user=no` |
+| `chrome://crash` | PASS | `loadingChanged loading=no`, then `tabCrashed status=1` (crashed) `loading=no listed=yes`; a second crash of the tab before recovery reports nothing |
+| Zoom of a crashed tab | PASS | `zoom in` on it: no event, zoom stays 100 (Chromium does not zoom a page without a live frame) |
+| Recovery | PASS | `reload` of the crashed tab: `tabRecovered live=0 loading=yes`, before the reload's `urlChanged` and `loadingChanged`; a navigation of a crashed tab: `tabRecovered`, then the new URL |
+| `requestFullscreen` with an infobar | PASS | automation infobar raised from `chrome://infobar-internals` (`internal_only_uis_enabled` set in the fresh profile's Local State): `innerHeight` 600 -> 560, container subviews 2; `fullscreen`: `ARKT: enter fullscreen`, `tabFullscreenChanged fullscreen=yes`, container subviews 1 (no infobar height), page 1130x1800; `fullscreen exit`: `fullscreen=no`, subviews 2, page 560x900 again |
+| Crash while fullscreen | PASS | `ARKT: exit fullscreen`, `loadingChanged no`, `tabFullscreenChanged fullscreen=no`, then `tabCrashed` |
+| `chrome://gpucrash` | NOT REACHED | a facade navigation is `PAGE_TRANSITION_TYPED` without `FROM_ADDRESS_BAR`, and content handles browser debug URLs only for an explicit navigation (`ContentBrowserClient::IsExplicitNavigation`); the DevTools `Page.navigate` is not one either (`net::ERR_ABORTED`, the GPU process kept its pid). See "Needs the maintainer" below |
+| GPU process exits (the GPU helper of the test build killed by PID, 6 times) | PASS to 5 | after each of exits 1-5: `GPU process exited unexpectedly`, `Reinitialized the GPU process after a crash`, the window and both tabs listed, no tab or window event. Exit 6: `GPU process isn't usable. Goodbye.`, the browser ends (Chromium's limit; exits 4-5 already reinitialized in 0 ms, the software fallback) |
+| Killed browser, relaunch (`relaunch` profile, SIGKILL by PID) | PASS | killed 15 s after start (`exit_type` `Crashed` on disk), relaunched: `facade last session crashed`, `embedderReady lastSessionCrashed=yes`, `0 queued request(s)` and one window (Chromium restored nothing and showed no bubble); `session`: yes; `session dismiss`: `crashed session dismissed`, no; a second dismiss: no; SIGTERM: `exit_type` `SessionEnded`; relaunch: clean |
+| Killed 7 s after a fresh start | finding | relaunch reported clean: the first `Preferences` write had not happened yet, so no `Crashed` mark was on disk |
+| Crash, relaunch, quit without answering | finding | the next relaunch reports clean: Chromium acknowledged the crash itself when the shell's first window got its tab, so a clean quit writes `SessionEnded`. Chrome's own behaviour (the crash stays until the bubble is answered) would need the facade to keep the mark; see "Needs the maintainer" |
+
+`FATAL`, `NOTREACHED`, `Check failed` lines: 0 in every run except the sixth GPU exit (Chromium's own fatal, above).
+
+### In-app contract (`dev.arkt.Arkt.try577`, Engine app on `out/Spike`, `--arkt-engine-contract --arkt-engine-test-api`, tabs probe, throwaway profile, `ARKT_DATA_DIR`, `ARKT_ARC_DIR` and `ARKT_DEFAULTS_SUITE` per run, `--use-mock-keychain`)
+
+| Check | Result |
+|---|---|
+| Rule 25 `zoomStepIsReportedOnceAndNothingAtTheEnds` | PASS (89 ms) |
+| Rule 25 `crashedTabStaysListed` (`chrome://crash`) | PASS (691 ms) |
+| Rule 25 `reloadRecoversACrashedTabOnce` | PASS (3841 ms) |
+| Rule 26 (3 checks) | `DEFERRED (#583)` |
+| Result | `21/25`, exit 1: rules 19, 20, 21 and 24 are NOT-APPLICABLE as before (the runner has no `raiseDialog`, `raisePermission`, `raiseInfobar` or `downloads` driver); every other rule PASS, 0 `FATAL` |
+
+### Patch budget
+
+| Source | Count |
+|---|---|
+| `.patches` lines | 11 |
+| `arkt` commits above `156.0.8078.48` | 11 |
+
+In sync; nothing exported. Facade header copies `cmp` identical.
+
+### Left open
+
+- `chrome://gpucrash` from the shell, and the unanswered crashed session across runs (maintainer questions in the pull
+  request).
+- The shell side: #578 (crash panel), #579 (zoom), #581 (fullscreen), #580 / #690 (restore).
+
+### #577 review fixes (PR #770)
+
+- **Replaced contents clear a crash.** `ReportAll` (new contents after `TabReplaced`) now calls `ReportRecovery()` after
+  `ReportCrash`: live new contents end the crash, so the tab's next real crash is reported. The scripted facade models
+  it (`replaceContents(live:)` records `TabRecovered` after `TabReplaced`); `ChromiumTabStateTests` checks crash,
+  live replacement, crash again (`tabCrashed`, `tabRecovered`, `tabCrashed`) and that crashed replacement contents
+  keep the crash. Deliberate break: without the recovery in `replaceContents`, the second crash is lost and the test
+  fails (2 issues); restored. A replacement of a crashed tab's contents was not reachable in the self-test, so the
+  real path is covered by the scripted model only.
+- **Scripted order.** The scripted facade reports `TabRecovered` before the URL and the load start of the reload or
+  navigation, as the real facade does (`RenderFrameCreated` comes first, seen in the self-test runs above).
+- **Zoom batch rule: the last event wins.** ChromiumEngine reports one change per tab and batch, from the live zoom,
+  with the user flag of the batch's last `ZoomChanged` for that tab (the event that set the live zoom). Tested both
+  ways; with the event's own flag instead, both cases fail; restored.
+- **Header:** the `ZoomChanged` comment notes that in an isolated or manual zoom mode a navigation can report user
+  initiated (both copies, `cmp` identical).
+- `ContractCheck.chromiumDeferred` reads a rule-to-issue map (`chromiumDeferredRules`, `[26: 583]`); doc comments moved
+  to the members they describe (`lastSessionCrashed`, `isFiltered`).
+
+| Check | Result |
+|---|---|
+| `swift test --filter "ChromiumEngineKitTests\|ArktEngineABITests\|EngineAPITests"` (`nice -n 20`, `-j 2`) | 144 + 28 + 279 passed, 0 failed (3 new ChromiumTabStateTests cases plus the 2-argument batch test) |
+| `nice -n 20 autoninja -C out/Spike chrome -j 4` | finished successfully, `FAILED:` 0; `gn check` only the pre-existing errors |
+| Self-test, fresh profile: zoom in, then `chrome://crash`, reload, `chrome://crash`, reload | `zoomChanged 110 user=yes`; `tabCrashed`, `tabRecovered`, `tabCrashed`, `tabRecovered`; 0 `FATAL` |
+| `.patches` | 11 = 11, in sync |
+
+Cleanup: the self-test and the loopback server stopped by PID; the profiles, the build log and the three crash dumps
+of the run deleted.
