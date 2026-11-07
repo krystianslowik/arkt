@@ -159,6 +159,15 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// back (#355). Set by `ShellWindowSet`.
   var reopenLittleArkt: (@MainActor () -> Void)?
   var canReopenLittleArkt: @MainActor () -> Bool = { false }
+  /// Reopen Closed Tab in a blank or incognito window with nothing of its own to reopen: the last closed private
+  /// window comes back (#746). Set by `ShellWindowSet`.
+  var reopenPrivateWindow: (@MainActor () -> Void)?
+  var canReopenPrivateWindow: @MainActor () -> Bool = { false }
+  /// This blank or incognito window closed with pages (#746): the window set keeps them in memory, never on disk, for
+  /// Reopen Closed Tab in another private window.
+  var onPrivateWindowClosed: (@MainActor (ClosedPrivateWindow) -> Void)?
+  /// The private window's pages as its close began; handed over when the window closes, dropped when it stays.
+  var closingPrivateWindow: ClosedPrivateWindow?
   /// Unloaded copies of closed pages that the stack holds (or is about to): tabs without a row that never show.
   var parkedTabs: Set<TabID> = []
   /// The reopen batch the visible undo toast belongs to; nil without one.
@@ -1018,6 +1027,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     guard engineWindow != nil, let request = engineHost.onCloseRequested else { return true }
     let open = Array(tabsByNode.values)
     saveSession()                                    // #116: before the tabs close
+    holdClosingPrivateWindow()                       // #746: while its pages are still there
     isWindowCloseRequested = true
     stampsShownTabsOnWindowClose = true
     request()
@@ -1029,6 +1039,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// its controller; release it with the window.
   public func windowWillClose(_ notification: Notification) {
     settlePendingClear()                             // #413: a window closed without `windowShouldClose`
+    handOverClosedPrivateWindow()                    // #746
     isClosed = true
     for node in shownNodes { onTabHidden?(node) }
     removePaneMouseMonitor()
