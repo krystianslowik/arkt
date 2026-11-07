@@ -5,7 +5,7 @@ import Motion
 enum EditPinMetrics {
   static let width: CGFloat = 320
   static let padding: CGFloat = 16
-  static let cornerRadius: CGFloat = 12
+  static let cornerRadius = ShellRadius.popover
   /// The arrow: how far its tip stands out, and half its base.
   static let arrowDepth: CGFloat = 7
   static let arrowHalfBase: CGFloat = 8

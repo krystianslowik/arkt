@@ -44,7 +44,7 @@ public enum SettingsMetrics {
   static let paneBarTop: CGFloat = 36
   static let paneItemSize = NSSize(width: 84, height: 44)
   static let paneItemGap: CGFloat = 2
-  static let paneItemRadius: CGFloat = 9
+  static let paneItemRadius = ShellRadius.row
   static let paneGlyph: CGFloat = 16
   static let paneGlyphToLabel: CGFloat = 3
   static let contentTop: CGFloat = 8
@@ -53,11 +53,11 @@ public enum SettingsMetrics {
   static let sectionTitleLeading: CGFloat = 10
   static let sectionTitleBelow: CGFloat = 6
   static let sectionGap: CGFloat = 18
-  static let groupRadius: CGFloat = 10
+  static let groupRadius = ShellRadius.field
   static let groupPadding: CGFloat = 4
   static let rowGap: CGFloat = 2
   static let rowMinHeight: CGFloat = 36
-  static let rowRadius: CGFloat = 9
+  static let rowRadius = ShellRadius.row
   static let rowPaddingTop: CGFloat = 6
   static let rowPaddingTrailing: CGFloat = 8
   static let rowPaddingBottom: CGFloat = 6
@@ -73,6 +73,13 @@ public enum SettingsMetrics {
   static let popUpHeight: CGFloat = 26
   static let popUpRadius: CGFloat = 8
   static let keycapHeight: CGFloat = 22
+  static let keycapRadius: CGFloat = 6
+  static let segmentedRadius: CGFloat = 9
+  static let segmentedPlateRadius: CGFloat = 7
+  /// The Default capsule.
+  static let capsuleHeight: CGFloat = 24
+  /// The leading Space swatch.
+  static let swatchRadius: CGFloat = 6
   static let searchHeight: CGFloat = 32
   static let searchBelow: CGFloat = 14
 }

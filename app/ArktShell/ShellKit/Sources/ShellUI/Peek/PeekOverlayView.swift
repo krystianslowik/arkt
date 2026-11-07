@@ -60,7 +60,7 @@ public final class PeekOverlayView: NSView {
       addSubview(view)
     }
     grabber.wantsLayer = true
-    grabber.layer?.cornerRadius = 3
+    grabber.layer?.cornerRadius = PeekLayout.grabberRadius
     grabber.setAccessibilityElement(false)
     controlsView.wantsLayer = true
     for button in controls { controlsView.addSubview(button) }
