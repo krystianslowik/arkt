@@ -4479,3 +4479,98 @@ under the embed folder after. Deleted: the embed folder with its dylib clones, d
 fixture, the bundle's preferences file (`dev.arkt.Arkt.try566.plist`) and the logs; the defaults suite had never been
 written. Nothing under `~/Applications/ArktTest` or
 `/Applications/Arkt.app` was touched.
+
+## #575: a no-op autofill bubble handler
+
+Date 2026-11-07. Branch `engine/575-autofill-bubble-handler` from `origin/main` (`ad916ba`). Overlay only: no patch,
+facade header and Swift unchanged.
+
+### Gate
+
+- Seam: the overlay. `ArktBrowserWindow` owns an `ArktAutofillBubbleHandler`
+  (`engine/arkt/browser/arkt_autofill_bubble_handler.{h,cc}`) and returns it from `GetAutofillBubbleHandler()`.
+- Facade header: unchanged. `.patches`: unchanged (11).
+- Build: `nice -n 20 autoninja -C out/Spike chrome -j 4`; disk 1.9 TB free on the Chromium disk, 45 GB internal.
+
+### Caller audit (pinned sources)
+
+Two things the issue text did not have:
+
+1. Half of the callers do not go through `BrowserWindow::GetAutofillBubbleHandler()`. Save card, IBAN, offer
+   notification, churned users and wallet reminder call `AutofillBubbleHandler::Get(browser->GetUnownedUserDataHost())`,
+   the user data `AutofillBubbleHandlerImpl` registers in its constructor. Without that registration they find no
+   handler; churned users (`payments_churned_users_bubble_controller.cc:150`, :218) dereferences `Get()` unchecked.
+   The handler registers itself the same way (`ui::ScopedUnownedUserData`).
+2. Most callers dereference the returned bubble: `SetBubbleView(*handler->Show...())`, several followed by
+   `CHECK(bubble_view())`. So the plan's nullptr return would crash them. Those methods return one process-wide no-op
+   `AutofillBubbleBase` (`Hide()` does nothing, `IsMouseHovered()` is false). It is a `base::NoDestructor`, not a
+   handler member: a controller is `WebContentsUserData` and keeps the raw pointer until it calls `Hide()`, so a bubble
+   that died with the window could dangle. Only the three callers that check the result get nullptr.
+
+Every `Show*` logs `ARKT: autofill bubble <name> not shown` on each call.
+
+| Caller | Reaches the handler through | Uses the returned bubble | Handler returns | Result |
+|---|---|---|---|---|
+| `save_card_bubble_controller_impl.cc:845`, :848 (save card, save card confirmation) | `Get()`, null-checked at :126, :173 | `*`, `CHECK` at :851 | no-op bubble | no crash, not shown (smoke) |
+| `iban_bubble_controller_impl.cc:156`, :494 (IBAN, IBAN confirmation) | `Get()`, null-checked at :56, :75 | `*`, `CHECK` at :497 | no-op bubble | no crash, not shown (smoke) |
+| `offer_notification_bubble_controller_impl.cc:239` | `Get()`, unchecked | `*` | no-op bubble | no crash, not shown (by construction) |
+| `mandatory_reauth_bubble_controller_impl.cc:298` | `GetAutofillBubbleHandler()`, unchecked | `*` | no-op bubble | no crash, not shown (by construction) |
+| `filled_card_information_bubble_controller_impl.cc:428` | `GetAutofillBubbleHandler()`, unchecked | `*`, `DCHECK` | no-op bubble | no crash, not shown (by construction) |
+| `virtual_card_enroll_bubble_controller_impl.cc:389`, :396 (enroll, confirmation) | `GetAutofillBubbleHandler()`, unchecked | `*`, `DCHECK` | no-op bubble | no crash, not shown (by construction) |
+| `autofill_ai_import_data_controller_impl.cc:242` (save, local save notification) | `GetAutofillBubbleHandler()`, unchecked | `*` | no-op bubble | no crash, not shown (by construction) |
+| `omnibox_autofill_bubble_controller.cc:130` | `GetAutofillBubbleHandler()`, unchecked | null-checked | nullptr | no crash, not shown (by construction) |
+| `payments_churned_users_bubble_controller.cc:150`, :218 (bubble, confirmation) | `Get()`, unchecked | null-checked | nullptr | no crash, not shown (by construction) |
+| `wallet_reminder_notice_bubble_controller.cc:139` | `Get()`, null-checked | null-checked | nullptr | no crash, not shown (by construction) |
+| `address_bubbles_controller.cc:61`, :75, :86 (save, update, sign-in promo) | `FindBrowserWindowWithWebContents()`, unchecked | `*`, `CHECK` at :248, :344 | no-op bubble | **crashes before the handler** (smoke); needs a patch, #768 |
+
+"By construction" rows were not reached in a fresh profile: they need a signed-in account, server cards, offers,
+Autofill AI data or the omnibox autofill flow. The handler and the bubble are non-null for them, and the table records
+whether each dereferences the result.
+
+The address bubbles never reach the handler. `BrowserWindow::FindBrowserWindowWithWebContents`
+(`browser_view.cc:1173-1190`) returns only a `BrowserView`, so it is nullptr on an Arkt window, and the crash is the
+`->GetAutofillBubbleHandler()` on it. No overlay seam changes that lookup. #768 asks which patch to take.
+
+### Build
+
+| Step | Result | Numbers |
+|---|---|---|
+| `nice -n 20 autoninja -C out/Spike chrome -j 4` | `The build has finished successfully.`, `FAILED:` 0 | 46 s |
+| `gn check out/Spike //arkt/browser:window` | 1 error, in `arkt_extension_batch_install.mm:29` (already listed under #566); none in the files this change touches | |
+| Deliberate break: registration removed (`scoped_user_data_`), rebuilt | card save logs nothing (0 `ARKT: autofill` lines) | 29 s build |
+| Fix restored, rebuilt | `The build has finished successfully.`, `FAILED:` 0; card save logs again | 28 s build |
+
+Load average while building and running: 2 to 5 (other lanes' work; nothing added).
+
+### Smoke (`out/Spike/Chromium.app`, throwaway profiles under `profiles/575-20261107/`, `--use-mock-keychain`, forms served from `127.0.0.1`, typed and submitted over the DevTools protocol)
+
+| Run | Check | Before (`origin/main` build) | After |
+|---|---|---|---|
+| card | Luhn-valid card, future expiry, submitted | no crash, nothing logged: save card finds no handler and gives up | `ARKT: autofill bubble SaveCreditCard not shown`, no crash |
+| card, same tab | a second card on the same tab | | not logged: the save-card controller still holds the no-op bubble |
+| tab switch and close | new tab opened, the card tab hidden and closed | | no crash (`Hide()` on the no-op bubble from `OnVisibilityChanged` and the controller destructor) |
+| IBAN | `DE89370400440532013000` on a fresh tab | | `ARKT: autofill bubble Iban not shown`, no crash |
+| card after IBAN | another card on that tab | | `ARKT: autofill bubble SaveCreditCard not shown`, no crash |
+| window close | last tab closed | | `ARKT: native window destroyed`, no crash |
+| address | full US address with country, phone and email | `Received signal 11 SEGV_ACCERR 000000000000`, top frame `autofill::(anonymous namespace)::ShowSaveBubble` | same crash, same frame: unchanged by this task |
+
+`FATAL`, `NOTREACHED` and `Check failed` lines in the card, IBAN and window runs: 0.
+
+Known limit: a controller that received the no-op bubble reports `IsShowingBubble()` until its tab is hidden or closed,
+so the next prompt of that kind on the same tab is skipped (the second card row). Accepted for a handler that shows
+nothing.
+
+### Patch budget
+
+| Source | Count |
+|---|---|
+| `.patches` lines | 11 |
+| `arkt` commits above `156.0.8078.48` | 11 |
+
+In sync; nothing exported. Facade header copies `cmp` identical.
+
+### Cleanup
+
+Every Chromium run stopped by exact PID or crashed (`ps -p` prints nothing); the local HTTP server stopped by PID.
+Deleted: the throwaway profiles under `profiles/575-20261107/`, the logs, and the two crash reports the address runs
+wrote. Nothing under `~/Applications/ArktTest` or `/Applications/Arkt.app` was touched.

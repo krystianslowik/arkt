@@ -5,6 +5,7 @@
 #include <string>
 #include <utility>
 
+#include "arkt/browser/arkt_autofill_bubble_handler.h"
 #include "arkt/browser/arkt_browser_window_parts.h"
 #include "arkt/browser/arkt_extension_calls.h"
 #include "arkt/browser/arkt_extensions_bridge.h"
@@ -293,6 +294,10 @@ ArktBrowserWindow::ArktBrowserWindow(BrowserWindowInterface* browser,
   scoped_extensions_container_ =
       std::make_unique<ui::ScopedUnownedUserData<ExtensionsContainer>>(
           browser_->GetUnownedUserDataHost(), *extensions_container_);
+  // Autofill finds its bubble handler both through GetAutofillBubbleHandler()
+  // and through the browser's unowned user data, as AutofillBubbleHandlerImpl.
+  autofill_bubble_handler_ =
+      std::make_unique<ArktAutofillBubbleHandler>(browser_);
 
   browser_->GetTabStripModel()->AddObserver(this);
   BindHost();
@@ -315,6 +320,7 @@ ArktBrowserWindow::~ArktBrowserWindow() {
     new_tab_footer_controller_->TearDown();
     new_tab_footer_controller_.reset();
   }
+  autofill_bubble_handler_.reset();
   scoped_extensions_container_.reset();
   extensions_container_.reset();
   side_panel_ui_.reset();
@@ -1517,9 +1523,8 @@ PinnedToolbarActions* ArktBrowserWindow::GetPinnedToolbarActions() {
 }
 
 autofill::AutofillBubbleHandler* ArktBrowserWindow::GetAutofillBubbleHandler() {
-  // Week 3: a non-null no-op handler (six callers dereference it).
-  ARKT_STUB("BrowserWindow");
-  return nullptr;
+  // Non-null: six callers dereference it unchecked (#575).
+  return autofill_bubble_handler_.get();
 }
 
 // BrowserWindow: bubbles and dialogs Arkt does not show this week -------------
