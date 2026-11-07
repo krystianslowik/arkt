@@ -67,7 +67,7 @@ AsBrowserView() | GetBrowserViewForNativeWindow | static_cast<BrowserView | AsVi
 - Upstream is splitting by window type, not abstracting the lookups away (`ui/browser_window.h:139-146`,
   `browser_window_features.cc:705-708`). What it is generalizing is `Browser::window()` into
   `BrowserWindow::FromBrowser` (crbug.com/496674143), and window behaviour into features found with `X::From(browser)`
-  ("Project Bedrock"). Null guards match upstream's own Webium precedent (`ui/views/exclusive_access_permission_prompt.cc:22`,
+  ("Project Bedrock"). Null guards match upstream's own Webium precedent (`ui/views/permissions/exclusive_access_permission_prompt.cc:22`,
   `ui/views/profiles/dice_web_signin_interception_bubble_view.cc:61-63`, `ui/views/session_crashed_bubble_view.cc:281-283`).
 - A hidden `BrowserView` per Arkt window is blocked in source: a child widget of a hidden parent never shows on Mac
   (`components/remote_cocoa/app_shim/native_widget_ns_window_bridge.mm:1052-1058`), lookups cannot point at both
@@ -182,9 +182,19 @@ window lookup), so they become 0015 and 0016 or whatever is next when they land.
 
 Extending the factory override to `TYPE_POPUP` (section 3.5, option B) edits 0004 and adds no file.
 
-**The week-2 gate trips.** `engine/REBASE.md`, section 6, requires the week-2 seam limits to hold: at most 8 seam patch
-files, 25 upstream files (not counting 0001-0004) and 6 hunks in the hot files. Seam patches 0005-0012 are already 8
-files, so 0013 alone trips the first limit, and the gated guards would trip the second. The gate's own fallback, a
+**The week-2 gate trips before this plan completes.** `engine/REBASE.md`, section 6, requires the week-2 seam limits to
+hold: at most 8 seam patch files, 25 upstream files (not counting 0001-0004) and 6 hunks in the hot files. The week-2
+plan defines the seam set as its tolerate-a-non-BrowserView themes plus the dialog hook; it does not say whether
+behaviour patches count. Two readings:
+
+| Reading | Seam patch files today | After 0013-0014 | Upstream files today | After 0013-0014 | After gated guards |
+|---|---|---|---|---|---|
+| seam patches only (0005, 0006, 0007, 0012) | 4 | 6 | 10 | 18 | up to 28 |
+| every patch after 0004 (0005-0012) | 8 | 10 | 15 | 23 | up to 33 |
+
+Under the narrow reading, E1 and E2 pass the gate, and the file limit trips with the E4 hooks (0015-0019); the
+upstream-file limit trips only if the gated sites are guarded instead of switched off. Under the broad reading, 0013
+trips the file limit at once. The gate's own fallback, a
 widget-backed `ArktBrowserWindow` (variant W in the week-2 plan), does not apply: decision 3 draws every prompt
 natively, so Views bubbles anchored on a widget are not wanted. This design proposes new limits (under "Needs the
 maintainer" in the pull request): fewer than 30 patch files in total, at most 40 upstream files outside 0001-0004, and
