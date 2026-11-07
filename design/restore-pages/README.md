@@ -86,7 +86,7 @@ An unsuccessful restore retains the offer and does not acknowledge. Little Arkt'
 successful page loads. The decision is hosted only by a regular window and remains pending across host closure or a
 change to private mode.
 
-On normal confirmed quit the App requests a clear and flushes it; a failed flush is logged and the existing quit flow
+On normal confirmed quit the App requests a clear and flushes it, except while an offer is unanswered; a failed flush is logged and the existing quit flow
 allows failure. SIGTERM has no final confirmed-termination hook, so its flush retains the snapshot. Persistence tests
 and ShellKit tests cover their respective boundaries, not the App adapter or a killed process; feature-level validation
 and CI on the combined head remain necessary. See the maintainer's [contract](https://github.com/krystianslowik/arkt/pull/690#issuecomment-6707149941)

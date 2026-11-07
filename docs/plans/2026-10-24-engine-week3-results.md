@@ -5600,8 +5600,15 @@ offer is answered, matching the marker behavior proposed in [#803](https://githu
 The test-first GUI cases cover repeated offers using the same record store and persisted sidebar NodeID with fresh fake
 engines, independent overwrite and clear assertions, and resumed recording and clearing after Restore or Dismiss. This
 is a Shell contract test, not a real Chromium or database roundtrip; Core Persistence already tests database reopening.
-The existing empty filtered offer notice remains covered. Production behavior is unchanged in this stage.
+The empty filtered offer notice remains covered. At test-first head `912443b`, [GUI run 42422178440](https://github.com/krystianslowik/arkt/actions/runs/42422178440/job/128552912724) executed 2,081 tests, skipped 54 and reported 9 assertion failures in the four unanswered-offer regressions. The earlier `4beeeec` compile error was not a behavioral red.
 
-The new GUI assertions are expected to fail against the current implementation; their runtime result is unobserved.
-Swift 6.2.4 source parsing and scoped diff checks passed. Local full builds and tests were not run because the baseline
-does not compile with the installed toolchain.
+The window set now protects the captured crashed records from initialization through an unanswered offer, including
+live changes, cancelled quit and confirmed clean quit. Restore, Dismiss and the empty notice release protection and
+immediately rebuild the live snapshot; a failed Restore retains the offer. A pre-offer and cancelled-quit boundary
+regression and an immediate empty-notice refresh assertion supplement the existing tests. The fake engine models the
+retained marker; this is not a Chromium relaunch. #803 remains unmerged.
+
+Swift 6.2.4 source parsing and scoped diff/import checks are static only. Local full builds and tests were not run
+because the baseline cannot compile; CI on the implementation head is pending. Earlier green run 42407828692 at
+`004e3ca` reported Core 579 tests/47 suites, pure ShellKit 2,510/282 and GUI 2,077 executed/54 skipped/0 failures;
+those results predate these regressions and the fix.

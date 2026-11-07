@@ -44,6 +44,7 @@ public final class ShellWindowSet {
   private let hostLookup: HostLookup?
   private let recoveryPageSource: (any RecoveryPageSource)?
   private let priorRecoveryPages: [ShellRecoveryPage]
+  private var preservingUnansweredRecovery: Bool
   private var recoveryTabOrder: [TabID] = []
   private var recoveryRecordingStopped = false
   private var windows: [ShellWindowController] = []
@@ -110,6 +111,7 @@ public final class ShellWindowSet {
     self.hostLookup = hostLookup
     self.recoveryPageSource = recoveryPageSource
     self.priorRecoveryPages = recoveryPageSource?.pages ?? []
+    self.preservingUnansweredRecovery = engine.sessionRecovery?.lastSessionCrashed == true
     windowObservation = engine.observeWindows { [weak self] event in
       guard case .windowOpened(let id) = event else { return }
       self?.windowOpened(id)
@@ -151,7 +153,12 @@ public final class ShellWindowSet {
   public func beginSessionRecovery(_ recovery: (any EngineSessionRecovery)?) {
     guard !recoveryStarted else { return }
     recoveryStarted = true
-    guard let recovery else { return }
+    guard let recovery else {
+      preservingUnansweredRecovery = false
+      recordRecoveryPages()
+      return
+    }
+    preservingUnansweredRecovery = recovery.lastSessionCrashed
     let pages = eligibleRecoveryPages(priorRecoveryPages, sidebar: sidebar)
     let model = RestorePagesModel(recovery: recovery, pages: pages) { [weak self] pages in
       self?.restoreRecoveryPages(pages) ?? false
@@ -160,16 +167,25 @@ public final class ShellWindowSet {
     model.onAnswer = { [weak self] in
       self?.pendingRecovery = nil
       self?.recoveryWindow = nil
+      self?.preservingUnansweredRecovery = false
+      self?.recordRecoveryPages()
+    }
+    // An empty offer is acknowledged in the model's initializer, before onAnswer is installed.
+    switch model.presentation {
+    case .offer: break // The answer callback releases the snapshot after a successful decision.
+    case .none, .notice:
+      preservingUnansweredRecovery = false
+      recordRecoveryPages()
     }
     presentPendingRecovery()
   }
 
-  /// A clean termination clears the persisted records; a cancelled quit keeps them.
+  /// A clean termination clears records unless the crash offer is unanswered; a cancelled quit resumes recording.
   public func finishSessionRecovery(cleanQuit: Bool) {
     if cleanQuit {
       recoveryRecordingStopped = true
       recoveryTabOrder = []
-      if recoveryPageSource?.pages.isEmpty == false { recoveryPageSource?.pages = [] }
+      if !preservingUnansweredRecovery, recoveryPageSource?.pages.isEmpty == false { recoveryPageSource?.pages = [] }
     } else {
       recoveryRecordingStopped = false
       recordRecoveryPages()
@@ -178,7 +194,7 @@ public final class ShellWindowSet {
 
   /// Rebuild from owned pages only; retain tab order across hide/restore and metadata changes.
   private func recordRecoveryPages() {
-    guard !recoveryRecordingStopped, let source = recoveryPageSource else { return }
+    guard !recoveryRecordingStopped, !preservingUnansweredRecovery, let source = recoveryPageSource else { return }
     var live: [TabID: ShellRecoveryPage] = [:]
     var discovered: [TabID] = []
     func add(_ tab: TabID, kind: ShellRecoveryPage.Kind, node: NodeID? = nil) {

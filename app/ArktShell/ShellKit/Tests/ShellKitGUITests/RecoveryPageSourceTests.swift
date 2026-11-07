@@ -327,6 +327,28 @@ final class RecoveryPageSourceTests: XCTestCase {
     XCTAssertEqual(engine.crashedSession.dismissals, 0)
   }
 
+  func testPreOfferChangesAndCancelledQuitPreserveCrashedRecords() throws {
+    _ = NSApplication.shared
+    let engine = InMemoryEngine()
+    engine.crashedSession.simulateCrashedExit()
+    let old = ShellRecoveryPage(title: "Old", url: URL(string: "https://example.invalid/old")!, kind: .littleArkt)
+    let records = RecordingRecoveryPages([old])
+    let set = ShellWindowSet(engine: engine, sidebar: StubSidebar.sample(), recoveryPageSource: records)
+    let live = set.openLittleArkt(url: URL(string: "https://example.invalid/live")!)
+    defer { live.window.close() }
+    XCTAssertEqual(records.pages, [old])
+    set.finishSessionRecovery(cleanQuit: true)
+    set.finishSessionRecovery(cleanQuit: false)
+    XCTAssertEqual(records.pages, [old])
+    set.beginSessionRecovery(engine.crashedSession)
+    let host = set.openWindow()
+    host.window?.isReleasedWhenClosed = false
+    defer { host.close() }
+    let panel = try XCTUnwrap(host.rootView.subviews.compactMap { $0 as? RestorePagesView }.first)
+    panel.dismissPressed()
+    XCTAssertEqual(records.pages.map(\.url.path), ["/live"])
+  }
+
   func testAnsweredOfferRefreshesLiveRecordsAndCleanQuitClears() throws {
     _ = NSApplication.shared
     for restore in [false, true] {
@@ -365,15 +387,17 @@ final class RecoveryPageSourceTests: XCTestCase {
     let engine = InMemoryEngine()
     engine.crashedSession.simulateCrashedExit()
     let set = ShellWindowSet(engine: engine, sidebar: sidebar, recoveryPageSource: records)
+    _ = set.openLittleArkt(url: URL(string: "https://example.invalid/before-notice")!)
     let host = set.openWindow()
     host.window?.isReleasedWhenClosed = false
     defer { set.littleArkts.forEach { $0.window.close() }; host.close() }
     set.beginSessionRecovery(engine.crashedSession)
     XCTAssertEqual(engine.crashedSession.dismissals, 1)
+    XCTAssertEqual(records.pages.map(\.url.path), ["/before-notice"])
     XCTAssertFalse(engine.crashedSession.lastSessionCrashed)
     XCTAssertFalse(host.rootView.subviews.contains { $0 is RestorePagesView })
     _ = set.openLittleArkt(url: URL(string: "https://example.invalid/live")!)
-    XCTAssertEqual(records.pages.map(\.url.path), ["/live"])
+    XCTAssertEqual(records.pages.map(\.url.path), ["/before-notice", "/live"])
     set.finishSessionRecovery(cleanQuit: true)
     XCTAssertTrue(records.pages.isEmpty)
   }
