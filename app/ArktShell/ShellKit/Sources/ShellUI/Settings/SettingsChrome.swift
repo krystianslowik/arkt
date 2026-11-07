@@ -34,8 +34,8 @@ public final class SettingsPaneItemView: NSView {
       fill.cornerRadius = SettingsMetrics.paneItemRadius
       fill.cornerCurve = .continuous
     }
-    plate.shadowOffset = CGSize(width: 0, height: -1)
-    plate.shadowRadius = 1.5
+    plate.shadowOffset = SettingsTokens.paneItemPlateShadow.unflippedOffset
+    plate.shadowRadius = SettingsTokens.paneItemPlateShadow.radius
     plate.opacity = 0
     label.alignmentMode = .center
     content.addSublayer(glyph)
@@ -174,7 +174,9 @@ public final class SettingsPaneItemView: NSView {
       hoverFill.backgroundColor = hovering && !isSelected
         ? ShellTokens.sidebarItemBackground.resolve(flavor).cgColor : nil
       plate.backgroundColor = ShellTokens.tabCurrent.resolve(flavor).cgColor
-      plate.shadowOpacity = flavor == .light ? Float(ShellTokens.tabCurrentShadow.light.alpha) * 0.5 : 0
+      let plateShadow = SettingsTokens.paneItemPlateShadow.color.resolve(flavor)
+      plate.shadowColor = plateShadow.cgColor
+      plate.shadowOpacity = plateShadow.alpha > 0 ? 1 : 0
       plate.borderWidth = increase && flavor == .dark ? 1 : 0
       plate.borderColor = SettingsTokens.separatorIncreasedContrast.resolve(flavor).cgColor
       let font = NSFont.systemFont(ofSize: 11, weight: .medium)

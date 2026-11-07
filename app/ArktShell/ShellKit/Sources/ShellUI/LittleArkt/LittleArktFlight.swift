@@ -201,9 +201,9 @@ final class LittleArktFlight {
     cardLayer.addSublayer(snapshotLayer)
     // The same values as the main window's card (`ContentCardView.updateLayer`), which the flight lands on.
     shadowLayer.anchorPoint = CGPoint(x: 0.5, y: 0.5)
-    shadowLayer.shadowColor = ShellTokens.cardShadow.resolve(flavor).cgColor
-    shadowLayer.shadowRadius = 3
-    shadowLayer.shadowOffset = CGSize(width: 0, height: -1)
+    shadowLayer.shadowColor = ShellTokens.cardLiftShadow.color.resolve(flavor).cgColor
+    shadowLayer.shadowRadius = ShellTokens.cardLiftShadow.radius
+    shadowLayer.shadowOffset = ShellTokens.cardLiftShadow.unflippedOffset
     applyShadowState()
     overlay.contentView?.layer?.addSublayer(shadowLayer)
     overlay.contentView?.layer?.addSublayer(cardLayer)
