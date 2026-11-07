@@ -278,4 +278,66 @@ final class FavoriteSplitTileTests: XCTestCase {
     XCTAssertEqual(tile.accessibilityLabel(), "F0 | T0")
     harness.controller.close()
   }
+
+  /// The split's tile takes the strongest state of its panes, as its outline row does: current while one of its panes
+  /// is shown (selected for VoiceOver), not current once another tab is.
+  func testFavoriteSplitTileIsCurrentWhileAPaneIsShown() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let (split, _) = try harness.addSplit(on: world.favorite, url: Self.url("new"))
+
+    let tile = try harness.tile(split)
+    XCTAssertTrue(tile.isCurrent)
+    XCTAssertTrue(tile.isAccessibilitySelected())
+
+    harness.controller.activate(node: world.pinned)
+
+    XCTAssertFalse(try harness.tile(split).isCurrent)
+    XCTAssertFalse(try harness.tile(split).isAccessibilitySelected())
+    harness.controller.close()
+  }
+
+  // MARK: Menu actions
+
+  /// Close and Keep Favorite from the split's menu: every pane's page closes, the split stays a Favorite, and nothing
+  /// goes to the Archive.
+  func testCloseAndKeepFavoriteFromTheSplitMenuArchivesNothing() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let (split, pane) = try harness.addSplit(on: world.favorite, url: Self.url("new"))
+    let menu = try XCTUnwrap(harness.grid.contextMenu(for: split))
+    let index = menu.indexOfItem(withTitle: "Close and Keep Favorite")
+    XCTAssertGreaterThanOrEqual(index, 0)
+
+    menu.performActionForItem(at: index)
+
+    XCTAssertEqual(harness.archived, [])
+    XCTAssertNil(harness.controller.engineTab(of: world.favorite))
+    XCTAssertNil(harness.controller.engineTab(of: pane))
+    XCTAssertEqual(harness.favorites, [split])
+    XCTAssertEqual(harness.source.children(of: .split(split)), [world.favorite, pane])
+    harness.controller.close()
+  }
+
+  /// Copy Links on the split's tile copies the link of every pane, to the window's link pasteboard (a private one
+  /// here, never the system clipboard).
+  func testCopyLinksOnTheSplitTileCopiesEveryPane() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let board = NSPasteboard(name: .init("FavoriteSplitTileTests.\(UUID().uuidString)"))
+    defer { board.releaseGlobally() }
+    board.clearContents()
+    harness.controller.linkPasteboard = board
+    let (split, _) = try harness.addSplit(on: world.favorite, url: Self.url("new"))
+    let menu = try XCTUnwrap(harness.grid.contextMenu(for: split))
+    let index = menu.indexOfItem(withTitle: "Copy Links")
+    XCTAssertGreaterThanOrEqual(index, 0)
+
+    menu.performActionForItem(at: index)
+
+    let copied = try XCTUnwrap(board.string(forType: .string))
+    XCTAssertTrue(copied.contains(Self.url("f0").absoluteString), copied)
+    XCTAssertTrue(copied.contains(Self.url("new").absoluteString), copied)
+    harness.controller.close()
+  }
 }

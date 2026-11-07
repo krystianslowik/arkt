@@ -607,7 +607,7 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
   private func configure(_ item: FavoriteTileItem, id: NodeID) {
     let tile = item.tileView
     tile.flavor = flavor
-    tile.isCurrent = resolver.state(for: id) == .current
+    tile.isCurrent = state(for: id) == .current
     tile.selectionAlpha = selectionFade?.node == id ? (selectionFade?.alpha ?? 1) : 1
     tile.isKeyboardFocused = keyboardFocusID == id
     var title = "", url: URL?
@@ -656,6 +656,13 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
     guard let pageLoadedProvider else { return false }
     if case .split? = source.node(id) { return source.children(of: .split(id)).contains { pageLoadedProvider($0) } }
     return pageLoadedProvider(id)
+  }
+
+  /// A tile's row state: a split takes the strongest state among its panes, as its outline row does (#801).
+  private func state(for id: NodeID) -> TabRowState {
+    guard case .split? = source.node(id) else { return resolver.state(for: id) }
+    let states = source.children(of: .split(id)).map { resolver.state(for: $0) }
+    return [TabRowState.current, .contentVisible, .previous].first(where: states.contains) ?? .normal
   }
 
   /// VoiceOver's press on a tile: the Favorite activates, as a click on it does (#607).
@@ -871,10 +878,10 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
   /// Refreshes one tile (favicon, title or whether its page is loaded). A pane of a Favorite split refreshes its
   /// split's tile, which shows the X while a pane has a page (#801).
   public func reload(node id: NodeID) {
-    let id = if case .split(let split)? = source.parent(of: id), nodeIDs.contains(split) { split } else { id }
-    guard let index = nodeIDs.firstIndex(of: id),
+    let tileID = if case .split(let split)? = source.parent(of: id), nodeIDs.contains(split) { split } else { id }
+    guard let index = nodeIDs.firstIndex(of: tileID),
           let item = collectionView.item(at: IndexPath(item: index, section: 0)) as? FavoriteTileItem else { return }
-    configure(item, id: id)
+    configure(item, id: tileID)
   }
 
   /// Targeted update for a `.favorites` structure change. Returns true when the grid height changed. The columns
