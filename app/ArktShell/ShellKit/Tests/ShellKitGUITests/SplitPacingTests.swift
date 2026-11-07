@@ -79,8 +79,11 @@ final class SplitPacingTests: XCTestCase {
     let source = ModelSidebarSource(sidebar: sidebar)
     let controller = ShellWindowController(engine: engine, sidebar: source)
     defer { controller.close() }
+    // Four panes leave a divider almost no room at the planned 1200 x 800 (four 240 pt minima): the side-by-side case
+    // gets a wider window and the stacked case a taller one, so the sweep below has room.
+    let width: CGFloat = orientation == .horizontal && panes == 4 ? 1400 : 1200
     let height: CGFloat = orientation == .vertical && panes == 4 ? 1100 : 800
-    controller.window?.setFrame(NSRect(x: 0, y: 0, width: 1200, height: height), display: false)
+    controller.window?.setFrame(NSRect(x: 0, y: 0, width: width, height: height), display: false)
     controller.showWindow(nil)
     controller.activate(node: nodes[0])
     controller.window?.contentView?.layoutSubtreeIfNeeded()
@@ -94,20 +97,23 @@ final class SplitPacingTests: XCTestCase {
       }
     }
     let split = controller.rootView.split
-    if orientation == .vertical && panes == 4 && split.bounds.height < 990 {
-      throw XCTSkip("NOT-MEASURABLE (four stacked panes require at least 990 pt)")
-    }
     let stable = await StableFrames.wait(on: split, count: 10, threshold: FrameStats().hitchThreshold)
     print("split.pacing warmup stableFrames=\(stable) of 10")
     let index = (panes - 1) / 2
     let divider = try XCTUnwrap(split.dividers.dropFirst(index).first)
     let length = orientation == .horizontal ? split.bounds.width : split.bounds.height
     // The sweep covers the divider's allowed range: its two panes share `pair` points, and `SplitLayout.factors` keeps
-    // each at `minimumPaneLength` or more. The amplitude stays 1 pt inside that clamp, so every frame moves the panes.
+    // each at `minimumPaneLength` or more. The amplitude stays 1 pt inside that clamp, so every frame changes the
+    // factors. A sweep of a few points measures nothing useful: below the floor the case is NOT-MEASURABLE.
     let pair = 2 * (length - split.gap * CGFloat(panes - 1)) / CGFloat(panes)
     let center = split.dividerPosition(index)
     let amplitude = pair / 2 - SplitLayout.minimumPaneLength - 1
-    XCTAssertGreaterThan(amplitude, 0, "\(label): the panes have room to move")
+    let minimumAmplitude: CGFloat = 8
+    if amplitude < minimumAmplitude {
+      throw XCTSkip(String(format: "NOT-MEASURABLE (%@: split length %.0f pt leaves a sweep of +/-%.1f pt, under %.0f pt)",
+                           label, length, amplitude, minimumAmplitude))
+    }
+    print(String(format: "split.pacing sweep label=%@ length=%.0f amplitude=%.1f", label, length, amplitude))
     // Precondition guard: since #665 a drag ends a running reflow into the same `lastPacing` (that takeover is covered
     // by `SplitPaneCloseTests`). Nothing may be reflowing here, so the stats read below are the drag's own.
     XCTAssertFalse(split.isReflowing, "\(label): no reflow is running when the drag begins")
@@ -120,7 +126,7 @@ final class SplitPacingTests: XCTestCase {
     XCTAssertEqual(split.pacer.label, "split-divider", "\(label): the drag's own pacing session runs")
     _ = FrameScript(view: split, frames: 60, step: { _ in
       frame += 1
-      // Two and a half periods over 60 frames: both ends of the range, ending at the trailing one.
+      // One and a quarter periods over 60 frames: both ends of the range, ending at the trailing one.
       let position = center + amplitude * sin(Double(frame) * .pi / 24)
       divider.drag(to: position)
     }, done: { divider.endDrag(); finished.fulfill() })
