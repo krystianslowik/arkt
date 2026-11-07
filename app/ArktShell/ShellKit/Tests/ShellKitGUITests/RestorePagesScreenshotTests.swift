@@ -43,14 +43,18 @@ final class RestorePagesScreenshotTests: XCTestCase {
       try capture.run()
       capture.waitUntilExit()
       XCTAssertEqual(capture.terminationStatus, 0)
-      let bitmap = try XCTUnwrap(NSBitmapImageRep(contentsOf: file))
+      let imageData = try Data(contentsOf: file)
+      let bitmap = try XCTUnwrap(NSBitmapImageRep(data: imageData))
       XCTAssertGreaterThan(bitmap.pixelsWide, 0)
       XCTAssertGreaterThan(bitmap.pixelsHigh, 0)
-      let colors = Set((0..<10).flatMap { x in
-        (0..<10).compactMap { y in
-          bitmap.colorAt(x: x * (bitmap.pixelsWide - 1) / 9, y: y * (bitmap.pixelsHigh - 1) / 9)?.description
+      var colors = Set<String>()
+      for column in 0..<10 {
+        let x = column * (bitmap.pixelsWide - 1) / 9
+        for row in 0..<10 {
+          let y = row * (bitmap.pixelsHigh - 1) / 9
+          if let color = bitmap.colorAt(x: x, y: y) { colors.insert(color.description) }
         }
-      })
+      }
       XCTAssertGreaterThan(colors.count, 1, "window capture must not be blank")
     }
   }
