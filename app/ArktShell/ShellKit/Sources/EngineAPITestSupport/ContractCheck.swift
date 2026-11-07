@@ -41,7 +41,7 @@ public enum ContractCheck: String, CaseIterable, Sendable {
   case permissionChangeRaisesTheReloadInfobarOnce
 
   /// The rules the Chromium engine does not run yet, each with the issue that adds it here.
-  public static let chromiumDeferredRules: [Int: Int] = [26: 583]  // page info seam
+  public static let chromiumDeferredRules: [Int: Int] = [:]
 
   /// The checks the Chromium engine runs: every rule not in `chromiumDeferredRules`.
   public static var chromiumChecks: [ContractCheck] { allCases.filter { chromiumDeferredRules[$0.rule] == nil } }
