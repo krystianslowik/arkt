@@ -4441,6 +4441,7 @@ overlay test target; facade header and Swift unchanged.
 | Deliberate break: bridge change reverted, test target rebuilt | `HistorySyncBridgeTest.ImportedVisitsNotSynced` FAILED: `processor()->GetEntities().empty()` is false | 13 s build |
 | `nice -n 20 autoninja -C out/Spike chrome -j 4` (fix restored) | `The build has finished successfully.`, `FAILED:` 0 | 28 s; `history_sync_bridge.o` recompiled |
 | Same command again with the test target | nothing to rebuild | 11 s; the 37 bridge tests pass again |
+| `gn check out/Spike //arkt/browser:arkt_patch_unittests` | `Header dependency check OK` | `gn check '//arkt/*'` reports 5 include errors in `arkt/api/arkt_engine_facade.mm` and `arkt/browser/arkt_extension_batch_install.mm`, files this change does not touch |
 | Engine app, `xcodebuild -scheme ArktShell -configuration Engine PRODUCT_BUNDLE_IDENTIFIER=dev.arkt.Arkt.try566 -jobs 2` (`nice -n 20`) | `BUILD SUCCEEDED`, `Engine framework copied: Chromium Framework.framework 156.0.8078.48` | 176 s; 522 component dylibs cloned next to the bundle (`cp -c`) |
 
 Load average while building: 5 to 8 (other lanes' work; nothing added).
@@ -4468,6 +4469,8 @@ In sync. Export changed only the new patch (patches 0001 to 0010 byte-identical)
 
 ### Cleanup
 
-The run exited by itself (`ps -p`). `lsregister -u` on the embed copy; embed folder with its dylib clones, derived data,
-the throwaway profile, fixture, defaults suite and logs deleted. Nothing under `~/Applications/ArktTest` or
+The run exited by itself (`ps -p`). `lsregister -u` on the embed copy and its helpers: 0 records for `try566` and 0 paths
+under the embed folder after. Deleted: the embed folder with its dylib clones, derived data, the throwaway profile and
+fixture, the bundle's preferences file (`dev.arkt.Arkt.try566.plist`) and the logs; the defaults suite had never been
+written. Nothing under `~/Applications/ArktTest` or
 `/Applications/Arkt.app` was touched.
