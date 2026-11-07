@@ -8,9 +8,9 @@ act on the active tab instead of dereferencing a missing BrowserView or
 checking that only tests lack a toast anchor.
 ---
  chrome/browser/ui/browser_actions.cc          | 27 ++++++++++++++++---
- chrome/browser/ui/toasts/toast_controller.cc  | 17 ++++++++++--
+ chrome/browser/ui/toasts/toast_controller.cc  | 18 +++++++++++--
  .../storage/storage_pressure_bubble_view.cc   |  4 +++
- 3 files changed, 43 insertions(+), 5 deletions(-)
+ 3 files changed, 44 insertions(+), 5 deletions(-)
 
 diff --git a/chrome/browser/ui/browser_actions.cc b/chrome/browser/ui/browser_actions.cc
 index 0f7a326019..1ade26772f 100644
@@ -65,10 +65,10 @@ index 0f7a326019..1ade26772f 100644
                bwi))
            .SetActionId(actions::kActionPaste)
 diff --git a/chrome/browser/ui/toasts/toast_controller.cc b/chrome/browser/ui/toasts/toast_controller.cc
-index 4b17a93554..958c034e6a 100644
+index 4b17a93554..143c5c7fb6 100644
 --- a/chrome/browser/ui/toasts/toast_controller.cc
 +++ b/chrome/browser/ui/toasts/toast_controller.cc
-@@ -323,9 +323,22 @@ void ToastController::CreateToast(ToastParams params,
+@@ -323,9 +323,23 @@ void ToastController::CreateToast(ToastParams params,
    if (!anchor_view) {
      // Don't actually create the toast in unit tests
      // TODO(webium): show toast in webui browser.
@@ -86,6 +86,7 @@ index 4b17a93554..958c034e6a 100644
 +    if (elements && !elements->GetPrimaryWindowWidget()) {
 +      toast_close_timer_.Stop();
 +      currently_showing_toast_close_callback_.RunAndReset();
++      on_widget_destroyed_callbacks_.Notify(*currently_showing_toast_id_);
 +      currently_showing_toast_id_ = std::nullopt;
 +      return;
 +    }

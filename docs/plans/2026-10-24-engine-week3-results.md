@@ -5274,13 +5274,14 @@ yet; the batch issue list waits for the maintainer. Guards and one generalizatio
 
 ### What landed
 
-Two patch files, one per theme (design section 2.3), 4 upstream files, 57 insertions, 9 deletions:
+Two patch files, one per theme (design section 2.3), 4 upstream files, 59 insertions, 9 deletions (after the review
+fixes below):
 
 | Patch | Site | Change |
 |---|---|---|
 | 0013 guards | `ui/views/storage/storage_pressure_bubble_view.cc` (row 1) | `ShowBubble` returns when the last active window has no `BrowserView` (4 lines) |
 | 0013 | `ui/browser_actions.cc` Cut, Copy, Paste (rows 3-5) | without a `BrowserView`, the action calls the active tab's `WebContents::Cut/Copy/Paste` (3 hunks, 8 lines each) |
-| 0013 | `ui/toasts/toast_controller.cc` `CreateToast` (row T) | no anchor and an initialized-never `BrowserElementsViews` (no primary window widget, an embedder's window): the toast is dropped as if it closed at once (timer stopped, close callback run, current id cleared) instead of `CHECK_IS_TEST()`. Unit tests (no browser) and Webium keep their paths |
+| 0013 | `ui/toasts/toast_controller.cc` `CreateToast` (row T) | no anchor and a `BrowserElementsViews` with no primary window widget (an embedder's window): the toast is dropped as if its widget closed at once, in `OnWidgetDestroyed`'s order (timer stopped, close callback run, widget-destroyed subscribers notified, current id cleared) instead of `CHECK_IS_TEST()`. Webium keeps its path, and so do unit tests with no browser (the `ToastController` unit tests). Tests that do have a `BrowserElementsViews` but no widget (a `TestBrowserWindow`) now take the drop path too |
 | 0014 generalization | `ui/browser_commands.cc` `CloseTab` (row 2) | the Close Tab accelerator comes from `BrowserWindow::FromBrowser(browser)->GetAcceleratorProvider()`; no provider or no `IDC_CLOSE_TAB` shortcut: close without the confirmation toast; a toast the window could not show: close too. `kClosePinnedTab` is actionable, so in Chrome a toast is always showing or queued after `MaybeShowToast` and the last branch never runs there |
 
 - `GetAnchorView` needed no guard: `BrowserElementsViewsImpl` exists for every window (`browser_window_features.cc:357`)
@@ -5290,6 +5291,19 @@ Two patch files, one per theme (design section 2.3), 4 upstream files, 57 insert
   before `CreateToast`, and only the widget's destruction clears it, so after one dropped toast every later toast was
   queued forever, and a pinned tab could never be closed with `IDC_CLOSE_TAB` (run `after-a` v1: two Copy URL toasts,
   then close-tab twice, tab still open).
+- Cut, Copy and Paste on an Arkt window behave like Chrome on Windows and Linux, not like Chrome on Mac: they act on
+  the page (`WebContents::Cut/Copy/Paste` on the focused frame), not on the focused native view through
+  `NSApp`. Today nothing in the app sends these commands (the shell's Edit menu uses `cut:`, `copy:` and `paste:`
+  through the responder chain). If E2 routes these commands to the engine, the guard should forward them to `NSApp`
+  as `BrowserView::CutCopyPaste` does on Mac.
+- The other `CHECK_DEREF(BrowserView::GetBrowserViewForBrowser(bwi))` sites in `browser_actions.cc` are unreachable on
+  an Arkt window. Each action is invoked only from a Views page action icon, the Views toolbar or the WebUI toolbar,
+  never from a browser command, and an Arkt window has none of those:
+  - `:812` `kActionShowJsOptimizationsIcon`: the JS optimizations page action icon.
+  - `:1485` `kActionShowCookieControls`: the cookie controls page action icon (location bar).
+  - `:2014` `kActionShowCollaborationRecentActivity`: the collaboration messaging page action icon.
+  - `:2152` `kActionPinActionToToolbar` and `:2176` `kActionUnpinActionFromToolbar`: the pinned toolbar button's
+    context menu (`pinned_action_toolbar_button_menu_model.cc`).
 - Overlay: `ArktAcceleratorProvider` (`arkt_browser_window_parts`), returned by `ArktBrowserWindow::GetAcceleratorProvider`
   (was an `ARKT_STUB`). It reads the main menu: the first `commandDispatch:` item tagged with the command id that has
   a key equivalent (the shell's page commands, `MainMenu.swift`). The app's Cmd-W is Archive Tab, so the app has no
@@ -5307,7 +5321,8 @@ No patch. Checked against the pinned source with a fresh profile, no sign-in and
 | WebAuthn ambient sign-in (`ambient_signin_controller.cc:120`) | `--disable-features=WebAuthenticationAmbientSignin` (shell launch list) | already `FEATURE_DISABLED_BY_DEFAULT` (`device/fido/public/features.cc:92-94`); the switch also wins over `--enable-experimental-web-platform-features` |
 | Media remoting dialog (`media_remoting_dialog_view.cc:49`) | `--disable-features=MediaRouter` (shell launch list) | reached while casting a tab; `kMediaRouter` is enabled by default. The remoting pref cannot be set by a default value (`cast_remoting_connector.cc:447-452`). This turns Cast off until E2 draws its device list (#653) |
 | glic (`browser_conditions.cc:191`, `glic_metrics.cc:1003`, `context_sharing_border_view.cc:109`) | `--disable-features=Glic` (shell launch list) | `kGlic` is enabled by default on Mac; glic stays inert without a capable signed-in account, the switch removes it |
-| iOS promos (`ios_promo_controller.cc:125`, `ios_promos_utils.cc:172`) | local-state default `browser.promotions_enabled` = false (`PreProfileInit`, next to the quit confirmation default; the PromotionsEnabled policy still wins) | needs active sync otherwise; the pref also stops the extensions zero-state promo |
+| iOS promos (`ios_promo_controller.cc:125`, `ios_promos_utils.cc:172`) | local-state default `browser.promotions_enabled` = false (`PreProfileInit`, next to the quit confirmation default; the PromotionsEnabled policy still wins) | needs active sync otherwise. See the next row for what else the pref turns off |
+| `browser.promotions_enabled` = false, side effects | the same default | it acts as the PromotionsEnabled policy. It also skips Chromium's profile first-run and the sign-in intercept first-run dialog (`IsFirstRunDisabledByPolicy`, `profile_picker.cc:51-55`), the avatar promos, the startup infobar promos, the app menu promos and the extensions zero-state promo. Arkt shows none of those surfaces: it has its own onboarding and no avatar, toolbar or app menu |
 | Lens region search (`lens_region_search_controller.cc:40`) | none needed | not compiled: `ENABLE_LENS_DESKTOP_GOOGLE_BRANDED_FEATURES` is 0 in an unbranded build |
 | Relaunch notification (`relaunch_recommended_bubble_view.cc:47`) | none needed | `browser.relaunch_notification` defaults to 0, which never shows the bubble |
 | Idle timeout (`idle_bubble.cc:67`) | none needed | `idle_timeout` defaults to zero: no polling |
@@ -5397,8 +5412,11 @@ copies `cmp` identical.
 - **Cast is off** with `MediaRouter` until E2 draws the device list (#653). The alternative from design section 2.3
   (a guard of about 5 lines for a site no switch can stop): guard `media_remoting_dialog_view.cc:49` in 0013, one more
   upstream file, and leave Cast on. For the maintainer to choose.
-- **Upstream unit tests** with a `TestBrowserWindow` and a real `CreateToast` now get the dropped-toast path instead of a
-  toast that stays current; none were run (they are not part of `arkt_patch_unittests`).
+- **Upstream unit tests** that have a `BrowserElementsViews` but no widget (a `TestBrowserWindow`) and a real
+  `CreateToast` now take the drop path instead of a toast that stays current; none were run (they are not part of
+  `arkt_patch_unittests`).
+- **MediaRouter** stays disabled (agreed in review); E2 removes it from `requiredDisabledFeatures` once #653's native
+  device picker lands.
 
 ### Cleanup
 
@@ -5406,3 +5424,24 @@ Every Chromium run stopped by exact PID or exited when it crashed or closed its 
 each); the loopback server stopped by PID. Deleted: the throwaway profiles under `profiles/e1-20261107/`, the build
 logs, and the crash reports the crashing runs wrote. The runs wrote to the system clipboard (it held no text before);
 it was cleared afterwards. Nothing under `~/Applications/ArktTest` or `/Applications/Arkt.app` was touched.
+
+### #800 review fixes
+
+- 0013, toast drop path: `on_widget_destroyed_callbacks_.Notify(*currently_showing_toast_id_)` now runs between the
+  close callback and clearing the id, in `OnWidgetDestroyed`'s order. Without it, subscribers such as
+  `ManagePasswordsAutoSigninToastDelegate` never hear that the toast is gone, and the tab stays in `AUTO_SIGNIN_STATE`
+  instead of moving to `MANAGE_STATE`.
+- 0014, `CloseTab`: `BrowserWindow::FromBrowser` is null-checked; with no window the tab closes without the toast.
+- Results: Cut, Copy and Paste semantics, the remaining `CHECK_DEREF` sites, row T for unit tests with a
+  `BrowserElementsViews` but no widget, and the side effects of `promotions_enabled` (above).
+- Build: `nice -n 15 autoninja -j 4 -C out/Spike chrome`, `FAILED:` 0, 40 s; the overlay link was checked first.
+- Re-smoke (`out/Spike`, fresh profiles under `profiles/e1r-20261107/`, the shell's `--disable-features` list,
+  `--use-mock-keychain`): Copy URL three times, then pin and close-tab, once with Chromium's menu and once with
+  `--arkt-menu-probe`. Both runs: 3 of 3 Copy URL commands completed, the pinned tab closed on the first command,
+  `native window destroyed`, 0 `FATAL`, `Check failed`, `NOTREACHED` or `Received signal` lines. The notification
+  itself was not observed: auto sign-in needs a saved credential with auto sign-in on, so `MANAGE_STATE` holds by
+  construction.
+- Export: `.patches` 14 lines, 14 `arkt` commits, in sync; 0001 to 0012 byte-identical; only 0013 and 0014 changed.
+- Cleanup: both runs and the loopback server stopped by exact PID; profiles and build log deleted; no crash report.
+  The clipboard held text this time and the run replaced it with the page URL; it was cleared afterwards and the
+  earlier text was not restored.
