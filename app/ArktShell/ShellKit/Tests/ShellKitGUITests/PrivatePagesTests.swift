@@ -156,6 +156,71 @@ final class PrivatePagesTests: XCTestCase {
     }
   }
 
+  /// The bottom bar is gone in a private window, but Extensions is not: the same button sits at the trailing end of
+  /// the footer band, beside the window's kind, opens the same panel and dims with the sidebar. Archive, New Tab and
+  /// Library stay out of reach.
+  func testExtensionsSitsInTheFooterBand() throws {
+    let f = try makeFixture()
+    for incognito in [false, true] {
+      let window = try privateWindow(f, incognito: incognito)
+      window.window?.setFrame(NSRect(x: 0, y: 0, width: 640, height: 420), display: false)
+      let sidebar = window.sidebarController.view
+      sidebar.layoutSubtreeIfNeeded()
+      let button = try XCTUnwrap(window.extensionsButton)
+      XCTAssertTrue(sidebar.extensionsButton === button)
+      XCTAssertFalse(button.isHiddenOrHasHiddenAncestor, "Extensions is reachable in a private window")
+      XCTAssertFalse(button.isDescendant(of: sidebar.bottomBar))
+      XCTAssertTrue(sidebar.bottomBar.isHidden, "Archive, New Tab and Library stay hidden")
+      XCTAssertEqual(button.accessibilityLabel(), "Extensions")
+      XCTAssertEqual(button.toolTip, "Extensions")
+
+      let frame = sidebar.convert(button.bounds, from: button)
+      let footer = SidebarContainerView.privateFooterHeight
+      let band = NSRect(x: 0, y: sidebar.bounds.height - footer, width: sidebar.bounds.width, height: footer)
+      XCTAssertTrue(band.contains(frame), "the button sits in the 40 pt band")
+      XCTAssertEqual(frame.midY, band.midY, accuracy: 0.5, "centered in the band, as the label")
+      XCTAssertEqual(frame.maxX, sidebar.bounds.width - SidebarMetrics.horizontalPadding,
+                     "at the trailing end, as in the bottom bar")
+      XCTAssertEqual(frame.width, SidebarMetrics.bottomBarButtonSize)
+      XCTAssertFalse(frame.intersects(sidebar.windowKindLabel.frame), "the kind label never runs under it")
+      XCTAssertEqual(sidebar.windowKindLabel.frame.midX, band.midX, accuracy: 0.5, "the kind stays centered")
+      XCTAssertNotNil(button.image, "drawn in the chrome flavor's foreground")
+
+      sidebar.isDimmed = true
+      XCTAssertEqual(button.alphaValue, SidebarContainerView.dimmedAlpha, "dims with the sidebar when not key")
+      sidebar.isDimmed = false
+      XCTAssertEqual(button.alphaValue, 1)
+
+      let panel = try XCTUnwrap(window.extensionsPanel)
+      window.window?.orderFront(nil)
+      button.performClick(nil)
+      XCTAssertTrue(panel.isShown, "the same action opens the Extensions panel")
+      XCTAssertTrue(button.isOpen)
+      panel.hide(keyboard: false)
+      XCTAssertFalse(button.isOpen)
+      window.window?.performClose(nil)
+    }
+  }
+
+  /// A container switched back to a normal window returns the button to the bottom bar, left of New Tab.
+  func testExtensionsReturnsToTheBottomBarInANormalWindow() {
+    let container = SidebarContainerView(source: StubSidebar.sample())
+    container.frame = NSRect(x: 0, y: 0, width: ShellMetrics.standard.sidebarMinWidth, height: 420)
+    let button = ExtensionsButton()
+    container.extensionsButton = button
+    container.setPrivateKind(.blank)
+    container.isDimmed = true
+    container.layoutSubtreeIfNeeded()
+    XCTAssertFalse(button.isDescendant(of: container.bottomBar))
+    XCTAssertEqual(button.alphaValue, SidebarContainerView.dimmedAlpha)
+
+    container.setPrivateKind(.standard)
+    container.layoutSubtreeIfNeeded()
+    XCTAssertTrue(button.isDescendant(of: container.bottomBar))
+    XCTAssertEqual(button.alphaValue, 1, "the bottom bar carries the dimming, not the button twice")
+    XCTAssertEqual(button.frame.maxX, container.newTabButton.frame.minX)
+  }
+
   /// The welcome card ("New Space") is for a profile without Spaces. A blank or incognito window draws no Spaces, but
   /// its pages are on the card: the welcome never covers them.
   func testThePageIsNotCoveredByTheWelcomeCard() throws {

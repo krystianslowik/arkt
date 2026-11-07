@@ -456,12 +456,13 @@ public final class SidebarContainerView: NSView {
   public let archiveButton = NSButton(frame: .zero)
   public let newTabButton = NSButton(frame: .zero)
   public let spaceDots = SpaceDotsView(frame: .zero)
-  /// The Extensions control, left of New Tab; nil for an engine without extensions (week-3 Decision 10).
+  /// The Extensions control, left of New Tab; nil for an engine without extensions (week-3 Decision 10). In a blank
+  /// or incognito window, whose bottom bar is hidden, it sits at the trailing end of the footer band instead (#668).
   public var extensionsButton: ExtensionsButton? {
     didSet {
       guard extensionsButton !== oldValue else { return }
       oldValue?.removeFromSuperview()
-      if let extensionsButton { bottomBar.addSubview(extensionsButton) }
+      placeExtensionsButton()
       applyButtonImages()
       needsLayout = true
     }
@@ -533,10 +534,23 @@ public final class SidebarContainerView: NSView {
     windowKindLabel.textColor = ShellTokens.sidebarForeground.resolve(flavor).nsColor()
     privatePages.isHidden = !isPrivate
     bottomBar.isHidden = isPrivate
+    placeExtensionsButton()
     needsLayout = true
   }
 
   var isPrivate: Bool { !privatePages.isHidden }
+
+  /// Puts the Extensions button in the bottom bar, or in the footer band of a private window. In the band it carries
+  /// the non-key dimming itself; in the bottom bar the bar does.
+  private func placeExtensionsButton() {
+    guard let extensionsButton else { return }
+    let host: NSView = isPrivate ? self : bottomBar
+    if extensionsButton.superview !== host {
+      extensionsButton.removeFromSuperview()
+      host.addSubview(extensionsButton)
+    }
+    extensionsButton.alphaValue = isPrivate && isDimmed ? Self.dimmedAlpha : 1
+  }
 
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -576,6 +590,7 @@ public final class SidebarContainerView: NSView {
       for view in [urlBar, favorites, pager, bottomBar, windowKindLabel, privatePages, banner.row] as [NSView] {
         view.alphaValue = alpha
       }
+      placeExtensionsButton()
     }
   }
 
@@ -666,7 +681,7 @@ public final class SidebarContainerView: NSView {
     archiveButton.frame = NSRect(x: padding, y: buttonY, width: buttonSize, height: buttonSize)
     newTabButton.frame = NSRect(x: width - padding - buttonSize, y: buttonY, width: buttonSize, height: buttonSize)
     var trailing = newTabButton.frame.minX
-    if let extensionsButton {
+    if let extensionsButton, !isPrivate {
       extensionsButton.frame = NSRect(x: trailing - buttonSize, y: buttonY, width: buttonSize, height: buttonSize)
       trailing = extensionsButton.frame.minX
     }
@@ -678,8 +693,9 @@ public final class SidebarContainerView: NSView {
     spaceDots.frame = NSRect(x: dotsX, y: 0, width: max(0, trailing - dotsX), height: bottomHeight)
   }
 
-  /// The Pages list from under the address bar down to the footer band, and the window's kind centered in that band.
-  /// The band never scrolls with the list. A banner (#648) keeps its place above the bottom bar's band, which is
+  /// The Pages list from under the address bar down to the footer band, the window's kind centered in that band and
+  /// the Extensions button at its trailing end, where the bottom bar has it. The label keeps a button's width clear on
+  /// both sides, so it stays centered and never runs under the button. The band never scrolls with the list. A banner (#648) keeps its place above the bottom bar's band, which is
   /// taller than the footer: while it reserves space, the list ends above it, as the row list of a normal window does.
   private func layoutPrivatePages() {
     guard isPrivate else { return }
@@ -690,9 +706,14 @@ public final class SidebarContainerView: NSView {
     let bottomInset = reserved > 0 ? SidebarMetrics.bottomBarHeight + reserved : footer
     privatePages.frame = NSRect(x: padding, y: top, width: max(0, bounds.width - 2 * padding),
                                 height: max(0, bounds.height - bottomInset - top))
+    let buttonSize = SidebarMetrics.bottomBarButtonSize
+    let labelInset = padding + (extensionsButton == nil ? 0 : buttonSize)
     let labelHeight = ceil(windowKindLabel.intrinsicContentSize.height)
-    windowKindLabel.frame = NSRect(x: padding, y: (bounds.height - footer + (footer - labelHeight) / 2).rounded(),
-                                   width: max(0, bounds.width - 2 * padding), height: labelHeight)
+    windowKindLabel.frame = NSRect(x: labelInset, y: (bounds.height - footer + (footer - labelHeight) / 2).rounded(),
+                                   width: max(0, bounds.width - 2 * labelInset), height: labelHeight)
+    extensionsButton?.frame = NSRect(x: bounds.width - padding - buttonSize,
+                                     y: (bounds.height - footer + (footer - buttonSize) / 2).rounded(),
+                                     width: buttonSize, height: buttonSize)
   }
 
   /// Trackpad swipes starting over the Favorites grid, bottom bar, or other sidebar chrome outside the outline page

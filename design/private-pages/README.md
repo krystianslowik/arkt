@@ -48,6 +48,9 @@ Not picked: A (the Ctrl-Tab switcher lists the pages; keyboard only).
   comes back. Cmd-W on the last page closes the window.
 - **Footer**: the window's kind ("Incognito" or "Blank"), 11 pt semibold `sidebarForeground`, centered in a 40 pt band
   at the bottom of the sidebar.
+  The Extensions button sits at the band's trailing end, as in a normal window's bottom bar (same action, label,
+  open-panel fill, flavor and non-key dimming), so extensions stay reachable. Archive, New Tab and Library are not in
+  these windows (maintainer, 2026-11-07).
 
 ## Order
 
