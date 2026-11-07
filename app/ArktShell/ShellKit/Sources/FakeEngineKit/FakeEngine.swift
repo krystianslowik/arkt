@@ -643,6 +643,9 @@ public final class FakeEngine: EngineClient, EngineImporting, EngineDownloads, E
     if sitePermissions.reset(forOrigin: origin) { announcePageInfo(forOrigin: origin) }
   }
 
+  /// WebKit's site data is not counted (`FakeSitePermissions`), so an open panel changes nothing.
+  public func pageInfoDidOpen(tab: TabID) {}
+
   public func pageInfoDidClose(tab: TabID) {}
 
   private func announcePageInfo(forOrigin origin: String) {

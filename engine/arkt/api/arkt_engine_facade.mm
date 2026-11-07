@@ -3309,6 +3309,18 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
                        self, base::SysNSStringToUTF8(origin))];
 }
 
+- (void)pageInfoDidOpen {
+  [self runOrQueue:"pageInfoDidOpen"
+              work:base::BindOnce(
+                       [](ArktFacadeTab* that) {
+                         if (that.contents && arkt::g_facade->page_info()) {
+                           arkt::g_facade->page_info()->PageInfoOpened(
+                               that.contents);
+                         }
+                       },
+                       self)];
+}
+
 - (void)pageInfoDidClose {
   [self runOrQueue:"pageInfoDidClose"
               work:base::BindOnce(

@@ -221,8 +221,9 @@ typedef NS_ENUM(NSInteger, ArktEngineEventKind) {
   ArktEngineEventKindTabFullscreenChanged = 29,
   // The tab's page info changed (#583): a content setting of its site
   // changed in its profile (from this facade, Chromium's settings pages or an
-  // extension), its connection's security state changed, or the site data
-  // count it waits for arrived. No values: the handle's pageInfo has the new
+  // extension), its connection's security state changed, or, while its page
+  // info panel is open (-pageInfoDidOpen), the site data count it waits for
+  // arrived. No values: the handle's pageInfo has the new
   // state. Sent only for tabs whose last committed origin the change matches;
   // one call of this facade that changes settings reports once per tab.
   ArktEngineEventKindPageInfoChanged = 30,
@@ -820,11 +821,14 @@ NS_SWIFT_UI_ACTOR
 @property(nonatomic, readonly, nullable, copy) NSDate* certificateValidUntil;
 // Site data as chrome://settings/content/siteDetails counts it
 // (BrowsingDataModel entries matching the origin: their storage bytes and
-// first-party cookies). NO before the profile's first count has arrived;
-// PageInfoChanged follows when it does. A count older than 10 s is recounted
-// when read: the old count is reported meanwhile, and PageInfoChanged
-// follows when the new one differs from what the tab read. NO for a page
-// without site settings.
+// first-party cookies). Counted only for a tab whose page info panel is open
+// (-pageInfoDidOpen until -pageInfoDidClose): NO before the profile's first
+// count has arrived, and PageInfoChanged follows when it does. While the panel
+// is open, a count older than 10 s is recounted when read: the old count is
+// reported meanwhile, and PageInfoChanged follows when the new one differs
+// from what the tab read. With no panel open, a read reports the profile's
+// last count, however old, or NO without one, and never starts a count. NO
+// for a page without site settings.
 @property(nonatomic, readonly) BOOL hasSiteData;
 @property(nonatomic, readonly) NSInteger siteDataCookies;
 @property(nonatomic, readonly) int64_t siteDataBytes;
@@ -998,8 +1002,9 @@ NS_SWIFT_UI_ACTOR
                                             CGFloat scale))completion
     NS_SWIFT_NAME(copyFrame(maxPixelSize:completion:)) NS_SWIFT_DISABLE_ASYNC;
 // Page info (#583) of the tab's last committed page, in the tab's profile;
-// nil for a closed tab or one without a committed page. Reading it starts
-// the site data count when the profile's count is older than 10 s.
+// nil for a closed tab or one without a committed page. Reading it while the
+// tab's page info panel is open starts the site data count when the
+// profile's count is older than 10 s; otherwise reading it counts nothing.
 @property(nonatomic, readonly, nullable) id<ArktPageInfo> pageInfo;
 // Sets one permission of `origin` in the tab's profile, as Chromium's page
 // info does (PageInfo::OnSitePermissionChanged: the narrowest pattern,
@@ -1018,6 +1023,13 @@ NS_SWIFT_UI_ACTOR
 // stays, as with Chromium's page info. Cookies and site data stay.
 - (void)resetPermissionsForOrigin:(NSString*)origin
     NS_SWIFT_NAME(resetPermissions(forOrigin:));
+// The shell's page info panel of this tab opened (#782). Until
+// -pageInfoDidClose or the tab closing, reads of pageInfo count the site
+// data, on every page of the tab: the count starts now when the profile's
+// count is older than 10 s or missing, and PageInfoChanged follows when it
+// differs from the one the tab had. A second call while open does nothing
+// more.
+- (void)pageInfoDidOpen;
 // The shell's page info panel of this tab closed (PageInfo::OnUIClosing).
 // After a change from this tab that needs a reload (any kind but sound),
 // Chromium's reload infobar (ArktInfobarKindReload) is added to this tab,
