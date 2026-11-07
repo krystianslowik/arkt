@@ -129,6 +129,10 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
   var topBar: LittleArktTopBar { rootView.topBar }
   var card: ContentCardView { rootView.card }
   public var isClosed: Bool { phase == .closed }
+  /// Open and showing its page, not moving it out or closing.
+  var isOpen: Bool { phase == .open }
+  /// The top bar's Space chooser is up (its delegate reports the open and the close); it owns Esc meanwhile.
+  var isChooserOpen = false
   var isAnimating: Bool { animator.isRunning }
   /// What the window's own motion shows now.
   var currentScene: LittleArktScene { animator.currentScene }
@@ -589,6 +593,7 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
   /// (docs/design/little-arkt.md, Copy).
   func chooserMenu() -> NSMenu {
     let menu = NSMenu(title: LittleArktCopy.chooseSpace)
+    menu.delegate = self
     let heading = NSMenuItem(title: LittleArktCopy.chooserHeading, action: nil, keyEquivalent: "")
     heading.isEnabled = false
     menu.addItem(heading)
