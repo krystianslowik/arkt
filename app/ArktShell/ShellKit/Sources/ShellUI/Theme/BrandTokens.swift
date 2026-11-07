@@ -1,3 +1,5 @@
+import CoreGraphics
+
 /// Arkt's brand colors, kept apart from the Arc-parity `ShellTokens` so brand work never moves parity values.
 ///
 /// Every token is an sRGB `TokenPair`; all are opaque except the hairlines and control fills, which are graphite or
@@ -63,12 +65,16 @@ public enum BrandTokens {
   /// Pressed fills of the glass and quiet buttons.
   public static let brandControlFillPressed = TokenPair(light: .srgb(hex: 0x202321, alpha: 0.10),
                                                         dark: .srgb(hex: 0xFAF9F5, alpha: 0.12))
-  /// The appearance control's thumb: a hairline lift, the same black in both appearances, drawn at (0, -1).
+  /// The appearance control's thumb: a hairline lift 1 pt down, the same black in both appearances.
   public static let appearanceThumbShadow = ShadowToken(color: TokenPair(light: .black(0.12), dark: .black(0.12)),
                                                         radius: 1, offsetY: 1)
-  /// The Space preview card on Make it yours: a deep drop, the same black in both appearances.
+  /// The Space preview card on Make it yours, the prototype's `0 24px 48px -26px` at the 340 pt reference width: 24 pt
+  /// down, a 24 pt blur (CALayer's radius is half the CSS blur), drawn from the card inset by
+  /// `spacePreviewShadowSpread` so only a soft band shows below it. The same black in both appearances.
   public static let spacePreviewShadow = ShadowToken(color: TokenPair(light: .black(0.45), dark: .black(0.45)),
-                                                     radius: 24, offsetY: 14)
+                                                     radius: 24, offsetY: 24)
+  /// The prototype's negative spread for `spacePreviewShadow`: the shadow's shape is the card inset this much per side.
+  public static let spacePreviewShadowSpread: CGFloat = 26
 
   /// Source-over of a translucent `top` on an opaque `bottom`, both read as sRGB; the result is opaque. For contrast
   /// checks of the translucent tokens above.

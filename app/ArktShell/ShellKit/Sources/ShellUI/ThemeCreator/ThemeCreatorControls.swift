@@ -47,7 +47,7 @@ enum ThemeCreatorMetrics {
 /// Shadows of the theme creator's controls (#764). One black in both appearances: they sit on the popover's own
 /// surface, not on the window. Values are the ones the controls drew before they were named.
 enum ThemeCreatorTokens {
-  /// The slider knob's lift, drawn at (0, -2).
+  /// The slider knob's lift, 2 pt down.
   static let sliderKnobShadow = ShadowToken(color: TokenPair(light: .black(0.25), dark: .black(0.25)),
                                             radius: 3, offsetY: 2)
   /// The pad's inner shadow along its top edge.
@@ -231,7 +231,7 @@ final class ThemeSliderView: ThemeFocusableView {
     knob.shadowColor = ThemeCreatorTokens.sliderKnobShadow.color.light.cgColor
     knob.shadowOpacity = 1
     knob.shadowRadius = ThemeCreatorTokens.sliderKnobShadow.radius
-    knob.shadowOffset = ThemeCreatorTokens.sliderKnobShadow.unflippedOffset
+    knob.shadowOffset = ThemeCreatorTokens.sliderKnobShadow.flippedOffset   // a sublayer of this flipped view
     knobEdge.cornerRadius = ThemeCreatorMetrics.knob / 2
     knobEdge.borderWidth = 0.5
     knobEdge.borderColor = CGColor(gray: 0, alpha: 0.2)

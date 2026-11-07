@@ -387,6 +387,28 @@ final class OnboardingTests: XCTestCase {
 
   // MARK: - No Arc: Make it yours first, a fresh Space
 
+  /// The Space preview's drop survives the window's appearance (#767): AppKit resets a backing layer's shadow when the
+  /// appearance changes, and the preview puts it back on its next display, in both appearances.
+  func testTheSpacePreviewKeepsItsDropOnTheThemeStep() throws {
+    let stub = StubSidebar()
+    let window = makeWindow(stub)
+    window.showWindow(nil)
+    let services = FakeOnboardingServices(sidebar: stub, arcFound: false)
+    let onboarding = present(window, services)
+    onboarding.performPrimary()
+    XCTAssertEqual(onboarding.flow.step, .theme)
+    let preview = try XCTUnwrap(stepView(onboarding).preview)
+    let nsWindow = try XCTUnwrap(window.window)
+    for name in [nil, NSAppearance.Name.darkAqua, .aqua] {
+      if let name { nsWindow.appearance = NSAppearance(named: name) }
+      nsWindow.displayIfNeeded()
+      XCTAssertEqual(preview.layer?.shadowOpacity, 1, "the drop is drawn (\(name?.rawValue ?? "initial"))")
+      XCTAssertEqual(preview.layer?.shadowOffset.height ?? 0, BrandTokens.spacePreviewShadow.offsetY
+                       * preview.bounds.width / 340, accuracy: 0.001, "and falls down")
+    }
+    window.close()
+  }
+
   func testNoArcBranchCreatesTheChosenSpace() throws {
     let stub = StubSidebar()
     let window = makeWindow(stub)
