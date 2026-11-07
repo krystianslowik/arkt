@@ -5445,3 +5445,59 @@ it was cleared afterwards. Nothing under `~/Applications/ArktTest` or `/Applicat
 - Cleanup: both runs and the loopback server stopped by exact PID; profiles and build log deleted; no crash report.
   The clipboard held text this time and the run replaced it with the page URL; it was cleared afterwards and the
   earlier text was not restored.
+
+## #759: gn check under //arkt
+
+### Gate
+
+1. Task: declare the dependencies behind the header-include errors that `gn check out/Spike '//arkt/*'` reports.
+   An overlay `BUILD.gn` change is enough; no Chromium patch.
+2. Facade header: unchanged. `arkt_engine_facade.mm`: unchanged.
+3. `.patches`: unchanged, no patch number claimed.
+4. Commands: `gn check out/Spike '//arkt/*'` before and after, `nice -n 15 autoninja -j 4 -C out/Spike chrome`, and
+   the engine ABI Swift tests. Chromium disk 1.9 TiB free.
+
+### Before
+
+`gn check out/Spike '//arkt/*'` reported 5 errors in 2 targets (4 in `//arkt/api:embedder`, 1 in
+`//arkt/browser:window`), so the count reads as 4 when only the first target is counted:
+
+- `arkt/api/arkt_engine_facade.mm`, lines 71 to 74: `find_notification_details.h`, `find_result_observer.h`,
+  `find_tab_helper.h` and `find_types.h`, from `//components/find_in_page`. The target reached it only through
+  `//arkt/browser:window`, which depends privately on `//chrome/browser/ui/find_bar`.
+- `arkt/browser/arkt_extension_batch_install.mm:29`: `extensions/browser/webstore_install_result.h`, from
+  `//extensions/browser:webstore_installer`, reached only privately through `//chrome/browser/extensions`.
+
+### What landed
+
+- `//arkt/api:embedder` depends on `//components/find_in_page`.
+- `//arkt/browser:window` depends on `//extensions/browser:webstore_installer`.
+
+Neither upstream target sets `visibility`. No include line, source file or patch changed.
+
+### After
+
+- `gn check out/Spike '//arkt/*'`: `Header dependency check OK`.
+- `gn check out/Arkt '//arkt/*'`: `Header dependency check OK`.
+- Overlay link: `readlink $CR/arkt` prints the engine worktree's `engine/arkt`.
+- Sync check: `.patches` 14 lines, 14 `arkt` commits, in sync.
+- `cmp` of the two facade header copies: identical (header untouched).
+
+### Build
+
+`nice -n 15 autoninja -j 4 -C out/Spike chrome`: `The build has finished successfully.`, 58 s. GN regenerated
+`build.ninja`, both target files now list the new dependency, and `libchrome_dll.dylib` was relinked.
+
+### Swift tests (`nice -n 20`, `-j 2`, in `app/ArktShell/ShellKit`)
+
+`swift test -j 2 --filter 'ArktEngineABITests|ChromiumEngineKitTests'`: `Test run with 33 tests in 11 suites
+passed`. No Swift file changed; the run confirms the ABI targets still build and pass on this branch.
+
+### Patch budget
+
+Unchanged: 14 patches.
+
+### Cleanup
+
+No Chromium run was launched, so there is no profile, process or crash report to remove. The build log stayed
+outside the repo and the Chromium disk.
