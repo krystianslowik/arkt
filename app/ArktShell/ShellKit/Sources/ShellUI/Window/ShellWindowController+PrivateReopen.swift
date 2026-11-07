@@ -43,6 +43,7 @@ extension ShellWindowController {
   /// close goes back on the stack. True when something happened that ends the reopen.
   func reopen(_ closed: ClosedPrivatePage) -> Bool {
     guard isPrivateWindow else {
+      assertionFailure("a private page's close is only ever on a private window's stack")
       closeParked(ClosedItem.privatePage(closed).parkedTabs)
       return false
     }

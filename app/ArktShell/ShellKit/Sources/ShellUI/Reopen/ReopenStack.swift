@@ -178,11 +178,13 @@ public struct ReopenStack: Sendable {
     return []
   }
 
-  /// Takes off the most recent close of private page `tab` (its close was cancelled). Returns its parked copy to close.
+  /// Takes off every close of private page `tab` (its close was cancelled, so none of them happened). Returns their
+  /// parked copies to close.
   public mutating func remove(privatePage tab: TabID) -> [TabID] {
-    guard let index = items.lastIndex(where: { if case .privatePage(let page) = $0 { page.tab == tab } else { false } })
-    else { return [] }
-    return items.remove(at: index).parkedTabs
+    let isTab = { (item: ClosedItem) -> Bool in if case .privatePage(let page) = item { page.tab == tab } else { false } }
+    let removed = items.filter(isTab)
+    items.removeAll(where: isTab)
+    return removed.flatMap(\.parkedTabs)
   }
 
   /// Puts `peek` on the most recent close of `node`, the row whose close closed it. False when there is none.

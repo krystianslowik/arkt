@@ -118,10 +118,12 @@ extension ShellWindowController {
     return closePrivatePage(shown)
   }
 
-  /// Closes `tab`, one of this window's private pages, unless it is the last one. False when it is not closed here.
+  /// Closes `tab`, one of this window's private pages, unless it is the last one. False when it is not closed here. A
+  /// page whose close is already held at its leave-site prompt is left to that prompt: true, and nothing is pushed.
   @discardableResult
   func closePrivatePage(_ tab: TabID) -> Bool {
     guard privateTabs.contains(tab), privateTabs.count > 1 else { return false }
+    guard engine.snapshot(of: tab)?.isClosing != true else { return true }
     rememberPrivateClose(of: tab)                   // #746: Cmd-Shift-T brings it back in this window
     engine.closeTab(tab)
     return true

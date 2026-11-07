@@ -193,8 +193,10 @@ struct ReopenStackTests {
     let (parked, otherParked) = (TabID(), TabID())
     _ = stack.push(.privatePage(ClosedPrivatePage(tab: page, parked: parked, url: Self.url)))
     _ = stack.push(.privatePage(ClosedPrivatePage(tab: other, parked: otherParked, url: Self.url)))
+    let again = TabID()
+    _ = stack.push(.privatePage(ClosedPrivatePage(tab: page, parked: again, url: Self.url)))
     #expect(stack.isParked(parked))
-    #expect(stack.remove(privatePage: page) == [parked])
+    #expect(stack.remove(privatePage: page) == [parked, again])
     #expect(stack.remove(privatePage: page).isEmpty)
     #expect(stack.items == [.privatePage(ClosedPrivatePage(tab: other, parked: otherParked, url: Self.url))])
   }
