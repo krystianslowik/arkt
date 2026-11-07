@@ -153,29 +153,37 @@ final class ShadowDirectionInWindowTests: XCTestCase {
     try expectCastsDown(flight.shadowLayer, in: try render(flight.overlay), band: 2)
   }
 
-  /// The selected Archive row in the Archive window's own table (`selectionHighlightStyle = .regular`), focused and
-  /// unfocused: its fill shows (`tabCurrent`, lighter than the window behind it) and its lift casts down. The harness
-  /// above sets `.none`; this one hosts the row as production does.
-  ///
-  /// Known to fail (#796): the table adds AppKit's own selection view over the whole row, above the fill. It
-  /// draws the accent color while the table is focused and gray 0xDC while it is not, so neither the fill nor its
-  /// lift shows. Strict: the test reports when that stops.
+  /// #796: the selected Archive row in the Archive window's own table, focused and unfocused: its fill shows
+  /// (`tabCurrent`, lighter than the window behind it) and its lift casts down. The table draws no selection of its
+  /// own (`selectionHighlightStyle = .none`), so AppKit adds no selection view over the row. The selection is made
+  /// with the keyboard, and the row and the accessibility table both report it.
   func testTheSelectedArchiveRowInTheArchiveTable() async throws {
-    let controller = ArchiveWindowController(dataSource: OneRowArchive())
+    let controller = ArchiveWindowController(dataSource: ArchiveRowsStub(count: 2))
     let archive = try XCTUnwrap(controller.window)
     defer { archive.close() }
     archive.appearance = NSAppearance(named: .aqua)
     await controller.reload()
     archive.orderFront(nil)
-    controller.tableView.selectRowIndexes([0], byExtendingSelection: false)
+    let table = try XCTUnwrap(controller.tableView as? ArchiveTableView)
+    XCTAssertEqual(table.selectionHighlightStyle, .none, "the rows draw the selection themselves")
+    XCTAssertTrue(archive.makeFirstResponder(table))
+    for _ in 0..<2 { table.keyDown(with: try Self.down()) }   // Down from no selection: row 0, then row 1
+    XCTAssertEqual(table.selectedRow, 1)
     archive.contentView?.layoutSubtreeIfNeeded()
     archive.displayIfNeeded()
-    let row = try XCTUnwrap(controller.tableView.rowView(atRow: 0, makeIfNecessary: false) as? ArchiveRowView)
-    XCTAssertEqual(row.selectionHighlightStyle, .regular, "as the Archive window's table sets it")
+    let row = try XCTUnwrap(table.rowView(atRow: 1, makeIfNecessary: false) as? ArchiveRowView)
+    let other = try XCTUnwrap(table.rowView(atRow: 0, makeIfNecessary: false) as? ArchiveRowView)
     XCTAssertTrue(row.isSelected)
+    XCTAssertFalse(other.isSelected)
+    XCTAssertEqual(row.displayedFill, ShellTokens.tabCurrent.resolve(.light))
+    XCTAssertNil(other.displayedFill)
+    XCTAssertTrue(row.isAccessibilitySelected())
+    XCTAssertFalse(other.isAccessibilitySelected())
+    let selected = try XCTUnwrap(table.axProxyRows.element.accessibilitySelectedRows())
+    XCTAssertEqual(selected.compactMap { ($0 as? AXProxyRow)?.accessibilityIndex() }, [1])
+    XCTAssertEqual(row.subviews.filter { !($0 is NSTableCellView) }, [], "no selection view over the row")
     let rowLayer = try XCTUnwrap(row.layer)
 
-    XCTExpectFailure("#796: AppKit's selection view covers the Archive row's fill and lift")
     // The table emphasizes its selection while it is first responder in the key window; the runner is never active,
     // so both states are set by hand.
     for focused in [true, false] {
@@ -193,6 +201,12 @@ final class ShadowDirectionInWindowTests: XCTestCase {
   }
 
   // MARK: Helpers
+
+  private static func down() throws -> NSEvent {
+    try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0,
+                                   context: nil, characters: "\u{F701}", charactersIgnoringModifiers: "\u{F701}",
+                                   isARepeat: false, keyCode: 125))
+  }
 
   private static func standIn(_ frame: CGRect) -> CALayer {
     let layer = CALayer()
@@ -266,15 +280,16 @@ private struct Rendered {
   }
 }
 
-/// One archived tab, for the Archive window's row.
+/// A few archived tabs, for the Archive window's rows.
 @MainActor
-private final class OneRowArchive: ArchiveListDataSource {
+final class ArchiveRowsStub: ArchiveListDataSource {
   var canRestore = true
   var onChange: (@MainActor () -> Void)?
-  func loadPage() async -> ArchiveListPage {
-    ArchiveListPage(rows: [ArchiveRow(id: UUID(), title: "Archived", detail: "a.example - Work", reason: "Closed")],
-                    unreadable: 0, mayHaveMore: false)
+  private let rows: [ArchiveRow]
+  init(count: Int = 1) {
+    rows = (0..<count).map { ArchiveRow(id: UUID(), title: "Archived \($0)", detail: "a.example - Work", reason: "Closed") }
   }
+  func loadPage() async -> ArchiveListPage { ArchiveListPage(rows: rows, unreadable: 0, mayHaveMore: false) }
   func loadMore() async -> ArchiveListPage { await loadPage() }
   func refresh() async -> ArchiveListPage { await loadPage() }
   func restore(_ id: UUID) -> Bool { false }
