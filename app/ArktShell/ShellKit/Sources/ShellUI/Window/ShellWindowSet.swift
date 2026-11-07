@@ -135,7 +135,24 @@ public final class ShellWindowSet {
     guard !recoveryStarted else { return }
     recoveryStarted = true
     guard let recovery else { return }
-    let model = RestorePagesModel(recovery: recovery)
+    let model = RestorePagesModel(recovery: recovery) { [weak self] pages in
+      guard let self, let host = self.recoveryWindow, !host.isWindowCloseRequested, !host.isPrivateWindow else {
+        return false
+      }
+      // Preflight before opening anything, so a missing Peek source leaves the whole offer intact.
+      let peeks = pages.filter { $0.kind == .peek }
+      let source = host.currentTab
+      // Peek currently permits one page per source; never acknowledge a batch that would replace one.
+      guard peeks.count <= 1, peeks.isEmpty || source != nil else { return false }
+      for page in pages {
+        switch page.kind {
+        case .littleArkt: self.openLittleArkt(url: page.url)
+        case .peek:
+          if let source { host.peek.open(page.url, from: source) }
+        }
+      }
+      return true
+    }
     pendingRecovery = model
     model.onAnswer = { [weak self] in
       self?.pendingRecovery = nil
@@ -145,7 +162,7 @@ public final class ShellWindowSet {
   }
 
   private func presentPendingRecovery() {
-    let eligible = controllers.filter { !$0.isPrivateWindow }
+    let eligible = controllers.filter { !$0.isPrivateWindow && !$0.isWindowCloseRequested }
     let window = primary.flatMap { candidate in eligible.first { $0 === candidate } } ?? eligible.first
     guard recoveryWindow == nil, let model = pendingRecovery, let window else { return }
     switch model.presentation {
@@ -543,6 +560,7 @@ public final class ShellWindowSet {
       self.recoveryWindow = nil
       self.presentPendingRecovery()
     }
+    controller.onRecoveryEligibilityChanged = { [weak self] in self?.presentPendingRecovery() }
     controller.onBecomingPrivate = { [weak self, weak controller] in
       guard let self, let controller, self.recoveryWindow === controller else { return }
       controller.rootView.subviews.filter { $0 is RestorePagesView }.forEach { $0.removeFromSuperview() }

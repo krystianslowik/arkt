@@ -4612,10 +4612,9 @@ Deleted: the throwaway profiles under `profiles/575-20261107/`, the logs, and th
 wrote. Nothing under `~/Applications/ArktTest` or `/Applications/Arkt.app` was touched.
 ### Restore pages Swift boundary (#580)
 
-The Swift recovery contract carries only non-private Little Arkt and Peek page titles, URLs and kinds, and accepts an
-explicit request to reopen all selected pages outside the sidebar. The shell presents the offer after its own window
-session restoration; an empty offer acknowledges the crash and shows the status notice. The in-memory provider records
-requests. Chromium integration and killed-process validation remain pending #577.
+The Swift recovery contract carries only non-private Little Arkt and Peek page titles, URLs and kinds, and supplies the list to the shell, which requests reopening outside the sidebar. The shell presents the offer after its own window
+session restoration; an empty offer acknowledges the crash and shows the status notice. Chromium integration and
+killed-process validation remain pending #577.
 
 Test-first CI run 42112475936 at 75b3800 failed to compile the missing model in ShellKit tests (job 127543462923)
 and GUI tests (job 127543462890); the Swift tests gate (job 127547434337) consequently failed. No tests executed in
@@ -4626,11 +4625,10 @@ pending.
 ### Restore pages review fixes (#580)
 
 The window set retains an unanswered decision across regular-window closure and presents it when another window is
-available. The panel remains above the content in Split View. A page-capable provider must accept or reject the exact
-eligible request; rejection retains the offer and crash. Crash-only providers expose no page capability. A persistent
+available. The panel remains above the content in Split View. The shell requests the pages before acknowledging; an unavailable shell path retains the offer and crash. Crash-only providers expose no page capability. A persistent
 database-recovery notice remains underneath the six-second crash notice and reappears after dismissal or expiry.
 
-Regression coverage exercises the production window-set coordinator and window lifecycle, capability and rejection,
+Regression coverage exercises the production window-set coordinator and window lifecycle, capability and unavailable shell paths,
 Split View, and notice ordering. These additions have not run locally because the installed toolchain cannot compile the
 baseline; syntax parsing alone does not validate behavior. Direct `AppSession.finishLaunch`, GUI, keyboard, accessibility,
 motion and real-engine killed-process validation remain pending. Chromium delivery remains with #577.
@@ -4646,3 +4644,11 @@ New GUI regressions cover both private modes, transfer with a private primary, d
 regular host closes, private creation while an offer is pending, and a host changing mode. They were written before
 the fix but not run locally: the installed toolchain cannot compile the baseline. CI must validate compilation and
 behavior on the new head; syntax parsing and source checks do not establish test results.
+
+### Maintainer feedback on restore pages (#580)
+
+The provider supplies a list only; the shell reopens Little Arkt and Peek pages using the host's current tab for Peek.
+A missing source or multiple Peek pages retain the offer: the current Peek controller replaces an existing Peek from
+the same source, so multiple Peek recovery requires a further shell solution. Closing windows are ineligible and a
+cancelled close retries pending presentation. New regression tests and the private-routing suite are not run locally;
+CI must validate the merged head. Chromium and killed-process validation remain pending #577.

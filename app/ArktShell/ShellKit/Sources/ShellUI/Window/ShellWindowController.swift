@@ -82,6 +82,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// links); the app builds a new window instead (#241: Dock reopen).
   public private(set) var isClosed = false
   public var onRecoveryWindowClosed: (@MainActor () -> Void)?
+  var onRecoveryEligibilityChanged: (@MainActor () -> Void)?
   var onBecomingPrivate: (@MainActor () -> Void)?
   /// Shown in the sidebar when the engine runs extensions (`EngineExtensions`).
   public internal(set) var extensionsButton: ExtensionsButton?
@@ -388,6 +389,9 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       view.frame.origin = NSPoint(x: card.maxX - view.frame.width - 22, y: card.minY + 22)
       rootView.addSubview(view, positioned: .above, relativeTo: rootView.split)
       view.appear()
+      if let window, window.firstResponder == nil || window.firstResponder === window {
+        window.makeFirstResponder(view)
+      }
     }
   }
 

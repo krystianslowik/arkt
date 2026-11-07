@@ -65,13 +65,10 @@ public protocol EngineSessionRecovery: AnyObject {
   func dismissLastSession()
 }
 
-/// An engine that can both offer and restore eligible pages. Legacy crash-only providers do not conform.
+/// A list of eligible pages. Providers must never return private or sidebar data.
 @MainActor
 public protocol EnginePageRecovery: EngineSessionRecovery {
   var recoveryPages: [RecoveryPage] { get }
-  /// Accepts all supplied eligible pages for restoration, or rejects without restoring any. A rejection leaves
-  /// the crash unacknowledged so the user can retry or dismiss. Never restore a full session into the sidebar.
-  func restorePages(_ pages: [RecoveryPage]) -> Bool
 }
 
 extension EngineClient {

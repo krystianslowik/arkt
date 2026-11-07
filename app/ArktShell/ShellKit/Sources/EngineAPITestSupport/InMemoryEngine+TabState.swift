@@ -70,15 +70,6 @@ public final class InMemorySessionRecovery: EnginePageRecovery {
   public private(set) var lastSessionCrashed = false
   public private(set) var dismissals = 0
   public var recoveryPages: [RecoveryPage] = []
-  public private(set) var restoredPages: [[RecoveryPage]] = []
-
-  public var acceptsRestore = true
-  public func restorePages(_ pages: [RecoveryPage]) -> Bool {
-    guard acceptsRestore else { return false }
-    restoredPages.append(pages)
-    return true
-  }
-
   public init() {}
 
   /// Test hook: the previous run ended without a clean quit.
