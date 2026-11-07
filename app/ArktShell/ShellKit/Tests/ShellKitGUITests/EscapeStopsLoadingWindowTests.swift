@@ -125,4 +125,43 @@ final class EscapeStopsLoadingWindowTests: XCTestCase {
     XCTAssertFalse(harness.engine.simulateUnhandledKeyDown(try key(53), in: tab))
     XCTAssertTrue(stops(harness).isEmpty)
   }
+
+  // MARK: The Chromium engine does not name the tab
+
+  /// `arkt_browser_window.mm` posts the unused key with a nil tab: the Esc is the active page's when the focus is
+  /// inside that page.
+  func testANilTabStopsTheActivePageWhenItHasTheFocus() throws {
+    let (harness, _, tab) = try makeWindow()
+    let window = try XCTUnwrap(harness.controller.window)
+    let page = try XCTUnwrap(harness.engine.contentView(for: tab))
+    XCTAssertTrue(window.makeFirstResponder(page), "fixture: the page has the focus")
+    XCTAssertTrue(harness.controller.engineHost.handleUnhandledKeyDown(try key(53), in: nil))
+    XCTAssertEqual(harness.engine.executedCommands.map(\.command), [.stop])
+  }
+
+  func testANilTabWithTheFocusOutsideTheActivePageDoesNotStop() throws {
+    let (harness, _, _) = try makeWindow()
+    let window = try XCTUnwrap(harness.controller.window)
+    XCTAssertTrue(window.makeFirstResponder(nil), "fixture: no page has the focus")
+    XCTAssertFalse(harness.controller.engineHost.handleUnhandledKeyDown(try key(53), in: nil))
+    XCTAssertTrue(stops(harness).isEmpty)
+  }
+
+  /// In a split, Stop acts on the focused pane (the engine's active tab): an Esc from the other pane stops nothing.
+  func testANilTabFromTheOtherSplitPaneDoesNotStop() throws {
+    let (harness, world, _) = try makeWindow()
+    harness.controller.activate(node: world.split)
+    harness.controller.window?.contentView?.layoutSubtreeIfNeeded()
+    let window = try XCTUnwrap(harness.controller.window)
+    let engineWindow = try XCTUnwrap(harness.controller.engineWindow)
+    let active = try XCTUnwrap(harness.engine.latestActiveTab(in: engineWindow))
+    let panes = try world.panes.map { try XCTUnwrap(harness.controller.engineTab(of: $0)) }
+    XCTAssertTrue(panes.contains(active), "fixture: a pane is the active tab")
+    let other = try XCTUnwrap(panes.first { $0 != active })
+    XCTAssertEqual(harness.engine.snapshot(of: active)?.isLoading, true, "fixture: the active pane is loading")
+    let otherPage = try XCTUnwrap(harness.engine.contentView(for: other))
+    XCTAssertTrue(window.makeFirstResponder(otherPage), "fixture: the other pane has the focus")
+    XCTAssertFalse(harness.controller.engineHost.handleUnhandledKeyDown(try key(53), in: nil))
+    XCTAssertTrue(stops(harness).isEmpty)
+  }
 }

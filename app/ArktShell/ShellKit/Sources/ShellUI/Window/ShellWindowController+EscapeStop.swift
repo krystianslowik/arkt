@@ -17,10 +17,21 @@ extension ShellWindowController {
   /// An unmodified Esc the page of `tab` did not use: sends Stop when that page is the window's active tab, is loading
   /// and nothing else owns the key. True when it did. Stop goes through the engine like Cmd-., so it acts on the
   /// window's active tab, which is why an Esc from any other tab is left alone.
+  ///
+  /// The Chromium engine does not name the tab (`unhandledKeyDown:inTab:nil`). Then the Esc counts as the active
+  /// tab's only while the first responder is inside that tab's page, so an Esc from the other pane of a split, or
+  /// from anywhere else in the window, stops nothing.
   func stopLoadingOnEscape(_ event: NSEvent, in tab: TabID?) -> Bool {
     guard event.keyCode == 53, event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty,
-          let tab, let engineWindow, engine.latestActiveTab(in: engineWindow) == tab,
-          let snapshot = engine.snapshot(of: tab) else { return false }
+          let engineWindow, let active = engine.latestActiveTab(in: engineWindow) else { return false }
+    if let tab {
+      guard tab == active else { return false }
+    } else {
+      guard let page = engine.contentView(for: active), let responder = window?.firstResponder as? NSView,
+            responder.isDescendant(of: page) else { return false }
+    }
+    guard let snapshot = engine.snapshot(of: active) else { return false }
+    let tab = active
     let stops = Self.escapeStopsLoading(
       isLoading: snapshot.isLoading, peekOpen: peek.session != nil, findBarOpen: findBar.isOpen(tab),
       commandBarVisible: commandBar.isVisible,
