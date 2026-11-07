@@ -1,3 +1,4 @@
+import AppKit
 import Testing
 @testable import ShellUI
 
@@ -42,6 +43,27 @@ struct ThemeCompositeTests {
     #expect(abs(first.color.red - drawn.baseColors[0].red * 0.6) < 1e-6)
     #expect(abs(first.color.green - drawn.baseColors[0].green * 0.6) < 1e-6)
     #expect(abs(first.color.blue - drawn.baseColors[0].blue * 0.6) < 1e-6)
+  }
+
+  @Test(arguments: [0.25, 1.0])
+  func mixedColorSpacesConvertBeforeBlending(alpha: Double) throws {
+    let pairs: [(RGBA, RGBA)] = [
+      (.p3(hex: 0x5A8CBA, alpha: 1), .srgb(hex: 0xC47850, alpha: alpha)),
+      (.srgb(hex: 0x5A8CBA), .p3(hex: 0xA07860, alpha: alpha)),
+    ]
+    for (base, overlay) in pairs {
+      let name = base.space == .displayP3 ? CGColorSpace.displayP3 : CGColorSpace.sRGB
+      let target = try #require(CGColorSpace(name: name))
+      let converted = try #require(overlay.cgColor.converted(to: target, intent: .relativeColorimetric, options: nil))
+      let components = try #require(converted.components)
+      let result = try #require(ThemeGradient.composite(base: [base], overlay: [overlay]).first?.color)
+      #expect(result.space == base.space)
+      for (actual, top, bottom) in zip(zip([result.red, result.green, result.blue], components),
+                                       [base.red, base.green, base.blue]).map({ ($0.0.0, Double($0.0.1), $0.1) }) {
+        #expect(abs(actual - (top * alpha + bottom * (1 - alpha))) < 0.003)
+      }
+      #expect(result.alpha == 1)
+    }
   }
 
   @Test func noOverlayKeepsTheExpandedBase() {
