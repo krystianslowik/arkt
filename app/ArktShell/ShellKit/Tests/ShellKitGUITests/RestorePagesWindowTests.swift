@@ -2,7 +2,7 @@ import AppKit
 import EngineAPI
 import EngineAPITestSupport
 import XCTest
-@testable import ShellUI
+@_spi(Smoke) @testable import ShellUI
 
 @MainActor
 final class RestorePagesWindowTests: XCTestCase {
