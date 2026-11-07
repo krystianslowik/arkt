@@ -7,12 +7,19 @@ import AppKit
 
 /// A label whose text color is a token with alpha: it draws the token as given.
 final class TokenLabel: NSTextField {
+  /// Clicks go to the views under the label (a title drawn over a checkbox's own).
+  var passesMouseThrough = false
+
   override func draw(_ dirtyRect: NSRect) {
     super.draw(dirtyRect)
   }
+
+  override func hitTest(_ point: NSPoint) -> NSView? {
+    passesMouseThrough ? nil : super.hitTest(point)
+  }
 }
 
-/// A plain button (a text link, a checkbox) whose title color is a token with alpha: it draws the token as given.
+/// A plain text button (a link) whose title color is a token with alpha: it draws the token as given.
 class TokenTitleButton: NSButton {
   override func draw(_ dirtyRect: NSRect) {
     super.draw(dirtyRect)

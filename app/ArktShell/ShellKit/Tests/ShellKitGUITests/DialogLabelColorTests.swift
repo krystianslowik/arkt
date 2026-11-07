@@ -20,7 +20,7 @@ final class DialogLabelColorTests: XCTestCase {
   }
 
   override func tearDown() async throws {
-    for window in windows { window.orderOut(nil) }
+    for window in windows { window.close() }
     windows = []
   }
 
@@ -93,6 +93,101 @@ final class DialogLabelColorTests: XCTestCase {
                     "footer link", file: file, line: line)
   }
 
+  // MARK: - Checkbox, subtitle and list
+
+  /// A dialog with every kind of text the sheet draws: subtitle, paragraph, a list with its heading, and a checkbox.
+  private static let fullContent = DialogContent(
+    title: "Remove Quiet Reader?", subtitle: "Added from the Chrome Web Store",
+    paragraphs: [.init("Its settings on this Mac are removed too.")], listHeading: "It could read",
+    listItems: ["Pages you open", "Your downloads"], primaryTitle: "Remove", cancelTitle: "Cancel",
+    isDestructive: true, checkbox: .init("Report abuse"))
+
+  func testASheetsSubtitleListAndCheckboxDrawTheirTokensInDark() throws {
+    try assertFullSheet(.dark)
+  }
+
+  func testASheetsSubtitleListAndCheckboxDrawTheirTokensInLight() throws {
+    try assertFullSheet(.light)
+  }
+
+  private func makeAlert(_ content: DialogContent, _ flavor: ThemeFlavor) -> DialogAlert {
+    let alert = DialogAlert(content: content)
+    alert.panel.isReleasedWhenClosed = false
+    alert.panel.appearance = SidebarBannerPopoverView.appearance(for: flavor)
+    alert.panel.orderFrontRegardless()
+    windows.append(alert.panel)
+    alert.panel.display()
+    return alert
+  }
+
+  private func assertFullSheet(_ flavor: ThemeFlavor, file: StaticString = #filePath, line: UInt = #line) throws {
+    let alert = makeAlert(Self.fullContent, flavor)
+    let shot = try Shot(alert.container)
+    let view = alert.view
+    let list = try XCTUnwrap(view.listField, file: file, line: line)
+    try shot.assert(try XCTUnwrap(view.subtitleField), drawn: ShellTokens.secondaryText, flavor: flavor, "subtitle",
+                    file: file, line: line)
+    try shot.assert(try XCTUnwrap(list.headingField), drawn: ShellTokens.secondaryText, flavor: flavor,
+                    "list heading", over: ArchiveTokens.listField, file: file, line: line)
+    for (index, item) in list.itemFields.enumerated() {
+      try shot.assert(item, drawn: ShellTokens.primaryText, flavor: flavor, "list item \(index)",
+                      over: ArchiveTokens.listField, file: file, line: line)
+    }
+    let label = try XCTUnwrap(view.checkboxTitleLabel, file: file, line: line)
+    XCTAssertEqual(label.stringValue, "Report abuse", file: file, line: line)
+    try shot.assert(label, drawn: ShellTokens.primaryText, flavor: flavor, "checkbox title", file: file, line: line)
+  }
+
+  /// The checkbox keeps AppKit's own box, accent and focus ring: only its title moved to a `TokenLabel`. Its box is
+  /// drawn pixel for pixel like a plain checkbox's, off and on (the accent fill), and its title still toggles it.
+  func testTheCheckboxKeepsAppKitsBoxAccentAndFocusRing() throws {
+    for flavor in [ThemeFlavor.light, .dark] {
+      for isOn in [false, true] {
+        var content = Self.fullContent
+        content.checkbox = .init("Report abuse", isOn: isOn)
+        let alert = makeAlert(content, flavor)
+        let checkbox = try XCTUnwrap(alert.view.checkboxButton)
+        XCTAssertTrue(type(of: checkbox) == NSButton.self, "AppKit's checkbox, not a subclass that redraws it")
+        XCTAssertEqual(checkbox.title, "Report abuse", "VoiceOver and the click target keep the title")
+        XCTAssertEqual(checkbox.accessibilityLabel(), "Report abuse")
+        XCTAssertNotEqual(checkbox.focusRingType, .none)
+        XCTAssertFalse(try XCTUnwrap(alert.view.checkboxTitleLabel).isAccessibilityElement())
+
+        let reference = NSButton(checkboxWithTitle: "Report abuse", target: nil, action: nil)
+        reference.font = .systemFont(ofSize: 13)
+        reference.state = isOn ? .on : .off
+        reference.frame = checkbox.frame
+        let host = try XCTUnwrap(alert.panel.contentView)
+        host.addSubview(reference, positioned: .below, relativeTo: nil)
+        defer { reference.removeFromSuperview() }
+        XCTAssertEqual(checkbox.focusRingMaskBounds, reference.focusRingMaskBounds, "the same focus ring")
+        let box = NSRect(x: 0, y: 0, width: checkbox.frame.height, height: checkbox.frame.height)
+        let drawn = try Shot(checkbox)
+        let plain = try Shot(reference)
+        let difference = drawn.largestDifference(from: plain, in: box)
+        XCTAssertLessThanOrEqual(difference, 2, "\(flavor) \(isOn ? "on" : "off"): the box as AppKit draws it")
+
+        // The title's text starts where the plain checkbox draws its own, within a point.
+        let labelInk = try XCTUnwrap(try Shot(title(alert)).inkOrigin(after: 0))
+        let plainInk = try XCTUnwrap(plain.inkOrigin(after: box.width))
+        let labelOffset = NSPoint(x: try title(alert).frame.minX - checkbox.frame.minX,
+                                  y: try title(alert).frame.minY - checkbox.frame.minY)
+        XCTAssertEqual(labelInk.x + labelOffset.x, plainInk.x, accuracy: 1, "\(flavor): the title's leading edge")
+        XCTAssertEqual(labelInk.y + labelOffset.y, plainInk.y, accuracy: 1, "\(flavor): the title's top")
+
+        // A click on the title lands on the checkbox, as before.
+        let title = try XCTUnwrap(alert.view.checkboxTitleLabel)
+        let point = alert.view.convert(NSPoint(x: title.frame.midX, y: title.frame.midY), to: alert.view.superview)
+        XCTAssertTrue(alert.view.hitTest(point) === checkbox, "a click on the title toggles the box")
+        XCTAssertTrue(alert.panel.makeFirstResponder(checkbox), "the box takes keyboard focus")
+      }
+    }
+  }
+
+  private func title(_ alert: DialogAlert) throws -> TokenLabel {
+    try XCTUnwrap(alert.view.checkboxTitleLabel)
+  }
+
   // MARK: - Screenshots
 
   /// 2x shots of both dialogs in light and dark for the pull request, written as `<dialog>-<flavor>.png`. Skipped
@@ -119,6 +214,8 @@ final class DialogLabelColorTests: XCTestCase {
       windows.append(alert.panel)
       alert.panel.display()
       try Shot(alert.container).write(to: folder.appendingPathComponent("launch-failure-\(suffix).png"))
+      let full = makeAlert(Self.fullContent, flavor)
+      try Shot(full.container).write(to: folder.appendingPathComponent("checkbox-list-\(suffix).png"))
     }
   }
 }
@@ -149,13 +246,17 @@ private struct Shot {
   }
 
   /// The token filled over the dialog surface, drawn the way `cacheDisplay` draws: the level its text should reach.
-  func expectedLevel(_ token: TokenPair, flavor: ThemeFlavor) throws -> Int {
+  func expectedLevel(_ token: TokenPair, flavor: ThemeFlavor, over underlay: TokenPair? = nil) throws -> Int {
     let swatch = try XCTUnwrap(Self.rep(size: NSSize(width: 4, height: 4), scale: scale))
     let context = try XCTUnwrap(NSGraphicsContext(bitmapImageRep: swatch))
     NSGraphicsContext.saveGraphicsState()
     NSGraphicsContext.current = context
     AlertTokens.dialogSurface.resolve(flavor).nsColor().setFill()
     NSRect(x: 0, y: 0, width: 4, height: 4).fill()
+    if let underlay {
+      underlay.resolve(flavor).nsColor().setFill()
+      NSRect(x: 0, y: 0, width: 4, height: 4).fill(using: .sourceOver)
+    }
     token.resolve(flavor).nsColor().setFill()
     NSRect(x: 0, y: 0, width: 4, height: 4).fill(using: .sourceOver)
     NSGraphicsContext.restoreGraphicsState()
@@ -182,12 +283,43 @@ private struct Shot {
     return best
   }
 
-  func assert(_ view: NSView, drawn token: TokenPair, flavor: ThemeFlavor, _ name: String, file: StaticString,
-              line: UInt) throws {
-    let expected = try expectedLevel(token, flavor: flavor)
+  func assert(_ view: NSView, drawn token: TokenPair, flavor: ThemeFlavor, _ name: String, over underlay: TokenPair? = nil,
+              file: StaticString, line: UInt) throws {
+    let expected = try expectedLevel(token, flavor: flavor, over: underlay)
     let drawn = try drawnLevel(of: view, flavor: flavor)
     XCTAssertLessThanOrEqual(abs(drawn - expected), DialogLabelColorTestsTolerance.levels,
                              "\(name) in \(flavor): drawn \(drawn), token \(expected)", file: file, line: line)
+  }
+
+  /// The largest per-channel difference (0 to 255) from `other` inside `rect` (points, top-left origin).
+  func largestDifference(from other: Shot, in rect: NSRect) -> Int {
+    var largest = 0
+    let minX = Int(rect.minX * scale), maxX = min(rep.pixelsWide, other.rep.pixelsWide, Int(rect.maxX * scale))
+    let minY = Int(rect.minY * scale), maxY = min(rep.pixelsHigh, other.rep.pixelsHigh, Int(rect.maxY * scale))
+    for y in minY..<maxY {
+      for x in minX..<maxX {
+        guard let a = rep.colorAt(x: x, y: y), let b = other.rep.colorAt(x: x, y: y) else { continue }
+        for (p, q) in [(a.redComponent, b.redComponent), (a.greenComponent, b.greenComponent),
+                       (a.blueComponent, b.blueComponent), (a.alphaComponent, b.alphaComponent)] {
+          largest = max(largest, Int((abs(p - q) * 255).rounded()))
+        }
+      }
+    }
+    return largest
+  }
+
+  /// The top-left of the opaque pixels (text) right of `minX` points, in points from the view's top-left.
+  func inkOrigin(after minX: CGFloat) -> NSPoint? {
+    var left = Int.max, top = Int.max
+    for y in 0..<rep.pixelsHigh {
+      for x in Int(minX * scale)..<rep.pixelsWide {
+        guard let color = rep.colorAt(x: x, y: y), color.alphaComponent > 0.5 else { continue }
+        left = min(left, x)
+        top = min(top, y)
+      }
+    }
+    guard left != .max else { return nil }
+    return NSPoint(x: CGFloat(left) / scale, y: CGFloat(top) / scale)
   }
 
   func write(to file: URL) throws {
