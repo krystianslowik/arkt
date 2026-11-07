@@ -10,15 +10,14 @@ final class RestorePagesWindowTests: XCTestCase {
     _ = NSApplication.shared
     let engine = InMemoryEngine()
     let pages = (0..<5).map { index in
-      RecoveryPage(title: "Page \(index)", url: URL(string: "https://example.invalid/\(index)")!, kind: .peek)
+      ShellRecoveryPage(title: "Page \(index)", url: URL(string: "https://example.invalid/\(index)")!, kind: .peek)
     }
-    engine.crashedSession.recoveryPages = pages
     engine.crashedSession.simulateCrashedExit()
     let controller = ShellWindowController(engine: engine, sidebar: StubSidebar.sample())
     controller.window?.isReleasedWhenClosed = false
     defer { controller.close() }
-    var requested: [RecoveryPage] = []
-    let model = RestorePagesModel(recovery: engine.crashedSession) { requested = $0; return true }
+    var requested: [ShellRecoveryPage] = []
+    let model = RestorePagesModel(recovery: engine.crashedSession, pages: pages) { requested = $0; return true }
     controller.presentRestorePages(model)
     controller.presentRestorePages(model)
     let panels = controller.rootView.subviews.compactMap { $0 as? RestorePagesView }
@@ -61,7 +60,7 @@ final class RestorePagesWindowTests: XCTestCase {
   func testOfferSurvivesSplitSwitch() throws {
     _ = NSApplication.shared
     let engine = InMemoryEngine()
-    engine.crashedSession.recoveryPages = [RecoveryPage(title: String(repeating: "Long title ", count: 50),
+    let pages = [ShellRecoveryPage(title: String(repeating: "Long title ", count: 50),
       url: URL(string: "https://example.invalid/")!, kind: .peek)]
     engine.crashedSession.simulateCrashedExit()
     let controller = ShellWindowController(engine: engine, sidebar: StubSidebar.sample())
@@ -69,7 +68,7 @@ final class RestorePagesWindowTests: XCTestCase {
     defer { controller.close() }
     controller.rootView.frame = NSRect(x: 0, y: 0, width: 640, height: 420)
     controller.rootView.layoutSubtreeIfNeeded()
-    controller.presentRestorePages(RestorePagesModel(recovery: engine.crashedSession) { _ in true })
+    controller.presentRestorePages(RestorePagesModel(recovery: engine.crashedSession, pages: pages) { _ in true })
     let panel = try XCTUnwrap(controller.rootView.subviews.compactMap { $0 as? RestorePagesView }.first)
     XCTAssertEqual(panel.frame.width, 340)
     XCTAssertEqual(panel.frame.maxX, controller.rootView.card.frame.maxX - 22, accuracy: 0.01)
@@ -83,9 +82,11 @@ final class RestorePagesWindowTests: XCTestCase {
   func testDeferredLaunchTransfersUnansweredOfferThroughWindowLifecycle() throws {
     _ = NSApplication.shared
     let engine = InMemoryEngine()
-    engine.crashedSession.recoveryPages = [RecoveryPage(title: "Page", url: URL(string: "https://example.invalid/")!, kind: .peek)]
+    let pages = [ShellRecoveryPage(title: "Page", url: URL(string: "https://example.invalid/")!, kind: .peek)]
     engine.crashedSession.simulateCrashedExit()
-    let set = ShellWindowSet(engine: engine, sidebar: StubSidebar.sample())
+    let sidebar = StubSidebar.sample()
+    let records = TestRecoverySource(pages, sidebar: sidebar)
+    let set = ShellWindowSet(engine: engine, sidebar: sidebar, recoveryPageSource: records)
     set.beginSessionRecovery(engine.crashedSession)
     set.beginSessionRecovery(engine.crashedSession)
     let first = set.openWindow()
@@ -105,9 +106,11 @@ final class RestorePagesWindowTests: XCTestCase {
   func testExistingWindowReceivesOfferAndTransfersToAnotherOpenWindow() throws {
     _ = NSApplication.shared
     let engine = InMemoryEngine()
-    engine.crashedSession.recoveryPages = [RecoveryPage(title: "Page", url: URL(string: "https://example.invalid/")!, kind: .peek)]
+    let pages = [ShellRecoveryPage(title: "Page", url: URL(string: "https://example.invalid/")!, kind: .peek)]
     engine.crashedSession.simulateCrashedExit()
-    let set = ShellWindowSet(engine: engine, sidebar: StubSidebar.sample())
+    let sidebar = StubSidebar.sample()
+    let records = TestRecoverySource(pages, sidebar: sidebar)
+    let set = ShellWindowSet(engine: engine, sidebar: sidebar, recoveryPageSource: records)
     let first = set.openWindow()
     let second = set.openWindow()
     first.window?.isReleasedWhenClosed = false
@@ -124,10 +127,12 @@ final class RestorePagesWindowTests: XCTestCase {
   func testTransferredOfferSkipsAWindowWithAHeldClose() throws {
     _ = NSApplication.shared
     let engine = InMemoryEngine()
-    engine.crashedSession.recoveryPages = [RecoveryPage(title: "Page", url: URL(string: "https://example.invalid/")!, kind: .peek)]
+    let pages = [ShellRecoveryPage(title: "Page", url: URL(string: "https://example.invalid/")!, kind: .peek)]
     engine.crashedSession.simulateCrashedExit()
-    let set = ShellWindowSet(engine: engine, sidebar: StubSidebar.sample(),
-                             hostLookup: { [engine] in engine.host(of: $0) })
+    let sidebar = StubSidebar.sample()
+    let records = TestRecoverySource(pages, sidebar: sidebar)
+    let set = ShellWindowSet(engine: engine, sidebar: sidebar,
+                             hostLookup: { [engine] in engine.host(of: $0) }, recoveryPageSource: records)
     let owner = set.openWindow()
     owner.window?.isReleasedWhenClosed = false
     set.beginSessionRecovery(engine.crashedSession)
@@ -156,10 +161,12 @@ final class RestorePagesWindowTests: XCTestCase {
   func testPendingOfferReturnsWhenHeldCloseIsCancelled() throws {
     _ = NSApplication.shared
     let engine = InMemoryEngine()
-    engine.crashedSession.recoveryPages = [RecoveryPage(title: "Page", url: URL(string: "https://example.invalid/")!, kind: .peek)]
+    let pages = [ShellRecoveryPage(title: "Page", url: URL(string: "https://example.invalid/")!, kind: .peek)]
     engine.crashedSession.simulateCrashedExit()
-    let set = ShellWindowSet(engine: engine, sidebar: StubSidebar.sample(),
-                             hostLookup: { [engine] in engine.host(of: $0) })
+    let sidebar = StubSidebar.sample()
+    let records = TestRecoverySource(pages, sidebar: sidebar)
+    let set = ShellWindowSet(engine: engine, sidebar: sidebar,
+                             hostLookup: { [engine] in engine.host(of: $0) }, recoveryPageSource: records)
     let owner = set.openWindow()
     owner.window?.isReleasedWhenClosed = false
     set.beginSessionRecovery(engine.crashedSession)
@@ -198,9 +205,11 @@ final class RestorePagesWindowTests: XCTestCase {
     _ = NSApplication.shared
     for mode in [ShellWindowSet.WindowKind.blank, .incognito] {
       let engine = InMemoryEngine()
-      engine.crashedSession.recoveryPages = [RecoveryPage(title: "Page", url: URL(string: "https://example.invalid/")!, kind: .peek)]
+      let pages = [ShellRecoveryPage(title: "Page", url: URL(string: "https://example.invalid/")!, kind: .peek)]
       engine.crashedSession.simulateCrashedExit()
-      let set = ShellWindowSet(engine: engine, sidebar: StubSidebar.sample())
+      let sidebar = StubSidebar.sample()
+      let records = TestRecoverySource(pages, sidebar: sidebar)
+      let set = ShellWindowSet(engine: engine, sidebar: sidebar, recoveryPageSource: records)
       let owner = set.openWindow()
       owner.window?.isReleasedWhenClosed = false
       set.beginSessionRecovery(engine.crashedSession)
@@ -223,9 +232,11 @@ final class RestorePagesWindowTests: XCTestCase {
     _ = NSApplication.shared
     for mode in [ShellWindowSet.WindowKind.blank, .incognito] {
       let engine = InMemoryEngine()
-      engine.crashedSession.recoveryPages = [RecoveryPage(title: "Page", url: URL(string: "https://example.invalid/")!, kind: .peek)]
+      let pages = [ShellRecoveryPage(title: "Page", url: URL(string: "https://example.invalid/")!, kind: .peek)]
       engine.crashedSession.simulateCrashedExit()
-      let set = ShellWindowSet(engine: engine, sidebar: StubSidebar.sample())
+      let sidebar = StubSidebar.sample()
+      let records = TestRecoverySource(pages, sidebar: sidebar)
+      let set = ShellWindowSet(engine: engine, sidebar: sidebar, recoveryPageSource: records)
       set.beginSessionRecovery(engine.crashedSession)
       var privateHadOfferDuringConfiguration = false
       set.configure = { window in
@@ -255,9 +266,11 @@ final class RestorePagesWindowTests: XCTestCase {
     for (kind, presentation) in [(ShellWindowSet.WindowKind.incognito, SidebarPresentation.incognito),
                                  (.blank, .blank)] {
       let engine = InMemoryEngine()
-      engine.crashedSession.recoveryPages = [RecoveryPage(title: "Page", url: URL(string: "https://example.invalid/")!, kind: .peek)]
+      let pages = [ShellRecoveryPage(title: "Page", url: URL(string: "https://example.invalid/")!, kind: .peek)]
       engine.crashedSession.simulateCrashedExit()
-      let set = ShellWindowSet(engine: engine, sidebar: StubSidebar.sample())
+      let sidebar = StubSidebar.sample()
+      let records = TestRecoverySource(pages, sidebar: sidebar)
+      let set = ShellWindowSet(engine: engine, sidebar: sidebar, recoveryPageSource: records)
       set.beginSessionRecovery(engine.crashedSession)
       var sawPanel = false
       var sawNotice = false
@@ -322,9 +335,11 @@ final class RestorePagesWindowTests: XCTestCase {
   func testChangingOwnerToPrivateTransfersOffer() throws {
     _ = NSApplication.shared
     let engine = InMemoryEngine()
-    engine.crashedSession.recoveryPages = [RecoveryPage(title: "Page", url: URL(string: "https://example.invalid/")!, kind: .peek)]
+    let pages = [ShellRecoveryPage(title: "Page", url: URL(string: "https://example.invalid/")!, kind: .peek)]
     engine.crashedSession.simulateCrashedExit()
-    let set = ShellWindowSet(engine: engine, sidebar: StubSidebar.sample())
+    let sidebar = StubSidebar.sample()
+    let records = TestRecoverySource(pages, sidebar: sidebar)
+    let set = ShellWindowSet(engine: engine, sidebar: sidebar, recoveryPageSource: records)
     let owner = set.openWindow()
     owner.window?.isReleasedWhenClosed = false
     let other = set.openWindow()
@@ -344,14 +359,14 @@ final class RestorePagesWindowTests: XCTestCase {
     _ = NSApplication.shared
     for (key, code, restores) in [("\r", UInt16(36), true), ("\u{1b}", UInt16(53), false)] {
       let recovery = InMemorySessionRecovery()
-      recovery.recoveryPages = [RecoveryPage(title: "Page", url: URL(string: "https://example.invalid/")!, kind: .peek)]
+      let pages = [ShellRecoveryPage(title: "Page", url: URL(string: "https://example.invalid/")!, kind: .peek)]
       recovery.simulateCrashedExit()
       let controller = ShellWindowController(engine: InMemoryEngine(), sidebar: StubSidebar.sample())
       let window = try XCTUnwrap(controller.window)
       window.isReleasedWhenClosed = false
       defer { controller.close() }
       var called = false
-      controller.presentRestorePages(RestorePagesModel(recovery: recovery) { _ in called = true; return true })
+      controller.presentRestorePages(RestorePagesModel(recovery: recovery, pages: pages) { _ in called = true; return true })
       let panel = try XCTUnwrap(controller.rootView.subviews.compactMap { $0 as? RestorePagesView }.first)
       XCTAssertTrue(window.makeFirstResponder(panel))
       let event = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [],
@@ -367,14 +382,17 @@ final class RestorePagesWindowTests: XCTestCase {
   func testRestoreUsesHostTabAndOpensEveryLittleArkt() throws {
     _ = NSApplication.shared
     let engine = InMemoryEngine()
-    engine.crashedSession.recoveryPages = (0..<4).map { RecoveryPage(title: "Page \($0)",
+    let pages = (0..<4).map { ShellRecoveryPage(title: "Page \($0)",
       url: URL(string: "https://example.invalid/\($0)")!, kind: .littleArkt) } +
-      [RecoveryPage(title: "Peek", url: URL(string: "https://example.invalid/peek")!, kind: .peek)]
+      [ShellRecoveryPage(title: "Peek", url: URL(string: "https://example.invalid/peek")!, kind: .peek)]
     engine.crashedSession.simulateCrashedExit()
-    let set = ShellWindowSet(engine: engine, sidebar: StubSidebar.sample())
+    let sidebar = StubSidebar.sample()
+    let records = TestRecoverySource(pages, sidebar: sidebar)
+    let set = ShellWindowSet(engine: engine, sidebar: sidebar, recoveryPageSource: records)
     let host = set.openWindow()
     host.window?.isReleasedWhenClosed = false
     defer { set.littleArkts.forEach { $0.window.close() }; host.close() }
+    host.activate(node: try XCTUnwrap(records.pages.last?.sourceNode))
     let source = try XCTUnwrap(host.currentTab)
     set.beginSessionRecovery(engine.crashedSession)
     let panel = try XCTUnwrap(host.rootView.subviews.compactMap { $0 as? RestorePagesView }.first)
@@ -387,9 +405,11 @@ final class RestorePagesWindowTests: XCTestCase {
   func testURLBarReturnSubmitsWhileOfferRemains() throws {
     _ = NSApplication.shared
     let engine = InMemoryEngine()
-    engine.crashedSession.recoveryPages = [RecoveryPage(title: "Page", url: URL(string: "https://example.invalid/")!, kind: .peek)]
+    let pages = [ShellRecoveryPage(title: "Page", url: URL(string: "https://example.invalid/")!, kind: .peek)]
     engine.crashedSession.simulateCrashedExit()
-    let set = ShellWindowSet(engine: engine, sidebar: StubSidebar.sample())
+    let sidebar = StubSidebar.sample()
+    let records = TestRecoverySource(pages, sidebar: sidebar)
+    let set = ShellWindowSet(engine: engine, sidebar: sidebar, recoveryPageSource: records)
     let host = set.openWindow()
     host.window?.isReleasedWhenClosed = false
     defer { host.close() }
@@ -412,9 +432,11 @@ final class RestorePagesWindowTests: XCTestCase {
   func testEscapeInFindClosesFindAndKeepsOffer() throws {
     _ = NSApplication.shared
     let engine = InMemoryEngine()
-    engine.crashedSession.recoveryPages = [RecoveryPage(title: "Page", url: URL(string: "https://example.invalid/")!, kind: .peek)]
+    let pages = [ShellRecoveryPage(title: "Page", url: URL(string: "https://example.invalid/")!, kind: .peek)]
     engine.crashedSession.simulateCrashedExit()
-    let set = ShellWindowSet(engine: engine, sidebar: StubSidebar.sample())
+    let sidebar = StubSidebar.sample()
+    let records = TestRecoverySource(pages, sidebar: sidebar)
+    let set = ShellWindowSet(engine: engine, sidebar: sidebar, recoveryPageSource: records)
     let host = set.openWindow()
     let window = try XCTUnwrap(host.window)
     window.isReleasedWhenClosed = false
@@ -440,10 +462,12 @@ final class RestorePagesWindowTests: XCTestCase {
       let engine = InMemoryEngine()
       let recovered = URL(string: "https://example.invalid/recovered")!
       let original = URL(string: "https://example.invalid/original")!
-      engine.crashedSession.recoveryPages = [RecoveryPage(title: "Window", url: recovered, kind: .littleArkt),
-                                               RecoveryPage(title: "Peek", url: recovered, kind: .peek)]
+      let pages = [ShellRecoveryPage(title: "Window", url: recovered, kind: .littleArkt),
+                                               ShellRecoveryPage(title: "Peek", url: recovered, kind: .peek)]
       engine.crashedSession.simulateCrashedExit()
-      let set = ShellWindowSet(engine: engine, sidebar: StubSidebar.sample())
+      let sidebar = StubSidebar.sample()
+      let records = TestRecoverySource(pages, sidebar: sidebar)
+      let set = ShellWindowSet(engine: engine, sidebar: sidebar, recoveryPageSource: records)
       let host = set.openWindow()
       host.window?.isReleasedWhenClosed = false
       defer { set.littleArkts.forEach { $0.window.close() }; host.close() }
@@ -472,9 +496,10 @@ final class RestorePagesWindowTests: XCTestCase {
     let space = sidebar.addSpace(title: "Test")
     let first = sidebar.addTab(url: url, title: "First", in: .today(space))
     let second = sidebar.addTab(url: url, title: "Second", in: .today(space))
-    engine.crashedSession.recoveryPages = [RecoveryPage(title: "Peek", url: url, kind: .peek)]
+    let pages = [ShellRecoveryPage(title: "Peek", url: url, kind: .peek, sourceNode: first)]
     engine.crashedSession.simulateCrashedExit()
-    let set = ShellWindowSet(engine: engine, sidebar: sidebar)
+    let records = TestRecoverySource(pages, sidebar: sidebar)
+    let set = ShellWindowSet(engine: engine, sidebar: sidebar, recoveryPageSource: records)
     let host = set.openWindow()
     host.window?.isReleasedWhenClosed = false
     defer { host.close() }
@@ -500,13 +525,16 @@ final class RestorePagesWindowTests: XCTestCase {
     _ = NSApplication.shared
     let engine = InMemoryEngine()
     let recovered = URL(string: "https://example.invalid/recovered")!
-    engine.crashedSession.recoveryPages = [RecoveryPage(title: "Window", url: recovered, kind: .littleArkt),
-                                             RecoveryPage(title: "Peek", url: recovered, kind: .peek)]
+    let pages = [ShellRecoveryPage(title: "Window", url: recovered, kind: .littleArkt),
+                                             ShellRecoveryPage(title: "Peek", url: recovered, kind: .peek)]
     engine.crashedSession.simulateCrashedExit()
-    let set = ShellWindowSet(engine: engine, sidebar: StubSidebar.sample())
+    let sidebar = StubSidebar.sample()
+    let records = TestRecoverySource(pages, sidebar: sidebar)
+    let set = ShellWindowSet(engine: engine, sidebar: sidebar, recoveryPageSource: records)
     let host = set.openWindow()
     host.window?.isReleasedWhenClosed = false
     defer { set.littleArkts.forEach { $0.window.close() }; host.close() }
+    host.activate(node: try XCTUnwrap(records.pages.last?.sourceNode))
     set.beginSessionRecovery(engine.crashedSession)
     let before = Set(engine.tabIDs)
     engine.unavailableContentURLs = [recovered]
@@ -524,37 +552,42 @@ final class RestorePagesWindowTests: XCTestCase {
     XCTAssertEqual(engine.crashedSession.dismissals, 1)
   }
 
-  func testMultiplePeeksAreNotAcknowledgedOrPartiallyOpened() throws {
+  func testMissingSourceIsFilteredIntoNotice() {
     _ = NSApplication.shared
     let engine = InMemoryEngine()
-    engine.crashedSession.recoveryPages = (0..<2).map { RecoveryPage(title: "Page \($0)",
-      url: URL(string: "https://example.invalid/\($0)")!, kind: .peek) }
+    let sidebar = StubSidebar.sample()
+    let page = ShellRecoveryPage(title: "Peek", url: URL(string: "https://example.invalid/")!, kind: .peek)
+    let records = RawRecoverySource([page])
     engine.crashedSession.simulateCrashedExit()
-    let set = ShellWindowSet(engine: engine, sidebar: StubSidebar.sample())
+    let set = ShellWindowSet(engine: engine, sidebar: sidebar, recoveryPageSource: records)
+    set.beginSessionRecovery(engine.crashedSession)
     let host = set.openWindow()
     host.window?.isReleasedWhenClosed = false
     defer { host.close() }
-    set.beginSessionRecovery(engine.crashedSession)
-    let panel = try XCTUnwrap(host.rootView.subviews.compactMap { $0 as? RestorePagesView }.first)
-    panel.restorePressed()
-    XCTAssertNil(host.peek.session)
-    XCTAssertNotNil(panel.superview)
-    XCTAssertEqual(engine.crashedSession.dismissals, 0)
+    XCTAssertNil(host.rootView.subviews.first { $0 is RestorePagesView })
+    XCTAssertEqual(host.toasts.current?.kind, .recovery)
+    XCTAssertEqual(engine.crashedSession.dismissals, 1)
   }
 
-  func testMissingPeekSourceKeepsOffer() throws {
-    _ = NSApplication.shared
-    let engine = InMemoryEngine()
-    engine.crashedSession.recoveryPages = [RecoveryPage(title: "Peek", url: URL(string: "https://example.invalid/")!, kind: .peek)]
-    engine.crashedSession.simulateCrashedExit()
-    let set = ShellWindowSet(engine: engine, sidebar: StubSidebar.sample())
-    let host = set.openWindow(opensFirstTab: false)
-    host.window?.isReleasedWhenClosed = false
-    defer { host.close() }
-    set.beginSessionRecovery(engine.crashedSession)
-    let panel = try XCTUnwrap(host.rootView.subviews.compactMap { $0 as? RestorePagesView }.first)
-    panel.restorePressed()
-    XCTAssertNotNil(panel.superview)
-    XCTAssertEqual(engine.crashedSession.dismissals, 0)
+}
+
+@MainActor
+private final class TestRecoverySource: RecoveryPageSource {
+  var pages: [ShellRecoveryPage]
+  init(_ pages: [ShellRecoveryPage], sidebar: StubSidebar) {
+    let node = sidebar.spaceOrder.first.flatMap { space in
+      sidebar.children(of: .pinned(space)).first ?? sidebar.children(of: .today(space)).first
+    }
+    self.pages = pages.map { page in
+      var page = page
+      if page.kind == .peek && page.sourceNode == nil { page.sourceNode = node }
+      return page
+    }
   }
+}
+
+@MainActor
+private final class RawRecoverySource: RecoveryPageSource {
+  var pages: [ShellRecoveryPage]
+  init(_ pages: [ShellRecoveryPage]) { self.pages = pages }
 }

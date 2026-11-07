@@ -105,6 +105,53 @@ final class RecoveryPageSourceTests: XCTestCase {
     }
   }
 
+  func testPartialFailureRollsBackAndRetryRestoresBoth() throws {
+    _ = NSApplication.shared
+    let engine = InMemoryEngine()
+    let sidebar = StubSidebar()
+    let space = sidebar.addSpace(title: "Test")
+    let first = sidebar.addTab(url: URL(string: "https://example.invalid/a")!, title: "A", in: .today(space))
+    let second = sidebar.addTab(url: URL(string: "https://example.invalid/b")!, title: "B", in: .today(space))
+    let records = RecordingRecoveryPages([page("one", source: first), page("two", source: second),
+      ShellRecoveryPage(title: "Window", url: URL(string: "https://example.invalid/little")!, kind: .littleArkt)])
+    engine.crashedSession.simulateCrashedExit()
+    let set = ShellWindowSet(engine: engine, sidebar: sidebar, recoveryPageSource: records)
+    let host = set.openWindow()
+    host.window?.isReleasedWhenClosed = false
+    host.peek.animator.drivesDisplayLink = false
+    defer { set.littleArkts.forEach { $0.window.close() }; host.close() }
+    set.beginSessionRecovery(engine.crashedSession)
+    let panel = try XCTUnwrap(host.rootView.subviews.compactMap { $0 as? RestorePagesView }.first)
+    engine.unavailableContentURLs = [records.pages[1].url]
+    panel.restorePressed()
+    XCTAssertNil(host.peek.session)
+    XCTAssertTrue(host.peek.hiddenPeeks.isEmpty)
+    XCTAssertTrue(set.littleArkts.isEmpty)
+    XCTAssertEqual(engine.crashedSession.dismissals, 0)
+    engine.unavailableContentURLs = []
+    panel.restorePressed()
+    XCTAssertEqual(host.peek.hiddenPeeks.count, 1)
+    XCTAssertNotNil(host.peek.session)
+    XCTAssertEqual(set.littleArkts.count, 1)
+    XCTAssertEqual(engine.crashedSession.dismissals, 1)
+  }
+
+  func testOfferSnapshotPrecedesBeginEvenAfterSourceChanges() throws {
+    _ = NSApplication.shared
+    let engine = InMemoryEngine()
+    let old = ShellRecoveryPage(title: "Old", url: URL(string: "https://example.invalid/old")!, kind: .littleArkt)
+    let records = RecordingRecoveryPages([old])
+    engine.crashedSession.simulateCrashedExit()
+    let set = ShellWindowSet(engine: engine, sidebar: StubSidebar.sample(), recoveryPageSource: records)
+    records.pages = []
+    let host = set.openWindow()
+    host.window?.isReleasedWhenClosed = false
+    defer { host.close() }
+    set.beginSessionRecovery(engine.crashedSession)
+    let panel = try XCTUnwrap(host.rootView.subviews.compactMap { $0 as? RestorePagesView }.first)
+    XCTAssertTrue(panel.rowLabels.contains { $0.stringValue.contains("Old") })
+  }
+
   func testRecordsOpenNavigationTitleAndCloseButNotPrivatePages() throws {
     _ = NSApplication.shared
     let engine = InMemoryEngine()

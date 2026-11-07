@@ -41,19 +41,6 @@ public struct TabZoom: Equatable, Sendable {
   public static let steps = [25, 33, 50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300, 400, 500]
 }
 
-/// A page outside the sidebar that can be reopened after a crash. Private pages must never be persisted.
-public struct RecoveryPage: Equatable, Sendable {
-  public enum Kind: Equatable, Sendable { case littleArkt, peek }
-  public let title: String
-  public let url: URL
-  public let kind: Kind
-  public init(title: String, url: URL, kind: Kind) {
-    self.title = title
-    self.url = url
-    self.kind = kind
-  }
-}
-
 /// The previous run of the engine ended without a clean quit (a crash, a force quit, a power loss). The shell asks once
 /// whether to bring the last session back. Dismissing acknowledges the crash, so it is not asked again; a second
 /// dismiss does nothing. Only non-private pages outside the sidebar are restored.
@@ -63,12 +50,6 @@ public protocol EngineSessionRecovery: AnyObject {
   var lastSessionCrashed: Bool { get }
   /// Acknowledges the crash without restoring anything.
   func dismissLastSession()
-}
-
-/// A list of eligible pages. Providers must never return private or sidebar data.
-@MainActor
-public protocol EnginePageRecovery: EngineSessionRecovery {
-  var recoveryPages: [RecoveryPage] { get }
 }
 
 extension EngineClient {

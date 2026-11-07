@@ -20,7 +20,7 @@ final class RestorePagesView: NSView {
     } completionHandler: { MainActor.assumeIsolated { completion() } }
   }
 
-  init(model: RestorePagesModel, pages: [RecoveryPage]) {
+  init(model: RestorePagesModel, pages: [ShellRecoveryPage]) {
     self.model = model
     let count = min(pages.count, 3)
     let height: CGFloat = 168 + CGFloat(count) * 40 + (pages.count > 3 ? 22 : 0)

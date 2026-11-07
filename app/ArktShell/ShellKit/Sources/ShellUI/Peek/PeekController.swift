@@ -196,17 +196,6 @@ public final class PeekController {
     }
   }
 
-  /// Recovery must not replace any live or hidden Peek. Report whether the new page was presented.
-  func openForRecovery(_ url: URL, from source: TabID) -> Bool {
-    guard shell.window != nil, session == nil, hiddenPeeks.isEmpty else { return false }
-    let tab = shell.engine.createTab(url: url, in: shell.ensureEngineWindow())
-    guard present(tab, url: url, from: source, motion: .open(at: nil)) else {
-      shell.engine.closeTab(tab, mode: .skipUnloadHandlers)
-      return false
-    }
-    return true
-  }
-
   /// A tab the engine opened on its own from `snapshot.opener` (#345: a `target=_blank` link, `window.open` without
   /// window features) becomes the Peek when the link rules say so: the engine's tab itself, with its page, history and
   /// opener, never a second load. True when it did; the window then adds no row for it.
@@ -445,16 +434,32 @@ public final class PeekController {
 
   /// Puts a closed Peek back over `source`: its parked copy, history and all, or a new load of its URL without one.
   /// An open Peek closes first (it goes on the stack).
-  func reopen(_ closed: ClosedPeek, over source: TabID) {
+  @discardableResult
+  func reopen(_ closed: ClosedPeek, over source: TabID) -> Bool {
     if session != nil { teardown(closingTab: true, remember: true) }
     if let copy = closed.parked, shell.engine.snapshot(of: copy) != nil,
        present(copy, url: closed.url, from: source, motion: .reopen(linkOffset: closed.linkOffset)) {
-      return
+      return true
     }
     if let copy = closed.parked { shell.engine.closeTab(copy, mode: .skipUnloadHandlers) }
     let tab = shell.engine.createTab(url: closed.url, in: shell.ensureEngineWindow())
-    if !present(tab, url: closed.url, from: source, motion: .reopen(linkOffset: closed.linkOffset)) {
+    guard present(tab, url: closed.url, from: source, motion: .reopen(linkOffset: closed.linkOffset)) else {
       shell.engine.closeTab(tab, mode: .skipUnloadHandlers)
+      return false
+    }
+    return true
+  }
+
+  func hideRecoveryTab(_ tab: TabID) {
+    if session?.tab == tab { hide() }
+  }
+
+  func removeRecoveryTab(_ tab: TabID) {
+    if session?.tab == tab { teardown(closingTab: true); return }
+    if let source = hiddenPeeks.first(where: { $0.value.tab == tab })?.key {
+      hiddenPeeks.removeValue(forKey: source)
+      shell.engine.closeTab(tab, mode: .skipUnloadHandlers)
+      dropObservationIfIdle()
     }
   }
 

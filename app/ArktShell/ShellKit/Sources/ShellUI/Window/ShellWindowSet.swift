@@ -42,6 +42,8 @@ public final class ShellWindowSet {
   public var sidebarBanner: SidebarBannerCenter?
 
   private let hostLookup: HostLookup?
+  private let recoveryPageSource: (any RecoveryPageSource)?
+  private let priorRecoveryPages: [ShellRecoveryPage]
   private var windows: [ShellWindowController] = []
   /// True once the session's first window adopted the saved sidebar state (#331); later windows keep the defaults.
   private var adoptedSavedSidebarState = false
@@ -93,7 +95,8 @@ public final class ShellWindowSet {
   public init(engine: any EngineClient, sidebar: any SidebarSource, toolbarSetting: ToolbarSetting = .ephemeral(),
               sidebarStateStore: SidebarWindowStateStore = .ephemeral(),
               sessionStore: WindowSessionStore = .ephemeral(),
-              commandBarSettings: CommandBarSettings = .ephemeral(), hostLookup: HostLookup? = nil) {
+              commandBarSettings: CommandBarSettings = .ephemeral(), hostLookup: HostLookup? = nil,
+              recoveryPageSource: (any RecoveryPageSource)? = nil) {
     self.engine = engine
     self.sidebar = sidebar
     self.toolbarSetting = toolbarSetting
@@ -101,6 +104,8 @@ public final class ShellWindowSet {
     self.sessionStore = sessionStore
     self.commandBarSettings = commandBarSettings
     self.hostLookup = hostLookup
+    self.recoveryPageSource = recoveryPageSource
+    self.priorRecoveryPages = recoveryPageSource?.pages ?? []
     windowObservation = engine.observeWindows { [weak self] event in
       guard case .windowOpened(let id) = event else { return }
       self?.windowOpened(id)
@@ -143,20 +148,9 @@ public final class ShellWindowSet {
     guard !recoveryStarted else { return }
     recoveryStarted = true
     guard let recovery else { return }
-    let model = RestorePagesModel(recovery: recovery) { [weak self] pages in
-      guard let self, let host = self.recoveryWindow, !host.isWindowCloseRequested, !host.isPrivateWindow else {
-        return false
-      }
-      // A batch cannot be retried safely after opening only some of its pages.
-      let peeks = pages.filter { $0.kind == .peek }
-      guard peeks.count <= 1 else { return false }
-      if let peek = peeks.first {
-        guard let source = host.currentTab, host.peek.openForRecovery(peek.url, from: source) else { return false }
-      }
-      for page in pages where page.kind == .littleArkt {
-        self.openLittleArkt(url: page.url)
-      }
-      return true
+    let pages = eligibleRecoveryPages(priorRecoveryPages, sidebar: sidebar)
+    let model = RestorePagesModel(recovery: recovery, pages: pages) { [weak self] pages in
+      self?.restoreRecoveryPages(pages) ?? false
     }
     pendingRecovery = model
     model.onAnswer = { [weak self] in
@@ -164,6 +158,49 @@ public final class ShellWindowSet {
       self?.recoveryWindow = nil
     }
     presentPendingRecovery()
+  }
+
+  /// A clean termination clears the persisted records; a cancelled quit keeps them.
+  public func finishSessionRecovery(cleanQuit: Bool) {
+    if cleanQuit { recoveryPageSource?.pages = [] }
+  }
+
+  private func restoreRecoveryPages(_ pages: [ShellRecoveryPage]) -> Bool {
+    guard let host = recoveryWindow, !host.isWindowCloseRequested, !host.isPrivateWindow else { return false }
+    let eligible = controllers.filter { !$0.isPrivateWindow && !$0.isWindowCloseRequested }
+    var routes: [(ShellRecoveryPage, ShellWindowController, NodeID)] = []
+    for page in pages where page.kind == .peek {
+      guard let node = page.sourceNode, case .tab? = sidebar.node(node), sidebar.parent(of: node) != nil else {
+        return false
+      }
+      let target = eligible.first(where: { $0.visibleNodes.contains(node) }) ?? host
+      // Handoff must not close a hidden Peek belonging to this source in another window.
+      guard !controllers.contains(where: { window in
+        guard let tab = window.engineTab(of: node) else { return false }
+        return window.peek.hiddenPeeks[tab] != nil || window.peek.session?.source == tab
+      }) else { return false }
+      // Activating a source must not replace or restore an unrelated live Peek.
+      guard target.peek.session == nil,
+            target.engineTab(of: node).map({ target.peek.hiddenPeeks[$0] == nil }) ?? true else { return false }
+      routes.append((page, target, node))
+    }
+    var created: [(ShellWindowController, TabID)] = []
+    for (page, target, node) in routes {
+      if target.currentNode != node { target.activate(node: node) }
+      if let active = target.peek.session?.tab, created.contains(where: { $0.0 === target && $0.1 == active }) {
+        target.peek.hideRecoveryTab(active)
+      }
+      guard let source = target.engineTab(of: node), target.peek.session == nil,
+            target.peek.hiddenPeeks[source] == nil,
+            target.peek.reopen(ClosedPeek(parked: nil, sourceNode: node, url: page.url, linkOffset: .zero),
+                               over: source), let tab = target.peek.session?.tab else {
+        for (window, tab) in created.reversed() { window.peek.removeRecoveryTab(tab) }
+        return false
+      }
+      created.append((target, tab))
+    }
+    for page in pages where page.kind == .littleArkt { openLittleArkt(url: page.url) }
+    return true
   }
 
   private func presentPendingRecovery() {

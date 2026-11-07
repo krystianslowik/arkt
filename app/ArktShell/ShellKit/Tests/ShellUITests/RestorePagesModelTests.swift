@@ -8,12 +8,11 @@ import EngineAPITestSupport
 struct RestorePagesModelTests {
   @Test func offerRequestsEveryPageBeforeAcknowledgingOnce() {
     let recovery = InMemorySessionRecovery()
-    let pages = (0..<5).map { RecoveryPage(title: "Page \($0)",
+    let pages = (0..<5).map { ShellRecoveryPage(title: "Page \($0)",
       url: URL(string: "https://example.invalid/\($0)")!, kind: $0 == 0 ? .littleArkt : .peek) }
-    recovery.recoveryPages = pages
     recovery.simulateCrashedExit()
-    var requested: [RecoveryPage] = []
-    let model = RestorePagesModel(recovery: recovery) { pages in
+    var requested: [ShellRecoveryPage] = []
+    let model = RestorePagesModel(recovery: recovery, pages: pages) { pages in
       #expect(recovery.dismissals == 0)
       requested = pages
       return true
@@ -28,10 +27,9 @@ struct RestorePagesModelTests {
 
   @Test func unavailableShellActionRetainsOffer() {
     let recovery = InMemorySessionRecovery()
-    let page = RecoveryPage(title: "Page", url: URL(string: "https://example.invalid/")!, kind: .peek)
-    recovery.recoveryPages = [page]
+    let page = ShellRecoveryPage(title: "Page", url: URL(string: "https://example.invalid/")!, kind: .peek)
     recovery.simulateCrashedExit()
-    let model = RestorePagesModel(recovery: recovery) { _ in false }
+    let model = RestorePagesModel(recovery: recovery, pages: [page]) { _ in false }
     model.restore()
     #expect(model.presentation == .offer([page]))
     #expect(recovery.dismissals == 0)
@@ -52,7 +50,6 @@ struct RestorePagesModelTests {
 private final class LegacyRecovery: EngineSessionRecovery {
   var lastSessionCrashed = true
   var dismissals = 0
-  var recoveryPages = [RecoveryPage(title: "Page", url: URL(string: "https://example.invalid/")!, kind: .peek)]
   func dismissLastSession() { lastSessionCrashed = false; dismissals += 1 }
 }
 

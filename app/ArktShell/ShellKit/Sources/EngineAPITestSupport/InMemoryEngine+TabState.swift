@@ -66,10 +66,9 @@ extension InMemoryEngine {
 /// InMemoryEngine's crashed session: `simulateCrashedExit()` stands in for a run that did not quit cleanly;
 /// `dismissals` counts the acknowledgements.
 @MainActor
-public final class InMemorySessionRecovery: EnginePageRecovery {
+public final class InMemorySessionRecovery: EngineSessionRecovery {
   public private(set) var lastSessionCrashed = false
   public private(set) var dismissals = 0
-  public var recoveryPages: [RecoveryPage] = []
   public init() {}
 
   /// Test hook: the previous run ended without a clean quit.

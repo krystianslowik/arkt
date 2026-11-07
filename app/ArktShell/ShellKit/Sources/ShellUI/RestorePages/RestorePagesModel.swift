@@ -7,19 +7,18 @@ public final class RestorePagesModel {
   public enum Presentation: Equatable, Sendable {
     case none
     case notice
-    case offer([RecoveryPage])
+    case offer([ShellRecoveryPage])
   }
 
   public private(set) var presentation: Presentation = .none
   private let recovery: any EngineSessionRecovery
-  private let reopen: @MainActor ([RecoveryPage]) -> Bool
+  private let reopen: @MainActor ([ShellRecoveryPage]) -> Bool
   public var onAnswer: (@MainActor () -> Void)?
 
-  public init(recovery: any EngineSessionRecovery, restore: @escaping @MainActor ([RecoveryPage]) -> Bool) {
+  public init(recovery: any EngineSessionRecovery, pages: [ShellRecoveryPage] = [], restore: @escaping @MainActor ([ShellRecoveryPage]) -> Bool) {
     self.recovery = recovery
     self.reopen = restore
     guard recovery.lastSessionCrashed else { return }
-    let pages = (recovery as? any EnginePageRecovery)?.recoveryPages ?? []
     if pages.isEmpty {
       presentation = .notice
       recovery.dismissLastSession()
