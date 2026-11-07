@@ -4335,3 +4335,69 @@ Not taken: a window capture of the sheet (the text above was read from the windo
 Cleanup (both rounds of checks): every app process exited by itself and the local hanging socket was stopped by its PID, confirmed with `ps -p`; `lsregister -u` on the embed copy (4 records for `dev.arkt.Arkt.try513`
 before, 0 after); the two profiles, the embed folder with its 518 dylib copies, derived data, build logs and the two defaults suites were
 deleted. Nothing under `~/Applications/ArktTest` or `/Applications/Arkt.app` was touched.
+
+## #531: history import always answers (PR #565)
+
+Date 2026-11-07. Branch `engine/531-history-import-drop`, `origin/main` merged in at `06275a6`. Overlay and Swift only: no Chromium
+patch, `.patches` unchanged.
+
+### What landed
+
+- `HistoryBarrier` answers `false` from its destructor when it is destroyed without having run its reply; `HistoryImport` also
+  observes `HistoryServiceBeingDeleted`. Either way the pending visits are counted failed ("no answer from the history store"),
+  `done` runs once, posted, and the engine logs `history import: <n> visits got no answer from the history store` (warning).
+- `written` and `latestVisit` are counted when the barrier answers, not when the visits are submitted.
+- Swift: the continuation in `ChromiumEngine+Importing.swift` resumes for the first answer only.
+- Runner phase `--arkt-import-check=history-shutdown` (Engine configuration only): queues 4000 URLs with 10 visits each and quits
+  200 ms later, while the history thread is still writing.
+
+### Build
+
+| Step | Result | Numbers |
+|---|---|---|
+| `nice -n 20 autoninja -C out/Spike chrome -j 4` | `The build has finished successfully.`, `FAILED:` 0 | 4 h 16 min (15385 s), 63939 steps: an almost full rebuild after `out/Spike` had last been built on 2026-10-23; swap flat at 3.0 GB, at least 49 GB free on `/` |
+| Same command again | `ninja: no work to do.` | 12 s; `arkt_import_writer.o` holds the new warning string |
+| Engine app, `xcodebuild -scheme ArktShell -configuration Engine PRODUCT_BUNDLE_IDENTIFIER=dev.arkt.Arkt.try531 -jobs 2` (`nice -n 20`) | `BUILD SUCCEEDED` | 174 s; the 518 component dylibs cloned next to the bundle (`cp -c`) |
+| ChromiumEngineKit `swift test --filter ChromiumEngineKitTests` after the merge (`nice -n 20`, `-j 2`) | passed | 130 tests in 18 suites (127 in 16 before the merge) |
+
+### Real engine (`dev.arkt.Arkt.try531`, Engine app on `out/Spike`, throwaway profiles under `profiles/531-*`, `ARKT_DATA_DIR` and `ARKT_DEFAULTS_SUITE` per run, `--use-mock-keychain`, `FakeChromiumProfile` fixture)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Normal import, counted on confirmation | PASS | `--arkt-import-check=import`: `history written=5 skipped=1 failed=0` (the stale visit skipped), `latest` set; same as #511 |
+| Re-import with the watermark | PASS | `history again written=0 skipped=5`, `latest=none` |
+| Counts in the profile | PASS | read-only `sqlite3` on `History`: `urls` 4, `visits` 6, `visit_source` 5 rows with source 7 (`SOURCE_OS_MIGRATION_IMPORTED`) |
+| Service deleted mid-import | PASS | `--arkt-import-check=history-shutdown`: engine log `history import: 40000 visits got no answer from the history store` during shutdown; exit 0 after 5 s, no hang |
+| Dropped barrier alone | not run | no shell-reachable way to drop the barrier without the service going away; covered by the scripted-facade double-answer test only |
+| Stderr | PASS | 0 hits of `FATAL`, `NOTREACHED`, `Check failed` in both runs |
+
+Finding: in the shutdown run all 40000 visits were on disk afterwards (`visits` 40000, `visit_source` 40000), although the
+answer counted them failed. "No answer" means "not confirmed", not "not written". A retry after such a failure has no watermark
+from it (`latestVisit` stays nil), so it would write those visits again. The coordinator (#515) has to decide whether to retry;
+the answer may also never reach the shell when the run loop has already stopped (it did not print in this run).
+
+Cookies in the same `import` run: `written=0 skipped=3`. The default fixture has no unexpired 127.0.0.1 cookie (the #512 run used
+`Options.extraCookies`); not part of this change.
+
+### History sync (#566)
+
+Checked in the pinned sources: `HistorySyncBridge::MaybeCommit` (`components/history/core/browser/sync/history_sync_bridge.cc`)
+skips only `SOURCE_ACTOR` visits, a redirect-chain middle and visits from another device. A `SOURCE_OS_MIGRATION_IMPORTED` visit
+written by `AddPage` with no redirects is a chain end, so it would be committed when history sync is active. #566 stays open for
+the fix.
+
+### Patch budget
+
+| Source | Count |
+|---|---|
+| `.patches` lines | 10 |
+| `arkt` commits above `156.0.8078.48` | 10 |
+
+In sync. Facade header copies `cmp` identical.
+
+### Cleanup
+
+Every app run exited by itself (PIDs checked with `ps -p`). `lsregister -u` on the embed copy and its helpers: 0 records for
+`dev.arkt.Arkt.try531` and 0 paths under the embed folder after. Deleted: the embed folder with its 518 dylib clones, derived data,
+the four throwaway profiles, the fixture, the two defaults suites and the bundle's empty preferences file, the run and build logs.
+Nothing under `~/Applications/ArktTest` or `/Applications/Arkt.app` was touched.

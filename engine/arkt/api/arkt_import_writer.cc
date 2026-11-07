@@ -604,6 +604,8 @@ class HistoryImport : public history::HistoryServiceObserver {
         counts_.latest_visit = pending_latest_;
       }
     } else {
+      LOG(WARNING) << "history import: " << pending_
+                   << " visits got no answer from the history store";
       counts_.failed += pending_;
       counts_.reasons["no answer from the history store"] += pending_;
     }
