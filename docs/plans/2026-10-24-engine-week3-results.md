@@ -4504,15 +4504,18 @@ Two things the issue text did not have:
 2. Most callers dereference the returned bubble: `SetBubbleView(*handler->Show...())`, several followed by
    `CHECK(bubble_view())`. So the plan's nullptr return would crash them. Those methods return one process-wide no-op
    `AutofillBubbleBase` (`Hide()` does nothing, `IsMouseHovered()` is false). It is a `base::NoDestructor`, not a
-   handler member: a controller is `WebContentsUserData` and keeps the raw pointer until it calls `Hide()`, so a bubble
-   that died with the window could dangle. Only the three callers that check the result get nullptr.
+   handler member: each controller belongs to its tab (`WebContentsUserData`), not to the window, and keeps the raw
+   pointer until it calls `Hide()` or hears the bubble closed. A tab can move to another window and outlive this one,
+   so a bubble that died with the handler could dangle. Only the three callers that check the result get nullptr.
+3. Review fix: save card, IBAN and the address bubbles are told in a posted task that the bubble closed untouched,
+   so they let go of the no-op bubble (see "Review fix: close notifications" below).
 
 Every `Show*` logs `ARKT: autofill bubble <name> not shown` on each call.
 
 | Caller | Reaches the handler through | Uses the returned bubble | Handler returns | Result |
 |---|---|---|---|---|
-| `save_card_bubble_controller_impl.cc:845`, :848 (save card, save card confirmation) | `Get()`, null-checked at :126, :173 | `*`, `CHECK` at :851 | no-op bubble | no crash, not shown (smoke) |
-| `iban_bubble_controller_impl.cc:156`, :494 (IBAN, IBAN confirmation) | `Get()`, null-checked at :56, :75 | `*`, `CHECK` at :497 | no-op bubble | no crash, not shown (smoke) |
+| `save_card_bubble_controller_impl.cc:845`, :848 (save card, save card confirmation) | `Get()`, null-checked at :126, :173 | `*`, `CHECK` at :851 | no-op bubble, then a posted `OnBubbleClosed(kNotInteracted)` | no crash, not shown (smoke) |
+| `iban_bubble_controller_impl.cc:156`, :494 (IBAN, IBAN confirmation) | `Get()`, null-checked at :56, :75 | `*`, `CHECK` at :497 | no-op bubble, then a posted `OnBubbleClosed(kNotInteracted)` | no crash, not shown (smoke) |
 | `offer_notification_bubble_controller_impl.cc:239` | `Get()`, unchecked | `*` | no-op bubble | no crash, not shown (by construction) |
 | `mandatory_reauth_bubble_controller_impl.cc:298` | `GetAutofillBubbleHandler()`, unchecked | `*` | no-op bubble | no crash, not shown (by construction) |
 | `filled_card_information_bubble_controller_impl.cc:428` | `GetAutofillBubbleHandler()`, unchecked | `*`, `DCHECK` | no-op bubble | no crash, not shown (by construction) |
@@ -4521,7 +4524,7 @@ Every `Show*` logs `ARKT: autofill bubble <name> not shown` on each call.
 | `omnibox_autofill_bubble_controller.cc:130` | `GetAutofillBubbleHandler()`, unchecked | null-checked | nullptr | no crash, not shown (by construction) |
 | `payments_churned_users_bubble_controller.cc:150`, :218 (bubble, confirmation) | `Get()`, unchecked | null-checked | nullptr | no crash, not shown (by construction) |
 | `wallet_reminder_notice_bubble_controller.cc:139` | `Get()`, null-checked | null-checked | nullptr | no crash, not shown (by construction) |
-| `address_bubbles_controller.cc:61`, :75, :86 (save, update, sign-in promo) | `FindBrowserWindowWithWebContents()`, unchecked | `*`, `CHECK` at :248, :344 | no-op bubble | **crashes before the handler** (smoke); needs a patch, #768 |
+| `address_bubbles_controller.cc:61`, :75, :86 (save, update, sign-in promo) | `FindBrowserWindowWithWebContents()`, unchecked | `*`, `CHECK` at :248, :344 | no-op bubble; save and update then post the owned controller's `OnBubbleClosed()` | **crashes before the handler** (smoke); needs a patch, #768 |
 
 "By construction" rows were not reached in a fresh profile: they need a signed-in account, server cards, offers,
 Autofill AI data or the omnibox autofill flow. The handler and the bubble are non-null for them, and the table records
@@ -4542,7 +4545,7 @@ The address bubbles never reach the handler. `BrowserWindow::FindBrowserWindowWi
 
 Load average while building and running: 2 to 5 (other lanes' work; nothing added).
 
-### Smoke (`out/Spike/Chromium.app`, throwaway profiles under `profiles/575-20261107/`, `--use-mock-keychain`, forms served from `127.0.0.1`, typed and submitted over the DevTools protocol)
+### Smoke, first version (`out/Spike/Chromium.app`, throwaway profiles under `profiles/575-20261107/`, `--use-mock-keychain`, forms served from `127.0.0.1`, typed and submitted over the DevTools protocol)
 
 | Run | Check | Before (`origin/main` build) | After |
 |---|---|---|---|
@@ -4557,10 +4560,41 @@ Load average while building and running: 2 to 5 (other lanes' work; nothing adde
 
 `FATAL`, `NOTREACHED` and `Check failed` lines in the card, IBAN and window runs: 0.
 
-Known limit: a controller that received the no-op bubble reports `IsShowingBubble()` until its tab is hidden or closed,
-and a later autofill prompt on that tab may be skipped, of the same kind or another: seen for a second card and for an
-IBAN after the cards (the two "same tab" rows), while a card after an IBAN on a fresh tab did log. Accepted for a handler
-that shows nothing.
+In this first version a controller that received the no-op bubble reported `IsShowingBubble()` until its tab was
+hidden or closed, and a later autofill prompt on that tab could be skipped, of the same kind or another (the two "same
+tab" rows). The review fix below removes that for save card, IBAN and the address bubbles.
+
+### Review fix: close notifications
+
+The limit is not inherent to a handler that shows nothing: a controller lets go of its bubble when it hears that the
+bubble closed. The handler now tells it, in a posted task, because the caller stores the returned bubble and CHECKs it
+after `Show*` returns (`save_card_bubble_controller_impl.cc:845-851`, `iban_bubble_controller_impl.cc:494-497`):
+
+- Save card, save card confirmation, IBAN, IBAN confirmation: the controller's `GetOnBubbleClosedCallback()` (bound
+  to a weak pointer, `save_card_bubble_controller_impl.cc:422-424`, `iban_bubble_controller_impl.cc:259-261`) runs
+  with `PaymentsUiClosedReason::kNotInteracted`. That reason records no user decision
+  (`save_card_bubble_controller_impl.cc:669-672`, `iban_bubble_controller_impl.cc:373-383`).
+- Save and update address: the handler owns the controller it is given, so it moves it into the posted task and calls
+  its `OnBubbleClosed()`, which reaches `AddressBubblesController` through the controller's weak delegate
+  (`save_address_bubble_controller.cc:250-252`). Not reachable until #768: the address flow crashes before the
+  handler.
+
+The limit remains for the five controllers that keep the no-op bubble until their tab is hidden or closed: offer
+notification, filled card, mandatory re-auth, virtual card enroll and Autofill AI. None of them is reachable in a
+fresh profile.
+
+| Step | Result | Numbers |
+|---|---|---|
+| `git merge origin/main` (1 commit behind, Swift only) | merged, no conflicts | |
+| `nice -n 20 autoninja -C out/Spike chrome -j 4` | `The build has finished successfully.`, `FAILED:` 0 | 36 s |
+| `gn check out/Spike //arkt/browser:window` | the same single error in `arkt_extension_batch_install.mm:29`; none in the files this change touches | |
+| Smoke, one tab: card, a second card, an IBAN after the cards | `SaveCreditCard not shown` twice, then `Iban not shown`; no crash | |
+| Same run: a second IBAN, a new tab, both tabs closed | `Iban not shown`, `ARKT: native window destroyed`; no crash | |
+| Deliberate break: posted close removed from the card and IBAN methods, rebuilt | one tab, card, card, IBAN: only the first `SaveCreditCard not shown` is logged | 27 s build |
+| Fix restored, rebuilt, same three submissions | `SaveCreditCard not shown` twice, `Iban not shown`; `FAILED:` 0 | 27 s build |
+
+`FATAL`, `NOTREACHED`, `Check failed` and `Received signal` lines in these runs: 0. Load average 3 to 6 (other lanes'
+work; nothing added).
 
 ### Patch budget
 

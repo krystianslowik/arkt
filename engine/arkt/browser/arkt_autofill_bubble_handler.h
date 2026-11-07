@@ -25,6 +25,11 @@ namespace arkt {
 // several CHECK it, so those methods return a shared no-op bubble. Only the
 // omnibox, churned-users and wallet-reminder callers check for nullptr; they
 // get nullptr, so their controllers never think a bubble is up.
+//
+// Save card, IBAN and the address bubbles are then told, in a posted task,
+// that the bubble closed untouched, so a later prompt on the same tab can
+// reach the handler. Offer, filled card, re-auth, virtual card and Autofill AI
+// controllers keep the no-op bubble until their tab is hidden or closed.
 class ArktAutofillBubbleHandler : public autofill::AutofillBubbleHandler {
  public:
   explicit ArktAutofillBubbleHandler(BrowserWindowInterface* browser);
