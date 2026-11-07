@@ -416,16 +416,42 @@ public final class SplitContainerView: NSView {
     return drawnPaneIndex(at: local) != nil ? self : super.hitTest(point)
   }
 
-  /// A mouse-down on a drawn pane mid-reflow: a click on its shown close button closes that pane; anywhere else it
-  /// focuses the pane. The page does not get the click: its view would place it by its real frame.
+  /// A mouse-down on a drawn pane mid-reflow: a click on its shown close button closes that pane; a Control-click
+  /// elsewhere is a secondary click and goes to the page as a right-click does (#715); any other click focuses the
+  /// pane. The page does not get a plain click: its view would place it by its real frame.
   public override func mouseDown(with event: NSEvent) {
+    if !isForwardingEvent { controlClickTarget = nil }   // a menu loop that took the last mouse-up leaves no target
     let point = convert(event.locationInWindow, from: nil)
-    guard reflow != nil, let index = drawnPaneIndex(at: point) else { return super.mouseDown(with: event) }
+    guard !isForwardingEvent, reflow != nil, let index = drawnPaneIndex(at: point) else {
+      return super.mouseDown(with: event)
+    }
     if isOnShownCloseButton(point, pane: index) {
       onCloseRequest?(index)
+    } else if event.modifierFlags.contains(.control) {
+      guard let click = atRestTarget(for: event, at: point) else { return super.mouseDown(with: event) }
+      controlClickTarget = click.view
+      controlClickOffset = click.offset
+      forward { click.view.mouseDown(with: click.event) }
     } else if index != focusedIndex {
       onFocusRequest?(index)
     }
+  }
+
+  public override func mouseDragged(with event: NSEvent) {
+    guard !isForwardingEvent, let target = controlClickTarget,
+          let moved = Self.mouseEvent(event, movedBy: controlClickOffset) else {
+      return super.mouseDragged(with: event)
+    }
+    forward { target.mouseDragged(with: moved) }
+  }
+
+  public override func mouseUp(with event: NSEvent) {
+    let target = isForwardingEvent ? nil : controlClickTarget
+    if !isForwardingEvent { controlClickTarget = nil }
+    guard let target, let moved = Self.mouseEvent(event, movedBy: controlClickOffset) else {
+      return super.mouseUp(with: event)
+    }
+    forward { target.mouseUp(with: moved) }
   }
 
   /// The page view a scroll gesture that began on a drawn pane mid-reflow goes to (#677). AppKit keeps every event of
@@ -437,6 +463,9 @@ public final class SplitContainerView: NSView {
   /// The view a right-click mid-reflow went to, and how far its location was moved, so its mouse-up follows it.
   private weak var rightClickTarget: NSView?
   private var rightClickOffset = CGVector.zero
+  /// The same for a Control-click mid-reflow (#715), so its drag and mouse-up follow it.
+  private weak var controlClickTarget: NSView?
+  private var controlClickOffset = CGVector.zero
   /// An event is being forwarded: a target that does not take it passes it up its responder chain, back here, and
   /// it then goes on up from this view instead of round again.
   private var isForwardingEvent = false
@@ -464,17 +493,27 @@ public final class SplitContainerView: NSView {
   public override func rightMouseDown(with event: NSEvent) {
     if !isForwardingEvent { rightClickTarget = nil }   // a menu loop that took the last mouse-up leaves no target
     let point = convert(event.locationInWindow, from: nil)
-    guard !isForwardingEvent, reflow != nil, let (_, real) = drawnTarget(at: point) else {
+    guard !isForwardingEvent, reflow != nil, let click = atRestTarget(for: event, at: point) else {
       return super.rightMouseDown(with: event)
     }
+    rightClickTarget = click.view
+    rightClickOffset = click.offset
+    forward { click.view.rightMouseDown(with: click.event) }
+  }
+
+  /// For a secondary click at `point` (in this view) on a drawn pane mid-reflow: ends the reflow at rest, and returns
+  /// the view under the spot of that pane it was drawn at, which is now at the pane's real frame, with `event` moved
+  /// there and the offset it was moved by. Nil off a drawn pane (the reflow then keeps running) or when nothing but
+  /// this view is there.
+  private func atRestTarget(for event: NSEvent, at point: CGPoint)
+    -> (view: NSView, event: NSEvent, offset: CGVector)? {
+    guard let (_, real) = drawnTarget(at: point) else { return nil }
     endReflow()
     applyFrames()
     let offset = CGVector(dx: real.x - point.x, dy: real.y - point.y)
     guard let target = hitTest(superview.map { convert(real, to: $0) } ?? real), target !== self,
-          let moved = Self.mouseEvent(event, movedBy: offset) else { return super.rightMouseDown(with: event) }
-    rightClickTarget = target
-    rightClickOffset = offset
-    forward { target.rightMouseDown(with: moved) }
+          let moved = Self.mouseEvent(event, movedBy: offset) else { return nil }
+    return (target, moved, offset)
   }
 
   public override func rightMouseDragged(with event: NSEvent) {
