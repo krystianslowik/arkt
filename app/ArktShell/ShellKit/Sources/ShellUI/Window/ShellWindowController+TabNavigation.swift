@@ -22,9 +22,11 @@ extension ShellWindowController {
     if let current = currentNode { switcher.noteViewed(current) }
   }
 
-  /// The flavor of the Space the window shows (the switcher and the pill follow it, as toasts do).
+  /// The flavor of the Space the window shows (the switcher and the pill follow it, as toasts do); a blank or
+  /// incognito window's backdrop flavor (#766).
   private var currentFlavor: ThemeFlavor {
-    currentSpace.flatMap { sidebar.space($0)?.theme.flavor } ?? .light
+    if let backdrop = sidebarController.privateBackdrop { return backdrop.flavor }
+    return currentSpace.flatMap { sidebar.space($0)?.theme.flavor } ?? .light
   }
 
   /// A tab of this window's profile that is still in the sidebar (cheap: no row is built).

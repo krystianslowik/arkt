@@ -262,7 +262,15 @@ public final class SidebarController {
     view.spaceDots.isHidden = hidesItems
     view.pager.isHidden = hidesItems
     view.setPrivateKind(presentation)
+    if hidesItems { refreshSpaceDetails() }             // the neutral backdrop's flavor, and the window's themes
     if presentation == .standard, let first = spaces.first { showSpace(first) }
+  }
+
+  /// A blank or incognito window's neutral backdrop (#766) as the window draws it in `themeContext`; nil in a normal
+  /// window. These windows show no Spaces, so no Space's theme says anything about them.
+  public var privateBackdrop: SpaceThemeInfo? {
+    guard presentation != .standard else { return nil }
+    return ThemeContrast.drawn(PrivateBackdrop.theme(for: themeContext.appearance), in: themeContext)
   }
 
   /// True once, after the current Space's theme changed. The window consumes it in `refreshThemes`.
@@ -449,7 +457,11 @@ public final class SidebarController {
     pagedFlavors = drawn.map { $0?.theme.flavor ?? .light }
     view.spaceDots.titles = pagedSpaces.map { source.space($0)?.title ?? "" }
     view.spaceDots.icons = pagedSpaces.map { source.space($0)?.icon }
-    if let id = currentSpace, let info = drawnSpace(id) { setChromeFlavor(info.theme.flavor) }
+    if let id = currentSpace, let info = drawnSpace(id) {
+      setChromeFlavor(info.theme.flavor)
+    } else if let backdrop = privateBackdrop {
+      setChromeFlavor(backdrop.flavor)
+    }
     noteCurrentTheme()
     themeCreator?.sourceDidChange()
     if notify { onSpacesChanged?(pagedSpaces) }
