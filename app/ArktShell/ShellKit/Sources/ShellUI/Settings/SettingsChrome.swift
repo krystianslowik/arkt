@@ -34,7 +34,7 @@ public final class SettingsPaneItemView: NSView {
       fill.cornerRadius = SettingsMetrics.paneItemRadius
       fill.cornerCurve = .continuous
     }
-    plate.shadowOffset = SettingsTokens.paneItemPlateShadow.unflippedOffset
+    plate.shadowOffset = SettingsTokens.paneItemPlateShadow.flippedOffset   // a sublayer of this flipped view
     plate.shadowRadius = SettingsTokens.paneItemPlateShadow.radius
     plate.opacity = 0
     label.alignmentMode = .center

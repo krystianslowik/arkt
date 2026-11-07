@@ -23,6 +23,67 @@ final class FlippedShadowScreenshotTests: XCTestCase {
     for flavor in [ThemeFlavor.light, .dark] { try shot(flavor) }
   }
 
+  /// #773: the Settings switch (off and on), segmented control and pane items, a current sidebar row and a selected
+  /// Archive row, in a flipped container as the Settings content views and the tables host them. Writes
+  /// `flipped-shadows-settings-rows-<light|dark>.png`. In dark only the off knob draws a lift (the plate and row
+  /// lifts are light only).
+  func testSettingsAndRowShots() throws {
+    for flavor in [ThemeFlavor.light, .dark] { try settingsAndRowShot(flavor) }
+  }
+
+  private final class FlippedContainer: NSView {
+    override var isFlipped: Bool { true }
+  }
+
+  private func settingsAndRowShot(_ flavor: ThemeFlavor) throws {
+    let size = NSSize(width: 560, height: 200)
+    let window = NSWindow(contentRect: NSRect(origin: NSPoint(x: 80, y: 80), size: size), styleMask: [.borderless],
+                          backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    defer { window.close() }
+    window.appearance = NSAppearance(named: flavor == .dark ? .darkAqua : .aqua)
+    let content = NSView(frame: NSRect(origin: .zero, size: size))
+    content.wantsLayer = true
+    content.layer?.backgroundColor = BrandTokens.surfaceBrand.resolve(flavor).cgColor
+    window.contentView = content
+    let container = FlippedContainer(frame: content.bounds)
+    container.wantsLayer = true
+    content.addSubview(container)
+
+    let off = SettingsSwitch(frame: NSRect(x: 30, y: 36, width: 32, height: 20))
+    container.addSubview(off)
+    let on = SettingsSwitch(frame: NSRect(x: 80, y: 36, width: 32, height: 20))
+    on.setOn(true, animated: false)
+    container.addSubview(on)
+    let segments = SettingsSegmentedControl(segments: ["Light", "Dark", "Auto"], selected: 0)
+    segments.frame = NSRect(origin: NSPoint(x: 140, y: 32), size: segments.intrinsicContentSize)
+    container.addSubview(segments)
+    for (index, pane) in [SettingsPane.general, .spaces].enumerated() {
+      let item = SettingsPaneItemView(pane: pane)
+      item.frame.origin = NSPoint(x: 400 + CGFloat(index) * 86, y: 24)
+      container.addSubview(item)
+      item.setSelected(index == 0, animated: false)
+    }
+    let sidebarRow = SidebarRowView(frame: NSRect(x: 30, y: 110, width: 230, height: 41))
+    sidebarRow.flavor = flavor
+    sidebarRow.state = .current
+    container.addSubview(sidebarRow)
+    let archiveRow = ArchiveRowView(frame: NSRect(x: 300, y: 112, width: 230, height: 37))
+    // Outside a table AppKit paints its own selection over a selected row; off, so the fill and its lift are drawn.
+    archiveRow.selectionHighlightStyle = .none
+    container.addSubview(archiveRow)
+    archiveRow.isSelected = true
+
+    window.orderFront(nil)
+    container.layoutSubtreeIfNeeded()
+    window.displayIfNeeded()
+
+    let folder = try XCTUnwrap(folder)
+    let data = try render(content)
+    let name = "flipped-shadows-settings-rows-\(flavor == .dark ? "dark" : "light").png"
+    try data.write(to: folder.appendingPathComponent(name))
+  }
+
   private func shot(_ flavor: ThemeFlavor) throws {
     let window = NSWindow(contentRect: NSRect(x: 80, y: 80, width: 900, height: 340), styleMask: [.borderless],
                           backing: .buffered, defer: false)

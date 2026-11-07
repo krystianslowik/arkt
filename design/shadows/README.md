@@ -13,3 +13,19 @@ pngquant --force --nofs --ext .png 256 /tmp/shadow-shots/*.png
 ```
 
 The test draws the window's layer tree directly (`cacheDisplay` leaves out the floating sidebar's own shadow).
+
+## Settings controls and row lifts (#773)
+
+The Settings switch knob, the selected segment's plate and the selected pane item's plate, the current sidebar row
+and the selected Archive row now cast down too. Favorite tiles, the content card and the Little Arkt flight already
+did: their layers are not flipped.
+
+Shots: `shots/flipped-shadows-settings-rows-<light|dark>.png` (2x, 560 x 200 window, a flipped container as the
+Settings content views and the tables host them). In dark only the off knob draws a lift; the plate and row lifts are
+light only.
+
+```zsh
+cd app/ArktShell/ShellKit
+ARKT_SHADOW_SHOTS_DIR=/tmp/shadow-shots swift test --filter FlippedShadowScreenshotTests/testSettingsAndRowShots
+pngquant --force --nofs --ext .png 256 /tmp/shadow-shots/*.png
+```
