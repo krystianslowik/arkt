@@ -30,7 +30,7 @@ final class DialogSheetView: NSView {
   let content: DialogContent
   let insets: Insets
   let iconView: DialogIconView?
-  let titleField = NSTextField(wrappingLabelWithString: "")
+  let titleField = TokenLabel(wrappingLabelWithString: "")
   let subtitleField: NSTextField?
   let paragraphFields: [NSTextField]
   /// The paragraphs inside a scroll view, when the content caps the body's height.
@@ -60,13 +60,13 @@ final class DialogSheetView: NSView {
     self.insets = insets
     iconView = content.icon == .none ? nil : DialogIconView(icon: content.icon, size: content.iconPlacement == .stacked
       ? Self.stackedIconSize : Self.besideIconSize)
-    subtitleField = content.subtitle.map { NSTextField(wrappingLabelWithString: $0) }
-    paragraphFields = content.paragraphs.map { NSTextField(wrappingLabelWithString: $0.text) }
+    subtitleField = content.subtitle.map { TokenLabel(wrappingLabelWithString: $0) }
+    paragraphFields = content.paragraphs.map { TokenLabel(wrappingLabelWithString: $0.text) }
     bodyScroll = content.bodyMaxHeight == nil ? nil : NSScrollView()
     inputView = content.input.map { DialogInputView(input: $0) }
     listField = content.listItems.isEmpty ? nil : DialogListView(heading: content.listHeading, items: content.listItems)
     checkboxButton = content.checkbox.map { box in
-      let button = NSButton(checkboxWithTitle: box.title, target: nil, action: nil)
+      let button = TokenTitleButton(checkboxWithTitle: box.title, target: nil, action: nil)
       button.state = box.isOn ? .on : .off
       return button
     }
@@ -506,8 +506,8 @@ final class DialogListView: NSView {
   let itemFields: [NSTextField]
 
   init(heading: String?, items: [String]) {
-    headingField = heading.map { NSTextField(labelWithString: $0) }
-    itemFields = items.map { NSTextField(wrappingLabelWithString: $0) }
+    headingField = heading.map { TokenLabel(labelWithString: $0) }
+    itemFields = items.map { TokenLabel(wrappingLabelWithString: $0) }
     super.init(frame: .zero)
     wantsLayer = true
     layer?.cornerRadius = 10
