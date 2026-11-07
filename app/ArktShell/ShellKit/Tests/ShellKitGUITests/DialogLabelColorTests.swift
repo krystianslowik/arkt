@@ -174,6 +174,9 @@ final class DialogLabelColorTests: XCTestCase {
                                   y: try title(alert).frame.minY - checkbox.frame.minY)
         XCTAssertEqual(labelInk.x + labelOffset.x, plainInk.x, accuracy: 1, "\(flavor): the title's leading edge")
         XCTAssertEqual(labelInk.y + labelOffset.y, plainInk.y, accuracy: 1, "\(flavor): the title's top")
+        let labelEnd = try XCTUnwrap(try Shot(title(alert)).inkEnd()) + labelOffset.x
+        let plainEnd = try XCTUnwrap(plain.inkEnd())
+        XCTAssertEqual(labelEnd, plainEnd, accuracy: 0.5, "\(flavor): the whole title shows, not clipped")
 
         // A click on the title lands on the checkbox, as before.
         let title = try XCTUnwrap(alert.view.checkboxTitleLabel)
@@ -320,6 +323,18 @@ private struct Shot {
     }
     guard left != .max else { return nil }
     return NSPoint(x: CGFloat(left) / scale, y: CGFloat(top) / scale)
+  }
+
+  /// The right edge of the opaque pixels, in points from the view's leading edge.
+  func inkEnd() -> CGFloat? {
+    var right = -1
+    for y in 0..<rep.pixelsHigh {
+      for x in 0..<rep.pixelsWide {
+        guard let color = rep.colorAt(x: x, y: y), color.alphaComponent > 0.5 else { continue }
+        right = max(right, x)
+      }
+    }
+    return right < 0 ? nil : CGFloat(right + 1) / scale
   }
 
   func write(to file: URL) throws {

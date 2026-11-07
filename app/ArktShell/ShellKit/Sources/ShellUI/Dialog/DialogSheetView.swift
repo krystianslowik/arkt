@@ -311,7 +311,8 @@ final class DialogSheetView: NSView {
   private func placeCheckboxTitle(over button: NSButton) {
     guard let checkboxTitleLabel, let cell = button.cell else { return }
     let title = button.convert(cell.titleRect(forBounds: button.bounds), to: self)
-    let size = checkboxTitleLabel.intrinsicContentSize
+    // The cell's size, not `intrinsicContentSize`, which can lag the font and attributes set after creation.
+    let size = checkboxTitleLabel.cell?.cellSize ?? checkboxTitleLabel.intrinsicContentSize
     checkboxTitleLabel.frame = NSRect(x: title.minX - Self.labelTextInset, y: (title.midY - size.height / 2).rounded(),
                                       width: min(ceil(size.width), max(0, bounds.width - title.minX)),
                                       height: ceil(size.height))
