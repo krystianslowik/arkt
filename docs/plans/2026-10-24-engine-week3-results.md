@@ -4424,6 +4424,8 @@ overlay test target; facade header and Swift unchanged.
 - Patch 0011 `Arkt: keep imported visits out of history sync`: `MaybeCommit` also returns for
   `SOURCE_OS_MIGRATION_IMPORTED`, right after the `SOURCE_ACTOR` check (4 lines), so all three entry points are covered.
   Not guarded by `IS_MAC`: the upstream importer (`stable_portability_data_importer.cc`) writes the same source.
+  Only source 7 is skipped. The older `SOURCE_FIREFOX_IMPORTED`, `SOURCE_IE_IMPORTED` and `SOURCE_SAFARI_IMPORTED`
+  (3 to 5) still sync; Arkt never writes them.
   `GetDataForCommit` only serves keys that were tracked, so it needs nothing.
 - Test `HistorySyncBridgeTest.ImportedVisitsNotSynced` in the same patch: an imported visit through `OnURLVisited`,
   `OnURLsModified` and `OnVisitUpdated` leaves the processor empty. `NonActorInitiatedVisitsAreSynced` still checks that
@@ -4457,6 +4459,9 @@ Load average while building: 5 to 8 (other lanes' work; nothing added).
 
 Not run: an upload with history sync active. That needs a signed-in account, which test runs never use; the bridge test
 is the evidence that an imported visit is not committed.
+
+Limit: visits imported with history sync on before this patch keep their server copies. They are not retracted, and
+later updates to them are skipped, so those copies go stale. Accepted, since no build has shipped sync-on imports.
 
 ### Patch budget
 
