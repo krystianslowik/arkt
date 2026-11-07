@@ -462,7 +462,7 @@ public final class SidebarContainerView: NSView {
     didSet {
       guard extensionsButton !== oldValue else { return }
       oldValue?.removeFromSuperview()
-      placeExtensionsButton()
+      updateExtensionsButtonHost()
       applyButtonImages()
       needsLayout = true
     }
@@ -534,7 +534,7 @@ public final class SidebarContainerView: NSView {
     windowKindLabel.textColor = ShellTokens.sidebarForeground.resolve(flavor).nsColor()
     privatePages.isHidden = !isPrivate
     bottomBar.isHidden = isPrivate
-    placeExtensionsButton()
+    updateExtensionsButtonHost()
     needsLayout = true
   }
 
@@ -542,7 +542,7 @@ public final class SidebarContainerView: NSView {
 
   /// Puts the Extensions button in the bottom bar, or in the footer band of a private window. In the band it carries
   /// the non-key dimming itself; in the bottom bar the bar does.
-  private func placeExtensionsButton() {
+  private func updateExtensionsButtonHost() {
     guard let extensionsButton else { return }
     let host: NSView = isPrivate ? self : bottomBar
     if extensionsButton.superview !== host {
@@ -590,7 +590,7 @@ public final class SidebarContainerView: NSView {
       for view in [urlBar, favorites, pager, bottomBar, windowKindLabel, privatePages, banner.row] as [NSView] {
         view.alphaValue = alpha
       }
-      placeExtensionsButton()
+      updateExtensionsButtonHost()
     }
   }
 
@@ -695,8 +695,9 @@ public final class SidebarContainerView: NSView {
 
   /// The Pages list from under the address bar down to the footer band, the window's kind centered in that band and
   /// the Extensions button at its trailing end, where the bottom bar has it. The label keeps a button's width clear on
-  /// both sides, so it stays centered and never runs under the button. The band never scrolls with the list. A banner (#648) keeps its place above the bottom bar's band, which is
-  /// taller than the footer: while it reserves space, the list ends above it, as the row list of a normal window does.
+  /// both sides, so it stays centered and never runs under the button. The band never scrolls with the list. A banner
+  /// (#648) keeps its place above the bottom bar's band, which is taller than the footer: while it reserves space, the
+  /// list ends above it, as the row list of a normal window does.
   private func layoutPrivatePages() {
     guard isPrivate else { return }
     let padding = SidebarMetrics.horizontalPadding
