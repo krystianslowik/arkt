@@ -1,4 +1,5 @@
 import AppKit
+import EngineAPI
 import Testing
 @testable import ShellUI
 
@@ -66,8 +67,20 @@ struct LiftShadowTokenTests {
     tile.isCurrent = true
     tile.layout()
     tile.updateLayer()
-    expectDraws(ShellTokens.rowLiftShadow, flavor, on: tile.fillLayer)
+    expectDraws(ShellTokens.rowLiftShadow, flavor, flipped: false, on: tile.fillLayer)
     #expect(tile.fillLayer.shadowPath != nil, "an explicit path, no offscreen pass")
+  }
+
+  @Test(arguments: [ThemeFlavor.light, .dark])
+  func theShownPrivatePageRow(flavor: ThemeFlavor) throws {
+    let tab = TabID()
+    let row = PrivatePageRowView(tab: tab)
+    row.frame = NSRect(x: 0, y: 0, width: 240, height: 32)
+    row.flavor = flavor
+    row.apply(PrivatePageRowContent(tab: tab, title: "Private", url: nil, favicon: nil, isShown: true), favicon: nil)
+    row.layout()
+    let fill = try #require(row.layer?.sublayers?.first, "the row's fill")
+    expectDraws(ShellTokens.rowLiftShadow, flavor, flipped: true, on: fill)
   }
 
   @Test(arguments: [NSAppearance.Name.aqua, .darkAqua])
@@ -88,7 +101,8 @@ struct LiftShadowTokenTests {
     card.appearance = NSAppearance(named: appearance)
     card.updateLayer()
     let layer = try #require(card.layer)
-    expectDraws(ShellTokens.cardLiftShadow, ThemeFlavor(appearance: card.effectiveAppearance), on: layer)
+    expectDraws(ShellTokens.cardLiftShadow, ThemeFlavor(appearance: card.effectiveAppearance), flipped: false,
+                on: layer)
   }
 
   @Test(arguments: [NSAppearance.Name.aqua, .darkAqua], [false, true])
@@ -143,7 +157,7 @@ struct LiftShadowTokenTests {
   /// The layer casts `token` for `flavor`: the same blur, offset and visible alpha (none where the token is clear).
   /// `flipped`: the layer's y axis points down (a flipped view's layer or sublayer), so down is a positive offset;
   /// `ShadowDirectionTests` checks each site's direction on screen.
-  private func expectDraws(_ token: ShadowToken, _ flavor: ThemeFlavor, flipped: Bool = false, on layer: CALayer,
+  private func expectDraws(_ token: ShadowToken, _ flavor: ThemeFlavor, flipped: Bool, on layer: CALayer,
                            sourceLocation: SourceLocation = #_sourceLocation) {
     #expect(layer.shadowRadius == token.radius, "blur", sourceLocation: sourceLocation)
     #expect(layer.shadowOffset == (flipped ? token.flippedOffset : token.unflippedOffset), "offset",

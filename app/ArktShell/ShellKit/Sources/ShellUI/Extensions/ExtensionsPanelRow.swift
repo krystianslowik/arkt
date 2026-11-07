@@ -215,7 +215,7 @@ final class ExtensionsPanelRow: ExtensionContextMenuView {
       background.shadowColor = shadow.color.resolve(flavor).cgColor
       background.shadowOpacity = isLifted ? 1 : 0
       background.shadowRadius = shadow.radius / 2
-      background.shadowOffset = CGSize(width: 0, height: -shadow.offsetY / 2)
+      background.shadowOffset = CGSize(width: 0, height: shadow.flippedOffset.height / 2)   // this view is flipped
     }
   }
 }
