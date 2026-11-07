@@ -1235,6 +1235,41 @@ final class ScriptedFacade: NSObject, ArktEngine {
     Task { @MainActor in held.completion(results) }
   }
 
+  /// What each `uninstallExtension` call received, in order (#721).
+  private(set) var uninstallCalls: [(extensionID: String, reportAbuse: Bool)] = []
+  /// Extensions the profile keeps installed (policy, the browser's own): their uninstall fails with "not removable".
+  var nonRemovableExtensions: Set<String> = []
+  /// What each `uninstallExtension` completion answered, in order.
+  private(set) var uninstallAnswers: [(uninstalled: Bool, reason: String?)] = []
+
+  /// What the real facade does: an id no window lists fails with "unknown extension", a kept one with "not
+  /// removable", both changing nothing; otherwise the action leaves every window that listed it (one
+  /// `ExtensionActionsChanged` each, inside the call, as `OnToolbarActionRemoved` fires inside `UninstallExtension`).
+  /// The completion runs on a later turn.
+  func uninstallExtension(
+    _ extensionID: String, reportAbuse: Bool, completion: @escaping (Bool, String?) -> Void
+  ) {
+    uninstallCalls.append((extensionID, reportAbuse))
+    let listing = browserList.filter { browser in
+      actions[ObjectIdentifier(browser)]?.contains { $0.actionId == extensionID } == true
+    }
+    let answer: (Bool, String?)
+    if listing.isEmpty {
+      answer = (false, "unknown extension")
+    } else if nonRemovableExtensions.contains(extensionID) {
+      answer = (false, "not removable")
+    } else {
+      for browser in listing {
+        setActions(actions[ObjectIdentifier(browser)]?.filter { $0.actionId != extensionID } ?? [], in: browser)
+      }
+      answer = (true, nil)
+    }
+    Task { @MainActor in
+      self.uninstallAnswers.append(answer)
+      completion(answer.0, answer.1)
+    }
+  }
+
   func answerDialog(in tab: any ArktTabHandle, accept: Bool) -> Bool {
     guard testAPIEnabled, let tab = tab as? ScriptedTab else { return false }
     return tab.answer(accept: accept)

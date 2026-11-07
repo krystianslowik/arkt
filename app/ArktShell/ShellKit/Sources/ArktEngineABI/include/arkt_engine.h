@@ -1156,6 +1156,29 @@ NS_SWIFT_UI_ACTOR
 // was already confirmed finishes with its real result. Does nothing when no
 // batch is running.
 - (void)cancelExtensionInstalls NS_SWIFT_NAME(cancelExtensionInstalls());
+// Uninstalls an extension of the profile the engine started with (#721) as
+// the user's own choice (UNINSTALL_REASON_USER_INITIATED), with no prompt of
+// the engine's: the shell asked already. Built on ExtensionRegistrar's
+// UninstallExtension, the call Chrome's own uninstall dialog makes; that
+// dialog is not shown. Every other uninstall path (chrome.management, for
+// one) keeps its dialog. `completion` runs on the main thread, never inside
+// the call: `uninstalled` YES once the extension is gone, or NO with a short
+// sentence that holds no id or name ("unknown extension" for an id the
+// profile does not have, "not removable" for one policy or the browser keeps
+// installed); nothing changed then. The removal reaches the sinks as
+// ExtensionActionsChanged for every window that listed the action.
+// `reportAbuse`: after a successful uninstall the Web Store's report page for
+// the extension opens in a new foreground tab of the last active window (the
+// one the shell's sheet belongs to), as Chrome does after its dialog. Only for
+// an extension that updates from the Web Store (Chrome shows its checkbox only
+// then); for any other extension no tab opens.
+- (void)uninstallExtension:(NSString*)extensionID
+               reportAbuse:(BOOL)reportAbuse
+                completion:(void (^)(BOOL uninstalled,
+                                     NSString* _Nullable failureReason))
+                               completion
+    NS_SWIFT_NAME(uninstallExtension(_:reportAbuse:completion:))
+        NS_SWIFT_DISABLE_ASYNC;
 
 // Downloads (#132), of the profile the engine started with. The events are
 // DownloadCreated, DownloadUpdated and DownloadRemoved (no tab, no window).

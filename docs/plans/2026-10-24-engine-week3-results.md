@@ -5050,3 +5050,107 @@ Deleted: the throwaway profiles under `profiles/583-20261107/` (with the crash r
 
 Cleanup: every run stopped by PID or exited; the loopback server stopped by PID; the profiles, the `embed-583` folder,
 the build logs and the defaults suite deleted.
+
+## #721: uninstall an extension through the facade
+
+Date 2026-11-07. Branch `engine/721-uninstall-extension` from `origin/main` (`03d6c58`). Engine side of #720 (the
+remove sheet and `EngineExtensions.uninstallExtension`). Overlay and facade only: no patch.
+
+### Gate
+
+- Seam: `ExtensionRegistrar::UninstallExtension` with `UNINSTALL_REASON_USER_INITIATED`, the public call
+  `ExtensionUninstallDialog` makes once its dialog is accepted, from a new overlay file pair
+  `arkt/browser/arkt_extension_uninstall.{h,cc}`. The report page is `NavigateParams` with
+  `extension_urls::GetWebstoreReportAbuseUrl` and `NEW_FOREGROUND_TAB`, as `ExtensionUninstallDialog::HandleReportAbuse`.
+  No upstream file is touched; `arkt_extension_dialogs.mm` (the dialog hook) is unchanged.
+- Facade header: additive only, both copies `cmp` identical. One required member on the engine,
+  `uninstallExtension:reportAbuse:completion:` (`completion(BOOL uninstalled, NSString* failureReason)`); the Swift
+  doubles (`ScriptedFacade`, the ABI `TestEngine`) grew it. No new event kind: the removal is the existing
+  `ExtensionActionsChanged`.
+- `.patches`: unchanged (12). New dep of `//arkt/browser:window`: `//chrome/browser/ui/navigator`.
+- Build: `nice -n 20 autoninja -C out/Spike chrome -j 4`; 1.9 TB free on the Chromium disk, 36 GB on `/`, swap 2.9 GB
+  used.
+
+### What landed
+
+- **`arkt::UninstallExtensionForUser`.** An id the registry does not have (`GetInstalledExtension`, enabled or not)
+  fails with "unknown extension" before the registrar is called (it `CHECK`s on an unknown id). A refusal of the
+  management policy (policy-installed, component, `MustRemainInstalled`) fails with "not removable"; the policy's
+  error names the extension, so it is neither returned nor logged. Neither changes anything.
+- **Report abuse.** After a successful uninstall, so the report page is the active tab even when the extension set an
+  uninstall URL. Only for an extension whose update URL is the Web Store's (`ExtensionManagement::UpdatesFromWebstore`,
+  read before the uninstall), the condition for Chrome's own checkbox; otherwise no tab opens and a line is logged. The
+  navigation names only the profile, as Chrome's does, so the tab lands in the last active window: the one the
+  shell's sheet hangs from. The shell's call carries no window to name instead.
+- **Facade.** `uninstallExtension:reportAbuse:completion:` runs through `RunOrDefer` like the other mutators and
+  posts the completion, so it never runs inside the call.
+- **ChromiumEngine** (`ChromiumEngine+Uninstall.swift`): `uninstallExtension(_:reportAbuse:)` calls the facade once;
+  a refusal is logged (`dev.arkt.shell`, `ChromiumExtensions`), as the shell's call has no answer. The action leaves
+  through the window's `.extensionActionsChanged`, which ChromiumEngine already maps.
+- Self-test embedder: command `uninstall <id> [abuse]`, which logs the answer and whether it came inside the call.
+
+### Tests first
+
+`ChromiumExtensionUninstallTests` (3 tests, 5 cases) and `ConformanceTests.uninstallReachesTheFacadeWithItsFlagAndAnswers`
+were written against the new header and the scripted facade's `uninstallExtension` before ChromiumEngine had the
+method. Red run: ChromiumEngine fell back to `EngineExtensions`' default no-op, and all 5 cases failed (15 issues:
+the facade saw no call, the action stayed, no event). With `ChromiumEngine+Uninstall.swift` all pass.
+
+### Swift tests (`nice -n 20`, `-j 2`, in `app/ArktShell/ShellKit`)
+
+| Command | Result |
+|---|---|
+| `swift test --filter "ChromiumEngineKitTests\|ArktEngineABITests\|EngineAPITests"` | 163 + 32 + 279 passed, 0 failed (baseline 160 + 31 + 279): 3 new `ChromiumExtensionUninstallTests` (5 cases), 1 new ABI test |
+| Full suite (`swift test --skip ShellKitGUITests`) | not run locally (several lanes building on this Mac); CI's Swift tests job |
+
+### Build
+
+| Step | Result |
+|---|---|
+| `nice -n 20 autoninja -C out/Spike chrome -j 4` | `The build has finished successfully.`, `FAILED:` 0 |
+| `gn check out/Spike //arkt/browser:window` | 1 error, pre-existing (`arkt_extension_batch_install.mm:29`, `webstore_installer`); none for the new files |
+| `gn check out/Spike //arkt/api:embedder` | the 4 pre-existing errors only |
+
+Load average 2.5 to 3.5 while building and running (other lanes' work; nothing added).
+
+### Self-test runs (`out/Spike/Chromium.app`, `--no-startup-window --arkt-facade-selftest --arkt-engine-test-api --remote-debugging-port=9333`, fresh profiles `profiles/721-20261107/run1` and `run2`, `--use-mock-keychain`, unpacked copies of the action probe loaded with `--load-extension` (one with the Web Store's `update_url`), commands through the page title over the DevTools protocol)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Unknown id (`aaaa...`, with abuse) | PASS | `answered failed reason=unknown extension insideCall=no`; no event, 1 page |
+| Component extensions (`mhjfbmdgcfjbbpaeojofohoefgiehjai` PDF viewer, `glbjnfimcajjenihimblfaponejbkoph`, with abuse) | PASS | `uninstall refused by the management policy`, `answered failed reason=not removable insideCall=no`; the listing still has its 3 actions, no tab |
+| Plain unpacked extension, with abuse | PASS | `uninstalled`, one `ExtensionActionsChanged`, the listing drops to 2, `report page skipped: the extension does not update from the Web Store`, no tab; its `extensions.settings` entry is empty after quit |
+| Web Store extension, with abuse, two windows (window 2 opened last by `chrome.windows.create`; the command sent from window 1's tab) | PASS | `ExtensionActionsChanged` for both windows, both listings drop the action, ONE `tabCreated` in window 2 with `https://chromewebstore.google.com/detail/<id>/report?utm_source=chrome-remove-extension-dialog`, active |
+| Web Store extension, abuse off (run2) | PASS | `uninstalled`, listing drops it, no tab |
+| Web Store extension, with abuse, one window (run2) | PASS | one report tab in that window; the run created 2 tabs in all (the first page and the report) |
+| No Chromium dialog on the facade path | PASS | `dialog sheet shown`: 0 in run2, and in run1 only the one below |
+| Other uninstall paths keep their dialog: `chrome.management.uninstallSelf({showConfirmDialog: true})` from the probe's page (user gesture) | PASS | `ARKT: dialog sheet shown ExtensionUninstallDialog` (patch 0007's native sheet); the extension stays installed until it is answered |
+
+`FATAL`, `NOTREACHED`, `Check failed` lines: 0 in both runs.
+
+### Patch budget
+
+| Source | Count |
+|---|---|
+| `.patches` lines | 12 |
+| `arkt` commits above `156.0.8078.48` | 12 |
+
+In sync, and the 12 commits export to the committed patch files unchanged; nothing exported. Facade header copies
+`cmp` identical.
+
+### Left open
+
+- The shell's Remove from Arkt... end to end in an Engine app build (criterion 4) was not run: it needs clicks in the
+  shell's window, and this lane sends no synthetic input it cannot check against the frontmost app. The facade path
+  under it is covered by the self-test runs; the sheet by #720's GUI tests.
+- Pins and commands: ChromiumEngine has no engine-backed `pinnedExtensionIDs` or `extensionCommands` yet (the facade
+  has no surface for them), so an uninstall emits no `.commandsChanged` and only the action's removal is verified.
+- Report abuse for an extension that does not update from the Web Store opens nothing, while the shell's sheet shows
+  the checkbox for every extension (maintainer question in the pull request).
+- The report tab goes to the last active window; the shell's call names no window.
+
+### Cleanup
+
+Both Chromium runs stopped by exact PID (`ps -p` prints nothing). Deleted: the throwaway profiles under
+`profiles/721-20261107/` and the build log. The fixtures and run logs lived in a temporary folder outside the repo.
+Nothing under `~/Applications/ArktTest` or `/Applications/Arkt.app` was touched.

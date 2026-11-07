@@ -1161,6 +1161,24 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
                      << " setting=" << permission.setting;
       }
     }
+  } else if (command == "uninstall") {
+    // #721: "uninstall <extension id> [abuse]", as the shell's remove sheet.
+    const bool report_abuse = words.size() > 2 && words[2] == "abuse";
+    LOG(WARNING) << "ARKT selftest uninstall " << argument
+                 << " reportAbuse=" << (report_abuse ? "yes" : "no");
+    __block bool returned = false;
+    [_engine uninstallExtension:base::SysUTF8ToNSString(argument)
+                    reportAbuse:report_abuse
+                     completion:^(BOOL uninstalled, NSString* reason) {
+                       LOG(WARNING)
+                           << "ARKT selftest uninstall answered "
+                           << (uninstalled ? "uninstalled" : "failed")
+                           << " reason="
+                           << (reason ? base::SysNSStringToUTF8(reason)
+                                      : std::string("none"))
+                           << " insideCall=" << (returned ? "no" : "yes");
+                     }];
+    returned = true;
   } else if (command == "devtools") {
     id<ArktWindowHost> host = tab.browser.host;
     if (host.executeCommand) {

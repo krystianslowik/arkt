@@ -17,6 +17,7 @@
 #include "arkt/browser/arkt_browser_window.h"
 #include "arkt/browser/arkt_extension_batch_install.h"
 #include "arkt/browser/arkt_extension_calls.h"
+#include "arkt/browser/arkt_extension_uninstall.h"
 #include "arkt/browser/arkt_extensions_container.h"
 #include "arkt/browser/arkt_extensions_menu.h"
 #include "arkt/browser/arkt_javascript_dialog.h"
@@ -4205,6 +4206,42 @@ void DeliverImportResult(void (^completion)(id<ArktImportResult>),
 - (void)cancelExtensionInstalls {
   arkt::CheckFacadeEntry();
   arkt::CancelWebstoreExtensionInstalls();
+}
+
+- (void)uninstallExtension:(NSString*)extensionID
+               reportAbuse:(BOOL)reportAbuse
+                completion:(void (^)(BOOL uninstalled,
+                                     NSString* _Nullable failureReason))
+                               completion {
+  arkt::CheckFacadeEntry();
+  // Deferred out of a nested run loop like the other mutators; the
+  // completion is posted either way, so it never runs inside the call.
+  arkt::RunOrDefer(
+      "uninstallExtension",
+      base::BindOnce(
+          [](std::string extension_id, bool report_abuse,
+             void (^completion)(BOOL, NSString*)) {
+            std::string failure;
+            const bool uninstalled = arkt::UninstallExtensionForUser(
+                arkt::EmbedderProfile(), extension_id, report_abuse,
+                &failure);
+            LOG(WARNING) << "ARKT: facade uninstallExtension report_abuse="
+                         << report_abuse << " "
+                         << (uninstalled ? "uninstalled" : failure);
+            base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+                FROM_HERE,
+                base::BindOnce(
+                    [](void (^completion)(BOOL, NSString*), bool uninstalled,
+                       std::string failure) {
+                      completion(uninstalled,
+                                 uninstalled
+                                     ? nil
+                                     : base::SysUTF8ToNSString(failure));
+                    },
+                    completion, uninstalled, std::move(failure)));
+          },
+          base::SysNSStringToUTF8(extensionID), reportAbuse == YES,
+          completion));
 }
 
 // MARK: Downloads (#132)

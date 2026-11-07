@@ -473,6 +473,12 @@ final class TestEngine: NSObject, ArktEngine {
 
   func cancelExtensionInstalls() {}
 
+  private(set) var uninstalledExtensions: [(String, Bool)] = []
+  func uninstallExtension(_ extensionID: String, reportAbuse: Bool, completion: @escaping (Bool, String?) -> Void) {
+    uninstalledExtensions.append((extensionID, reportAbuse))
+    completion(false, "unknown extension")
+  }
+
   func importBookmarks(_ bookmarks: [any ArktImportBookmark], completion: @escaping (any ArktImportResult) -> Void) {
     importedBookmarkPaths += bookmarks.map(\.folderPath)
     completion(TestImportResult(written: bookmarks.count, skipped: 0, failed: 0, failureReason: nil))
@@ -766,6 +772,16 @@ struct ConformanceTests {
     engine.evaluateScript("1 + 1", in: tab, userGesture: true) { value, _ in result = value }
     #expect(result as? Int == 5)
     #expect(engine.testAPIEnabled && !engine.answerDialog(in: tab, accept: true))
+  }
+
+  @Test func uninstallReachesTheFacadeWithItsFlagAndAnswers() {
+    let facade = TestEngine()
+    let engine: any ArktEngine = facade
+    var answer: (Bool, String?)?
+    engine.uninstallExtension("action-probe", reportAbuse: true) { answer = ($0, $1) }
+    #expect(facade.uninstalledExtensions.map(\.0) == ["action-probe"])
+    #expect(facade.uninstalledExtensions.map(\.1) == [true])
+    #expect(answer?.0 == false && answer?.1 == "unknown extension")
   }
 
   @Test func terminationSeamsRunTheCompletion() {
