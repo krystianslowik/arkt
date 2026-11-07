@@ -304,10 +304,21 @@ interaction, with `asserted=yes` or `asserted=no`. The test is skipped as NOT-ME
 at a 1-minute load at or above the core count, and the hitch count is reported but not asserted when the load read
 after measuring reaches the core count. Inside a longer GUI batch a gate only reports, because the tests before it
 leave main-thread work in its frames; it asserts when its class runs alone or when `ARKT_PACING_GATE=1` is set. On a
-quiet 120 Hz machine, check every gate with:
+quiet 120 Hz machine, check the gates one class at a time; each run is its class alone, so it asserts without the
+switch:
 
 ```zsh
 cd app/ArktShell/ShellKit
+for c in SpacePagerTests SplitPacingTests SplitReflowPacingTests SidebarHideTests PeekMotionOnScreenTests; do
+  swift test --filter "ShellKitGUITests.$c" || break
+done
+```
+
+`ARKT_PACING_GATE=1` over a batch of classes in one process is a diagnostic for the work earlier tests leave behind,
+not a gate check. It is expected to fail until #275 (the light/dark flip) and #805 (leftover windows in a GUI batch)
+are fixed:
+
+```zsh
 ARKT_PACING_GATE=1 swift test --filter '(SpacePager|SplitPacing|SplitReflowPacing|SidebarHide|PeekMotionOnScreen)Tests'
 ```
 
