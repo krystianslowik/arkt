@@ -29,6 +29,8 @@ public final class DialogSheet: NSWindowController {
     window.contentView = view
     window.initialFirstResponder = view.initialFocus
     window.onEscape = { [weak self] in self?.view.escape() ?? false }
+    // AppKit keeps the sheet role; the subrole makes VoiceOver read an alert dialog, as `DialogAlert` does.
+    window.setAccessibilitySubrole(.dialog)
     window.setAccessibilityLabel(content.title)
     view.onAnswer = { [weak self] answer in self?.finish(answer) }
   }

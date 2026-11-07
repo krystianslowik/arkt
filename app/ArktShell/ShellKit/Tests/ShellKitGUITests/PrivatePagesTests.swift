@@ -195,6 +195,14 @@ final class PrivatePagesTests: XCTestCase {
       window.window?.orderFront(nil)
       button.performClick(nil)
       XCTAssertTrue(panel.isShown, "the same action opens the Extensions panel")
+      let panelFrame = try XCTUnwrap(panel.panel?.frame)
+      let host = try XCTUnwrap(window.window)
+      let buttonOnScreen = host.convertToScreen(button.convert(button.bounds, to: nil))
+      let sidebarOnScreen = host.convertToScreen(sidebar.convert(sidebar.bounds, to: nil))
+      XCTAssertEqual(panelFrame.minY, buttonOnScreen.maxY + ExtensionsPanelMetrics.gap, accuracy: 0.5,
+                     "the panel opens just above the button in the band")
+      XCTAssertEqual(panelFrame.minX, sidebarOnScreen.minX + ExtensionsPanelMetrics.sidebarInset, accuracy: 0.5,
+                     "12 pt in from the sidebar, as from the bottom bar")
       XCTAssertTrue(button.isOpen)
       panel.hide(keyboard: false)
       XCTAssertFalse(button.isOpen)

@@ -78,7 +78,8 @@ public final class OnboardingController {
   public var onFinish: (@MainActor () -> Void)?
   /// Test seam: runs instead of the `NSAlert` sheet; answer true to confirm Skip setup.
   public var confirmSkip: (@MainActor (@escaping @MainActor (Bool) -> Void) -> Void)?
-  /// Runs `work` after `delay` seconds; the finish's reveal and browser handoff wait on it. Tests run it by hand.
+  /// Runs `work` after `delay` seconds; the import hero's removal after its fade, and the finish's reveal and browser
+  /// handoff, wait on it. Tests run it by hand.
   var schedule: @MainActor (TimeInterval, @escaping @MainActor () -> Void) -> Void = { delay, work in
     DispatchQueue.main.asyncAfter(deadline: .now() + delay) { work() }
   }
@@ -511,7 +512,7 @@ public final class OnboardingController {
     if let layer = hero.layer {
       OnboardingMotion.animate(layer, "opacity", to: Float(0), duration: 0.2)
     }
-    DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) { [weak hero] in hero?.removeFromSuperview() }
+    schedule(0.22) { [weak hero] in hero?.removeFromSuperview() }
     if outcome.importedAnything {
       importedSpaces = outcome.addedSpaces.isEmpty ? Array((window?.sidebar.spaceOrder ?? []).prefix(1)) : outcome.addedSpaces
       landed = Set(OnboardingCounts.Kind.allCases)

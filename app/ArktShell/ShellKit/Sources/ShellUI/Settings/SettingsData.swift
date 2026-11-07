@@ -43,14 +43,18 @@ public struct SettingsArchiveRows {
   /// "Archive Little Arkt windows after": one value for the app (BH-137).
   public var littleArktAfter: @MainActor () -> String
   public var setLittleArktAfter: @MainActor (String) -> Void
+  /// Reset all settings (#617): both rows back to their defaults; the window reads the new titles afterwards.
+  public var reset: @MainActor () -> Void
 
   public init(tabsAfter: @escaping @MainActor () -> String, setTabsAfter: @escaping @MainActor (String) -> Void,
               littleArktAfter: @escaping @MainActor () -> String,
-              setLittleArktAfter: @escaping @MainActor (String) -> Void) {
+              setLittleArktAfter: @escaping @MainActor (String) -> Void,
+              reset: @escaping @MainActor () -> Void = {}) {
     self.tabsAfter = tabsAfter
     self.setTabsAfter = setTabsAfter
     self.littleArktAfter = littleArktAfter
     self.setLittleArktAfter = setLittleArktAfter
+    self.reset = reset
   }
 }
 

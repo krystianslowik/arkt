@@ -63,6 +63,16 @@ public final class ArchiveSettingsModel {
     change { $0.littleArcThreshold = threshold }
   }
 
+  /// Reset all settings (#617): both rows Settings edits back to their defaults (12 hours, 6 hours) in one stored
+  /// change. Only those two: another profile's own tab threshold is not a row in Settings and stays.
+  public func resetToDefaults() {
+    guard tabThreshold != .tabsDefault || littleArktThreshold != .littleArcDefault else { return }
+    change {
+      $0.setTabThreshold(.tabsDefault, forProfile: ArchiveSettings.defaultProfile, scope: .thisProfile)
+      $0.littleArcThreshold = .littleArcDefault
+    }
+  }
+
   /// Returns when every change made so far is stored (or failed to store).
   public func flush() async { await saving?.value }
 
@@ -76,7 +86,8 @@ public final class ArchiveSettingsModel {
       littleArktAfter: { [weak self] in (self?.littleArktThreshold ?? .littleArcDefault).settingsTitle },
       setLittleArktAfter: { [weak self] title in
         AutoArchiveThreshold(settingsTitle: title).map { self?.setLittleArktThreshold($0) }
-      })
+      },
+      reset: { [weak self] in self?.resetToDefaults() })
   }
 
   private func change(_ edit: @escaping @Sendable (inout ArchiveSettings) -> Void) {

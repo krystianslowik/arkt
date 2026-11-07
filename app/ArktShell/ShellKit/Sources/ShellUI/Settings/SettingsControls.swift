@@ -75,8 +75,8 @@ public final class SettingsSwitch: NSButton {
     }
     knob.cornerRadius = SettingsMetrics.knob / 2
     knob.anchorPoint = CGPoint(x: 0, y: 0.5)          // stretches from its leading edge
-    knob.shadowOffset = CGSize(width: 0, height: -1)
-    knob.shadowRadius = 1
+    knob.shadowOffset = SettingsTokens.switchKnobShadow.unflippedOffset
+    knob.shadowRadius = SettingsTokens.switchKnobShadow.radius
     track.addSublayer(onFill)
     track.addSublayer(knob)
     layer?.addSublayer(track)
@@ -150,7 +150,8 @@ public final class SettingsSwitch: NSButton {
       knob.bounds = CGRect(x: 0, y: 0, width: SettingsMetrics.knob, height: SettingsMetrics.knob)
       knob.backgroundColor = (isOn ? SettingsTokens.switchKnobOn : SettingsTokens.switchKnobOff)
         .resolve(flavor).cgColor
-      knob.shadowOpacity = isOn && flavor == .dark ? 0 : (flavor == .dark ? 0.40 : 0.22)
+      knob.shadowColor = SettingsTokens.switchKnobShadow.color.resolve(flavor).cgColor
+      knob.shadowOpacity = isOn && flavor == .dark ? 0 : 1
       knob.position.y = SettingsMetrics.switchSize.height / 2
     }
     let fill: Float = isOn ? 1 : 0
@@ -268,11 +269,18 @@ public final class SettingsPopUpButton: NSButton {
 
   /// Chooses `title` as the menu does: a different title restyles and reports it; the current one does nothing.
   func select(_ title: String) {
-    guard title != selectedTitle, items.contains(title) else { return }
+    guard show(title) else { return }
+    onChange?(selectedTitle)
+  }
+
+  /// Shows `title` without reporting it: the value changed elsewhere (Reset all settings). True when it changed.
+  @discardableResult
+  func show(_ title: String) -> Bool {
+    guard title != selectedTitle, items.contains(title) else { return false }
     selectedTitle = title
     restyle()
     invalidateIntrinsicContentSize()
-    onChange?(selectedTitle)
+    return true
   }
 
   private func restyle() {
@@ -341,8 +349,8 @@ final class SettingsSegmentedControl: NSControl {
     plate.cornerRadius = 7
     plate.cornerCurve = .continuous
     plate.anchorPoint = .zero
-    plate.shadowOffset = CGSize(width: 0, height: -1)
-    plate.shadowRadius = 1
+    plate.shadowOffset = SettingsTokens.segmentPlateShadow.unflippedOffset
+    plate.shadowRadius = SettingsTokens.segmentPlateShadow.radius
     layer?.addSublayer(plate)
     labels.forEach {
       $0.alignmentMode = .center
@@ -389,7 +397,9 @@ final class SettingsSegmentedControl: NSControl {
       plate.bounds = CGRect(origin: .zero, size: NSSize(width: segmentWidth, height: Self.segmentSize.height))
       plate.position.y = 2
       plate.backgroundColor = (flavor == .dark ? RGBA.white(0.18) : ShellTokens.tabCurrent.light).cgColor
-      plate.shadowOpacity = flavor == .dark ? 0 : 0.10
+      let plateShadow = SettingsTokens.segmentPlateShadow.color.resolve(flavor)
+      plate.shadowColor = plateShadow.cgColor
+      plate.shadowOpacity = plateShadow.alpha > 0 ? 1 : 0
       for (index, label) in labels.enumerated() {
         let selected = index == selectedIndex
         label.string = NSAttributedString(string: segments[index], attributes: [

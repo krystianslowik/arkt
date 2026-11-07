@@ -239,9 +239,9 @@ public final class ContentCardView: NSView {
     let flavor = ThemeFlavor(appearance: effectiveAppearance)
     guard let layer, let clip = clipView.layer else { return }
     layer.shadowOpacity = flavor == .dark ? 0 : 1   // Shadow token is clear in dark; skip the shadow pass
-    layer.shadowColor = ShellTokens.cardShadow.resolve(flavor).cgColor
-    layer.shadowRadius = 3
-    layer.shadowOffset = CGSize(width: 0, height: -1)
+    layer.shadowColor = ShellTokens.cardLiftShadow.color.resolve(flavor).cgColor
+    layer.shadowRadius = ShellTokens.cardLiftShadow.radius
+    layer.shadowOffset = ShellTokens.cardLiftShadow.unflippedOffset
     var border = ShellTokens.cardBorder.resolve(flavor)
     border.alpha *= Double(borderEmphasis)
     clip.borderColor = border.cgColor

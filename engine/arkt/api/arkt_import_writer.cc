@@ -35,6 +35,7 @@
 #include "components/history/core/browser/history_backend.h"
 #include "components/history/core/browser/history_db_task.h"
 #include "components/history/core/browser/history_service.h"
+#include "components/history/core/browser/history_service_observer.h"
 #include "components/history/core/browser/history_types.h"
 #include "components/keyed_service/core/service_access_type.h"
 #include "components/password_manager/core/browser/password_form.h"
@@ -528,45 +529,102 @@ void ImportLogins(Profile* profile,
 namespace {
 
 // Runs on the history thread after every write queued before it, then calls
-// back on the main thread.
+// back on the main thread with true. If the task is destroyed without having
+// run its reply (the history thread went away, or the request was cancelled),
+// the destructor answers false from the sequence that created it, so the
+// import is never left unanswered.
 class HistoryBarrier : public history::HistoryDBTask {
  public:
-  explicit HistoryBarrier(base::OnceClosure reached)
-      : reached_(std::move(reached)) {}
+  explicit HistoryBarrier(base::OnceCallback<void(bool)> reply)
+      : reply_(std::move(reply)),
+        origin_(base::SequencedTaskRunner::GetCurrentDefault()) {}
+
+  ~HistoryBarrier() override {
+    if (reply_) {
+      origin_->PostTask(FROM_HERE,
+                        base::BindOnce(std::move(reply_), /*reached=*/false));
+    }
+  }
 
   bool RunOnDBThread(history::HistoryBackend*,
                      history::HistoryDatabase*) override {
     return true;
   }
-  void DoneRunOnMainThread() override { std::move(reached_).Run(); }
-
- private:
-  base::OnceClosure reached_;
-};
-
-// Owns one history batch until the history thread has caught up.
-class HistoryImport {
- public:
-  HistoryImport(ImportCounts counts, ImportDone done)
-      : counts_(std::move(counts)), done_(std::move(done)) {}
-
-  void Start(history::HistoryService* service) {
-    service->ScheduleDBTask(
-        FROM_HERE,
-        std::make_unique<HistoryBarrier>(
-            base::BindOnce(&HistoryImport::Finish, base::Unretained(this))),
-        &tracker_);
+  void DoneRunOnMainThread() override {
+    std::move(reply_).Run(/*reached=*/true);
   }
 
  private:
-  void Finish() {
-    std::move(done_).Run(std::move(counts_));
+  base::OnceCallback<void(bool)> reply_;
+  scoped_refptr<base::SequencedTaskRunner> origin_;
+};
+
+// Owns one history batch until the history thread has caught up. The visits
+// are submitted without an answer of their own, so they are held as pending
+// and counted written only when the barrier behind them answered; when it is
+// dropped or the service is deleted first, they are counted failed. Either
+// way `done` runs exactly once.
+class HistoryImport : public history::HistoryServiceObserver {
+ public:
+  HistoryImport(ImportCounts counts,
+                int pending,
+                base::Time pending_latest,
+                ImportDone done)
+      : counts_(std::move(counts)),
+        pending_(pending),
+        pending_latest_(pending_latest),
+        done_(std::move(done)) {}
+
+  void Start(history::HistoryService* service) {
+    observation_.Observe(service);
+    service->ScheduleDBTask(
+        FROM_HERE,
+        std::make_unique<HistoryBarrier>(base::BindOnce(
+            &HistoryImport::Settle, weak_factory_.GetWeakPtr())),
+        &tracker_);
+  }
+
+  // history::HistoryServiceObserver:
+  void HistoryServiceBeingDeleted(
+      history::HistoryService* history_service) override {
+    observation_.Reset();
+    // The delete's own task queue may drop the barrier; do not wait for it.
+    Settle(/*reached=*/false);
+  }
+
+ private:
+  void Settle(bool reached) {
+    if (!done_) {
+      return;
+    }
+    observation_.Reset();
+    if (reached) {
+      counts_.written += pending_;
+      if (pending_latest_ > counts_.latest_visit) {
+        counts_.latest_visit = pending_latest_;
+      }
+    } else {
+      LOG(WARNING) << "history import: " << pending_
+                   << " visits got no answer from the history store";
+      counts_.failed += pending_;
+      counts_.reasons["no answer from the history store"] += pending_;
+    }
+    pending_ = 0;
+    // Posted, so the shell is never called back from inside the service's
+    // shutdown.
+    PostDone(std::move(done_), std::move(counts_));
     base::SequencedTaskRunner::GetCurrentDefault()->DeleteSoon(FROM_HERE, this);
   }
 
   ImportCounts counts_;
+  int pending_;
+  base::Time pending_latest_;
   ImportDone done_;
   base::CancelableTaskTracker tracker_;
+  base::ScopedObservation<history::HistoryService,
+                          history::HistoryServiceObserver>
+      observation_{this};
+  base::WeakPtrFactory<HistoryImport> weak_factory_{this};
 };
 
 bool HistoryAccepts(const GURL& url) {
@@ -590,6 +648,7 @@ void ImportHistory(Profile* profile,
       base::Time::Now() -
       base::Days(history::HistoryBackend::kExpireDaysThreshold);
   int submitted = 0;
+  base::Time latest;
   for (const ImportHistoryEntry& entry : entries) {
     const int visits = static_cast<int>(entry.visits.size());
     if (!service) {
@@ -632,10 +691,10 @@ void ImportHistory(Profile* profile,
           entry.title.empty() ? std::nullopt
                               : std::optional<std::u16string>(entry.title));
       service->AddPage(std::move(args));
-      counts.written++;
+      // Counted written only once the barrier behind it answers.
       submitted++;
-      if (visit.time > counts.latest_visit) {
-        counts.latest_visit = visit.time;
+      if (visit.time > latest) {
+        latest = visit.time;
       }
     }
   }
@@ -643,7 +702,8 @@ void ImportHistory(Profile* profile,
     PostDone(std::move(done), std::move(counts));
     return;
   }
-  (new HistoryImport(std::move(counts), std::move(done)))->Start(service);
+  (new HistoryImport(std::move(counts), submitted, latest, std::move(done)))
+      ->Start(service);
 }
 
 namespace {

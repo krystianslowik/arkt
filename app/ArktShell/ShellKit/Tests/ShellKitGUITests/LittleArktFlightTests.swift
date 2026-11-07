@@ -838,8 +838,11 @@ final class LittleArktFlightTests: XCTestCase {
       let shadow = flight.shadowLayer
       XCTAssertEqual(shadow.shadowOpacity, 1, "at \(t)")
       XCTAssertEqual(shadow.shadowRadius, landing.shadowRadius, "the main card's blur at \(t)")
+      XCTAssertEqual(shadow.shadowRadius, ShellTokens.cardLiftShadow.radius, "the card lift token's blur at \(t)")
+      XCTAssertEqual(shadow.shadowOffset, ShellTokens.cardLiftShadow.unflippedOffset, "and its offset at \(t)")
       XCTAssertEqual(shadow.shadowOffset, landing.shadowOffset, "and offset at \(t)")
-      XCTAssertEqual(shadow.shadowColor, ShellTokens.cardShadow.resolve(.light).cgColor, "the token's color at \(t)")
+      XCTAssertEqual(shadow.shadowColor, ShellTokens.cardLiftShadow.color.resolve(.light).cgColor,
+                     "the token's color at \(t)")
       XCTAssertEqual(shadow.shadowColor, landing.shadowColor, "the same color the main card lands with at \(t)")
       XCTAssertNotNil(shadow.shadowPath, "an explicit path, so no offscreen pass, at \(t)")
       assertShadowFollowsTheCard(flight, "flying at \(t)")
