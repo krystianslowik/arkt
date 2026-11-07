@@ -43,13 +43,35 @@ public struct TabZoom: Equatable, Sendable {
 
 /// The previous run of the engine ended without a clean quit (a crash, a force quit, a power loss). The shell asks once
 /// whether to bring the last session back. Dismissing acknowledges the crash, so it is not asked again; a second
-/// dismiss does nothing. Restore is not here yet: what it brings back, and so its signature, waits on #580.
+/// dismiss does nothing. Only non-private pages outside the sidebar are restored.
+/// A page outside the sidebar that can be reopened after a crash. Private pages must never be persisted.
+public struct RecoveryPage: Equatable, Sendable {
+  public enum Kind: Equatable, Sendable { case littleArkt, peek }
+  public let title: String
+  public let url: URL
+  public let kind: Kind
+  public init(title: String, url: URL, kind: Kind) {
+    self.title = title
+    self.url = url
+    self.kind = kind
+  }
+}
+
 @MainActor
 public protocol EngineSessionRecovery: AnyObject {
   /// The previous run ended without a clean quit and nobody has answered yet.
   var lastSessionCrashed: Bool { get }
   /// Acknowledges the crash without restoring anything.
   func dismissLastSession()
+}
+
+/// An engine that can both offer and restore eligible pages. Legacy crash-only providers do not conform.
+@MainActor
+public protocol EnginePageRecovery: EngineSessionRecovery {
+  var recoveryPages: [RecoveryPage] { get }
+  /// Accepts all supplied eligible pages for restoration, or rejects without restoring any. A rejection leaves
+  /// the crash unacknowledged so the user can retry or dismiss. Never restore a full session into the sidebar.
+  func restorePages(_ pages: [RecoveryPage]) -> Bool
 }
 
 extension EngineClient {

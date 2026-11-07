@@ -66,9 +66,18 @@ extension InMemoryEngine {
 /// InMemoryEngine's crashed session: `simulateCrashedExit()` stands in for a run that did not quit cleanly;
 /// `dismissals` counts the acknowledgements.
 @MainActor
-public final class InMemorySessionRecovery: EngineSessionRecovery {
+public final class InMemorySessionRecovery: EnginePageRecovery {
   public private(set) var lastSessionCrashed = false
   public private(set) var dismissals = 0
+  public var recoveryPages: [RecoveryPage] = []
+  public private(set) var restoredPages: [[RecoveryPage]] = []
+
+  public var acceptsRestore = true
+  public func restorePages(_ pages: [RecoveryPage]) -> Bool {
+    guard acceptsRestore else { return false }
+    restoredPages.append(pages)
+    return true
+  }
 
   public init() {}
 

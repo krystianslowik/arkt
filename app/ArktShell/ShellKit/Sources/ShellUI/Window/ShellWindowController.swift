@@ -81,6 +81,8 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// The window closed. A closed controller is not shown again (its command bar and pager released their display
   /// links); the app builds a new window instead (#241: Dock reopen).
   public private(set) var isClosed = false
+  public var onRecoveryWindowClosed: (@MainActor () -> Void)?
+  var onBecomingPrivate: (@MainActor () -> Void)?
   /// Shown in the sidebar when the engine runs extensions (`EngineExtensions`).
   public internal(set) var extensionsButton: ExtensionsButton?
   /// The Extensions panel the button opens (#595); nil with the button.
@@ -369,6 +371,24 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     self.savesSession = savesSession        // after the opening tab: the set applies the saved frame next
     reapplyTrafficLights()
     _ = peek                                          // its click monitor records where links are clicked
+  }
+
+  /// Presents the one launch recovery decision after the sidebar session was restored.
+  public func presentRestorePages(_ model: RestorePagesModel) {
+    switch model.presentation {
+    case .none: break
+    case .notice:
+      toasts.show(Toast(text: "Arkt quit unexpectedly. Your Spaces and tabs are back.",
+                        kind: .recovery, glyph: "exclamationmark.shield", isPolite: true))
+    case .offer(let pages):
+      guard !rootView.subviews.contains(where: { $0 is RestorePagesView }) else { return }
+      rootView.layoutSubtreeIfNeeded()
+      let view = RestorePagesView(model: model, pages: pages)
+      let card = rootView.card.frame
+      view.frame.origin = NSPoint(x: card.maxX - view.frame.width - 22, y: card.minY + 22)
+      rootView.addSubview(view, positioned: .above, relativeTo: rootView.split)
+      view.appear()
+    }
   }
 
   public func activate(node: NodeID) { sidebarController.activate(node: node) }
@@ -1025,6 +1045,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   public func windowWillClose(_ notification: Notification) {
     settlePendingClear()                             // #413: a window closed without `windowShouldClose`
     isClosed = true
+    onRecoveryWindowClosed?()
     for node in shownNodes { onTabHidden?(node) }
     removePaneMouseMonitor()
     javaScriptDialogs.closeAll()
