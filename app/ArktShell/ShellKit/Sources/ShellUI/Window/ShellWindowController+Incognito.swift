@@ -7,6 +7,7 @@ extension ShellWindowController {
     savesSession = false
     sidebarController.present(.blank)
     keepVisitsOutOfTheSharedSidebar()
+    showPrivateChrome()
   }
 
   /// File > New Incognito Window (Cmd-Shift-N, BH-174): the same window, plus the sidebar label. A visit here is not
@@ -15,6 +16,7 @@ extension ShellWindowController {
     savesSession = false
     sidebarController.present(.incognito)
     keepVisitsOutOfTheSharedSidebar()
+    showPrivateChrome()
   }
 
   /// Command bar and Paste and Go would add a Today tab on the shared sidebar. These windows load the page in a tab
@@ -27,6 +29,10 @@ extension ShellWindowController {
     pages.onSelect = { [weak self] tab in self?.selectPrivatePage(tab) }
     pages.onClose = { [weak self] tab in self?.closePrivatePageFromRow(tab) }
     pages.onToggleMute = { [weak self] tab in self?.toggleMute(ofPrivatePage: tab) }
+  }
+
+  /// After `present(_:)`, whichever order the setup above runs in: no welcome card over the pages, and the Pages list.
+  private func showPrivateChrome() {
     updateEmptyState()
     refreshPrivatePages()
   }
