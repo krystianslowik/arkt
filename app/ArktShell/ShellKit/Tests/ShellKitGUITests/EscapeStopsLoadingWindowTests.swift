@@ -75,6 +75,9 @@ final class EscapeStopsLoadingWindowTests: XCTestCase {
     harness.controller.activate(node: world.today[1])
     let hidden = try XCTUnwrap(harness.controller.engineTab(of: world.today[0]))
     XCTAssertNotEqual(hidden, harness.controller.currentTab)
+    XCTAssertEqual(harness.engine.snapshot(of: hidden)?.window, harness.controller.engineWindow,
+                   "fixture: the hidden tab is still in the window, so its Esc reaches the host")
+    XCTAssertEqual(harness.engine.snapshot(of: hidden)?.isLoading, true, "fixture: the hidden page is loading")
     XCTAssertFalse(harness.engine.simulateUnhandledKeyDown(try key(53), in: hidden))
     XCTAssertTrue(stops(harness).isEmpty)
   }
@@ -107,6 +110,18 @@ final class EscapeStopsLoadingWindowTests: XCTestCase {
     let (harness, _, tab) = try makeWindow()
     harness.engine.setTabFullscreen(tab, true)
     XCTAssertEqual(harness.engine.snapshot(of: tab)?.isTabFullscreen, true, "fixture: the page is fullscreen")
+    XCTAssertFalse(harness.engine.simulateUnhandledKeyDown(try key(53), in: tab))
+    XCTAssertTrue(stops(harness).isEmpty)
+  }
+
+  func testAnAttachedSheetKeepsEsc() throws {
+    let (harness, _, tab) = try makeWindow()
+    let window = try XCTUnwrap(harness.controller.window)
+    let sheet = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 100), styleMask: [.titled],
+                         backing: .buffered, defer: true)
+    window.beginSheet(sheet)
+    defer { window.endSheet(sheet) }
+    XCTAssertFalse(window.sheets.isEmpty, "fixture: the sheet is attached")
     XCTAssertFalse(harness.engine.simulateUnhandledKeyDown(try key(53), in: tab))
     XCTAssertTrue(stops(harness).isEmpty)
   }
