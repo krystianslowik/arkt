@@ -15,7 +15,8 @@ public final class RestorePagesModel {
   private let reopen: @MainActor ([ShellRecoveryPage]) -> Bool
   public var onAnswer: (@MainActor () -> Void)?
 
-  public init(recovery: any EngineSessionRecovery, pages: [ShellRecoveryPage] = [], restore: @escaping @MainActor ([ShellRecoveryPage]) -> Bool) {
+  public init(recovery: any EngineSessionRecovery, pages: [ShellRecoveryPage] = [],
+              restore: @escaping @MainActor ([ShellRecoveryPage]) -> Bool) {
     self.recovery = recovery
     self.reopen = restore
     guard recovery.lastSessionCrashed else { return }

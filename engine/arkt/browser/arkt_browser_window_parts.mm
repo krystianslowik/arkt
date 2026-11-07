@@ -19,6 +19,9 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/views/bubble_anchor_util_views.h"
 #include "components/constrained_window/constrained_window_views.h"
+#include "ui/events/cocoa/cocoa_event_utils.h"
+#include "ui/events/keycodes/keyboard_code_conversion_mac.h"
+#include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/range/range.h"
@@ -613,5 +616,49 @@ content::WebContents* ArktSidePanelUI::GetWebContentsForTest(
 void ArktSidePanelUI::DisableAnimationsForTesting() {}
 
 void ArktSidePanelUI::SetNoDelaysForTesting(bool no_delays_for_testing) {}
+
+// ArktAcceleratorProvider ------------------------------------------------------
+
+namespace {
+
+// The first item in `menu` or its submenus that dispatches `command_id` and
+// has a key equivalent.
+NSMenuItem* FindCommandItem(NSMenu* menu, int command_id) {
+  static SEL const kDispatch = NSSelectorFromString(@"commandDispatch:");
+  for (NSMenuItem* item in menu.itemArray) {
+    if (item.submenu) {
+      if (NSMenuItem* found = FindCommandItem(item.submenu, command_id)) {
+        return found;
+      }
+    } else if (item.tag == command_id && item.action == kDispatch &&
+               item.keyEquivalent.length > 0) {
+      return item;
+    }
+  }
+  return nil;
+}
+
+}  // namespace
+
+bool ArktAcceleratorProvider::GetAcceleratorForCommandId(
+    int command_id,
+    ui::Accelerator* accelerator) const {
+  NSMenuItem* item = FindCommandItem(NSApp.mainMenu, command_id);
+  if (!item) {
+    return false;
+  }
+  const unichar key = [item.keyEquivalent characterAtIndex:0];
+  const ui::KeyboardCode code = ui::KeyboardCodeFromCharCode(key);
+  if (code == ui::VKEY_UNKNOWN) {
+    return false;
+  }
+  NSEventModifierFlags modifiers = item.keyEquivalentModifierMask;
+  // An upper-case key equivalent ("W") means Shift, as AppKit reads it.
+  if ([NSCharacterSet.uppercaseLetterCharacterSet characterIsMember:key]) {
+    modifiers |= NSEventModifierFlagShift;
+  }
+  *accelerator = ui::Accelerator(code, ui::EventFlagsFromModifiers(modifiers));
+  return true;
+}
 
 }  // namespace arkt

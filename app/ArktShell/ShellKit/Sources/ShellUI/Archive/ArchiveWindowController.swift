@@ -676,7 +676,7 @@ public final class ArchiveWindowController: NSWindowController, NSTableViewDataS
     tableView.allowsEmptySelection = true
     tableView.style = .plain
     tableView.backgroundColor = .clear
-    tableView.selectionHighlightStyle = .regular
+    tableView.selectionHighlightStyle = .none   // ArchiveRowView draws the selection (#796)
     tableView.focusRingType = .none
     tableView.dataSource = self
     tableView.delegate = self

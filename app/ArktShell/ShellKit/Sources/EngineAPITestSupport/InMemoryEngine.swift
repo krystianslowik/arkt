@@ -478,7 +478,8 @@ public final class InMemoryEngine: EngineClient, EngineExtensions, EngineImporti
   public var unavailableContentURLs: Set<URL> = []
 
   public func contentView(for id: TabID) -> NSView? {
-    guard let snapshot = snapshots[id], !(snapshot.url.map { unavailableContentURLs.contains($0) } ?? false) else { return nil }
+    guard let snapshot = snapshots[id],
+          !(snapshot.url.map { unavailableContentURLs.contains($0) } ?? false) else { return nil }
     if let view = views[id] { return view }
     let view = InMemoryPageView()
     view.identifier = NSUserInterfaceItemIdentifier("in-memory-tab-\(id)")

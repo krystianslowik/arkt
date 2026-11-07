@@ -187,7 +187,7 @@ final class ArchiveListFieldView: NSView {
 
 // MARK: - Rows
 
-/// A row's fill: `tabCurrent` with `tabCurrentShadow` when selected, `sidebarItemBackground` on hover, nothing
+/// A row's fill: `tabCurrent` with `rowLiftShadow` when selected, `sidebarItemBackground` on hover, nothing
 /// otherwise; 34 pt high, radius 9. No hairlines between rows.
 @MainActor
 final class ArchiveRowView: NSTableRowView {

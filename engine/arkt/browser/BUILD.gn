@@ -178,6 +178,7 @@ source_set("window") {
     "//ui/base/unowned_user_data",
     "//ui/color",
     "//ui/events",
+    "//ui/events:events_base",
     "//ui/gfx",
     "//ui/native_theme",
     "//ui/strings",

@@ -13,7 +13,9 @@ final class RestorePagesView: NSView {
   private(set) var overflowLabel: NSTextField?
   private var closing = false
   var reduceMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
-  var animateClose: @MainActor (@escaping @MainActor () -> Void, @escaping @MainActor () -> Void) -> Void = { animations, completion in
+  var animateClose: @MainActor (
+    @escaping @MainActor () -> Void, @escaping @MainActor () -> Void
+  ) -> Void = { animations, completion in
     NSAnimationContext.runAnimationGroup { context in
       context.duration = 0.15
       animations()
@@ -34,13 +36,15 @@ final class RestorePagesView: NSView {
     let title = label("Restore pages?", size: 15, weight: .semibold)
     title.frame = NSRect(x: 18, y: 18, width: 304, height: 20)
     addSubview(title)
-    let body = label("Arkt quit unexpectedly. Your Spaces and tabs are back. These were open outside the sidebar:", size: 13)
+    let body = label("Arkt quit unexpectedly. Your Spaces and tabs are back. "
+                       + "These were open outside the sidebar:", size: 13)
     body.identifier = NSUserInterfaceItemIdentifier("recovery.secondary")
     body.maximumNumberOfLines = 3
     body.lineBreakMode = .byWordWrapping
     body.frame = NSRect(x: 18, y: 44, width: 304, height: 56)
     addSubview(body)
-    let list = NSView(frame: NSRect(x: 18, y: 104, width: 304, height: CGFloat(count) * 40 + (pages.count > 3 ? 22 : 0) + 8))
+    let list = NSView(frame: NSRect(x: 18, y: 104, width: 304,
+                                   height: CGFloat(count) * 40 + (pages.count > 3 ? 22 : 0) + 8))
     list.wantsLayer = true
     list.layer?.cornerRadius = 10
     addSubview(list)
@@ -87,7 +91,9 @@ final class RestorePagesView: NSView {
 
   @available(*, unavailable) required init?(coder: NSCoder) { fatalError() }
   override var isFlipped: Bool { true }
-  private var flavor: ThemeFlavor { effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? .dark : .light }
+  private var flavor: ThemeFlavor {
+    effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? .dark : .light
+  }
   override func viewDidChangeEffectiveAppearance() { super.viewDidChangeEffectiveAppearance(); applyAppearance() }
   private func applyAppearance() {
     layer?.backgroundColor = BrandTokens.surfaceBrand.resolve(flavor).cgColor

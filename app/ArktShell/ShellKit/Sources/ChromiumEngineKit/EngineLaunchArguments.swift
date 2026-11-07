@@ -9,10 +9,15 @@ import Foundation
 ///   later, through a facade that holds the profile it was handed at start; an unloaded profile aborts there with
 ///   "Attempted to access a context that was ShutDown()" in `CreateBrowserWindow` (#469). Arkt has one profile and
 ///   Chromium's keep-alive holds the process, so the profile stays loaded until the process exits.
+/// - `WebAuthenticationAmbientSignin`, `MediaRouter` (Cast and its remoting dialog) and `Glic` in the same list: their
+///   Views UI looks for a `BrowserView`, which an Arkt window does not have. They stay off until the shell draws them
+///   natively (engine connector design, batch E1).
 public enum EngineLaunchArguments {
   public static let noStartupWindow = "--no-startup-window"
   static let disableFeaturesPrefix = "--disable-features="
-  static let requiredDisabledFeatures = ["DestroyProfileOnBrowserClose"]
+  static let requiredDisabledFeatures = [
+    "DestroyProfileOnBrowserClose", "WebAuthenticationAmbientSignin", "MediaRouter", "Glic",
+  ]
 
   /// Prefixes of the switches that exist for tests and engine-lane probes only (`--arkt-engine-contract`,
   /// `--arkt-engine-test-api`, `--arkt-reentrancy-probe`, `--arkt-embedder-fail`).

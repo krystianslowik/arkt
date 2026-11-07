@@ -174,7 +174,7 @@ final class PrivatePageRowView: NSView {
     CATransaction.begin()
     CATransaction.setDisableActions(true)
     background.backgroundColor = backgroundFill?.cgColor
-    let shadow = ShellTokens.tabCurrentShadow.resolve(flavor)
+    let shadow = ShellTokens.rowLiftShadow.color.resolve(flavor)
     background.shadowColor = shadow.cgColor
     background.shadowOpacity = isShown && shadow.alpha > 0 ? 1 : 0
     CATransaction.commit()

@@ -68,7 +68,9 @@ public final class ShellWindowSet {
   /// The size new Little Arkt windows get: the last one the user set (BH-142), for this session.
   private var littleArktSize = LittleArktLayout.defaultSize
   /// Reduce Motion for Little Arkt windows (tests set it).
-  public var littleArktReduceMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+  public var littleArktReduceMotion: @MainActor () -> Bool = {
+    NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+  }
   /// Runs on each new Little Arkt window before it appears (tests step its motion by hand).
   var littleArktConfigure: (@MainActor (LittleArktWindowController) -> Void)?
   /// A Little Arkt window the user or the idle timer closed (#355): the app archives its page under the Little Arkt
@@ -625,7 +627,8 @@ public final class ShellWindowSet {
 
   // MARK: Building
 
-  private func make(opensFirstTab: Bool, origin: SessionWindowOrigin, kind: WindowKind = .regular) -> ShellWindowController {
+  private func make(opensFirstTab: Bool, origin: SessionWindowOrigin,
+                    kind: WindowKind = .regular) -> ShellWindowController {
     // #116: the first main window the shell opens restores the saved frame, Space and tabs and keeps them saved;
     // when it closes, the next one takes over saving (without restoring again).
     let isRestored = SessionWindowPolicy.takesSession(origin, ownerIsAlive: sessionWindow.map { !$0.isClosed } ?? false)
