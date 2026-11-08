@@ -8,18 +8,18 @@ KB-074	U15 scenario added; focused CI execution and result pending	#180
 KB-075	U15 scenario does not yet cover this behavior	#180
 BH-040	Space icon animation during a swipe stays manual with GS-001	#26
 BH-069	Second Cmd-W on an already-closed pinned tab follows RT-17, not implemented yet	#85
-BH-087 (search)	Archive search shipped in #111; U9 test remains explicitly skipped pending coverage	#174
-BH-115	U15 scenario added; focused CI execution and result pending	#180
+BH-087 (search)	Archive search shipped in #111; U9 test remains explicitly skipped pending coverage	#827
+BH-115 (sidebar operations)	Single-row uniqueness and pin, favorite, rename, share and move of the split are not asserted	#180
 BH-116	U15 scenario added; focused CI execution and result pending	#180
-BH-117	U15 scenario added; focused CI execution and result pending	#180
+BH-117 (other creation paths)	Only drag to a page and option-click duplication are exercised; the other creation paths remain uncovered	#180
 BH-120	U15 scenario does not yet cover this behavior	#180
-BH-121	U15 scenario added; focused CI execution and result pending	#180
+BH-121 (pane close controls)	Pane X controls are not exercised	#180
 BH-122	U15 scenario added; focused CI execution and result pending	#180
-BH-123	U15 scenario added; focused CI execution and result pending	#180
-BH-125	U15 scenario added; focused CI execution and result pending	#180
+BH-123 (remaining pane expansion)	Cmd-W and Archive are checked, but expansion of the remaining panes is not asserted	#180
+BH-125 (both pane urls)	Focused Cmd-L is checked; displaying and retaining both pane URLs is not asserted	#180
 BH-128	U15 scenario added; focused CI execution and result pending	#180
 GS-001	Two-finger Space swipe stays manual; XCUITest scroll has no gesture phases	#26
 GS-010	U15 scenario does not yet cover this behavior	#180
-GS-011	U15 scenario added; focused CI execution and result pending	#180
+GS-011 (vertical drag)	The vertical top or bottom center drag is not exercised	#180
 GS-032	U15 scenario does not yet cover this behavior	#180
 GS-033	U15 scenario added; focused CI execution and result pending	#180

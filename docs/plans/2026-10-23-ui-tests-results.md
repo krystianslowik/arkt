@@ -1269,3 +1269,22 @@ new scenarios until their focused CI results are observed.
 Local executable tests and app build were not run: full Xcode is unavailable and the standalone toolchain cannot
 build the baseline ShellKit. The full UI suite has a separate import/onboarding timeout tracked in #799. A manual UI
 workflow filter permits a focused run while the default remains the full suite. Results for this head are pending.
+
+#### U15 review follow-up
+
+The pane-key scenario now checks previous as well as next wraparound, and separates the known `fourth` loopback
+page with Ctrl-Shift-minus. It opens that Today row, checks its URL and verifies the Archive count and row. BH-122
+is named by that scenario; the relaunch/Cmd-W case names BH-123. The split context-menu probes pair each input with
+an ordinary Today row's Archive Below menu, dismiss menus with Escape and attach both accessibility snapshots. A
+missing split menu still fails; if the control also fails, the cause remains unknown. Divider drag still checks only
+its value. The remaining portions of multi-behavior rows are listed as partial deferrals so a passing scenario cannot
+hide them. Archive search XCUITest coverage has the open, unassigned follow-up #827; #174 is closed.
+
+These review changes have not been compiled or run in XCUITest: full Xcode is unavailable and the baseline does not
+compile with the local standalone toolchain. The focused run on the earlier remote head does not establish results
+for this revision; menu input, page separation and all other runtime outcomes remain unverified.
+
+Static checks on the review revision: Swift 6.2.4 frontend parse passed (syntax only), `actionlint` passed, UI source
+checks passed, and `scripts/ui-tests/parity-report-test.sh` passed. The existing synthetic xcresult fixture, with test
+names mapped to BH-087, BH-115 and BH-125, was also run against the real spec and deferred file: search remained
+deferred to #827 and both split partials remained visible with a passing fixture result. These are not runtime tests.

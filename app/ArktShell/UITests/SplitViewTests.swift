@@ -77,13 +77,15 @@ final class SplitViewTests: ArktUITestCase {
     XCTAssertEqual(panes(app).count, 4)
   }
 
-  func test_KB071_KB072_KB073_BH128_paneKeys() async throws {
+  func test_KB071_KB072_KB073_BH122_BH128_paneKeys() async throws {
     let (app, _, server) = try await startSplit()
     add("third", server: server, app: app, count: 3)
     add("fourth", server: server, app: app, count: 4)
     for index in 0..<4 { select(index, in: app) }
     app.typeKey("]", modifierFlags: modifiers)
     XCTAssertTrue(Waits.until("focus wraps to first pane") { self.panes(app).element(boundBy: 0).isSelected })
+    app.typeKey("[", modifierFlags: modifiers)
+    XCTAssertTrue(Waits.until("previous focus wraps to fourth pane") { self.panes(app).element(boundBy: 3).isSelected })
     // The close shortcut separates the focused page; it must not add an Archive entry.
     app.menuBars.menuBarItems["Window"].click()
     app.menuBars.menuItems["Show Archive"].click()
@@ -93,10 +95,19 @@ final class SplitViewTests: ArktUITestCase {
     archive.typeKey("w", modifierFlags: .command)
     app.typeKey("-", modifierFlags: modifiers)
     XCTAssertTrue(Waits.until("three panes after separating") { self.panes(app).count == 3 })
+    let separated = Shell.todayRow(app, label: FixtureServer.title(ofPage: "fourth"))
+    XCTAssertTrue(waitFor(separated))
+    separated.click()
+    app.typeKey("d", modifierFlags: [.command, .shift])
+    let url = Shell.element(app, AXID.Toolbar.urlBar)
+    XCTAssertTrue(Waits.until("separated page URL") { (url.value as? String)?.contains("/p/fourth") == true })
     app.menuBars.menuBarItems["Window"].click()
     app.menuBars.menuItems["Show Archive"].click()
     XCTAssertTrue(waitFor(archive))
     XCTAssertEqual(archive.tables[AXID.Archive.table].tableRows.count, before)
+    let archived = archive.tables[AXID.Archive.table].tableRows.matching(identifier: AXID.Archive.row)
+      .element(matching: NSPredicate(format: "label == %@", FixtureServer.title(ofPage: "fourth")))
+    XCTAssertFalse(archived.exists)
   }
 
   func test_BH121_GS033_sidebarSplitRow() async throws {
@@ -113,21 +124,39 @@ final class SplitViewTests: ArktUITestCase {
     XCUIElement.perform(withKeyModifiers: .option) { tab.click() }
     XCTAssertTrue(waitFor(splitRow(app)))
     let count = Shell.todayRows(app).count
-    splitRow(app).rightClick()
-    let item = app.menuItems["Separate All Tabs"]
-    var state = "right-click:\n" + app.debugDescription
-    var opened = item.waitForExistence(timeout: Waits.scaled(3))
-    if !opened {
-      XCUIElement.perform(withKeyModifiers: .control) { self.splitRow(app).click() }
-      state += "\ncontrol-click:\n" + app.debugDescription
-      opened = item.waitForExistence(timeout: Waits.scaled(3))
+    let control = try XCTUnwrap(Shell.todayRows(app).allElementsBoundByIndex.first)
+    let splitItem = app.menuItems["Separate All Tabs"]
+    let controlItem = app.menuItems["Archive Below"]
+    var snapshots = ""
+    var splitOpened = [Bool]()
+    for controlClick in [false, true] {
+      let method = controlClick ? "control-click" : "right-click"
+      func click(_ target: XCUIElement) {
+        if controlClick { XCUIElement.perform(withKeyModifiers: .control) { target.click() } }
+        else { target.rightClick() }
+      }
+      click(control)
+      let controlOpened = controlItem.waitForExistence(timeout: Waits.scaled(3))
+      snapshots += "\n\(method) regular row menu=\(controlOpened):\n" + app.debugDescription
+      app.typeKey(.escape, modifierFlags: [])
+      XCTAssertTrue(Waits.until("regular menu dismissed") { !controlItem.exists })
+      click(splitRow(app))
+      let opened = splitItem.waitForExistence(timeout: Waits.scaled(3))
+      splitOpened.append(opened)
+      snapshots += "\n\(method) split row menu=\(opened):\n" + app.debugDescription
+      app.typeKey(.escape, modifierFlags: [])
+      XCTAssertTrue(Waits.until("split menu dismissed") { !splitItem.exists })
     }
-    let probe = XCTAttachment(string: state)
-    probe.name = "split row context menu accessibility probes"
+    let probe = XCTAttachment(string: snapshots)
+    probe.name = "regular and split row context menu accessibility probes"
     probe.lifetime = .deleteOnSuccess
     add(probe)
-    XCTAssertTrue(opened, "neither synthesized right-click nor control-click exposed the split menu")
-    guard opened else { return }
+    XCTAssertTrue(splitOpened.contains(true), "split menu missing; inspect the paired control probes")
+    guard let method = splitOpened.firstIndex(of: true) else { return }
+    if method == 0 { splitRow(app).rightClick() }
+    else { XCUIElement.perform(withKeyModifiers: .control) { self.splitRow(app).click() } }
+    XCTAssertTrue(splitItem.waitForExistence(timeout: Waits.scaled(3)))
+    let item = splitItem
     item.click()
     XCTAssertTrue(Waits.until("context menu separates the split") {
       !self.splitRow(app).exists && Shell.todayRows(app).count == count + 2
@@ -151,7 +180,7 @@ final class SplitViewTests: ArktUITestCase {
     XCTAssertEqual(panes(app).count, 2)
   }
 
-  func test_BH122_BH123_splitSurvivesRelaunchAndArchive() async throws {
+  func test_BH123_splitSurvivesRelaunchAndArchive() async throws {
     let server = try await fixtureServer()
     let sandbox = try Sandbox()
     let app = try launch(sandbox)
