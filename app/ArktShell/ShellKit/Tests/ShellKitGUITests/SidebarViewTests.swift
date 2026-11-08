@@ -162,11 +162,11 @@ final class SidebarViewTests: XCTestCase {
     grid.layoutSubtreeIfNeeded()
     let frames = (0..<6).compactMap { grid.item(at: IndexPath(item: $0, section: 0))?.view.frame }
     XCTAssertEqual(frames.count, 6)
-    XCTAssertEqual(frames[0].size, CGSize(width: 52, height: 46))
+    XCTAssertEqual(frames[0].size, CGSize(width: 53, height: 47))
     XCTAssertEqual(Set(frames.prefix(3).map(\.minY)).count, 1, "first three favorites share a row")
-    XCTAssertEqual(frames[1].minX - frames[0].maxX, 9, accuracy: 0.01)
-    XCTAssertEqual(frames[3].minY - frames[0].maxY, 9, accuracy: 0.01)
-    XCTAssertEqual(controller.view.favorites.frame.height, 46 * 2 + 9)
+    XCTAssertEqual(frames[1].minX - frames[0].maxX, 8, accuracy: 0.01)
+    XCTAssertEqual(frames[3].minY - frames[0].maxY, 8, accuracy: 0.01)
+    XCTAssertEqual(controller.view.favorites.frame.height, 47 * 2 + 8)
   }
 
   /// An empty Favorites grid is 0 pt tall, so the first Favorites (an Arc import into an empty profile) arrive while
@@ -189,11 +189,11 @@ final class SidebarViewTests: XCTestCase {
     }
     controller.view.layoutSubtreeIfNeeded()
 
-    XCTAssertEqual(grid.frame.height, 46 * 2 + 9)
+    XCTAssertEqual(grid.frame.height, 47 * 2 + 8)
     XCTAssertFalse(grid.collectionView.bounds.isEmpty)
     XCTAssertEqual(grid.collectionView.numberOfSections, 1)
     XCTAssertEqual(grid.collectionView.numberOfItems(inSection: 0), titles.count)
-    XCTAssertEqual(grid.collectionView.collectionViewLayout?.collectionViewContentSize.height, 46 * 2 + 9,
+    XCTAssertEqual(grid.collectionView.collectionViewLayout?.collectionViewContentSize.height, 47 * 2 + 8,
                    "the layout is prepared for every Favorite")
     XCTAssertEqual(grid.collectionView.visibleItems().count, titles.count)
     for (id, title) in zip(ids, titles) {
@@ -514,7 +514,7 @@ final class MountedSidebarTests: XCTestCase {
     grid.layoutSubtreeIfNeeded()
     let frames = (0..<3).compactMap { grid.item(at: IndexPath(item: $0, section: 0))?.view.frame }
     XCTAssertEqual(frames.count, 3)
-    XCTAssertEqual(frames[0].size, CGSize(width: 52, height: 46))
+    XCTAssertEqual(frames[0].size, CGSize(width: 53, height: 47))
     XCTAssertEqual(Set(frames.map(\.minY)).count, 1, "first three favorites share a row")
   }
 
