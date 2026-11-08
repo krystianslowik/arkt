@@ -25,11 +25,16 @@ final class DownloadsWindowTests: XCTestCase {
     center.announce = { _ in }
   }
 
+  // XCTest keeps each test case object until the run ends: release the windows too, not only hide them (#805).
   override func tearDown() async throws {
     center.library.window?.close()
     for controller in controllers { controller.close() }
+    for id in engine.windowIDs { engine.closeWindow(id) }
     controllers = []
     try? FileManager.default.removeItem(at: folder)
+    center = nil
+    settings = nil
+    engine = nil
   }
 
   private func makeWindow(width: CGFloat = 1200, height: CGFloat = 800) -> ShellWindowController {
