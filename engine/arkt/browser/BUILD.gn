@@ -172,6 +172,7 @@ source_set("window") {
     "//components/web_modal",
     "//content/public/browser",
     "//extensions/browser",
+    "//extensions/browser:webstore_installer",
     "//extensions/common",
     "//ui/base",
     "//ui/base:types",
