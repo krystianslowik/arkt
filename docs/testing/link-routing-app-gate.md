@@ -359,3 +359,34 @@ external scratch volume was mounted. Inherited main README/patch-context whitesp
 Combined external-open/crashed-recovery presentation and quit/cancellation still need representative executable
 coverage. Existing warm passes and old cold failures remain attributed to their original heads. No cold harness
 identity check, lifetime allowlist or routing policy was relaxed by the integration.
+
+### Proposed cold-launch argument carrier (pure contract only)
+
+`LaunchArgumentCarrier` defines a Debug-only, versioned `--arkt-ui-test-config=v1:` argument. Its base64 payload is
+canonical JSON: a sorted array of two-string key/value arrays. The exact whitelist is `TestIdentity.keys` and its
+loopback endpoint. Required values and the suite use `EnvironmentOverrides` startup policy; the endpoint and digest
+use `TestIdentity`. Values are limited to 4,096 UTF-8 bytes each, the argument to 32,768 bytes, and NUL is forbidden.
+Optional identity keys preserve absent versus empty. Unknown or duplicate keys, duplicate or malformed carrier
+arguments, noncanonical encoding, unsupported versions and invalid values fail closed. A process value for a known
+key must equal the carrier value; a process-only optional value is a conflict, not a fallback. Unrelated process keys
+are neither returned nor changed. No carrier returns nil and leaves environment-only launches to the existing guard.
+
+The decoder accepts a carrier only when the caller supplies the independent mandatory UI-test bundle flag as true.
+The payload cannot set that authority, a PID, or arbitrary environment keys. Arguments are visible to local process
+observers and are not a secret or an authentication mechanism; use only synthetic paths and configuration. A forged
+carrier in a mandatory test bundle is still untrusted input, and the existing nonce/digest loopback ACK, returned
+PID, bundle, sole-instance and persisted-profile checks remain mandatory. No path-based acknowledgement is added.
+
+After review, a minimal separate integration can have the harness encode its synthetic configuration into
+`NSWorkspace.OpenConfiguration.arguments`, and the Debug entry point obtain the bundle flag independently, decode
+before migration, fail closed on any error, then use the validated effective configuration consistently for startup
+validation and identity before proceeding. The method of making that configuration available to all existing consumers
+must itself be reviewed; this contract does not mutate process environment or establish startup ordering. No-carrier
+warm launches must retain their current behavior. A native isolated probe must then establish actual LaunchServices
+argument delivery during a true cold URL open and process-to-XCUI identity, while retaining all existing barriers.
+Pure test success proves neither OS delivery nor runtime ordering or routing.
+
+Focused actual-source probe: `SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX15.5.sdk
+/opt/homebrew/opt/swift/bin/swift test --package-path integration/StartupPolicy -j 2`. Test-first compilation failed
+on the absent carrier API (zero tests); after implementation and a test macro correction, 30 tests in four suites
+passed (prior reported baseline 26 in three suites, plus four carrier tests). No app or GUI build was run.
