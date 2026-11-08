@@ -8,7 +8,7 @@ private final class ShortcutRecorderButton: NSButton {
 extension SettingsWindowController {
   func observeShortcutEditor() {
     guard shortcutObserver == nil, let editor = services.shortcutEditor else { return }
-    shortcutObserver = editor.observe { [weak self] in self?.refreshShortcutControls() }
+    shortcutObserver = editor.observe { [weak self] in self?.refreshShortcutPresentation() }
     refreshShortcutControls()
   }
 
@@ -35,7 +35,7 @@ extension SettingsWindowController {
       guard let self, let editor = self.services.shortcutEditor else { return }
       self.cancelShortcutRecording()
       editor.reset(id)
-      self.refreshShortcutControls()
+      self.refreshShortcutPresentation()
       if !editor.conflictingActions.isEmpty { self.showShortcutConflict() }
     }
     actionTargets.append(resetTarget)
@@ -63,6 +63,12 @@ extension SettingsWindowController {
     shortcutResetAll?.isEnabled = !editor.overrides.isEmpty
   }
 
+  private func refreshShortcutPresentation() {
+    refreshShortcutControls()
+    // A record operation notifies before it releases the recorder. Rebuild after that operation completes.
+    if services.shortcutEditor?.recordingAction == nil { applyShortcutSearch() }
+  }
+
   private func shortcutDescription(_ binding: ShortcutBinding) -> String {
     let item = NSMenuItem(title: "", action: nil, keyEquivalent: binding.key)
     item.keyEquivalentModifierMask = binding.modifiers
@@ -81,18 +87,22 @@ extension SettingsWindowController {
       }
       return false
     }
+    guard let id = editor.recordingAction, let recorder = shortcutRecorders[id],
+          window?.firstResponder === recorder else {
+      cancelShortcutRecording()
+      return false
+    }
     if event.keyCode == 48 {
       cancelShortcutRecording()
       if event.modifierFlags.contains(.shift) { window?.selectPreviousKeyView(nil) }
       else { window?.selectNextKeyView(nil) }
       return true
     }
-    let id = editor.recordingAction
     editor.record(event: event)
-    refreshShortcutControls()
+    refreshShortcutPresentation()
     if !editor.conflictingActions.isEmpty {
       showShortcutConflict()
-    } else if let id, event.keyCode != 53, let binding = editor.binding(for: id),
+    } else if event.keyCode != 53, let binding = editor.binding(for: id),
               services.isSystemShortcut(binding) {
       showShortcutWarning()
     }
@@ -134,10 +144,14 @@ extension SettingsWindowController {
     use.setAccessibilityIdentifierWithCell("settings.shortcuts.conflict.use")
     let keepTarget = SettingsActionTarget { [weak self] in self?.cancelShortcutRecording() }
     let useTarget = SettingsActionTarget { [weak self] in
-      guard let self else { return }
-      self.services.shortcutEditor?.useRecordedShortcut()
+      guard let self, let editor = self.services.shortcutEditor else { return }
+      let id = editor.recordingAction
+      editor.useRecordedShortcut()
       self.dismissShortcutConflict()
-      self.refreshShortcutControls()
+      self.refreshShortcutPresentation()
+      if let id, let binding = editor.binding(for: id), self.services.isSystemShortcut(binding) {
+        self.showShortcutWarning()
+      }
     }
     actionTargets.append(contentsOf: [keepTarget, useTarget])
     keep.target = keepTarget

@@ -700,8 +700,10 @@ final class SettingsWindowTests: XCTestCase {
     let savedMenu = NSApp.mainMenu
     defer { NSApp.mainMenu = savedMenu }
     NSApp.mainMenu = menu
+    NSApp.activate()
     window.makeKeyAndOrderFront(nil)
     XCTAssertTrue(window.isKeyWindow)
+    guard window.isKeyWindow else { return } // Do not interpret undelivered application events as recorder failures.
     for (key, code) in [("w", UInt16(13)), ("1", 18), ("2", 19), ("3", 20), ("4", 21),
                         ("5", 23), ("6", 22), ("7", 26)] {
       try find("settings.shortcuts.record.toggleSidebarVisibility", in: controller, as: NSButton.self).performClick(nil)

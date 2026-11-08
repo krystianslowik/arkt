@@ -3081,3 +3081,30 @@ correction and zero afterward. This scan is separate from executing the Swift Te
 changed Swift files, actionlint and whitespace checks passed. No full local package, GUI or app build ran; current-head
 CI and visual review of the panel remain required. App composition, the remaining catalog and real system-warning
 detection are still unfinished; the PR remains draft.
+
+
+### Shortcut recorder runtime regressions and repair (#119)
+
+At `b9a65d731b393a9422310ea1f4848d0a32b83e71`, GUI job 128757602654 in
+[run 42489143541](https://github.com/krystianslowik/arkt/actions/runs/42489143541) reported 2082 tests,
+60 skipped, and 20 assertion failures across four Settings methods. The live-search regression had four failed
+assertions; focus leaving the recorder had three; accepting an app conflict without the system warning had two.
+Those nine assertions establish the intended runtime red for the three source findings. The Return-default and
+focused-Use Space scenario passed; its behavior is preserved.
+
+Search now rebuilds its descriptors from the editor's effective bindings, independently of menu-observer order,
+and refreshes filtered rows after edits, clears and resets. Rebuilding waits until a recording mutation releases
+the recorder. Ordinary key capture checks that the recorder still has focus, otherwise cancels and lets the focused
+control handle the event. Accepting Use also checks the accepted binding against the injected system-warning
+predicate. The three regression tests and their behavioral assertions are unchanged.
+
+The competing Settings-key method had eleven failures beginning with `isKeyWindow == false`; those undelivered
+application events do not establish a recorder routing defect. Its setup now explicitly activates the application,
+matching the existing command-bar fixture, before requesting the key window. The key-window assertion remains;
+a failed precondition stops the method before producing misleading downstream routing failures. Application event
+dispatch and all successful-routing assertions are retained. New CI must establish whether activation repairs setup.
+
+Swift 6.2.4 frontend parsing of the three changed Swift files and `git diff --check` passed. No component suite,
+GUI, app launch or full package build ran locally. This repair has no new-head executable result yet. App/menu
+composition, real-app dispatch, the remaining catalog audit, macOS system-warning detection, VoiceOver and visual
+review remain outstanding; the PR stays draft.
