@@ -140,6 +140,14 @@ struct ChromiumPageInfoTests {
     #expect(engine.sitesWithPermissions().isEmpty)
   }
 
+  @Test func openingThePanelTellsTheFacade() {
+    let (engine, id, tab) = makeEngine()
+    engine.pageInfoDidOpen(tab: id)
+    #expect(facade.siteSettings.opened == [tab.sessionId])
+    engine.pageInfoDidClose(tab: id)
+    #expect(facade.siteSettings.opened.isEmpty, "the close ends it")
+  }
+
   @Test func closingThePanelAfterAChangeRaisesTheReloadInfobarOnce() throws {
     let (engine, id, _) = makeEngine()
     let recorder = EventRecorder(engine)
@@ -204,9 +212,11 @@ struct ChromiumPageInfoTests {
     let stranger = TabID()
     engine.setPermission(.camera, to: .block, forOrigin: "https://fieldguide.example", from: stranger)
     engine.resetPermissions(forOrigin: "https://fieldguide.example", from: stranger)
+    engine.pageInfoDidOpen(tab: stranger)
     engine.pageInfoDidClose(tab: stranger)
     engine.openSiteSettings(forOrigin: "https://fieldguide.example", from: stranger)
     #expect(facade.siteSettings.exceptions.isEmpty && facade.siteSettings.closes == 0)
+    #expect(facade.siteSettings.opened.isEmpty)
     #expect(facade.siteSettings.openedSiteSettings.isEmpty)
   }
 

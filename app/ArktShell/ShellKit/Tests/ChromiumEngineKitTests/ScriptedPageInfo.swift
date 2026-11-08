@@ -63,6 +63,8 @@ final class ScriptedSiteSettings {
   /// The connection last reported per tab, seeded when the tab is bound (the facade's `TabObserver::Seed`).
   private var reportedConnections: [ObjectIdentifier: ArktPageConnection?] = [:]
   private(set) var closes = 0
+  /// The tabs whose panel is open, by session id, in the order they opened (#782).
+  private(set) var opened: [Int32] = []
 
   static let commonKinds: [ArktSitePermissionKind] = [.location, .camera, .microphone, .notifications]
   static let allKinds: [ArktSitePermissionKind] = (0...21).compactMap { ArktSitePermissionKind(rawValue: $0) }
@@ -176,8 +178,14 @@ final class ScriptedSiteSettings {
     tab.record(.pageInfoChanged)
   }
 
+  func didOpen(_ tab: ScriptedTab) {
+    guard tab.owner != nil, !opened.contains(tab.sessionId) else { return }
+    opened.append(tab.sessionId)
+  }
+
   func closed(_ tab: ScriptedTab) {
     closes += 1
+    opened.removeAll { $0 == tab.sessionId }
     guard pendingReloads.remove(ObjectIdentifier(tab)) != nil, tab.owner != nil else { return }
     tab.addInfobar("To apply your updated settings to this site, reload this page") {
       $0.kind = .reload; $0.okTitle = "Reload"; $0.cancelTitle = nil
@@ -205,6 +213,8 @@ extension ScriptedTab {
   }
 
   func resetPermissions(forOrigin origin: String) { facade.siteSettings.reset(origin: origin, from: self) }
+
+  func pageInfoDidOpen() { facade.siteSettings.didOpen(self) }
 
   func pageInfoDidClose() { facade.siteSettings.closed(self) }
 
