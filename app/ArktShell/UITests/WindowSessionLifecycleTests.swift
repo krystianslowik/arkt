@@ -56,27 +56,43 @@ final class WindowSessionLifecycleTests: ArktUITestCase {
         return label.exists && label.label == "Incognito"
       }.count == 1
     })
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: sandbox.defaultsSuite))
-    var beforeWindows: [[String: Any]] = []
-    XCTAssertTrue(Waits.until("ordered regular-window state is captured with private window open") {
-      guard let saved = self.savedWindows(defaults) else { return false }
-      beforeWindows = saved
-      return saved.count == 2
+    var firstReport: WindowSessionObservation.Report?
+    XCTAssertTrue(Waits.until("two raw regular-window entries while Incognito remains open") {
+      guard windows.count == 3,
+            windows.allElementsBoundByIndex.filter({ window in
+              window.descendants(matching: .any).matching(identifier: AXID.Incognito.label).firstMatch.exists
+            }).count == 1,
+            let report = self.observation(app) else { return false }
+      firstReport = report
+      return (try? self.savedWindows(report.current).count) == 2
     })
+    let first = try XCTUnwrap(firstReport)
+    let beforeWindows = try savedWindows(first.current)
     XCTAssertEqual(beforeWindows.count, 2, "check raw entries before reading any selection fields")
+    guard beforeWindows.count == 2 else { return }
     let before = try selectedIdentities(beforeWindows)
     XCTAssertEqual(Set(before).count, 2)
     quit(app)
-    let afterWindows = try XCTUnwrap(savedWindows(defaults))
-    XCTAssertEqual(afterWindows.count, 2, "quit cannot append an empty private-window entry")
-    XCTAssertEqual(try selectedIdentities(afterWindows), before, "quit must preserve the final ordered selections")
     let alphaRequests = server.requestedPaths.filter { $0 == "/p/session-alpha" }.count
     let betaRequests = server.requestedPaths.filter { $0 == "/p/session-beta" }.count
 
     let reopened = try launch(sandbox)
+    var secondReport: WindowSessionObservation.Report?
+    XCTAssertTrue(Waits.until("new launch completed its window decision") {
+      guard let report = self.observation(reopened), report.launchID != first.launchID,
+            report.launchComplete else { return false }
+      secondReport = report
+      return true
+    })
+    let initial = try XCTUnwrap(secondReport).initial
+    let afterWindows = try savedWindows(initial)
+    XCTAssertEqual(afterWindows.count, 2, "quit cannot append an empty private-window entry")
+    guard afterWindows.count == 2 else { return }
+    XCTAssertEqual(try selectedIdentities(afterWindows), before, "quit must preserve the final ordered selections")
     let restored = reopened.windows.matching(identifier: AXID.Shell.window)
+    // AX enumeration order is not window creation order; ordered identity is checked in the stored collection above.
     XCTAssertTrue(Waits.until("both distinct window selections restored") {
-      restored.count >= 2 && self.hasSelection(restored, space: "Space 1", tab: alphaTitle)
+      restored.count == 2 && self.hasSelection(restored, space: "Space 1", tab: alphaTitle)
         && self.hasSelection(restored, space: "Space 2", tab: betaTitle)
     })
     XCTAssertTrue(Waits.until("both selected pages requested after relaunch") {
@@ -95,12 +111,19 @@ final class WindowSessionLifecycleTests: ArktUITestCase {
     }
   }
 
-  private func savedWindows(_ defaults: UserDefaults) -> [[String: Any]]? {
-    guard let data = defaults.data(forKey: "windowSessions"),
-          let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-          let windows = object["windows"] as? [[String: Any]] else { return nil }
-    return windows
+  private func observation(_ app: XCUIApplication) -> WindowSessionObservation.Report? {
+    let element = app.staticTexts.matching(identifier: "arkt.ui-test.window-session-observation").firstMatch
+    guard element.exists, let text = element.value as? String else { return nil }
+    return try? WindowSessionObservation.Report.decode(text)
   }
+
+  private func savedWindows(_ value: WindowSessionObservation.RawValue) throws -> [[String: Any]] {
+    guard case .data(let data) = value else { throw ObservationError.notData }
+    let object = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+    return try XCTUnwrap(object["windows"] as? [[String: Any]])
+  }
+
+  private enum ObservationError: Error { case notData }
 
   /// Every raw entry must have a selection; none may disappear when projecting the ordered identities.
   private func selectedIdentities(_ windows: [[String: Any]]) throws -> [String] {

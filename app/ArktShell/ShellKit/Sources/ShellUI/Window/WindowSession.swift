@@ -98,6 +98,11 @@ public final class WindowSessionStore {
   /// Never touches user defaults (tests and the smoke).
   public static func ephemeral() -> WindowSessionStore { WindowSessionStore(store: nil) }
 
+  #if DEBUG
+  /// The actual injected collection value, without decoding or modifying it (UI-test observation only).
+  public var rawCollectionValue: Any? { defaults?.object(forKey: Self.windowsDefaultsKey) }
+  #endif
+
   /// The stored state; nil when nothing was saved, the value cannot be read, or its frame is empty or not finite.
   public func load() -> WindowSessionState? {
     guard let data = defaults?.data(forKey: Self.defaultsKey),

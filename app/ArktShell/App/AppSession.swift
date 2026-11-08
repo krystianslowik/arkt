@@ -24,6 +24,9 @@ final class AppSession {
   /// windows the engine asks for (Chromium: a Dock reopen, `chrome.windows.create`, a startup URL). A closed window is
   /// never shown again.
   let windows: ShellWindowSet
+  #if DEBUG
+  private let sessionObservation: WindowSessionObservation?
+  #endif
   /// One instance for every window, so Show / Hide Toolbar reaches all of them.
   let toolbarSetting = ToolbarSetting(defaults: AppEnvironment.userDefaults)
   /// The app-level settings the Settings window edits (#307), over the same defaults and Toolbar setting; every
@@ -95,9 +98,14 @@ final class AppSession {
     self.source = source
     // Toolbar on / off is an app-level setting in the user defaults (`topBarURLEnabled`; Debug test runs use the
     // `ARKT_DEFAULTS_SUITE` suite), not in the database: see ToolbarSetting.
+    let sessionStore = WindowSessionStore(defaults: AppEnvironment.userDefaults)
+    #if DEBUG
+    self.sessionObservation = AppEnvironment.isUITest
+      ? WindowSessionObservation(read: { sessionStore.rawCollectionValue }) : nil
+    #endif
     let windows = ShellWindowSet(engine: engine, sidebar: source, toolbarSetting: toolbarSetting,
                                  sidebarStateStore: SidebarWindowStateStore(defaults: AppEnvironment.userDefaults),
-                                 sessionStore: WindowSessionStore(defaults: AppEnvironment.userDefaults),
+                                 sessionStore: sessionStore,
                                  commandBarSettings: commandBarSettings, hostLookup: hostLookup)
     // BH-196: the one-off Copy URL tip remembers what it showed (#404).
     windows.copyLinkEducation = CopyLinkEducation(defaults: AppEnvironment.userDefaults)
@@ -199,6 +207,9 @@ final class AppSession {
       }
     }
     startAutoArchive()
+    #if DEBUG
+    sessionObservation?.finishLaunch()
+    #endif
   }
 
   /// The launch's one-time crash report ask (#129), on the primary window unless a first run covers it.
@@ -213,6 +224,9 @@ final class AppSession {
   /// The app's hooks on every browser window, before it is shown. Its stored favicons load off the main actor
   /// (each window has its own sidebar views); ids the engine reports meanwhile keep the newer one (#91).
   private func wire(_ window: ShellWindowController) {
+    #if DEBUG
+    if let sessionObservation { window.rootView.addSubview(SessionObservationView(observation: sessionObservation)) }
+    #endif
     window.onImportFromArc = { [weak self] in self?.importFromArc() }
     window.onArchive = { [weak self] ids in self?.archive.archive(ids, reason: .manual) }      // Cmd-W, BH-071
     window.onReopenArchived = { [weak self, weak window] id in                                // Cmd-Shift-T, BH-074

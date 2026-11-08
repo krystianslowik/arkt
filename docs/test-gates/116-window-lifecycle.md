@@ -158,3 +158,20 @@ the probe must rule each out. Deliberately breaking collection writes and quit c
 checks. A native run must first establish that the observation itself is available; only a representative runtime
 failure after that boundary can justify app launch/restoration changes. This is not a complete acceptance gate:
 launch completion, disabled restore, cancellation, exact final window count/order, and folder state remain separate.
+
+## Local observation repair (native verification pending)
+
+The Debug strict UI-test session now exposes a read-only accessibility report from the same `WindowSessionStore`
+instance supplied to `ShellWindowSet`. Its initial raw collection value is frozen before that set is created; current
+reads query the injected defaults and preserve absent, non-Data and Data bytes. A per-session UUID distinguishes
+launches, and the completion latch follows the actual `finishLaunch` window decision. The adapter appends a
+noninteractive child to each root without replacing its accessibility children. It does not request a capture or
+change restoration policy. AX discovery and value refresh are not established without a native run.
+
+The revised UI test checks the current collection with the identified private window still open, then compares its
+ordered selection pairs with the next launch's initial collection after requiring a different launch ID and the
+completion latch. It checks the exact restored window count and fresh fixture requests; AX enumeration does not
+establish creation order. A focused Foundation executable against a unique defaults suite passed the raw-value,
+immutability, read-only, identity, latch and codec checks. The AppKit adapter type-checked separately. The real store
+fixture tests, collection-save/capture mutation, full App build and native UI test have not run locally; those are not
+proof of App capture or AX forwarding. A representative native observation must precede any restoration change.
