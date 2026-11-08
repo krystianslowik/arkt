@@ -2896,3 +2896,17 @@ Written first. Each failed to compile before the code existed.
 - `LittleArktTests` (XCUITest, 4): Opt-Cmd-click opens Little Arkt, Open in, Cmd-W and the chooser's Open in New Window.
   The app and test bundle build (`xcodebuild ... build-for-testing`: TEST BUILD SUCCEEDED). Not run: the suite needs
   the real pointer and keyboard, and the Mac was in use.
+
+### Custom Favorite and folder icons (#339): local test-first gate
+
+- Added three SidebarModel test cases for independent Favorite and folder overrides, storage round trips and clearing,
+  preserving an override through a tab update and snapshot restore, and fallback for the existing version 3 fixture.
+  The proposed `setNodeIcon` and `customIcon` names are test seams, not a storage format decision.
+- Swift 6.2.4 parsed the new test file and compiled the actual SidebarModel sources as an isolated module. A focused
+  typecheck against that module failed because `Sidebar.setNodeIcon` and `Node.customIcon` do not exist, as expected.
+  The test file itself was not typechecked or run: the local toolchain could not locate the `Testing` module. No test
+  count or runtime failure is claimed. Full package, GUI and app checks were not run.
+- Remaining: implement and verify the model and versioned storage migration, picker and menu wiring, rendering and
+  reset fallback, including favicon updates and both folder states. Add integration and UI coverage and run the required
+  package and GUI checks on a suitable macOS toolchain. Coordinate later Favorite grid and context menu edits with
+  #278, #338 and #801; #618 changes layout math, and #580 touches session/window files.
