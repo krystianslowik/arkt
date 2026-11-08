@@ -86,11 +86,6 @@ final class LinkRoutingAppTests: ArktUITestCase {
     }
     configuration.environment = environment
     configuration.arguments = Self.launchArguments
-    if cold {
-      let keys = Set(TestIdentity.keys + [TestIdentity.endpointKey])
-      let carrierValues = environment.filter { keys.contains($0.key) }
-      configuration.arguments.append(try LaunchArgumentCarrier.encode(carrierValues, bundleIdentifier: bundleIdentifier))
-    }
     let opened = try await NSWorkspace.shared.open([url], withApplicationAt: applicationURL,
                                                    configuration: configuration)
     guard opened.bundleURL?.standardizedFileURL.resolvingSymlinksInPath() == applicationURL,

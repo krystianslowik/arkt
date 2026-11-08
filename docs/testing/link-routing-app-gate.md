@@ -1,5 +1,11 @@
 # External-link app integration gate (#113)
 
+## Current cold-transport status
+
+The argument carrier and its startup wiring were removed after the failed `cf931df` probe. Apple documents that `NSWorkspace.OpenConfiguration.arguments` is ignored when the calling process is sandboxed. The native CI log packages `com.apple.security.app-sandbox = 1` in `ArktShellUITests.xctest.xcent` and uses that exact file to sign `ArktShellUITests-Runner.app`. Thus the runner's configured sandbox is established by the build/signing record; the target app's settings are a different question. Source: [Apple arguments documentation](https://developer.apple.com/documentation/appkit/nsworkspace/openconfiguration/arguments).
+
+Debug startup again uses the existing environment-only guard before migration. Mandatory bundle validation, the isolated test bundle, loopback ACK, exact returned PID/bundle/sole-instance checks, persisted-profile inspection and exact-instance teardown remain. The sandbox restriction explains why the argument approach is unsupported; it does not explain the missing environment or prove cold routing. The cold test remains a failing setup observation, not a skipped test or a route-matching failure. No repeat is requested without a supported transport/composition plan. Earlier carrier probe counts below are historical and no longer describe retained source.
+
 The gate is designed to exercise the Debug app, its real Settings editor and SQLite-backed session, the sandboxed
 UI-test runner, Launch Services targeting that exact test bundle, and the loopback fixture server. A route to Space 1
 and a route to Little Arkt override a Space 2 default; an unmatched URL uses that default. Warm delivery and a URL used to relaunch after Cmd-Q exercise

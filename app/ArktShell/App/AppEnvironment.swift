@@ -14,7 +14,7 @@ enum AppEnvironment {
   @concurrent
   static func databaseLocation() async throws -> DatabaseLocation {
     #if DEBUG || ARKT_SMOKE_BUILD || ARKT_TEST_SWITCHES
-    if let path = effectiveEnvironment["ARKT_DATA_DIR"] {
+    if let path = ProcessInfo.processInfo.environment["ARKT_DATA_DIR"] {
       return DatabaseLocation(directory: URL(fileURLWithPath: path, isDirectory: true))
     }
     #endif
@@ -33,7 +33,7 @@ enum AppEnvironment {
   /// a test run never touches the real caches. Nothing is read or created until the first thumbnail.
   static func pageImageCache(in location: DatabaseLocation) -> PageImageCache? {
     #if DEBUG || ARKT_SMOKE_BUILD || ARKT_TEST_SWITCHES
-    if effectiveEnvironment["ARKT_DATA_DIR"] != nil {
+    if ProcessInfo.processInfo.environment["ARKT_DATA_DIR"] != nil {
       return PageImageCache(directory: location.directory.appending(path: "Caches/PageImages", directoryHint: .isDirectory))
     }
     #endif
@@ -46,7 +46,7 @@ enum AppEnvironment {
   /// fixture copy.
   static var arcDirectory: URL {
     #if DEBUG || ARKT_SMOKE_BUILD || ARKT_TEST_SWITCHES
-    if let path = effectiveEnvironment["ARKT_ARC_DIR"] {
+    if let path = ProcessInfo.processInfo.environment["ARKT_ARC_DIR"] {
       return URL(fileURLWithPath: path, isDirectory: true)
     }
     #endif
@@ -103,16 +103,8 @@ enum AppEnvironment {
   }
 
   #if DEBUG || ARKT_SMOKE_BUILD || ARKT_TEST_SWITCHES
-  static var effectiveEnvironment: [String: String] {
-    #if DEBUG
-    startupConfiguration.environment
-    #else
-    ProcessInfo.processInfo.environment
-    #endif
-  }
-
   private static var overrides: EnvironmentOverrides {
-    EnvironmentOverrides(environment: effectiveEnvironment)
+    EnvironmentOverrides(environment: ProcessInfo.processInfo.environment)
   }
   #endif
 
