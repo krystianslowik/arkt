@@ -277,7 +277,7 @@ public enum SidebarContextMenu {
   private static func splitRow(_ id: NodeID, layout: SplitLayoutInfo, _ source: any SidebarSource,
                                _ context: SidebarMenuContext) -> [SidebarMenuEntry] {
     var items: [SidebarMenuEntry] = [
-      .unavailable("Rename"),                  // a split has no stored title yet
+      SidebarMenuEntry(title: "Rename", action: .rename(id)),   // the row's inline field (#787)
       SidebarMenuEntry(title: "Duplicate Split View", action: .duplicateSplit(id)), .separator,
       SidebarMenuEntry(title: "Separate All Tabs", action: .separateSplit(id)),
       SidebarMenuEntry(title: SplitMenu.convertTitle(for: layout.orientation), action: .convertSplit(id)),

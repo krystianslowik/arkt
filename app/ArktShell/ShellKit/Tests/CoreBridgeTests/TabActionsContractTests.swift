@@ -50,18 +50,62 @@ struct TabActionsContractTests {
     _ = observation
   }
 
+  /// #787: a split takes the trimmed name, reported by `splitTitle`; an empty or nil name clears it.
   @Test(arguments: SourceKind.allCases)
-  func renamingASplitOrAnUnknownNodeChangesNothing(kind: SourceKind) throws {
+  func renamingASplitSetsItsTitleAndAnEmptyNameClearsIt(kind: SourceKind) throws {
     let source = kind.make()
     let space = try source.addSpace(title: "S")
     let a = try source.addTab(url: Self.urlA, title: "A", in: .today(space))
     let (split, _) = try source.addToSplit(.new(url: Self.urlB, title: "B"), target: a, at: 1,
                                            orientation: .horizontal)
+    #expect(source.splitTitle(split) == nil)
     var changes: [SidebarChange] = []
     let observation = source.observe { changes.append($0) }
-    source.renameNode(split, to: "X")
-    source.renameNode(NodeID(), to: "X")
+    source.renameNode(split, to: "  Research ")
+    #expect(source.splitTitle(split) == "Research")
+    #expect(changes == [.node(split)])
+    changes = []
+    source.renameNode(split, to: "Research")
+    #expect(changes.isEmpty, "the same name changes nothing")
+    source.renameNode(split, to: "   ")
+    #expect(source.splitTitle(split) == nil)
+    #expect(changes == [.node(split)])
+    source.renameNode(split, to: "Research")
+    source.renameNode(split, to: nil)
+    #expect(source.splitTitle(split) == nil)
+    #expect(source.splitTitle(a) == nil, "a tab is not a split")
+    _ = observation
+  }
+
+  /// The name stays with the split through its edits and comes along with Duplicate Split View.
+  @Test(arguments: SourceKind.allCases)
+  func aSplitKeepsItsNameThroughEditsAndDuplicates(kind: SourceKind) throws {
+    let source = kind.make()
+    let space = try source.addSpace(title: "S")
+    let a = try source.addTab(url: Self.urlA, title: "A", in: .today(space))
+    let (split, _) = try source.addToSplit(.new(url: Self.urlB, title: "B"), target: a, at: 1,
+                                           orientation: .horizontal)
+    source.renameNode(split, to: "Research")
+    try source.setSplitOrientation(split, .vertical)
+    _ = try source.addToSplit(.new(url: Self.urlA, title: "C"), target: split, at: 2, orientation: .horizontal)
+    try source.setSplitWidthFactors(split, [0.2, 0.3, 0.5])
+    #expect(source.splitTitle(split) == "Research")
+    let copy = try source.duplicateSplit(split)
+    #expect(source.splitTitle(copy) == "Research")
+    let duplicate = try source.duplicateNode(split)
+    #expect(source.splitTitle(duplicate) == "Research")
+  }
+
+  @Test(arguments: SourceKind.allCases)
+  func renamingAnUnknownNodeChangesNothing(kind: SourceKind) throws {
+    let source = kind.make()
+    _ = try source.addSpace(title: "S")
+    var changes: [SidebarChange] = []
+    let observation = source.observe { changes.append($0) }
+    let ghost = NodeID()
+    source.renameNode(ghost, to: "X")
     #expect(changes.isEmpty)
+    #expect(source.splitTitle(ghost) == nil)
     _ = observation
   }
 
