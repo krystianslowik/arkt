@@ -3075,3 +3075,9 @@ opacity-scaling limitation remains unchanged.
 The reviewed Google/DuckDuckGo change is integrated with main `1188868`; Google remains the default and Bing is not offered. The sole new merge conflict was this append-only history. The prior CommandBarResults conflict retains provider identities/counts and main's optimized builder. Folder and extension results remain non-actionable in this bounded stage.
 
 The focused settings/parser executable passed 26 checks before this merge. New Swift Testing/GUI tests, actual AppSession forwarding and native activation remain unexecuted locally. Source parsing, workflow import/UI checks, actionlint and header parity are checked for this merge; merged-head CI is pending.
+
+### #562 GUI fixture lifetime repair
+
+At `cd908de`, run `42519307867` GUI job `128849124672` reported 2,171 tests, 64 skipped and one failure. The search-setting behavior tests passed; the subsequent class's window guard identified `SettingsSearchSuggestionsTests` retaining 15 hidden windows (eight CommandBarPanel, three SettingsWindow and four ShellWindow). Teardown closed/invalidated them but retained its controller arrays on the XCTest case objects. The test-only fix empties all three arrays after the existing teardown calls, following the established fixture lifetime pattern. The guard and production code are unchanged.
+
+The changed test source parsed and whitespace checks passed. No local GUI/App/full package build ran; fresh CI must demonstrate that the window guard now passes. The earlier required gate, Core, pure ShellKit, app build and lint passed at `cd908de`; those results do not validate this follow-up head.

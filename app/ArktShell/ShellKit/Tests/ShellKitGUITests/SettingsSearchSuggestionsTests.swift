@@ -24,6 +24,10 @@ final class SettingsSearchSuggestionsTests: XCTestCase {
     bars.forEach { $0.invalidate() }
     settingsWindows.forEach { $0.window?.close() }
     shells.forEach { $0.close() }
+    // XCTest retains each case until the run ends; closing windows alone retains these controllers too.
+    bars.removeAll()
+    settingsWindows.removeAll()
+    shells.removeAll()
     UserDefaults().removePersistentDomain(forName: suiteName)
   }
 
