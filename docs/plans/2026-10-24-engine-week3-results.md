@@ -6125,6 +6125,139 @@ its dylib clones, derived data, the three throwaway profiles, the three defaults
 file, the build logs. No clipboard use. Nothing under `~/Applications/ArktTest` or `/Applications/Arkt.app` was
 touched. `out/Spike` now holds this branch's overlay (built from `origin/main` plus this change).
 
+## #759: gn check under //arkt
+
+### Gate
+
+1. Task: declare the dependencies behind the header-include errors that `gn check out/Spike '//arkt/*'` reports.
+   An overlay `BUILD.gn` change is enough; no Chromium patch.
+2. Facade header: unchanged. `arkt_engine_facade.mm`: unchanged.
+3. `.patches`: unchanged, no patch number claimed.
+4. Commands: `gn check out/Spike '//arkt/*'` before and after, `nice -n 15 autoninja -j 4 -C out/Spike chrome`, and
+   the engine ABI Swift tests. Chromium disk 1.9 TiB free.
+
+### Before
+
+`gn check out/Spike '//arkt/*'` reported 5 errors in 2 targets (4 in `//arkt/api:embedder`, 1 in
+`//arkt/browser:window`), so the count reads as 4 when only the first target is counted:
+
+- `arkt/api/arkt_engine_facade.mm`, lines 71 to 74: `find_notification_details.h`, `find_result_observer.h`,
+  `find_tab_helper.h` and `find_types.h`, from `//components/find_in_page`. The target reached it only through
+  `//arkt/browser:window`, which depends privately on `//chrome/browser/ui/find_bar`.
+- `arkt/browser/arkt_extension_batch_install.mm:29`: `extensions/browser/webstore_install_result.h`, from
+  `//extensions/browser:webstore_installer`, reached only privately through `//chrome/browser/extensions`.
+
+### What landed
+
+- `//arkt/api:embedder` depends on `//components/find_in_page`.
+- `//arkt/browser:window` depends on `//extensions/browser:webstore_installer`.
+
+Neither upstream target sets `visibility`. No include line, source file or patch changed.
+
+### After
+
+- `gn check out/Spike '//arkt/*'`: `Header dependency check OK`.
+- `gn check out/Arkt '//arkt/*'`: `Header dependency check OK`.
+- Overlay link: `readlink $CR/arkt` prints the engine worktree's `engine/arkt`.
+- Sync check: `.patches` 14 lines, 14 `arkt` commits, in sync.
+- `cmp` of the two facade header copies: identical (header untouched).
+
+### Build
+
+`nice -n 15 autoninja -j 4 -C out/Spike chrome`: `The build has finished successfully.`, 58 s. GN regenerated
+`build.ninja`, both target files now list the new dependency, and `libchrome_dll.dylib` was relinked.
+
+### Swift tests (`nice -n 20`, `-j 2`, in `app/ArktShell/ShellKit`)
+
+`swift test -j 2 --filter 'ArktEngineABITests|ChromiumEngineKitTests'`: `Test run with 33 tests in 11 suites
+passed`. No Swift file changed; the run confirms the ABI targets still build and pass on this branch.
+
+### Patch budget
+
+Unchanged: 14 patches.
+
+### Cleanup
+
+No Chromium run was launched, so there is no profile, process or crash report to remove. The build log stayed
+outside the repo and the Chromium disk.
+
+## #755: an Esc the page did not use reaches the host and stops loading
+
+Date 2026-11-08. Branch `engine/755-escape-stop` from `origin/main` (`e8380ee`). Follow-up of #614 (shell side, PRs
+#756 and #760), which could not be checked on an engine build at the time.
+
+### Gate
+
+- Seam: no patch. The overlay already hands an Esc the page did not handle to the host
+  (`ArktBrowserWindow::HandleKeyboardEvent` -> `ForwardUnhandledKeyDown` -> `unhandledKeyDown:inTab:` from a posted
+  task, #313). The check adds test-only code to the self-test embedder.
+- Facade header: unchanged (`cmp` identical). `.patches`: unchanged, 14 lines, 14 `arkt` commits above
+  `156.0.8078.48`; the 14 exported patches match the repo files apart from `From:` lines.
+- Overlay link checked before every build: `$CR/arkt` points at this worktree's `engine/arkt`.
+- Build: `nice -n 15 autoninja -j 4 -C out/Spike chrome`. Chromium disk 1.9 TB free, internal 47 GB. Load average 7
+  to 13 from other lanes' work; nothing added.
+
+### Answer to the issue's open question
+
+The week-3 note that Chromium's delayed shortcuts do not run in Arkt windows is about Cmd key equivalents (the
+Views focus manager path). A bare Esc never takes that path: the overlay takes it in `HandleKeyboardEvent` once the
+renderer reports it unhandled. #313's Engine app check already showed it reaching the shell (`peek unhandled Esc`).
+What was not checked was the loading half: `IDC_STOP` being enabled on an Arkt window while a page loads, and the
+stop taking effect. This run checks both. No key-routing fix is needed.
+
+### What landed (self-test embedder only)
+
+- `ArktSelfTestWindowHost` implements the optional `unhandledKeyDown:inTab:` as `ShellEngineHost` does for a tab
+  that is not in a Peek: a bare Esc, the shown tab loading, the window's first responder inside that tab's container
+  (the overlay names no tab, so the shell checks this too), and `validateCommand(IDC_STOP)`; then
+  `executeCommand(IDC_STOP, CURRENT_TAB)`, as the shell's `.stop` reaches the engine. It logs
+  `unhandledKeyDown ... inPage loading stopEnabled` and `stop sent`.
+- `arkt-selftest esc [ms]`: focuses the tab's page (`-focus`), then on a later turn builds an Esc key down and key up
+  and hands them to the tab's own window with `-[NSWindow sendEvent:]`, in process. The events never enter the system
+  event queue, so no other window or app can receive them; the test window did not need to be key or frontmost
+  (every run logged `appActive=no key=no`, with the page's `RenderWidgetHostViewCocoa` as first responder). This is
+  the real AppKit key path (the page's view, the renderer, the unhandled-key return), not DevTools input.
+
+### Smoke (`out/Spike/Chromium.app`, `--no-startup-window --arkt-facade-selftest --arkt-facade-selftest-url=<page>`, the shell's `--disable-features` list, fresh profiles under `profiles/755-20261108/`, `--use-mock-keychain`, loopback pages on `127.0.0.1:8795`)
+
+Each page drives itself by setting its title (`state`, then `esc`, then `state`), so one launch per page runs the
+check with no DevTools session. `/slow` and `/hang` answer after 30 s.
+
+| Page | Check | Result |
+|---|---|---|
+| `/loading`: an `<img src=/slow>` keeps the page loading | Esc stops it | PASS: `state ... loading=yes`, `unhandledKeyDown key=53 tab=-1 inPage=yes loading=yes stopEnabled=yes`, `stop sent`, `loadingChanged loading=no`, `state ... loading=no` |
+| `/uses-esc`: the same image, a focused field whose `keydown` calls `preventDefault()` on Escape | the page keeps the Esc | PASS: title `#used=1 #focus=1`, no `unhandledKeyDown` line, `state ... loading=yes` afterwards |
+| `/idle`: loaded page | nothing new | PASS: `unhandledKeyDown ... loading=no stopEnabled=no`, no `stop sent`, no navigation |
+| `/nav`: loaded page navigates to `/hang` (no response yet) | Esc cancels the pending navigation | PASS: `state url=.../hang loading=yes`, `unhandledKeyDown ... stopEnabled=yes`, `stop sent`, `state url=.../nav loading=no` |
+| break: `ForwardUnhandledKeyDown`'s key code changed (working tree only) | `/loading` | the check fails: `esc send ... inPage=yes`, no `unhandledKeyDown`, `state ... loading=yes` afterwards |
+| restored | `/loading`, `/uses-esc` | PASS again, the same lines as the first rows |
+
+No `FATAL`, `Check failed` or `Received signal` lines in any run.
+
+| Step | Result |
+|---|---|
+| Build with the self-test changes | `The build has finished successfully.`, `FAILED:` 0, 38 s |
+| Break build, restore build, format-only rebuild | each finished, `FAILED:` 0; `git status` in `$CR` clean apart from the untracked `build/util/MINIBRANCH` |
+| `gn check out/Spike '//arkt/*'` | fails on `main` with the include errors #759 fixes (PR #820); none in the self-test embedder |
+
+### Not checked here
+
+- **Peek closes on Esc on the Engine app.** The self-test host has no Peek. #313 recorded it as PASS on the Engine
+  app (`peek unhandled Esc`, `peek close keyboard`), and #614 left the order unchanged: `handleUnhandledKeyDown`
+  asks `peek.handleEscape` before `stopLoadingOnEscape`, and `escapeStopsLoading(peekOpen:)` yields while a Peek is
+  open (InMemoryEngine tests). Not re-run on the Engine app, because that needs an app build and input into the app
+  window, while this check has the same overlay path end to end.
+- The shell's own `stopLoadingOnEscape` on the Engine app; the self-test host repeats its conditions.
+
+### Patch budget
+
+Unchanged: 14 patch files, 14 `arkt` commits, in sync. No upstream file touched.
+
+### Cleanup
+
+Every Chromium run stopped by exact PID (`ps -p` prints nothing for each) and the loopback server by its PID. The
+throwaway profiles under `profiles/755-20261108/` and the build logs were deleted. The runs did not use the clipboard.
+
 ## #784: a dedicated address-bar navigation call
 
 Date 2026-11-08. Branch `engine/784-address-bar-navigation` from `origin/main` (`e8380ee`). Follow-up of #577 / #770
