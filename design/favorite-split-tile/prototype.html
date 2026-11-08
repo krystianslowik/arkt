@@ -5,12 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Favorite Split Tile</title>
 <!--
-  A Split View as a Favorites tile (#788). Single file, no network, ASCII-only source.
-  States are addressable by hash: #<direction>-<state>[&dark][&shot]
-    direction: a (side by side) | b (stack) | c (divided tile)
-    state:     resting | hover | selected | loading | menu
-    dark: dark appearance   shot: hide the prototype controls (used for the screenshots)
-  No hash: an overview of every direction and state.
+  A Split View as a Favorites tile (#788): the stack, the direction picked. Single file, no network, ASCII-only
+  source. The directions compared are in directions/prototype.html.
+  States are addressable by hash: #<state>[&dark][&shot][&2x]
+    state: resting | hover | selected | loading | menu | menu-rename
+    dark: dark appearance   shot: hide the prototype controls   2x: zoom the page (used for the screenshots)
+  No hash: an overview of every state.
   1 CSS px = 1 pt. Tile geometry is FavoritesLayout / SidebarMetrics on main (52 x 46 tile at the default 190 pt
   sidebar, 3 columns, 9 pt gap, radius 10, 20 pt favicon, 16 pt X at inset 3). Colors are ShellTokens values.
   Favicons are synthetic colored squares; no real sites.
@@ -117,44 +117,18 @@ html.shot2x { zoom: 2; }
 .fav { display: grid; place-items: center; border-radius: 25%; color: #fff; font-weight: 700; line-height: 1; }
 .fav.letter { background: var(--letter-fill); color: var(--text); font-weight: 600; }
 
-/* ---------- Direction A: side by side ---------- */
-.a-box { position: absolute; inset: 0; display: grid; place-content: center; }
-.a-box.h2 { grid-template-columns: 16px 16px; gap: 4px; }
-.a-box.v2 { grid-template-rows: 16px 16px; gap: 4px; }
-.a-box.q { grid-template-columns: 14px 14px; grid-auto-rows: 14px; gap: 3px; }
-.a-box.q .fav:nth-child(3):last-child { grid-column: 1 / span 2; justify-self: center; }
-
-/* ---------- Direction B: stack ---------- */
+/* ---------- The stack ---------- */
 .b-box { position: absolute; inset: 0; }
 .b-box .fav { position: absolute; }
 .b-box .back1 { left: 25px; top: 21px; }
 .b-box .back2 { left: 32px; top: 28px; }
 .b-box .front { left: 9px; top: 7px; box-shadow: 0 0 0 2px var(--ring); }
 .b-box .back1.ringed { box-shadow: 0 0 0 2px var(--ring); }
+/* The letter tile is translucent; in a stack it sits on the tile's solid color so the pane behind does not show through */
+.b-box .fav.letter { background-color: var(--ring); background-image: linear-gradient(var(--letter-fill), var(--letter-fill)); }
 .tile { --ring: var(--ring-rest); }
 .tile.hover { --ring: var(--ring-hover); }
 .tile.cur { --ring: var(--ring-cur); }
-
-/* ---------- Direction C: divided tile ---------- */
-.tile.divided, .tile.divided.hover, .tile.divided.cur { background: transparent; box-shadow: none; }
-.c-box { position: absolute; inset: 0; display: grid; gap: 2px; }
-.c-box.h2 { grid-template-columns: 1fr 1fr; }
-.c-box.v2 { grid-template-rows: 1fr 1fr; }
-.c-box.h3 { grid-template-columns: 1fr 1fr 1fr; }
-.c-box.q { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
-.c-cell { background: var(--fill); display: grid; place-items: center; border-radius: 4px; }
-.hover .c-cell { background: var(--fill-hover); }
-.cur .c-cell { background: var(--visible); }
-.cur .c-cell.focus { background: var(--cur); box-shadow: var(--cur-shadow); }
-.c-box.h2 .c-cell:nth-child(1), .c-box.h3 .c-cell:nth-child(1) { border-radius: 10px 4px 4px 10px; }
-.c-box.h2 .c-cell:nth-child(2), .c-box.h3 .c-cell:nth-child(3) { border-radius: 4px 10px 10px 4px; }
-.c-box.v2 .c-cell:nth-child(1) { border-radius: 10px 10px 4px 4px; }
-.c-box.v2 .c-cell:nth-child(2) { border-radius: 4px 4px 10px 10px; }
-.c-box.q .c-cell:nth-child(1) { border-radius: 10px 4px 4px 4px; }
-.c-box.q .c-cell:nth-child(2) { border-radius: 4px 10px 4px 4px; }
-.c-box.q .c-cell:nth-child(3) { border-radius: 4px 4px 4px 10px; }
-.c-box.q .c-cell:nth-child(4) { border-radius: 4px 4px 10px 4px; }
-.c-box.q.three .c-cell:nth-child(3) { grid-column: 1 / span 2; border-radius: 4px 4px 10px 10px; }
 
 /* ---------- Context menu ---------- */
 .menu { position: absolute; min-width: 248px; padding: 5px; border-radius: 8px; background: var(--menu); box-shadow: var(--menu-shadow); z-index: 10; }
@@ -211,33 +185,19 @@ html.shot2x { zoom: 2; }
     return keys.map(function (k, i) { return i === 1 ? 'loading1' : (i === 3 ? 'loading2' : k); });
   }
 
-  // tile(direction, {count, orient: 'h'|'v', state: resting|hover|selected|loading|menu, focus: pane index})
-  function tile(dir, o) {
+  // tile({count, orient: 'h'|'v', state: resting|hover|selected|loading|menu, focus: pane index})
+  function tile(o) {
     var p = panes(o.count, o.state === 'loading');
-    var cls = 'tile' + (o.state === 'hover' ? ' hover' : '') + (o.state === 'selected' ? ' cur' : '') + (dir === 'c' ? ' divided' : '');
+    var cls = 'tile' + (o.state === 'hover' ? ' hover' : '') + (o.state === 'selected' ? ' cur' : '');
     var x = o.state === 'hover' ? X : '';
-    var body = '';
-    if (dir === 'a') {
-      var lay = o.count === 2 ? (o.orient === 'v' ? 'v2' : 'h2') : 'q';
-      var size = o.count === 2 ? 16 : 14;
-      body = '<div class="a-box ' + lay + '">' + p.map(function (k) { return fav(k, size); }).join('') + '</div>';
-    } else if (dir === 'b') {
-      // The front favicon is the focused pane while the split is shown, else the first pane.
-      var f = o.state === 'selected' ? (o.focus || 0) : 0;
-      var order = [p[f]].concat(p.filter(function (_, i) { return i !== f; }));
-      var back = order.slice(1, 3);
-      body = '<div class="b-box">' +
-        (back[1] ? fav(back[1], 14, 'back2') : '') +
-        (back[0] ? fav(back[0], 16, 'back1' + (back[1] ? ' ringed' : '')) : '') +
-        fav(order[0], 20, 'front') + '</div>';
-    } else {
-      var lay2 = o.count === 2 ? (o.orient === 'v' ? 'v2' : 'h2') : (o.count === 3 && o.orient !== 'q' ? 'h3' : 'q');
-      var fsize = { h2: 16, v2: 14, h3: 12, q: 14 }[lay2];
-      body = '<div class="c-box ' + lay2 + '">' + p.map(function (k, i) {
-        var focus = o.state === 'selected' && i === (o.focus || 0);
-        return '<div class="c-cell' + (focus ? ' focus' : '') + '">' + fav(k, fsize) + '</div>';
-      }).join('') + '</div>';
-    }
+    // The front favicon is the focused pane while the split is shown, else the first pane.
+    var f = o.state === 'selected' ? (o.focus || 0) : 0;
+    var order = [p[f]].concat(p.filter(function (_, i) { return i !== f; }));
+    var back = order.slice(1, 3);
+    var body = '<div class="b-box">' +
+      (back[1] ? fav(back[1], 14, 'back2') : '') +
+      (back[0] ? fav(back[0], 16, 'back1' + (back[1] ? ' ringed' : '')) : '') +
+      fav(order[0], 20, 'front') + '</div>';
     return '<div class="' + cls + '" role="button" aria-label="' + p.map(function (k) { return SITES[k].t || 'Loading'; }).join(' | ') + '">' + body + x + '</div>';
   }
 
@@ -252,34 +212,37 @@ html.shot2x { zoom: 2; }
     ['Remove from Favorites'],
     ['Close and Keep Favorite', '&#8984;W']
   ];
-  function menuHtml(left, top) {
-    return '<div class="menu" role="menu" style="left:' + left + 'px;top:' + top + 'px">' + MENU.map(function (it, i) {
+  // After #847 (rename a split): Rename... first, as on a Favorite tab's menu.
+  var MENU_RENAME = [['Rename&#8230;'], '-'].concat(MENU);
+  function menuHtml(items, left, top) {
+    return '<div class="menu" role="menu" style="left:' + left + 'px;top:' + top + 'px">' + items.map(function (it, i) {
       if (it === '-') return '<div class="msep"></div>';
       return '<div class="mi' + (i === 0 ? ' hov' : '') + '" role="menuitem"><span>' + it[0] + '</span>' + (it[1] ? '<span class="k">' + it[1] + '</span>' : '') + '</div>';
     }).join('') + '</div>';
   }
 
-  var NAMES = { a: 'A. Side by side', b: 'B. Stack', c: 'C. Divided tile' };
-  var STATES = ['resting', 'hover', 'selected', 'loading', 'menu'];
+  var STATES = ['resting', 'hover', 'selected', 'loading', 'menu', 'menu-rename'];
   var CAPTION = {
     resting: 'Resting: the split is not shown',
     hover: 'Hover: the X closes every pane and keeps the Favorite',
     selected: 'Selected: the split is shown, the first pane has focus',
     loading: 'Second pane loading (no favicon yet), fourth pane has none',
-    menu: 'Context menu of a Favorite split'
+    menu: 'Context menu of a Favorite split',
+    'menu-rename': 'Context menu after #847'
   };
 
-  function stage(dir, state) {
-    var tileState = state === 'menu' ? 'resting' : state;
-    var main = tile(dir, { count: 2, orient: 'h', state: tileState, focus: 0 });
+  function stage(state) {
+    var isMenu = state === 'menu' || state === 'menu-rename';
+    var tileState = isMenu ? 'resting' : state;
+    var main = tile({ count: 2, orient: 'h', state: tileState, focus: 0 });
     var grid = [plainTile('mail'), main, plainTile('cal'), plainTile('notes'), plainTile('music'), plainTile('chat')].join('');
     var rows = '<div class="row">' + fav('sheet', 16) + '<span>Budget sheet</span></div>' +
                '<div class="row">' + fav('chat', 16) + '<span>Team chat</span></div>' +
                '<div class="row">' + fav('mail', 16) + '<span>Release checklist for the spring update, final</span></div>';
     var right;
-    if (state === 'menu') {
+    if (isMenu) {
       right = '<div class="content"><div class="pane" style="height:100%;box-shadow:none"><i class="h"></i><i></i><i style="width:80%"></i><i></i><i style="width:64%"></i></div></div>' +
-              menuHtml(16 + 8 + 52 + 9 + 30, 16 + 40 + 30);
+              menuHtml(state === 'menu' ? MENU : MENU_RENAME, 16 + 8 + 52 + 9 + 30, 16 + 40 + 30);
     } else {
       var v = [
         { count: 2, orient: 'h', cap: '2 panes, side by side' },
@@ -287,10 +250,10 @@ html.shot2x { zoom: 2; }
         { count: 3, orient: 'h', cap: '3 panes' },
         { count: 4, orient: 'h', cap: '4 panes (the most)' }
       ];
-      right = '<div class="zoom"><h2>' + NAMES[dir] + ' - ' + CAPTION[state] + ' - tile at 2x</h2><div class="cells">' +
+      right = '<div class="zoom"><h2>' + CAPTION[state] + ' - tile at 2x</h2><div class="cells">' +
         v.map(function (o) {
           o.state = tileState; o.focus = 0;
-          return '<div class="cell"><div class="mag">' + tile(dir, o) + '</div><div class="cap">' + o.cap + '</div></div>';
+          return '<div class="cell"><div class="mag">' + tile(o) + '</div><div class="cap">' + o.cap + '</div></div>';
         }).join('') + '</div></div>';
     }
     return '<div class="stage"><div class="sidebar"><div class="lights"><i></i><i></i><i></i></div>' +
@@ -299,29 +262,22 @@ html.shot2x { zoom: 2; }
 
   function overview() {
     var h = '<div class="overview"><h1>A Split View as a Favorites tile (#788)</h1>' +
-      '<p>Three directions. Each row shows the tile at its real size (52 x 46 pt) in every state, for a split of 2 panes side by side, 2 stacked, 3 and 4. Open a state for the full screen.</p>';
-    ['a', 'b', 'c'].forEach(function (d) {
-      h += '<h1>' + NAMES[d] + '</h1><div class="strip">';
-      ['resting', 'hover', 'selected', 'loading'].forEach(function (s) {
-        h += '<figure><a class="well" href="#' + d + '-' + s + '" style="display:flex;gap:9px">' +
-          [{ count: 2, orient: 'h' }, { count: 2, orient: 'v' }, { count: 3, orient: 'h' }, { count: 4, orient: 'h' }].map(function (o) {
-            o.state = s; o.focus = 0; return tile(d, o);
-          }).join('') + '</a><figcaption>' + s + '</figcaption></figure>';
-      });
-      h += '</div>';
+      '<p>The stack. The tile at its real size (52 x 46 pt) in every state, for a split of 2 panes side by side, 2 stacked, 3 and 4. Open a state for the full screen.</p><div class="strip">';
+    ['resting', 'hover', 'selected', 'loading'].forEach(function (s) {
+      h += '<figure><a class="well" href="#' + s + '" style="display:flex;gap:9px">' +
+        [{ count: 2, orient: 'h' }, { count: 2, orient: 'v' }, { count: 3, orient: 'h' }, { count: 4, orient: 'h' }].map(function (o) {
+          o.state = s; o.focus = 0; return tile(o);
+        }).join('') + '</a><figcaption>' + s + '</figcaption></figure>';
     });
-    return h + '</div>';
+    return h + '</div></div>';
   }
 
-  function controls(dir, state, dark) {
-    var h = '<div class="controls"><a href="#' + (dark ? 'dark' : '') + '"' + (!dir ? ' class="on"' : '') + '>Overview</a>';
-    ['a', 'b', 'c'].forEach(function (d) {
-      STATES.forEach(function (s) {
-        var on = d === dir && s === state;
-        h += '<a href="#' + d + '-' + s + (dark ? '&dark' : '') + '"' + (on ? ' class="on"' : '') + '>' + d.toUpperCase() + ' ' + s + '</a>';
-      });
+  function controls(state, dark) {
+    var h = '<div class="controls"><a href="#' + (dark ? 'dark' : '') + '"' + (!state ? ' class="on"' : '') + '>Overview</a>';
+    STATES.forEach(function (s) {
+      h += '<a href="#' + s + (dark ? '&dark' : '') + '"' + (s === state ? ' class="on"' : '') + '>' + s + '</a>';
     });
-    var self = dir ? dir + '-' + state : '';
+    var self = state || '';
     h += '<a href="#' + self + (dark ? '' : (self ? '&dark' : 'dark')) + '">' + (dark ? 'Light' : 'Dark') + '</a></div>';
     return h;
   }
@@ -333,10 +289,10 @@ html.shot2x { zoom: 2; }
     document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
     document.body.className = shot ? 'shot' : '';
     document.documentElement.classList.toggle('shot2x', parts.indexOf('2x') >= 0);
-    var m = /^([abc])-(resting|hover|selected|loading|menu)$/.exec(parts[0] || '');
+    var m = /^(?:b-)?(resting|hover|selected|loading|menu|menu-rename)$/.exec(parts[0] || '');
     var root = document.getElementById('root');
-    if (!m) { root.innerHTML = controls(null, null, dark) + overview(); return; }
-    root.innerHTML = controls(m[1], m[2], dark) + stage(m[1], m[2]);
+    if (!m) { root.innerHTML = controls(null, dark) + overview(); return; }
+    root.innerHTML = controls(m[1], dark) + stage(m[1]);
   }
   window.addEventListener('hashchange', render);
   render();
