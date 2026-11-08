@@ -179,6 +179,10 @@ public protocol SidebarSource: AnyObject {
   func space(_ id: SpaceID) -> SidebarSpaceInfo?
   func children(of location: SidebarLocation) -> [NodeID]
   func node(_ id: NodeID) -> SidebarNodeInfo?
+  /// The node icon override, or nil for the default appearance or an unknown node.
+  func nodeIcon(_ id: NodeID) -> SpaceIconInfo?
+  /// Sets or clears an override; unchanged and unknown nodes emit no change.
+  func setNodeIcon(_ id: NodeID, to icon: SpaceIconInfo?)
   /// The location that holds `id` (Track B: `Node.parent`).
   func parent(of id: NodeID) -> SidebarLocation?
   /// Throws when the model refuses the location (unknown Space, too deep). `StubSidebar` never throws.
@@ -306,6 +310,10 @@ public final class SidebarChangeHub {
 }
 
 extension SidebarSource {
+  /// Compatibility for sources that do not support node icons.
+  public func nodeIcon(_ id: NodeID) -> SpaceIconInfo? { nil }
+  public func setNodeIcon(_ id: NodeID, to icon: SpaceIconInfo?) {}
+
   public func moveNodes(_ ids: [NodeID], to location: SidebarLocation, at index: Int) throws {
     var target = index
     for id in ids {

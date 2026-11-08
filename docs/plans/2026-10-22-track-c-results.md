@@ -2950,3 +2950,11 @@ Written first. Each failed to compile before the code existed.
   and GRDB 7.11.1 ran `swift test -j 2 --filter SidebarV3LaunchTests`: 1 test in 1 suite passed. The focused run
   does not include the other Core tests. Swift parsing of the new test and Shell gate files, import inspection and
   `git diff --check` passed. No GUI, app launch or ShellKit baseline build was run locally.
+
+
+### Custom Favorite and folder icons (#339): Shell value and CoreBridge boundary
+
+- On head `6b74913fc2025bd1f1a1630a7eb8a0997ca883e0`, [CI GUI job 128591714123](https://github.com/krystianslowik/arkt/actions/runs/42434942680/job/128591714123) failed compilation at the intended missing `nodeIcon` and `setNodeIcon` boundary in `NodeIconContractTests.swift`. No tests executed in that job. Core, app and lint passed at the observed status; pure ShellKit was still in progress.
+- Added the plain-value source boundary, Core icon conversion, node notifications and no-op handling. Snapshot restamping and stub subtree and split duplication retain icon overrides. Added stub coverage for source dispatch, notifications, no-ops and subtree copies.
+- Swift 6.4.1 parsed the changed Swift sources and the boundary tests; import inspection and `git diff --check` passed. These checks do not compile or execute the contract tests. The local full ShellKit baseline is compiler-broken and full Xcode is unavailable; new CI validation is pending.
+- Picker and menu wiring, Favorite rendering and favicon reset fallback, expanded and collapsed folder rendering, GUI/UI and manual appearance, keyboard, accessibility and emoji Cancel checks remain. Follow the integration order in `docs/339-custom-icons-integration.md`.

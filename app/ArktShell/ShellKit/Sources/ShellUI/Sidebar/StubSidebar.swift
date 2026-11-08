@@ -7,6 +7,7 @@ public final class StubSidebar: SidebarSource {
   private struct Node {
     var info: SidebarNodeInfo
     var parent: SidebarLocation
+    var icon: SpaceIconInfo? = nil
   }
 
   public private(set) var spaceOrder: [SpaceID] = []
@@ -26,6 +27,14 @@ public final class StubSidebar: SidebarSource {
     if case .tab(_, let url, _) = info, let custom = customTitles[id] { return .tab(id: id, url: url, title: custom) }
     return info
   }
+  public func nodeIcon(_ id: NodeID) -> SpaceIconInfo? { nodes[id]?.icon }
+
+  public func setNodeIcon(_ id: NodeID, to icon: SpaceIconInfo?) {
+    guard let node = nodes[id], node.icon != icon else { return }
+    nodes[id]?.icon = icon
+    hub.emit(.node(id))
+  }
+
   public func parent(of id: NodeID) -> SidebarLocation? { nodes[id]?.parent }
 
   public func observe(_ handler: @escaping @MainActor (SidebarChange) -> Void) -> SidebarObservation {
@@ -224,7 +233,7 @@ public final class StubSidebar: SidebarSource {
     case .folder(_, let title): .folder(id: copy, title: title)
     case .split(_, let layout): .split(id: copy, layout: layout)
     }
-    nodes[copy] = Node(info: info, parent: location)
+    nodes[copy] = Node(info: info, parent: location, icon: original.icon)
     customTitles[copy] = customTitles[id]
     childOrder[location, default: []].append(copy)
     if let inner = original.info.childLocation, let copyInner = info.childLocation {
@@ -341,13 +350,13 @@ extension StubSidebar {
       let layout = try layout(of: split)
       guard let parent = nodes[split]?.parent else { throw SplitEditError.invalid }
       let copy = NodeID()
-      nodes[copy] = Node(info: .split(id: copy, layout: layout), parent: parent)
+      nodes[copy] = Node(info: .split(id: copy, layout: layout), parent: parent, icon: nodes[split]?.icon)
       let position = children(of: parent).firstIndex(of: split) ?? 0
       childOrder[parent, default: []].insert(copy, at: position + 1)
       for pane in children(of: .split(split)) {
         guard case .tab(_, let url, let title)? = nodes[pane]?.info else { continue }
         let id = NodeID()
-        nodes[id] = Node(info: .tab(id: id, url: url, title: title), parent: .split(copy))
+        nodes[id] = Node(info: .tab(id: id, url: url, title: title), parent: .split(copy), icon: nodes[pane]?.icon)
         childOrder[.split(copy), default: []].append(id)
       }
       return copy
