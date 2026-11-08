@@ -260,6 +260,7 @@ jobs:
         working-directory: app/ArktShell/ShellKit
         env:
           ARKT_CUSTOM_ICON_SHOTS_DIR: ${{ runner.temp }}/custom-icon-screenshots
+          ARKT_RESTORE_SHOTS_DIR: ${{ runner.temp }}/restore-pages-screenshots
         run: swift test --filter ShellKitGUITests
       - name: Upload synthetic custom icon screenshots
         if: always()
@@ -268,6 +269,14 @@ jobs:
           name: synthetic-custom-icon-screenshots
           path: ${{ runner.temp }}/custom-icon-screenshots/custom-icons-*.png
           if-no-files-found: ignore
+          retention-days: 7
+      - name: Upload restore pages screenshots
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: restore-pages-screenshots
+          path: ${{ runner.temp }}/restore-pages-screenshots/*.png
+          if-no-files-found: warn
           retention-days: 7
 
   app:

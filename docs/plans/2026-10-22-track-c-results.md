@@ -3024,3 +3024,49 @@ CI must regenerate the PNGs, and their visual audit remains pending. Native shee
 Merged main at `3a0263c`, including #802's Favorite split behavior and #804's shared pacing rule. The single content conflict was in SidebarContextMenu: the merged builder keeps main's split-versus-tab dispatch and split-specific copy/remove/close menu, and retains the custom Change Icon and Reset Icon controls on tab Favorites and folders. The Favorite-tab helper still receives the source and runs on the main actor. The FavoritesGridView merge retains custom-icon-first rendering together with main's split labels, loaded/current state, close and drag updates. Existing icon tests and FavoriteSplitTileTests remain present.
 
 Swift 6.2.4 frontend parsing passed for all ten Swift files changed by the merge; whitespace and source-layer inspection passed. No full local build, GUI or runtime tests ran because the local baseline/toolchain limitation remains. Earlier icon test and screenshot evidence belongs to `e8e807f`; the merge head requires fresh CI, including Favorite split and icon coverage. No new icon behavior, fixture capture, accessibility or performance claim is made.
+
+## Composite Space theme overlays (#534)
+
+The drawn base and opacity-scaled overlay are expanded in OKLab and source-over composited at the union of their
+stop locations in the first base color's space. Mixed-space stops are converted through D65 XYZ and clamped to the
+destination gamut before expansion and blending. Each Space uses one opaque gradient below the separate texture layers.
+The view caches both colors and explicit locations for the current drawn themes, reuses them across swipes and drops
+entries when those themes change, including appearance or contrast changes. An empty base falls back to white before
+compositing; a single stop is duplicated for Core Animation. Finite stops approximate the continuous result between
+samples when overlay alpha varies. The previous #381 overlay-layer description records the original implementation.
+
+At `6ad459c75bc321647a8ce4c849b97b1662952288`, CI run 41362710601 passed 1,872 pure ShellKit tests in 225
+suites, the app build, lint and the required Swift gate. The informative GUI run had 1,501 tests, 38 skipped and one
+failure in download cancellation. The partial-file cleanup race was subsequently fixed in merged PR #551; its
+`InvalidTransition` message was identified as coming from Apple's gesture framework. This evidence predates the
+integration with current main; CI for the integrated head is pending. The empty-base fallback uses white in the first
+overlay color's space, or sRGB without an overlay. Renderer tests cover P3 overlays at alpha 0.25 and 1.
+
+Local full builds and tests were not run because the available SDK/toolchain cannot compile baseline ShellKit.
+At `ed9dcb77dab149675a54269c7746a0289c5990f7`, manual CI run 41919150446 passed the required gate,
+1,969 ShellKit tests in 230 suites, 574 ArktCore tests in 45 suites, app build and lint; GUI ran 1,528 tests,
+39 skipped, zero failures. The workflow was cancelled only because the optional UI job was cancelled. Its
+[Repository-backed screenshots on #534](https://github.com/krystianslowik/arkt/issues/534#issuecomment-6705310586)
+show light and dark before/after images (baseline production `a4009de5bbd2bc70def89fe05b62dec0faf9bfa3`).
+The evidence run also recorded 20 loaded crossfade runs of seven tests each and the intended stale-completion failure
+after guard removal followed by a restored pass. These results apply to that revision; CI must verify the new head.
+The one-off evidence job and scripts were removed after the screenshots were preserved. Mixed-space regression cases
+compare against Core Graphics in both directions at fractional and full alpha; the full suite awaits CI.
+
+The quiet physical 120 Hz swipe frame-time gate with overlay themes was not measured and is deferred to #704 for
+maintainer hardware after landing. No frame-time improvement is claimed. Merged PR #551 supplies
+the deterministic completion and asynchronous download cancellation fixes. The existing 50% contrast fallback may
+remain below target, contrast samples do not cover every point or texture, and the pre-existing empty-base
+opacity-scaling limitation remains unchanged.
+
+
+### Custom-icon main integration after recovery and theme composition (#339)
+
+Merged main `859c4ce` (including #690 recovery, #833 retained-window fixes and #555 theme composition) into the
+custom-icon branch. The two conflicts were the GUI screenshot workflow and this append-only results history.
+Both screenshot environment variables and independent upload steps are retained; both results histories remain.
+Icon implementation and custom-icon test sources are unchanged from `8e20b9d`; main's unrelated sidebar/window
+changes merged automatically. Parser/source/lint and resolution whitespace checks passed. No new-head App/GUI
+build, icon interaction, screenshot capture or inspection ran locally. The earlier screenshots and suite counts
+remain historical until new-head CI and artifact inspection complete. Native accessibility/Character Viewer and
+manual performance remain unverified.

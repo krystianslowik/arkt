@@ -57,7 +57,7 @@ final class CommandBarHintStrip: NSView {
     wantsLayer = true
     hairline.wantsLayer = true
     addSubview(hairline)
-    trailingLabel.font = .systemFont(ofSize: 11.5)
+    trailingLabel.font = ShellType.hint.font
     trailingLabel.lineBreakMode = .byTruncatingHead
     trailingLabel.cell?.usesSingleLineMode = true
     trailingLabel.alignment = .right
@@ -115,7 +115,7 @@ final class CommandBarHintStrip: NSView {
         keyCaps.append(view)
       }
       let label = NSTextField(labelWithString: item.caption)
-      label.font = .systemFont(ofSize: 11.5)
+      label.font = ShellType.hint.font
       label.cell?.usesSingleLineMode = true
       addSubview(label)
       labels.append(label)

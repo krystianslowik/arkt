@@ -20,15 +20,13 @@ final class AppCommands: NSObject {
 
   /// File > New Blank Window (Ctrl-Cmd-N, KB-006, BH-170): the same window, with no sidebar items.
   @objc func newBlankWindow(_ sender: Any?) {
-    guard let window = session?.windows.openWindow(opensFirstTab: false) else { return }
-    window.makeBlank()
+    session?.windows.openWindow(opensFirstTab: false, kind: .blank)
   }
 
   /// File > New Incognito Window (Cmd-Shift-N, KB-007, BH-174): the same window, labeled only in the sidebar.
   /// A visit from it is not written to the shared sidebar.
   @objc func newIncognitoWindow(_ sender: Any?) {
-    guard let window = session?.windows.openWindow(opensFirstTab: false) else { return }
-    window.makeIncognito()
+    session?.windows.openWindow(opensFirstTab: false, kind: .incognito)
   }
 
   /// File > New Little Arkt Window (Cmd-Opt-N, KB-044): the quick lookup bar; Return opens the result in a new Little

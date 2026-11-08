@@ -1,36 +1,33 @@
 # Extensions design
 
-The native extension surfaces: the install sheet, pinned actions and their order, the extension context menu and the
-keyboard commands (#121), plus the other Chromium (Views) surfaces that need a native replacement (#122). Three
-directions are drawn for pinned actions and the install surface; the rest is one design. Picked: C for pinned actions
-and B for install (#590). The install sheet ships as the engine-drawn sheet (#244, #548), close enough to B; the rest
-is not built yet. The prototype is [`prototype.html`](prototype.html) (open it in a browser; Prev and Next step through
-every state). States by hash, `#<a|b|c>-<pinned|reorder|install|install-long>[&dark][&rm][&shot]`, plus `#menu`,
+The spec picks **direction C** for pinned actions: one Extensions button opens a panel. It picks **direction B**
+for the install sheet (#590). The existing engine-drawn install sheet (#244, #548) is close enough; no restyle is
+needed. New extensions are unpinned and the install toast offers Pin. Extension shortcuts work in Arkt by default,
+with a per-command opt-in to All Apps. On conflict, Return keeps the existing shortcut and leaves the extension
+command unassigned.
+
+The [prototype](prototype.html) contains the chosen states and historical alternatives; use `#c-pinned`,
+`#c-reorder`, `#b-install`, and `#b-install-long` for the chosen directions. The other states are `#menu`,
 `#menu-unpinned`, `#shortcuts`, `#shortcuts-conflict`, `#shortcuts-record`, `#toast-pin`,
-`#c-<empty|none-pinned|small>` and `#surf-<crashed|dialog|restore|pageinfo|zoom|sharing>`.
+`#c-<empty|none-pinned|small>` and `#surf-<crashed|dialog|restore|pageinfo|zoom|sharing>`. Append `&dark`,
+`&rm`, or `&shot` for dark, Reduce Motion, or screenshot mode. The [direction comparison](directions/README.md)
+is historical, not a specification.
 
 Everyday chrome: the system font, the shell's tokens, neutral pills. Mustard is a fill and the one primary pill of a
 surface (Add Extension, Reload, OK, Restore, Keep Existing). Extension icons and names are synthetic. Pinned actions
 carry no mustard: a badge is a graphite capsule with porcelain text, "needs attention" is a graphite dot.
 
-## Directions
+## Extensions panel
 
-| | A. Strip under the address | B. Tiles in the Favorites grid | C. One button and a panel |
-|---|---|---|---|
-| Idea | small icons where the page's address already is | extensions are tiles like Favorites | no persistent icons; one calm place |
-| Pinned actions | 28 pt hit targets (24 pt icon, radius 7), gap 4, up to 4 visible, a puzzle button at the trailing end opens the panel | 38 pt tiles in the Favorites grid's second row (4 columns), 20 pt icon, the 4th slot is the puzzle button | none in the sidebar; the Extensions button (28 pt, bottom bar, trailing) opens a 316 pt panel |
-| Badge and attention | 15 pt capsule at the icon's top trailing corner, dot for "needs access" | same, on the tile | in the panel row: the status line ("12 clips on this page", "Needs access to this site") |
-| Order | drag an icon; a 2 pt insertion mark shows the target; the lifted icon scales to 1.12 | drag a tile; the old slot shows a recessed outline | drag a row by its grip; a 2 pt insertion line |
-| Overflow | beyond 4 pinned, the rest go to the panel (the puzzle button) | beyond 3, the rest go to the panel | always in the panel |
-| Install | compact window sheet 420 pt: name, publisher and rating, a recessed "It can" list, Open in Web Store, Cancel, Add Extension | window sheet 460 pt: 52 pt icon, rating, users and size, permission rows with a plain explanation, a "Show in sidebar" switch (on), Cancel, Add Extension | panel anchored to the Extensions button, 320 pt: centered icon, permissions field, full-width Add Extension (primary) over a full-width Cancel |
-| Best for | the common case: a few extensions, one click | people who live in a few extensions | people with many extensions, a minimal sidebar |
-| Cost | competes with the address pill | uses the Favorites area's height | one more click to reach an extension |
-
-Recommendation: A for pinned actions with the C panel as its overflow, and the A sheet for install (shortest; the
-permission list is the same content as B's rows, and B's "Show in sidebar" can be a quiet toggle later). The A sheet
-replaces the Views prompt one for one (`ExtensionInstallPrompt` ShowDialogCallback), so it is also the cheapest to build.
+The 28 pt Extensions button at the trailing end of the bottom bar opens a 316 pt panel. Pinned extensions appear as
+rows with a status line; drag a row by its grip to reorder it, with a 2 pt insertion line. All actions remain in the
+panel, including when the window is small. The [approved states](#approved-states-590) specify the empty, unpinned,
+and smallest-window cases.
 
 ## The install sheet
+
+Direction B is a 460 pt window sheet with a 52 pt icon, rating, user count, size, and permission rows with plain
+explanations. Its proposed sidebar switch is omitted under C. The existing Chromium sheet is accepted as close enough.
 
 - **Content**: icon, "Add "<name>"?", publisher, "4.6 stars, 1,000,000+ users", the permission list (the strings
   Chromium reports, one per line, plain), Open in Web Store (a quiet link), Cancel, **Add Extension** (the one primary,
@@ -48,13 +45,12 @@ replaces the Views prompt one for one (`ExtensionInstallPrompt` ShowDialogCallba
 - **What pins**: extensions with an action. A new extension is not pinned (#590); pin it from the install toast or its row in the Extensions panel (B's "Show in
   sidebar" switch is not used under C). A
   profile syncs the order with the Space's profile.
-- **Order**: left to right is the pin order. Drag to reorder (A, B: in place; C: by the grip). The menu has Move Left and
+- **Order**: the panel rows follow pin order. Drag the grip to reorder. The menu has Move Left and
   Move Right for the keyboard (disabled at the ends). Cmd-E cycles the pinned extensions in this order (KB-047: hold
   Command, tap E; each tap opens the next one's popup; release Command to leave it open).
-- **Click**: opens the extension's popup anchored under the icon (A, B) or the panel row (C). A badge updates live.
+- **Click**: opens the extension's popup anchored under the panel row. A badge updates live.
   Right-click or Ctrl-click opens the context menu.
-- **Smallest window**: the sidebar's width never changes; A wraps nothing (it shows 3 and the puzzle button at 150 pt);
-  B keeps its 4 columns.
+- **Smallest window**: the sidebar's width never changes; the panel caps its height to the window and its list scrolls.
 
 ## The context menu
 
@@ -115,9 +111,11 @@ Transform and opacity only.
 
 ## VoiceOver and accessibility
 
-- The strip or grid is a toolbar "Pinned extensions"; each icon is a button labelled "<name>, 12" or "<name>, needs
-  attention". Move Left and Move Right in the menu are the keyboard route for ordering; dragging is never the only way.
+- The Extensions entry point is a button labelled "Extensions".
+- Move Left and Move Right in the menu are the keyboard route for ordering; dragging is never the only way.
 - The panel is a dialog "Extensions": a list; each row's pin button is a toggle ("Pin <name>", pressed when pinned).
+- An action row reads its name and status line together, for example "<name>, 12 clips on this page"; without a status
+  line, it reads the name.
 - The install sheet and the page dialogs are alert dialogs: title, then description, then the default button. Permission
   rows read as a list. Focus starts on the default button (a prompt's field takes focus first).
 - The sad-tab view is an alert; Reload takes focus.
@@ -147,10 +145,9 @@ letters in both. The menu uses the system's menu material. Increase Contrast add
 | `prototype.html` | Single-file prototype, no network, synthetic data |
 | `screens/extensions-<state>-<light\|dark>.png` | 54 screenshots at 2x (27 light, 27 dark; 1080 x 720 window): `a-`, `b-`, `c-` pinned, reorder, install, install-long; `c-empty`, `c-none-pinned`, `c-small`; menu, menu-unpinned, shortcuts, shortcuts-conflict, shortcuts-record, toast-pin; surf-crashed, surf-dialog, surf-restore, surf-pageinfo, surf-zoom, surf-sharing |
 
-## Picked: C panel and B install sheet, added states (#590)
+## Approved states (#590)
 
-The pick is C (one Extensions button and a panel) for pinned actions and B (the detailed sheet) for install. These
-states complete it; every older state in the prototype renders as before. Screens:
+The approved additional states are in the prototype and screens:
 `screens/extensions-<state>-<light|dark>.png`, 10 files at 2x.
 
 | State | What it shows |

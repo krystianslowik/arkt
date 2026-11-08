@@ -12,11 +12,16 @@ import Foundation
 /// - `WebAuthenticationAmbientSignin`, `MediaRouter` (Cast and its remoting dialog) and `Glic` in the same list: their
 ///   Views UI looks for a `BrowserView`, which an Arkt window does not have. They stay off until the shell draws them
 ///   natively (engine connector design, batch E1).
+/// - `HttpsFirstDialogUi` in the same list: with it on, an HTTPS-First fallback to HTTP asks through a tab-modal Views
+///   dialog, whose `TabDialogManager` finds no host widget on an Arkt window and takes the browser process down at
+///   `CHECK(host)` (#846). An HTTP-only site reached it on the engine build in a window of a fresh profile with default
+///   settings, with "Always use secure connections" on, and in an off-the-record window. With it off, HTTPS-First
+///   shows its full-page interstitial, which is web content in the tab (engine connector design, decision 6).
 public enum EngineLaunchArguments {
   public static let noStartupWindow = "--no-startup-window"
   static let disableFeaturesPrefix = "--disable-features="
   static let requiredDisabledFeatures = [
-    "DestroyProfileOnBrowserClose", "WebAuthenticationAmbientSignin", "MediaRouter", "Glic",
+    "DestroyProfileOnBrowserClose", "WebAuthenticationAmbientSignin", "MediaRouter", "Glic", "HttpsFirstDialogUi",
   ]
 
   /// Prefixes of the switches that exist for tests and engine-lane probes only (`--arkt-engine-contract`,
