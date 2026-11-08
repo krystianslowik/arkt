@@ -63,6 +63,16 @@ public struct SettingsArchiveRows {
 /// A destination identified independently of its display title.
 public enum SettingsLinkDestination: Equatable, Sendable {
   case littleArkt, mostRecentSpace, space(UUID)
+
+  /// Qualifies repeated titles by their sidebar order while preserving the underlying IDs.
+  static func spaceChoices(_ spaces: [SettingsSpaceSummary]) -> [(String, SettingsLinkDestination)] {
+    var counts: [String: Int] = [:]
+    for space in spaces { counts[space.title, default: 0] += 1 }
+    return spaces.enumerated().map { index, space in
+      let title = counts[space.title, default: 0] > 1 ? "\(space.title) (Space \(index + 1))" : space.title
+      return (title, .space(space.id))
+    }
+  }
 }
 
 public struct SettingsLinkRoute: Equatable, Sendable {

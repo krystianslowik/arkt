@@ -20,12 +20,12 @@ final class LinkRoutingFormTests: XCTestCase {
     return try XCTUnwrap(window.contentView.flatMap(search) as? T, "Missing control \(id)")
   }
 
-  private func waitUntil(_ predicate: () -> Bool) async -> Bool {
+  private func waitUntil(_ predicate: @MainActor () async -> Bool) async -> Bool {
     for _ in 0..<1_000 {
-      if predicate() { return true }
+      if await predicate() { return true }
       await Task.yield()
     }
-    return predicate()
+    return await predicate()
   }
 
   private func choose(_ index: Int, _ popup: SettingsPopUpButton) throws {
@@ -38,10 +38,10 @@ final class LinkRoutingFormTests: XCTestCase {
     _ = popup.perform(NSSelectorFromString("chose:"), with: item)
   }
 
-  private func withWindow(initial: LinkRouting, failFirst: Bool = false,
+  private func withWindow(initial: LinkRouting, failFirst: Bool = false, holdReload: Bool = false,
                           _ body: (NSWindow, LinkRoutingSettingsModel, FormRoutingStore) async throws -> Void) async throws {
     _ = NSApplication.shared
-    let store = FormRoutingStore(initial: initial, failFirst: failFirst)
+    let store = FormRoutingStore(initial: initial, failFirst: failFirst, holdReload: holdReload)
     let model = LinkRoutingSettingsModel(state: store)
     await model.load()
     let suite = "dev.arkt.tests.routingForm.\(UUID().uuidString)"
@@ -61,11 +61,14 @@ final class LinkRoutingFormTests: XCTestCase {
     }
     let window = try XCTUnwrap(controller.window)
     let loaded = await waitUntil {
-      (try? self.find(AXID.Settings.control("spaces", "linksFromOtherApps"),
+      if holdReload, await store.loadCount > 1 { return true }
+      return (try? self.find(AXID.Settings.control("spaces", "linksFromOtherApps"),
                       in: window, as: SettingsPopUpButton.self))?.items.contains("Most Recent Space") == true
     }
     guard loaded else { XCTFail("Routing controls did not load"); throw FormTestError.notLoaded }
-    try await body(window, model, store)
+    do { try await body(window, model, store) }
+    catch { await store.releaseHeldLoad(); throw error }
+    await store.releaseHeldLoad()
   }
 
   private func openAdd(_ window: NSWindow) throws -> NSWindow {
@@ -73,6 +76,23 @@ final class LinkRoutingFormTests: XCTestCase {
     XCTAssertTrue(add.isEnabled, "Add Route must be available after routing loads")
     add.performClick(nil)
     return try XCTUnwrap(window.attachedSheet)
+  }
+
+  func testSaveDoesNotLoseDraftDuringAnUnnecessarySettingsReload() async throws {
+    try await withWindow(initial: LinkRouting(routes: []), holdReload: true) { window, model, store in
+      let sheet = try openAdd(window)
+      try find("settings.route.literal", in: sheet, as: NSTextField.self).stringValue = "saved literal"
+      try find("settings.route.save", in: sheet, as: NSButton.self).performClick(nil)
+      // If a redundant read started, keep it suspended through Save, then release it without another user event.
+      await store.releaseHeldLoad()
+      let expected = LinkRouting.Route(condition: .contains("saved literal"), destination: .littleArkt)
+      let saved = await waitUntil { model.settings.routes == [expected] && !model.needsFlush }
+      XCTAssertTrue(saved, "Save must not be silently discarded while the Settings section refreshes")
+      let snapshot = await store.snapshot()
+      XCTAssertEqual(snapshot.routes, [expected])
+      let loads = await store.loadCount
+      XCTAssertEqual(loads, 1, "Settings must reuse the loaded session editor")
+    }
   }
 
   func testCancelAndEscapeLeaveRoutesUnchanged() async throws {
@@ -148,10 +168,11 @@ final class LinkRoutingFormTests: XCTestCase {
       XCTAssertFalse((condition.accessibilityLabel() ?? "").isEmpty)
       XCTAssertFalse((destination.accessibilityLabel() ?? "").isEmpty)
       try choose(0, condition) // contains
-      XCTAssertEqual(destination.items.filter { $0 == "Shared" }.count, 2)
-      let shared = destination.items.indices.filter { destination.items[$0] == "Shared" }
+      XCTAssertEqual(destination.items.filter { $0.hasPrefix("Shared") }, ["Shared (Space 1)", "Shared (Space 2)"])
+      let shared = destination.items.indices.filter { destination.items[$0].hasPrefix("Shared") }
       let secondShared = try XCTUnwrap(shared.last)
       try choose(secondShared, destination)
+      XCTAssertEqual(destination.accessibilityValue() as? String, "Shared (Space 2)")
       try find("settings.route.save", in: sheet, as: NSButton.self).performClick(nil)
       let appended = LinkRouting.Route(condition: .contains("  Mixed/路径  "), destination: .space(second))
       let saved = await waitUntil { model.settings.routes == [original, original, appended] && !model.needsFlush }
@@ -168,9 +189,23 @@ private actor FormRoutingStore: LinkRoutingSettingsStoring {
   enum Failure: Error { case requested }
   private var value: LinkRouting
   private var fail: Bool
-  init(initial: LinkRouting, failFirst: Bool) { value = initial; fail = failFirst }
+  private var holdReload: Bool
+  private var heldLoad: CheckedContinuation<Void, Never>?
+  private(set) var loadCount = 0
+  init(initial: LinkRouting, failFirst: Bool, holdReload: Bool) {
+    value = initial; fail = failFirst; self.holdReload = holdReload
+  }
+  func releaseHeldLoad() {
+    holdReload = false
+    heldLoad?.resume()
+    heldLoad = nil
+  }
   func snapshot() -> LinkRouting { value }
-  func loadLinkRouting() async throws -> LinkRouting { value }
+  func loadLinkRouting() async throws -> LinkRouting {
+    loadCount += 1
+    if holdReload && loadCount > 1 { await withCheckedContinuation { heldLoad = $0 } }
+    return value
+  }
   func updateLinkRouting(at date: Date, _ change: @escaping @Sendable (inout LinkRouting) -> Void) async throws -> LinkRouting {
     if fail { fail = false; throw Failure.requested }
     change(&value)

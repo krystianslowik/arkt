@@ -2983,3 +2983,24 @@ compile against the old boundary, then the actual-source SQLite integration prob
 Swift 6.4.1, macOS 15 target and SDK 15.5. The toolchain emitted missing developer framework search-path linker
 warnings. Source parsing, changed-source import checks and diff whitespace checks passed. GUI, app build and XCUITest
 were not run locally; CI must validate the form.
+
+
+### Route form reload and duplicate-title review corrections (#113)
+
+Review of `813de74` found that rebuilding Settings rows starts another store read while Add/Edit remain enabled;
+a Save during that read can be ignored. The Settings adapter now initializes the shared editor only until it is
+loaded; the model's explicit reload API remains available. Duplicate Space titles now use sidebar-order qualifiers
+such as Shared (Space 1) in both destination controls and route descriptions, while choices still carry the same IDs.
+
+A focused actual-source regression ran first against the old adapter: one test failed because two initialization
+calls performed two loads instead of one. A separate label test then failed compilation on the missing choice helper.
+After correction, Swift 6.4.1 with the macOS 15.5 SDK passed 5 tests in 3 suites in the existing standalone integration
+probe, including both new pure regressions plus the prior SQLite/adapter cases. The initial Swift 6.2 probe attempt
+failed in the existing ThemeTexture expression before tests ran; it is not regression evidence. The successful probe
+emitted existing toolchain linker/search-path warnings. The two new pure cases are canonical CoreBridge tests linked
+into the probe; normal CI will also run them.
+
+The GUI form gate additionally holds a redundant read across Save, checks the saved snapshot without another user
+event, and asserts distinct visible/accessibility destination labels while retaining the second Space's ID. It has
+not run locally. Source parsing, import inspection and diff checks passed. New-head CI must verify the actual form;
+AppSession and Chromium runtime validation remain unverified. No routing normalization or ambiguity policy changes.

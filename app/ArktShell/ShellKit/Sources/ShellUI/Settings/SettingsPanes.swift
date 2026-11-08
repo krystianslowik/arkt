@@ -236,7 +236,9 @@ extension SettingsWindowController {
           switch route.destination {
           case .littleArkt: destination = "Little Arkt"
           case .mostRecentSpace: destination = "Most Recent Space"
-          case .space(let id): destination = spaces.first { $0.id == id }?.title ?? "Unavailable Space"
+          case .space(let id):
+            destination = SettingsLinkDestination.spaceChoices(spaces)
+              .first { $0.1 == .space(id) }?.0 ?? "Unavailable Space"
           }
           let edit = self.pill(.spaces, "route.\(index).edit", "Edit") { [weak self, weak container] in
             guard let self, let container else { return }
@@ -325,7 +327,7 @@ extension SettingsWindowController {
     }
     var choices: [(String, SettingsLinkDestination)] = [("Little Arkt", .littleArkt),
       ("Most Recent Space", .mostRecentSpace)]
-    choices += spaces.map { ($0.title, .space($0.id)) }
+    choices += SettingsLinkDestination.spaceChoices(spaces)
     if !choices.contains(where: { $0.1 == destination }) {
       choices.append(("Unavailable Space", destination))
     }

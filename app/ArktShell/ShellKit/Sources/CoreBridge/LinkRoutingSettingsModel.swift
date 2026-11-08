@@ -162,7 +162,10 @@ public extension LinkRoutingSettingsModel {
   /// Plain Settings actions over this editor. Multiple consumers share its snapshot.
   var settingsRows: SettingsLinkRoutingRows {
     SettingsLinkRoutingRows(
-      load: { [weak self] in await self?.load() },
+      load: { [weak self] in
+        guard let self, !self.isLoaded else { return }
+        await self.load()
+      },
       destination: { [weak self] in
         guard let self, self.isLoaded else { return nil }
         switch self.settings.defaultDestination {

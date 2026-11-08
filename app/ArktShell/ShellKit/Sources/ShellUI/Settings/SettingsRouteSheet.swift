@@ -24,7 +24,7 @@ final class SettingsRouteSheet: NSWindowController {
     let selected = route?.destination ?? .littleArkt
     var choices: [(String, SettingsLinkDestination)] = [("Little Arkt", .littleArkt),
                                                          ("Most Recent Space", .mostRecentSpace)]
-    choices += spaces.map { ($0.title, .space($0.id)) }
+    choices += SettingsLinkDestination.spaceChoices(spaces)
     if !choices.contains(where: { $0.1 == selected }) { choices.append(("Unavailable Space", selected)) }
     let values = choices.map(\.1)
     let initialDestination = values.firstIndex(of: selected) ?? 0
