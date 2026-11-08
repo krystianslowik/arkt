@@ -2897,6 +2897,93 @@ Written first. Each failed to compile before the code existed.
   The app and test bundle build (`xcodebuild ... build-for-testing`: TEST BUILD SUCCEEDED). Not run: the suite needs
   the real pointer and keyboard, and the Mac was in use.
 
+## Favorite unread badges (#338): test-first stage
+
+- Added five pure ShellUI test cases for synthetic page-title counts, clearing, malformed counts, lookalike hosts,
+  display boundaries and the two service settings. The synthetic titles are parser contracts, not evidence of live
+  site formats. Formatting in this stage displays 1 through 99 and caps larger counts at `99+`; zero hides the badge.
+- The proposed `FavoriteUnreadBadge.text` seam does not yet exist. CI must first show the intended missing-API red;
+  implementation and a green run remain. No production badge code or engine change is included.
+- Local full suites and GUI checks were not run: this environment lacks Xcode and the baseline ShellKit build cannot
+  compile. Source parsing and diff checks do not establish a test count or a CI red. No visual placement or clipping
+  has been checked. Preserve the music indicator from #117.
+- Future grid changes overlap #822 and #802; follow the approved-first/smaller-first merge order, rebase later work,
+  and retain both hover and split-Favorite callbacks. This test file is independent of #824 layout math.
+
+### Pure model follow-up
+
+- CI run 42429614905, pure ShellKit job 128575434551, confirmed the test-stage red at
+  `FavoriteUnreadBadgeTests.swift:9`: `FavoriteUnreadBadge` was missing. The pure model now accepts a leading
+  parenthesized ASCII integer on the six tested exact hosts, case-insensitively; zero, malformed and overflowing
+  values clear the badge, and counts above 99 display `99+`. The X/Twitter and WhatsApp settings remain independent.
+- Swift 6.2.4, macOS 15 deployment target and the selected macOS SDK: an isolated package containing the actual
+  model and test files passed 7 tests in 1 suite (the original 5 plus 2 boundary tests). Frontend parsing, import
+  inspection and `git diff --check` passed. This is not a full ShellKit suite result; full package, app and GUI builds
+  were not run because the local baseline cannot compile and full Xcode is absent.
+- Runtime follow-up: establish actual service title formats and any supported bare or subdomain hosts before widening
+  the exact allowlist or parser. Synthetic examples do not establish live behavior; no live traffic was used.
+- Next, write integration tests first for title observation, clearing and independent settings changes, then connect
+  the renderer and settings. Coordinate the shared grid and context-menu files with #822 and #802 using the existing
+  merge order and preserve hover and split-Favorite callbacks; coordinate geometry with #824. Verify 0, 1 and 99+
+  clipping, accessibility, appearance and the #117 music indicator. The whole feature remains incomplete. Live
+  Calendar Join remains not planned (OS-06).
+
+### Integration gate and validated model head
+
+- CI run 42431223964 at `bfafdeda`: ShellKit pure passed 2,512 tests in 280 suites. The informative GUI suite
+  executed 2,045 tests, with 54 skipped and no failures. The app build, isolation/lint and required gate passed;
+  Core and UI jobs were skipped. These counts precede the integration gate.
+- The next test-first stage covers live and adopted-tab titles, including empty-title clearing; shared defaults-backed
+  preferences and real reset; tile reuse, accessibility actions, favicon coexistence and positive badge geometry.
+  Source review corrections include using actual tab handoff, one shared settings binding, and resetting while both
+  preferences differ from their defaults. The proposed UI/settings APIs are still missing; first executable red is
+  unobserved. Source parsing and diff checks do not establish compilation or runtime behavior.
+- Results moved here from the engine week-3 file as requested in PR #830 comment 6715272520. Other results remain
+  intact. Renderer implementation, AppSession composition/forwarding, actual service formats, pixel placement and
+  contrast, and music coexistence remain unverified.
+
+### Favorite badge preferences (#338): bounded storage slice
+
+- The shared defaults-backed `AppSettings` now exposes independent X/Twitter and WhatsApp Boolean values, removes
+  both keys on reset, and sends its existing weak-observer notification on changes and reset. The ephemeral store
+  follows the same path. No badge renderer or window binding is included.
+- Product question for the maintainer: what should the initial and reset values of `twitterBadgeEnabled` and
+  `whatsAppBadgeEnabled` be in Arkt? The spec's settings table marks both defaults unknown, while the approved Settings
+  design's parity notes omit these controls. The storage fallback is provisionally false for each; it is not wired to
+  badge display and does not decide the eventual UI behavior. The pure parser's synthetic helper defaults are not
+  evidence of product defaults.
+- Test-first red: Swift 6.2.4, macOS 15 deployment target and selected macOS SDK; an isolated Swift package used the
+  actual `AppSettings.swift`, the published `FavoriteBadgeSettingsTests.swift`, and extracted existing declarations
+  for its small dependencies. Compilation reached the test and failed because `favoriteBadges` and
+  `FavoriteBadgePreferences` were missing. No tests executed on that red.
+- After implementation, the same focused package passed **2 tests in 1 suite**: persistence/reopen/reset and
+  independent changes with observer notifications, no-op assignment and key removal. This is not a full ShellKit run.
+  An attempt to include the actual `AppSettingsTests` could not compile its existing optional `CGPoint` equality
+  assertions with the selected toolchain/SDK; no tests executed in that attempt. The existing reset helper was updated
+  to change both new preferences, but that broader test file remains unvalidated locally.
+- Swift frontend parsing, changed-file import inspection and `git diff --check` passed. Full ShellKit, GUI and app
+  builds were not run. The published integration gate still requires the badge view and window bindings; its status is
+  not established by this focused run.
+
+### Favorite unread integration harness repair (#338)
+
+CI run 42435597056 at `5b70828` failed compilation in both ShellKit job 128593765545 and informative GUI job
+128593765492. No tests executed. In addition to the intended missing badge view, live-title and shared-window
+binding APIs, the test harness had unrelated actor-isolation errors and called a private grid configurator with a
+wrong argument label. This is not a clean integration red.
+
+The nested harness now declares its main-actor isolation. Reuse drives the public collection data-source callback
+with a controlled recycled item, preserving the assertion that the same item represents another node and clears
+its badge. No production code or behavior assertions were removed. The helper subclass type-checked against real
+AppKit using Swift 6.2.4 and SDK 15.5; the complete test file passed frontend parsing and diff checks. The suite
+remains uncompiled and unrun locally; CI must confirm the repaired gate before feature implementation continues.
+
+The preferences slice has two focused actual-source tests passing, with no review blockers. Both product defaults
+remain unknown: the stored fallback is provisionally false and is not wired to UI or rendering. Initial and reset
+values need the maintainer's decision. The broader settings suite remains locally blocked by existing optional
+CGPoint equality assertions. Rendering, title observation, shared-window settings and app composition remain
+unimplemented; earlier model-only CI counts do not establish those paths.
+
 ## Composite Space theme overlays (#534)
 
 The drawn base and opacity-scaled overlay are expanded in OKLab and source-over composited at the union of their
@@ -2930,3 +3017,9 @@ maintainer hardware after landing. No frame-time improvement is claimed. Merged 
 the deterministic completion and asynchronous download cancellation fixes. The existing 50% contrast fallback may
 remain below target, contrast samples do not cover every point or texture, and the pre-existing empty-base
 opacity-scaling limitation remains unchanged.
+
+### #338 main integration update
+
+Merged main `1188868` into the draft badge branch. The sole conflict was this append-only results history; both histories are retained. Badge model, preference implementation and test contracts remain unchanged, including the unresolved initial/reset defaults and provisional storage fallback. Rendering and shared window/AppSession integration remain outstanding.
+
+Source parsing, workflow import-layer and UI-source checks, actionlint and engine-header parity were checked after the merge. No local full build, GUI run or app launch was performed; merged-head CI is pending. Historical badge test results do not establish the proposed integration gate.

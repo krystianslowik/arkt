@@ -135,6 +135,9 @@ struct AppSettingsTests {
 
   /// Every preference a pane edits, set away from its default.
   private func changeEveryPreference(_ settings: AppSettings) {
+    settings.favoriteBadges = FavoriteBadgePreferences(
+      twitterBadgeEnabled: !settings.favoriteBadges.twitterBadgeEnabled,
+      whatsAppBadgeEnabled: !settings.favoriteBadges.whatsAppBadgeEnabled)
     settings.tabNavigation.countsFavorites = false
     settings.tabNavigation.ninthOpensNinth = true
     settings.peekLinks.opensCrossSiteLinks = false
