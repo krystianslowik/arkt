@@ -131,6 +131,9 @@ public final class ShellRootView: NSView {
     cardTarget = l.cardFrame
     applyCardFrame()
     split.frame = l.cardFrame
+    for panel in subviews.compactMap({ $0 as? RestorePagesView }) {
+      panel.frame.origin = NSPoint(x: l.cardFrame.maxX - panel.frame.width - 22, y: l.cardFrame.minY + 22)
+    }
     resizeHandle.frame = l.resizeHandleFrame
     CATransaction.commit()
     if revealEdgeFrame != l.revealEdgeFrame {
