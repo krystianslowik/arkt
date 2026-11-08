@@ -12,6 +12,11 @@ boundary failure, then implement and run the required suites. UI state and mutat
 sidebar is a hot path, and these checks introduce no animation or per-frame work. Use synthetic data, and check missing
 favicons, both folder states, light and dark appearance, keyboard and accessibility in the eventual UI validation.
 
+Review follow-up: fallback comparisons render into a common pixel buffer instead of requiring image cache identity.
+Both Favorite and folder tests invoke selection and reset and check the picker selection states against the existing
+Space picker contract. Their window cleanup is registered immediately so a thrown unwrap still closes the harness.
+These changes have been parsed but not executed; the intended missing-boundary red still needs the supported toolchain.
+
 ## Integration order
 
 - Retain #822's pager hover deferral when integrating Favorite rendering. Its current diff adds a hover regression test;

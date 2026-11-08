@@ -996,6 +996,7 @@ final class TabActionsTests: XCTestCase {
     var world = try Self.makeWorld()
     let favorite = try world.sidebar.addTab(url: Self.url("fav"), title: "Fav", in: .favorites(profile: "default"))
     let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
     let grid = harness.controller.sidebarController.view.favorites
     grid.layoutSubtreeIfNeeded()
     let tile = try XCTUnwrap(grid.tile(for: favorite))
@@ -1006,16 +1007,45 @@ final class TabActionsTests: XCTestCase {
     let menu = try XCTUnwrap(grid.collectionView.menu(for: event))
     let picker = try XCTUnwrap(menu.item(withTitle: "Change Icon")?.submenu)
     XCTAssertNil(harness.source.sidebar.nodes[favorite]?.customIcon, "opening the picker changes nothing")
+    XCTAssertEqual(picker.item(withTitle: "None")?.state, .on)
+    XCTAssertEqual(picker.item(withTitle: "Star")?.state, .off)
     let star = picker.indexOfItem(withTitle: "Star")
     XCTAssertGreaterThanOrEqual(star, 0)
     if star >= 0 { picker.performActionForItem(at: star) }
     XCTAssertEqual(harness.source.sidebar.nodes[favorite]?.customIcon, .symbol("star"))
     let resetMenu = try XCTUnwrap(grid.collectionView.menu(for: event))
+    let selectedPicker = try XCTUnwrap(resetMenu.item(withTitle: "Change Icon")?.submenu)
+    XCTAssertEqual(selectedPicker.item(withTitle: "Star")?.state, .on)
+    XCTAssertEqual(selectedPicker.item(withTitle: "None")?.state, .off)
     let reset = resetMenu.indexOfItem(withTitle: "Reset Icon")
     XCTAssertGreaterThanOrEqual(reset, 0)
     if reset >= 0 { resetMenu.performActionForItem(at: reset) }
     XCTAssertNil(harness.source.sidebar.nodes[favorite]?.customIcon)
-    harness.controller.close()
+    let clearedMenu = try XCTUnwrap(grid.collectionView.menu(for: event))
+    XCTAssertEqual(clearedMenu.item(withTitle: "Change Icon")?.submenu?.item(withTitle: "None")?.state, .on)
+  }
+
+  func testFolderIconMenuSelectionAndReset() throws {
+    var world = try Self.makeWorld()
+    let folder = try world.sidebar.addFolder(title: "Folder", in: .pinned(world.work))
+    let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
+    let picker = try XCTUnwrap(try harness.menu(folder).item(withTitle: "Change Icon")?.submenu)
+    XCTAssertNil(harness.source.sidebar.nodes[folder]?.customIcon, "opening the picker changes nothing")
+    XCTAssertEqual(picker.item(withTitle: "None")?.state, .on)
+    XCTAssertEqual(picker.item(withTitle: "Star")?.state, .off)
+
+    try harness.choose("Change Icon", "Star", on: folder)
+    XCTAssertEqual(harness.source.sidebar.nodes[folder]?.customIcon, .symbol("star"))
+    let selected = try XCTUnwrap(try harness.menu(folder).item(withTitle: "Change Icon")?.submenu)
+    XCTAssertEqual(selected.item(withTitle: "Star")?.state, .on)
+    XCTAssertEqual(selected.item(withTitle: "None")?.state, .off)
+
+    try harness.choose("Reset Icon", on: folder)
+    XCTAssertNil(harness.source.sidebar.nodes[folder]?.customIcon)
+    let cleared = try XCTUnwrap(try harness.menu(folder).item(withTitle: "Change Icon")?.submenu)
+    XCTAssertEqual(cleared.item(withTitle: "None")?.state, .on)
+    XCTAssertEqual(cleared.item(withTitle: "Star")?.state, .off)
   }
 
   // MARK: Empty area (BH-021, BH-023) and dimming (BH-025)

@@ -416,6 +416,23 @@ final class SidebarViewTests: XCTestCase {
     XCTAssertTrue(try cell(controller, tab).faviconView.image === placeholder, "nil restores the cached placeholder")
   }
 
+  /// Compare the pixels drawn in the same icon slot, independent of image/cache object identity.
+  private func iconPixels(_ image: NSImage?) throws -> Data {
+    let image = try XCTUnwrap(image)
+    let bitmap = try XCTUnwrap(NSBitmapImageRep(
+      bitmapDataPlanes: nil, pixelsWide: 32, pixelsHigh: 32, bitsPerSample: 8, samplesPerPixel: 4,
+      hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 128, bitsPerPixel: 32))
+    bitmap.size = NSSize(width: 16, height: 16)
+    let context = try XCTUnwrap(NSGraphicsContext(bitmapImageRep: bitmap))
+    NSGraphicsContext.saveGraphicsState()
+    defer { NSGraphicsContext.restoreGraphicsState() }
+    NSGraphicsContext.current = context
+    let rect = NSRect(x: 0, y: 0, width: 16, height: 16)
+    context.cgContext.clear(rect)
+    image.draw(in: rect, from: .zero, operation: .copy, fraction: 1)
+    return Data(bytes: try XCTUnwrap(bitmap.bitmapData), count: 32 * 128)
+  }
+
   func testFavoriteOverrideKeepsLatestFaviconForReset() async throws {
     let sidebar = StubSidebar.sample()
     let controller = makeSidebar(sidebar)
@@ -432,13 +449,13 @@ final class SidebarViewTests: XCTestCase {
     let first = try XCTUnwrap(tile.faviconView.image)
     sidebar.setNodeIcon(favorite, to: .symbol("star"))
     let custom = try XCTUnwrap(tile.faviconView.image)
-    XCTAssertFalse(custom === first)
+    XCTAssertNotEqual(try iconPixels(custom), try iconPixels(first))
     controller.setFavicon(try data(16), for: favorite)
     await controller.settleFaviconDecodes()
-    XCTAssertEqual(tile.faviconView.image?.tiffRepresentation, custom.tiffRepresentation)
+    XCTAssertEqual(try iconPixels(tile.faviconView.image), try iconPixels(custom))
     XCTAssertEqual(controller.favicons[favorite]?.size, NSSize(width: 16, height: 16))
     sidebar.setNodeIcon(favorite, to: nil)
-    XCTAssertTrue(tile.faviconView.image === controller.favicons[favorite])
+    XCTAssertEqual(try iconPixels(tile.faviconView.image), try iconPixels(controller.favicons[favorite]))
   }
 
   func testFolderOverrideSurvivesExpansionAndResetRestoresBothFallbacks() throws {
@@ -451,13 +468,13 @@ final class SidebarViewTests: XCTestCase {
     let collapsed = SidebarGlyphs.symbol("folder", flavor: .light, scale: outline.outlineView.shellBackingScale)
     sidebar.setNodeIcon(folder, to: .symbol("star"))
     let custom = try XCTUnwrap(try cell(controller, folder).faviconView.image)
-    XCTAssertFalse(custom === expanded)
+    XCTAssertNotEqual(try iconPixels(custom), try iconPixels(expanded))
     outline.handleClick(row: outline.row(for: folder), modifiers: [])
-    XCTAssertEqual(try cell(controller, folder).faviconView.image?.tiffRepresentation, custom.tiffRepresentation)
+    XCTAssertEqual(try iconPixels(try cell(controller, folder).faviconView.image), try iconPixels(custom))
     sidebar.setNodeIcon(folder, to: nil)
-    XCTAssertTrue(try cell(controller, folder).faviconView.image === collapsed)
+    XCTAssertEqual(try iconPixels(try cell(controller, folder).faviconView.image), try iconPixels(collapsed))
     outline.handleClick(row: outline.row(for: folder), modifiers: [])
-    XCTAssertTrue(try cell(controller, folder).faviconView.image === expanded)
+    XCTAssertEqual(try iconPixels(try cell(controller, folder).faviconView.image), try iconPixels(expanded))
   }
 
   func testDeactivateClearsStates() throws {
