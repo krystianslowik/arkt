@@ -74,6 +74,44 @@ final class SpaceSwitchTextTests: XCTestCase {
     return checked
   }
 
+  /// Where `view` shows on screen, in its own coordinates, and only the part the pager shows. AppKit's geometry lags
+  /// the screen mid-motion (#24), so the rect is derived from the layer translations of the strip and of a parked
+  /// page, not from view frames: it is the oracle the drawn rect is checked against.
+  private func shownRect(_ view: NSView, on page: NSView) -> NSRect {
+    let shift = (pager.strip.layer?.affineTransform().tx ?? 0) + (page.layer?.affineTransform().tx ?? 0)
+    let onScreen = view.convert(view.bounds, to: pager).offsetBy(dx: shift, dy: 0)
+    let shown = onScreen.intersection(pager.bounds)
+    guard !shown.isEmpty else { return .zero }
+    return view.convert(shown.offsetBy(dx: -shift, dy: 0), from: pager)
+  }
+
+  /// The whole part of every shown page's Space name and row titles that the pager shows is inside AppKit's visible
+  /// rect for that field. AppKit draws a text field only there, so a title shown outside it is cut off or blank
+  /// (#841). A non-empty visible rect is not enough: a page caught half way keeps a visible rect of half a title.
+  private func assertShownTitlesFullyDrawn(_ moment: String, file: StaticString = #filePath, line: UInt = #line) {
+    for case let page as SpacePageView in pager.pages where !page.isHidden {
+      let space = page.titleLabel.stringValue
+      // Only a layer-backed page can be parked (and its translation read here).
+      XCTAssertNotNil(page.layer, "\(moment): \(space) page is layer-backed", file: file, line: line)
+      var fields: [(String, NSTextField)] = [("header", page.titleLabel)]
+      let outline = page.outlineView
+      let rows = outline.rows(in: page.scrollView.contentView.bounds)
+      for row in rows.lowerBound..<rows.upperBound {
+        guard let cell = outline.rowView(atRow: row, makeIfNecessary: false)?.view(atColumn: 0)
+          as? SidebarTabCellView else { continue }
+        fields.append(("row \(row)", cell.titleField))
+      }
+      for (name, field) in fields {
+        let shown = shownRect(field, on: page)
+        guard shown.width > 0.5 else { continue }
+        let drawn = drawnRect(field)
+        XCTAssertTrue(drawn.minX <= shown.minX + 0.5 && drawn.maxX >= shown.maxX - 0.5,
+                      "\(moment): \(space) \(name) title shows \(shown.minX)...\(shown.maxX) but AppKit draws "
+                        + "\(drawn.minX)...\(drawn.maxX)", file: file, line: line)
+      }
+    }
+  }
+
   private func awaitSettle(_ body: () -> Void) async {
     let settled = expectation(description: "settled")
     pager.onSettleForTesting = { _ in settled.fulfill() }
@@ -156,6 +194,152 @@ final class SpaceSwitchTextTests: XCTestCase {
     pager.driver.tick(at: time)
     assertShownPagesDrawText("after the pointer sync and the next frame")
     pager.stopInteraction()
+  }
+
+  // MARK: A swipe that catches a settle (#841)
+
+  /// Presents settle frames by hand, checking the titles on each, until the settle ends.
+  private func settleByHand(from time: inout CFTimeInterval, _ moment: String,
+                            file: StaticString = #filePath, line: UInt = #line) {
+    let deadline = time + 3
+    var frames = 0
+    while pager.isSettling, time < deadline {
+      time += 1.0 / 120
+      pager.driver.tick(at: time)
+      frames += 1
+      assertShownTitlesFullyDrawn("\(moment) frame \(frames)", file: file, line: line)
+    }
+    XCTAssertFalse(pager.isSettling, "\(moment): the settle ended", file: file, line: line)
+  }
+
+  /// Settle frames are presented by hand only (no display link), from a clock read after the settle starts.
+  private func presentFramesByHand() {
+    pager.reduceMotionForTesting = false
+    pager.driver.drivesDisplayLink = false
+  }
+
+  /// Drags from the first page past the second, so the third shows (parked), releases, and presents two frames of
+  /// the settle: the strip is between the second and third pages, all three shown.
+  private func releaseASwipePastTheSecondSpace() -> CFTimeInterval {
+    presentFramesByHand()
+    pager.beginTracking()
+    for step in 1...12 {
+      pager.track(delta: -0.1 * pager.bounds.width, at: Double(step) * 0.01)
+      assertShownTitlesFullyDrawn("drag step \(step)")
+    }
+    XCTAssertGreaterThan(pager.position, 1.1)
+    XCTAssertFalse(pager.pages[2].isHidden, "the drag shows the third page")
+    pager.endTracking()
+    var time = CACurrentMediaTime()
+    for frame in 1...2 {
+      time += 1.0 / 120
+      pager.driver.tick(at: time)
+      assertShownTitlesFullyDrawn("first settle frame \(frame)")
+    }
+    XCTAssertTrue(pager.isSettling)
+    XCTAssertTrue((1.05...1.95).contains(pager.position), "the settle is between pages: \(pager.position)")
+    return time
+  }
+
+  /// The reported case (#841): swiping quickly between Spaces, the fingers touch down while the last swipe still
+  /// settles. Touch-down freezes the settle and syncs the strip geometry between two pages, which puts the pages the
+  /// settle showed back in their own slots; the next swipe must show their titles whole on every frame, not the part
+  /// AppKit had in view where the strip froze.
+  func testASwipeThatCatchesASettleShowsWholeTitlesOnEveryFrame() throws {
+    var time = releaseASwipePastTheSecondSpace()
+    pager.gestureMayBegin()
+    XCTAssertNotNil(pager.frozenTarget)
+    assertShownTitlesFullyDrawn("frozen")
+    pager.beginTracking()
+    pager.track(delta: -1, at: 1.0)
+    assertShownTitlesFullyDrawn("first frame after the catch")
+    for step in 1...6 {
+      pager.track(delta: -0.1 * pager.bounds.width, at: 1.0 + Double(step) * 0.01)
+      assertShownTitlesFullyDrawn("catch drag step \(step)")
+    }
+    pager.endTracking()
+    time = CACurrentMediaTime()
+    settleByHand(from: &time, "settle after the catch")
+    assertShownTitlesFullyDrawn("at rest")
+  }
+
+  /// The same catch, where the gesture turns out vertical: the frozen settle resumes from where it froze.
+  func testASettleResumedAfterATouchShowsWholeTitlesOnEveryFrame() throws {
+    _ = releaseASwipePastTheSecondSpace()
+    let target = pager.targetIndex
+    pager.gestureMayBegin()
+    pager.gestureEndedWithoutPaging()
+    XCTAssertTrue(pager.isSettling)
+    var time = CACurrentMediaTime()
+    settleByHand(from: &time, "resumed settle")
+    XCTAssertEqual(pager.index, target)
+  }
+
+  /// A swipe from a light Space to a dark one flips the sidebar's flavor half way, and the window's next layout pass
+  /// lays the pager out mid-swipe: that puts the strip frame where the strip shows and the parked page back in its
+  /// own slot. Every frame after the flip must still show both pages' titles whole (#841).
+  func testASwipeAcrossTheLightDarkFlipShowsWholeTitlesAfterTheFlip() throws {
+    presentFramesByHand()
+    pager.jump(to: 1)
+    let window = try XCTUnwrap(controller.window)
+    window.contentView?.layoutSubtreeIfNeeded()
+    let flavorBefore = controller.sidebarController.view.flavor
+    let width = pager.bounds.width
+    pager.beginTracking()
+    for step in 1...16 {
+      pager.track(delta: -0.06 * width, at: Double(step) / 120)
+      window.contentView?.layoutSubtreeIfNeeded()
+      assertShownTitlesFullyDrawn("step \(step), position \(pager.position)")
+    }
+    XCTAssertNotEqual(controller.sidebarController.view.flavor, flavorBefore, "the swipe crossed the light/dark flip")
+    pager.stopInteraction()
+  }
+
+  /// A pointer sync half way through a swipe puts the strip frame between two pages; when the fingers turn back, the
+  /// page the swipe started from slides back in and must show its titles whole, not the half AppKit had in view.
+  func testASwipeThatTurnsBackAfterAPointerSyncShowsWholeTitles() throws {
+    presentFramesByHand()
+    let window = try XCTUnwrap(controller.window)
+    let width = pager.bounds.width
+    pager.beginTracking()
+    pager.track(delta: -0.5 * width, at: 0.01)
+    let move = try XCTUnwrap(NSEvent.mouseEvent(with: .mouseMoved,
+                                                location: pager.convert(NSPoint(x: 10, y: 10), to: nil),
+                                                modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber,
+                                                context: nil, eventNumber: 0, clickCount: 0, pressure: 0))
+    pager.mouseMoved(with: move)
+    XCTAssertEqual(pager.stripLayerShiftForTesting, 0, "the pointer move synced the strip half way")
+    for step in 1...4 {
+      pager.track(delta: 0.1 * width, at: 0.01 + Double(step) * 0.01)
+      assertShownTitlesFullyDrawn("turning back, step \(step)")
+    }
+    pager.stopInteraction()
+  }
+
+  /// Back and forth across all three Spaces, every swipe catching the last one's settle.
+  func testSwipesBackAndForthThatEachCatchTheLastSettleShowWholeTitles() throws {
+    presentFramesByHand()
+    var time = CACurrentMediaTime()
+    var clock = 0.0
+    for (round, direction) in [-1.0, -1, 1, 1, -1, 1].enumerated() {
+      if pager.isSettling { pager.gestureMayBegin() }
+      pager.beginTracking()
+      for _ in 0..<5 {
+        clock += 0.01
+        pager.track(delta: direction * 0.12 * pager.bounds.width, at: clock)
+        assertShownTitlesFullyDrawn("swipe \(round) drag")
+      }
+      pager.endTracking()
+      time = max(time, CACurrentMediaTime())
+      for frame in 1...5 {
+        time += 1.0 / 120
+        pager.driver.tick(at: time)
+        assertShownTitlesFullyDrawn("swipe \(round) settle frame \(frame)")
+      }
+    }
+    time = max(time, CACurrentMediaTime())
+    settleByHand(from: &time, "last settle")
+    assertShownTitlesFullyDrawn("at rest")
   }
 
   /// Ctrl-N and the keyboard: every presented frame of the settle, from the first, draws both pages' text.

@@ -8,7 +8,7 @@ public enum LittleArktGeometry {
   public static let topFraction: CGFloat = 0.34        // measured: top at ~34% of window height
   public static let inputHeight: CGFloat = 60          // measured
   public static let rowHeight: CGFloat = 50            // measured
-  public static let cornerRadius: CGFloat = 12         // measured
+  public static let cornerRadius = ShellRadius.popover  // measured
   public static let selectedRowRadius: CGFloat = 8     // measured
   public static let maxVisibleRows = 8                 // TODO(measure)
   public static let listPadding: CGFloat = 8

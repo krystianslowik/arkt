@@ -327,14 +327,16 @@ final class SidebarHideTests: XCTestCase {
 
   /// NOT-MEASURABLE below 120 Hz or under load (`PacingEnvironment`); the 1-minute load is read again after measuring.
   /// The hitch count is asserted only with `ARKT_PACING_GATE=1` or when this class runs alone
-  /// (`PacingEnvironment.gateAsserts`), as in `SplitReflowPacingTests` (#775).
+  /// (`PacingEnvironment.checkFrameGate`, #671).
   func testRevealPacing() async throws {
     try PacingEnvironment.skipIfNotMeasurable(screen: controller.window?.screen)
     controller.toggleSidebarVisibility(nil)
     root.layoutSubtreeIfNeeded()
     overlay.reduceMotionForTesting = false
-    // Warm the window up the way the pager gate does: a few on-time frames before measuring.
-    try await Task.sleep(for: .milliseconds(300))
+    // Warm the window up the way the pager gate does: wait for on-time frames before measuring.
+    let warmUp = 10
+    let stable = await StableFrames.wait(on: root, count: warmUp, threshold: FrameStats().hitchThreshold)
+    print("sidebar.pacing warmup stableFrames=\(stable) of \(warmUp)")
     var results: [(String, FrameStats)] = []
     var details: [HitchDetail] = []
     for round in 0..<2 {
@@ -345,40 +347,7 @@ final class SidebarHideTests: XCTestCase {
       results.append(("sidebar-conceal-\(round)", try XCTUnwrap(overlay.lastPacing)))
       details += overlay.pacer.hitchDetails
     }
-    // What held the main thread across each late frame: app work (cpu near wall) or waiting (off CPU).
-    for d in details {
-      print(String(format: "sidebar.hitch label=%@ frame=%d ms=%.2f busyMs=%.2f cpuMs=%.2f offCpuMs=%.2f passes=%d",
-                   d.label, d.frame, d.interval * 1000, (d.longest?.wall ?? 0) * 1000, (d.longest?.cpu ?? 0) * 1000,
-                   (d.longest?.offCPU ?? 0) * 1000, d.passes))
-    }
-    var load = [0.0]
-    let cores = ProcessInfo.processInfo.activeProcessorCount
-    let loaded = getloadavg(&load, 1) != 1 || load[0] >= Double(cores)
-    let gated = PacingEnvironment.gateAsserts(for: Self.self)
-    print("sidebar.pacing gate=\(gated ? "asserts" : "reports")")
-    let fps = NSScreen.main?.maximumFramesPerSecond ?? 0
-    for (label, stats) in results {
-      let hitches = stats.intervals.enumerated().filter { $0.element > stats.hitchThreshold }
-        .map { String(format: "%d@%.2f", $0.offset, $0.element * 1000) }
-      let summary = String(
-        format: "sidebar.pacing label=%@ screenMaxFPS=%d frames=%d over8.6=%d overBudgetPct=%.2f maxMs=%.2f "
-          + "p99Ms=%.2f leadInMs=%.2f load1=%.2f cores=%d asserted=%@ hitchesMs=[%@]",
-        label, fps, stats.frameCount, stats.hitchCount, stats.overBudgetRatio * 100, stats.maxInterval * 1000,
-        stats.p99 * 1000, (stats.leadInInterval ?? 0) * 1000, load[0], cores, loaded || !gated ? "no" : "yes",
-        hitches.joined(separator: ","))
-      print(summary)
-      let attachment = XCTAttachment(string: summary)
-      attachment.name = "sidebar.pacing.\(label)"
-      attachment.lifetime = .keepAlways
-      add(attachment)
-      XCTAssertGreaterThan(stats.frameCount, 10, "\(label): the display link ran (is the display awake?)")
-      if loaded {
-        print("sidebar.pacing skipped assert: 1-minute load \(load[0]) >= \(cores) active cores")
-      } else if !gated {
-        print("sidebar.pacing reported only: set ARKT_PACING_GATE=1 or run SidebarHideTests alone")
-      } else {
-        XCTAssertEqual(stats.hitchCount, 0, "\(label): frames over 8.6 ms")
-      }
-    }
+    PacingEnvironment.checkFrameGate("sidebar", results: results, details: details, gate: Self.self, in: self,
+                                     fps: controller.window?.screen?.maximumFramesPerSecond ?? 0)
   }
 }

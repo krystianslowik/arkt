@@ -46,14 +46,14 @@ final class PageInfoPanelView: NSView {
     badge.layer?.cornerCurve = .continuous
     badgeGlyph.symbolConfiguration = .init(pointSize: 14, weight: .regular)
     badge.addSubview(badgeGlyph)
-    hostLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+    hostLabel.font = ShellType.bodyEmphasis.font
     hostLabel.lineBreakMode = .byTruncatingMiddle
     hostLabel.maximumNumberOfLines = 1
     hostLabel.cell?.usesSingleLineMode = true
     connectionGlyph.symbolConfiguration = .init(pointSize: 10, weight: .medium)
-    connectionLabel.font = .systemFont(ofSize: 12)
+    connectionLabel.font = ShellType.caption.font
     connectionLabel.maximumNumberOfLines = 2
-    noteLabel.font = .systemFont(ofSize: 12)
+    noteLabel.font = ShellType.caption.font
     for view in [badge, hostLabel, connectionGlyph, connectionLabel, noteLabel] as [NSView] { addSubview(view) }
     for view in [badgeGlyph, connectionGlyph] { view.setAccessibilityElement(false) }
 
@@ -67,9 +67,9 @@ final class PageInfoPanelView: NSView {
     siteDataRow.button.target = self
     siteDataRow.button.action = #selector(showSiteData(_:))
     list.addSubview(siteDataRow)
-    permissionsTitle.font = .systemFont(ofSize: 11, weight: .semibold)
+    permissionsTitle.font = ShellType.sectionHeader.font
     list.addSubview(permissionsTitle)
-    readOnlyLabel.font = .systemFont(ofSize: 11)
+    readOnlyLabel.font = ShellType.footnote.font
     readOnlyLabel.lineBreakMode = .byTruncatingTail
     list.addSubview(readOnlyLabel)
 
@@ -79,7 +79,7 @@ final class PageInfoPanelView: NSView {
                              (siteSettingsButton, #selector(openSiteSettings(_:)))] {
       button.isBordered = false
       button.bezelStyle = .regularSquare
-      button.font = .systemFont(ofSize: 13)
+      button.font = ShellType.body.font
       button.target = self
       button.action = action
       addSubview(button)
@@ -298,7 +298,7 @@ final class PageInfoPanelView: NSView {
     for button in [resetButton, siteSettingsButton] {
       let color = button.isEnabled ? secondary : secondary.withAlphaComponent(0.45)
       button.attributedTitle = NSAttributedString(string: button.title, attributes: [
-        .foregroundColor: color, .font: button.font ?? .systemFont(ofSize: 13),
+        .foregroundColor: color, .font: button.font ?? ShellType.body.font,
       ])
     }
     siteDataRow.restyle(flavor: flavor)
@@ -334,9 +334,9 @@ final class PageInfoDataRow: NSView {
     glyph.symbolConfiguration = .init(pointSize: 13, weight: .regular)
     chevron.image = NSImage(systemSymbolName: "chevron.right", accessibilityDescription: nil)
     chevron.symbolConfiguration = .init(pointSize: 10, weight: .semibold)
-    title.font = .systemFont(ofSize: 13)
+    title.font = ShellType.body.font
     title.lineBreakMode = .byTruncatingTail
-    summary.font = .systemFont(ofSize: 12)
+    summary.font = ShellType.caption.font
     summary.alignment = .right
     summary.lineBreakMode = .byTruncatingTail
     for view in [glyph, title, summary, chevron] as [NSView] {
@@ -389,12 +389,12 @@ final class PageInfoPermissionRow: NSView {
     super.init(frame: .zero)
     glyph.symbolConfiguration = .init(pointSize: 13, weight: .regular)
     glyph.setAccessibilityElement(false)
-    title.font = .systemFont(ofSize: 13)
+    title.font = ShellType.body.font
     title.lineBreakMode = .byTruncatingTail
     title.setAccessibilityElement(false)
     popUp.isBordered = false
     popUp.controlSize = .small
-    popUp.font = .systemFont(ofSize: 12)
+    popUp.font = ShellType.caption.font
     popUp.wantsLayer = true
     popUp.layer?.cornerRadius = PageInfoMetrics.popUpCorner
     popUp.layer?.cornerCurve = .continuous
@@ -432,7 +432,7 @@ final class PageInfoPermissionRow: NSView {
     glyph.frame = NSRect(x: m.sideInset, y: (bounds.height - m.glyph) / 2, width: m.glyph, height: m.glyph)
     // Compact, as drawn: the selected title and the arrows, trailing; it grows when the choice does.
     let selected = (popUp.titleOfSelectedItem ?? "") as NSString
-    let titleWidth = selected.size(withAttributes: [.font: popUp.font ?? .systemFont(ofSize: 12)]).width
+    let titleWidth = selected.size(withAttributes: [.font: popUp.font ?? ShellType.caption.font]).width
     let popUpWidth = ceil(titleWidth) + 32
     popUp.frame = NSRect(x: bounds.width - m.sideInset - popUpWidth, y: (bounds.height - m.popUpHeight) / 2,
                          width: popUpWidth, height: m.popUpHeight)
