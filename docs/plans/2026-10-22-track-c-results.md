@@ -3128,3 +3128,25 @@ environment forwarding and a quoted xcodebuild argument array. Empty input runs 
 selector runs that target/class. XcodeGen retry and checksum handling remain intact. Actionlint and whitespace checks
 passed. One focused run will be dispatched at the corrected head; no runtime red is established by the rejected
 dispatch or static checks.
+
+
+### #113 pure external-open readiness coordinator
+
+The missing-API test-first compilation red reached the canonical coordinator test target and ran zero tests.
+The implemented main-actor CoreBridge receiver retains URLs before and during reads, coalesces concurrent starts,
+retains inputs after a failed read for explicit retry, and reports all delivery outcomes in FIFO order. Duplicate
+URL events remain distinct; reentrant delivery and result callbacks append to the tail. Ready starts retain the
+original callbacks. No App composition or dispatch wiring changes are included.
+
+The probe source-links the production coordinator. After bounding canonical test waits and adding held-read cleanup,
+`SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX15.5.sdk /opt/homebrew/opt/swift/bin/swift test --package-path integration/LinkRouting -j 2`
+passed 60 tests in 13 suites. The coordinator filter passed 20 consecutive runs under CPU load (six tests in one
+suite per run). Deliberately disabling the coalescing guard made that filter fail with three issues, including a
+bounded incomplete-start failure instead of a hang; the guard was restored before the green run and commit.
+Detailed commands and load observations are in `docs/testing/link-routing-app-gate.md`.
+
+Swift 6.2.4 parsing and whitespace checks passed. Existing missing framework/library search-path linker warnings
+remain. This focused package is not run by CI, and no local full ShellKit, GUI or app build ran. The six real-app
+warm/cold tests have not executed yet: focused run 42491702781 was queued at the latest read. AppComposition ownership,
+AppDelegate early-event retention, session readiness and retry wiring, Chromium engine-window adoption, and native
+runtime validation remain separate gates. The PR stays draft.

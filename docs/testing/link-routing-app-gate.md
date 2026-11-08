@@ -81,3 +81,30 @@ additional result-callback reentrancy/ready-callback retention regression. Swift
 source and canonical test file also passed; this parser check is distinct from test execution. The held-read and
 signal helpers still have unbounded waits, and HeldRead holds only one continuation; bounded cleanup remains work for
 the gate owner before publication. The native app run remains unobserved here.
+
+
+### Bounded canonical harness
+
+The canonical contracts now use finite main-actor turn waits (10,000 yields), including completion of each start.
+There is no wall-clock deadline or sleep. HeldRead retains all pending continuations rather than overwriting one;
+each throwing test registers cleanup before its first observation, releases all held reads, and cancels its start
+attempts. The original behavior expectations and the result-callback regression remain intact.
+
+With the production coalescing guard deliberately disabled, the focused six-test suite failed with three issues:
+the retry read count became three instead of two, and the concurrent-start completion hit the finite turn bound.
+The broken run exited with failure rather than hanging. The production guard was restored before validation and
+commit. An initial parser error in the helper rewrite was corrected before these executable runs.
+
+After restoration, the supported actual-source probe passed 60 tests in 13 suites. The six coordinator tests also
+passed 20 consecutive filtered runs while two CPU-load workers ran. Load averages were 1.62/1.74/1.65 at the start
+and 1.89/1.79/1.67 at the end. Commands were:
+
+```sh
+SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX15.5.sdk /opt/homebrew/opt/swift/bin/swift test --package-path integration/LinkRouting -j 2
+SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX15.5.sdk /opt/homebrew/opt/swift/bin/swift test --package-path integration/LinkRouting -j 2 --skip-build --filter ExternalOpenCoordinatorTests
+```
+
+Swift 6.2.4 parsing and whitespace checks passed. The focused build still emits the previously recorded missing
+framework/library search-path linker warnings, with no coordinator source warning. The standalone probe is not
+currently a CI job and does not establish AppSession, AppDelegate, Chromium, GUI or app behavior. Focused native run
+42491702781 remained queued at the latest inspection; no native runtime red is claimed.
