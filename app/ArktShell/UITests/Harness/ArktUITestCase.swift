@@ -8,6 +8,8 @@ import XCTest
 class ArktUITestCase: XCTestCase {
   /// Info.plist key the Debug (and Profile) builds set to `YES`; Release says `NO`.
   static let overridesKey = "ArktEnvironmentOverrides"
+  /// The disposable CI app has a distinct identity from the normal product and the UI-test runner.
+  static let isolatedBundleIdentifier = "dev.arkt.Arkt.UITestHarness"
 
   /// Launch arguments of every launch (plan, Rules): no restored windows, English UI.
   static let launchArguments = [
@@ -93,6 +95,10 @@ class ArktUITestCase: XCTestCase {
     }
     guard plist[Self.overridesKey] as? String == "YES" else {
       throw HarnessError("\(url.lastPathComponent) does not declare \(Self.overridesKey) = YES; refusing to launch")
+    }
+    if plist["ArktRequireUITestOverrides"] as? String == "YES",
+       plist["CFBundleIdentifier"] as? String != Self.isolatedBundleIdentifier {
+      throw HarnessError("mandatory UI-test builds must use the isolated test bundle identity")
     }
     if let bundleID = plist["CFBundleIdentifier"] as? String {
       let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)

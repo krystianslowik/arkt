@@ -359,9 +359,11 @@ jobs:
         run: |
           test_filter=()
           [[ -z "$UI_TEST_FILTER" ]] || test_filter=("-only-testing:$UI_TEST_FILTER")
+          df -h "$RUNNER_TEMP"
           xcodebuild -project ArktShell.xcodeproj -scheme ArktShellUITests -derivedDataPath build \
             -clonedSourcePackagesDirPath build/SourcePackages -resultBundlePath $RUNNER_TEMP/ui.xcresult \
-            -parallel-testing-enabled NO -collect-test-diagnostics never ARKT_REQUIRE_UITEST_OVERRIDES=YES "${test_filter[@]}" test
+            -parallel-testing-enabled NO -collect-test-diagnostics never ARKT_REQUIRE_UITEST_OVERRIDES=YES \
+            ARKT_DEBUG_BUNDLE_IDENTIFIER=dev.arkt.Arkt.UITestHarness "${test_filter[@]}" test
       - name: Capture UI startup diagnostics
         if: ${{ failure() }}
         run: |

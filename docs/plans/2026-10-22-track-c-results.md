@@ -3335,3 +3335,11 @@ Added the reviewed pure, Debug-only launch-argument carrier; it remains unwired 
 Added Shell-boundary tests for routed Space/Little Arkt activity during unanswered crashed recovery, cancellation, Restore/Dismiss and empty acknowledgment. Review follow-up leaves the source recorder writable during the quit interval and checks recovery-record count as well as URLs. These tests were parsed, not type-checked or executed; they do not prove App quit ordering or the native #803 crash marker.
 
 Main `1188868` integrated without conflict after these local changes. Import/UI-source checks, actionlint, Swift parsing and engine-header parity were checked; no local full App/ShellKit/GUI build or launch was performed. Merged-head CI remains pending.
+
+### #113 reviewed cold-launch wiring and overlap note
+
+The reviewed carrier application wiring now shares an immutable validated effective configuration across all known Debug startup consumers before migration. The cold helper sends the same whitelisted synthetic values as arguments and retains all existing identity/profile barriers. The mandatory UI workflow uses a distinct Debug app bundle ID and records free space; normal product and other configuration defaults remain unchanged. A fresh focused native probe is required; no cold success is claimed.
+
+Maintainer overlap comment `6726449896` was checked against open PR #854 at `e4d3eb7`: its Appearance switch, inverted `tabReorderingHapticsDisabled` reset key, and `ReorderHapticGate.bind(settings)` are independent of routing. No competing implementation or merge of the unlanded PR is needed. Preserve these hunks when main is next integrated after either side lands.
+
+Root reran the actual-source StartupPolicy probe after integrating the wiring: 34 tests in five suites passed. Seven changed Swift sources parsed; import/UI-source checks, parity-report tests, actionlint, header parity and whitespace checks passed. Root's harness follow-up pins mandatory UI-test metadata to the isolated Debug bundle and registers cleanup for the exact OS-returned application instance. These checks do not compile the full App or exercise the new native transport. One focused cold Space probe is the next observation.

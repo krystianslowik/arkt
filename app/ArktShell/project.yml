@@ -103,6 +103,9 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: dev.arkt.Arkt
         PRODUCT_NAME: ArktShell
       configs:
+        Debug:
+          ARKT_DEBUG_BUNDLE_IDENTIFIER: dev.arkt.Arkt
+          PRODUCT_BUNDLE_IDENTIFIER: $(ARKT_DEBUG_BUNDLE_IDENTIFIER)
         # The product is Arkt.app (the executable is Arkt too).
         Distribution:
           PRODUCT_NAME: Arkt

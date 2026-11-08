@@ -68,7 +68,7 @@ final class LinkRoutingAppTests: ArktUITestCase {
       _ = try Self.makeApplication() // Repeat bundle validation and the no-running-instance preflight.
       guard let bundle = Bundle(url: applicationURL),
             bundle.object(forInfoDictionaryKey: "ArktRequireUITestOverrides") as? String == "YES",
-            let identifier = bundle.bundleIdentifier, !identifier.isEmpty else {
+            let identifier = bundle.bundleIdentifier, identifier == Self.isolatedBundleIdentifier else {
         throw HarnessError("cold OS open requires the mandatory UI-test startup guard")
       }
       bundleIdentifier = identifier
@@ -104,6 +104,10 @@ final class LinkRoutingAppTests: ArktUITestCase {
         + "expectedBundle=\(applicationURL.path), acceptedPID=\(acceptedPID), identityRequests=\(reports)")
     }
     if cold {
+      // Clean up the exact OS-returned instance even if a later identity or profile observation fails.
+      addTeardownBlock { @MainActor in
+        if !opened.isTerminated { _ = opened.forceTerminate() }
+      }
       guard Waits.until("cold process identity report", { server.acceptedIdentity != nil }),
             let report = server.acceptedIdentity, report.pid == opened.processIdentifier,
             let bundleID = opened.bundleIdentifier, bundleID == bundleIdentifier else {
