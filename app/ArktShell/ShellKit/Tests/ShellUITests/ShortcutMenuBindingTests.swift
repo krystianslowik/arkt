@@ -54,4 +54,34 @@ struct ShortcutMenuBindingTests {
     #expect(visible.action == NSSelectorFromString("newTab:"))
     #expect(visible.target == nil)
   }
+
+  @Test(arguments: [false, true])
+  func rebuildingDefinitionsAfterBindingPreservesOriginalDefaults(cleared: Bool) throws {
+    func menu() -> NSMenu {
+      let value = NSMenu()
+      value.addItem(NSMenuItem(title: "New Tab", action: NSSelectorFromString("newTab:"), keyEquivalent: "t"))
+      return value
+    }
+    let original = ShortcutCatalog.definitions(from: menu())
+    let bound = menu() // This menu has not had definitions read before its first binding.
+    let item = try #require(bound.items.first)
+    let id = ShortcutActionID("newTab")
+    let suite = "dev.arkt.tests.shortcutDefaults.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let first = ShortcutEditorModel(catalog: original, defaults: defaults)
+    ShortcutCatalog.bind(model: first, to: bound)
+    first.setBinding(cleared ? nil : ShortcutBinding(key: "k", modifiers: .command), for: id)
+    item.title = "Open New Tab"
+
+    let rebuilt = ShortcutCatalog.definitions(from: bound)
+    #expect(rebuilt.first?.defaultBinding == ShortcutBinding(key: "t", modifiers: .command))
+    #expect(rebuilt.first?.title == "Open New Tab", "capture defaults without freezing validated titles")
+    let reloaded = ShortcutEditorModel(catalog: rebuilt, defaults: defaults)
+    ShortcutCatalog.bind(model: reloaded, to: bound)
+    reloaded.reset(id)
+    #expect(item.keyEquivalent == "t")
+    #expect(item.keyEquivalentModifierMask == .command)
+  }
+
 }

@@ -2956,3 +2956,18 @@ read-only catalog test suite and the new synthetic menu tests passed 15 tests in
 10 cases), Swift 6.4.1 in Swift 6 mode, macOS 15 target and macOS 15.5 SDK. The isolated catalog test suite was
 copied without the unrelated Space summary suite. This is not the full ShellKit or app build, and does not exercise
 real application dispatch. Full CI, GUI and UI tests remain pending.
+
+### Shortcut defaults after binding review regression (#119)
+
+Reconstructing catalog definitions from a bound menu read an override or explicit clear as the default. The new
+parameterized regression binds a separate pristine menu without first reading its definitions, then overrides or
+clears New Tab, rebuilds the model, and resets it. Against the previous production source, both cases failed: one
+Swift Testing test with two cases recorded five assertion issues. The current validated title remains part of the
+assertion, so preserving defaults must not freeze the menu title.
+
+Each supported menu item now retains its original optional binding before definitions read it or live binding
+changes it. Definitions continue to read the current title. The focused actual-source package passed 16 tests in
+three suites using Swift 6.2.4, macOS 15 target and SDK 15.5: eight model tests, five read-only catalog tests including
+ten parameterized search cases, and three menu-binding tests including this two-case regression. The unrelated
+Space summary suite is excluded. Source parsing and diff checks passed. Full ShellKit, actual app dispatch and GUI
+checks remain unverified locally; new-head CI is required. The pending Settings and conflict-default work is unchanged.

@@ -19,15 +19,14 @@ public enum ShortcutCatalog {
     menu.items.flatMap { item in [item] + (item.submenu.map { items(in: $0) } ?? []) }
   }
 
-  /// The first visible, non-alternate occurrence supplies the default for each supported action.
+  /// The first visible, non-alternate occurrence supplies the original default for each supported action.
+  /// Binding changes key equivalents, so capture the original before either reading or applying an override.
   public static func definitions(from menu: NSMenu) -> [ShortcutDefinition] {
     var seen: Set<ShortcutActionID> = []
     return items(in: menu).compactMap { item in
       guard !item.isHidden, !item.isAlternate, item.submenu == nil,
             let id = actionID(item), seen.insert(id).inserted else { return nil }
-      let binding = item.keyEquivalent.isEmpty ? nil : ShortcutBinding(key: item.keyEquivalent,
-                                                                        modifiers: item.keyEquivalentModifierMask)
-      return ShortcutDefinition(id: id, title: item.title, defaultBinding: binding)
+      return ShortcutDefinition(id: id, title: item.title, defaultBinding: originalBinding(for: item))
     }
   }
 
@@ -42,6 +41,22 @@ public enum ShortcutCatalog {
   }
 
   private static var bindingKey: UInt8 = 0
+  private static var originalBindingKey: UInt8 = 0
+
+  @MainActor private final class OriginalBinding {
+    let value: ShortcutBinding?
+    init(_ value: ShortcutBinding?) { self.value = value }
+  }
+
+  private static func originalBinding(for item: NSMenuItem) -> ShortcutBinding? {
+    if let original = objc_getAssociatedObject(item, &originalBindingKey) as? OriginalBinding {
+      return original.value
+    }
+    let binding = item.keyEquivalent.isEmpty ? nil : ShortcutBinding(key: item.keyEquivalent,
+                                                                    modifiers: item.keyEquivalentModifierMask)
+    objc_setAssociatedObject(item, &originalBindingKey, OriginalBinding(binding), .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+    return binding
+  }
 
   @MainActor private final class MenuBinding {
     let model: ShortcutEditorModel
@@ -57,6 +72,7 @@ public enum ShortcutCatalog {
       let supported = Set(model.catalog.map(\.id))
       for item in ShortcutCatalog.items(in: menu) {
         guard let id = ShortcutCatalog.actionID(item), supported.contains(id) else { continue }
+        _ = ShortcutCatalog.originalBinding(for: item)
         let binding = model.binding(for: id)
         item.keyEquivalent = binding?.key ?? ""
         item.keyEquivalentModifierMask = binding?.modifiers ?? []
