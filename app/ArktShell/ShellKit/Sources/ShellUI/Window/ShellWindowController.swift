@@ -877,6 +877,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       return
     case .pageInfoChanged(let tab):
       if tab == currentTab { refreshPageInfo() }                    // #582: before the map, as a private page has no row
+      if let node = nodeByTab[tab] { refreshPaneToolbar(of: node) } // #698: a pane's own Toolbar glyph
       return
     default:
       break
