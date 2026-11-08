@@ -67,6 +67,83 @@ final class RoutedOpenFromOtherAppTests: XCTestCase {
     }
   }
 
+  // Exercises the Shell resolver/dispatch boundary; it does not exercise App or OS forwarding.
+  func testRoutedActivityPreservesUnansweredRecoveryThroughCancelledQuit() async throws {
+    for restore in [false, true] {
+      var world = try EngineWorld.make()
+      let destination = world.sidebar.addSpace(title: "Destination")
+      let source = ModelSidebarSource(sidebar: world.sidebar, now: { EngineWorld.now })
+      let old = ShellRecoveryPage(title: "Prior", url: URL(string: "https://example.invalid/prior")!,
+                                  kind: .littleArkt)
+      let records = RoutedRecoveryPages([old])
+      let engine = InMemoryEngine()
+      engine.crashedSession.simulateCrashedExit()
+      let set = ShellWindowSet(engine: engine, sidebar: source, recoveryPageSource: records)
+      sets.append(set)
+      set.littleArktReduceMotion = { true }
+      let model = LinkRoutingSettingsModel(state: RoutingOpenStore(LinkRouting(routes: [])))
+      await model.load()
+      XCTAssertTrue(model.isLoaded)
+      set.externalLinkDestination = { model.destination(for: $0) }
+      let host = set.openWindow()
+      let privateWindow = set.openWindow(opensFirstTab: false)
+      privateWindow.makeIncognito()
+      let privatePages = privateWindow.privatePageOrder.pages
+      NotificationCenter.default.post(name: NSWindow.didBecomeMainNotification, object: privateWindow.window)
+      set.beginSessionRecovery(engine.crashedSession)
+      let panel = try XCTUnwrap(host.rootView.subviews.compactMap { $0 as? RestorePagesView }.first)
+      let spaceURL = URL(string: "https://example.invalid/routed-space")!
+      let littleURL = URL(string: "https://example.invalid/routed-little")!
+      model.setDefaultDestination(.space(destination))
+      model.appendRoute(.init(condition: .matches(littleURL.absoluteString), destination: .littleArkt))
+      XCTAssertEqual(set.openFromOtherApp([spaceURL, littleURL]), [.dispatched(spaceURL), .dispatched(littleURL)])
+      XCTAssertEqual(host.currentSpace, destination)
+      XCTAssertEqual(urls(set, in: destination), [spaceURL.absoluteString])
+      XCTAssertEqual(privateWindow.privatePageOrder.pages, privatePages)
+      XCTAssertEqual(littleURLs(set, engine), [littleURL])
+      XCTAssertEqual(records.pages, [old])
+      XCTAssertEqual(engine.crashedSession.dismissals, 0)
+      records.isSuspended = true
+      set.finishSessionRecovery(cleanQuit: true)
+      let tab = try XCTUnwrap(set.littleArkts.first?.shownTab)
+      let changed = URL(string: "https://example.invalid/changed")!
+      engine.navigate(tab, to: changed)
+      XCTAssertEqual(records.pages, [old])
+      records.isSuspended = false
+      set.finishSessionRecovery(cleanQuit: false)
+      XCTAssertEqual(records.pages, [old])
+      if restore { panel.restorePressed() } else { panel.dismissPressed() }
+      XCTAssertEqual(engine.crashedSession.dismissals, 1)
+      XCTAssertEqual(Set(records.pages.map(\.url)), Set(restore ? [changed, old.url] : [changed]))
+      XCTAssertTrue(records.pages.allSatisfy { $0.kind == .littleArkt })
+    }
+  }
+
+  func testEmptyRecoveryAcknowledgmentRecordsAlreadyRoutedLittleArkt() async throws {
+    let world = try EngineWorld.make()
+    let source = ModelSidebarSource(sidebar: world.sidebar, now: { EngineWorld.now })
+    let orphan = ShellRecoveryPage(title: "Orphan", url: URL(string: "https://example.invalid/orphan")!,
+                                   kind: .peek, sourceNode: UUID())
+    let records = RoutedRecoveryPages([orphan])
+    let engine = InMemoryEngine()
+    engine.crashedSession.simulateCrashedExit()
+    let set = ShellWindowSet(engine: engine, sidebar: source, recoveryPageSource: records)
+    sets.append(set)
+    set.littleArktReduceMotion = { true }
+    let model = LinkRoutingSettingsModel(state: RoutingOpenStore(LinkRouting(routes: [])))
+    await model.load()
+    XCTAssertTrue(model.isLoaded)
+    set.externalLinkDestination = { model.destination(for: $0) }
+    model.setDefaultDestination(.littleArkt)
+    let target = URL(string: "https://example.invalid/routed-before-notice")!
+    XCTAssertEqual(set.openFromOtherApp([target]), [.dispatched(target)])
+    XCTAssertEqual(records.pages, [orphan])
+    set.beginSessionRecovery(engine.crashedSession)
+    XCTAssertEqual(engine.crashedSession.dismissals, 1)
+    XCTAssertEqual(records.pages.map(\.url), [target])
+    XCTAssertEqual(records.pages.first?.kind, .littleArkt)
+  }
+
   func testConfiguredLittleArktOpensARealWindowWithoutAddingToday() async throws {
     let (set, engine, _, first, second) = try await fixture(LinkRouting(routes: []))
     let regular = set.openWindow()
@@ -216,4 +293,15 @@ private actor RoutingOpenStore: LinkRoutingSettingsStoring {
     change(&value)
     return value
   }
+}
+
+@MainActor
+private final class RoutedRecoveryPages: RecoveryPageSource {
+  var isSuspended = false
+  private var stored: [ShellRecoveryPage]
+  var pages: [ShellRecoveryPage] {
+    get { stored }
+    set { if !isSuspended { stored = newValue } }
+  }
+  init(_ pages: [ShellRecoveryPage]) { stored = pages }
 }
