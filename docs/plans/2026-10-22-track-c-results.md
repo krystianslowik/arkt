@@ -3100,3 +3100,23 @@ Swift 6.2.4 frontend parsing, changed-source import inspection and `git diff --c
 ShellKit or App build ran; CI must establish green for the unchanged real-window regression. The historical
 54-test mapping/persistence run is not validation of this correction. App readiness, early URLs, persisted resolver
 injection and Chromium startup requests remain separate unfinished integration work; the PR stays draft.
+
+### #113 routed-opening green and real-app test gate
+
+At `5bf05088ddc053b8ddd641337f696a73595c5ee3`, run 42487745766 passed Core 595 tests in 48 suites,
+pure ShellKit 2544 tests in 288 suites, and GUI 2082 reported tests with 56 skipped and zero failures. All seven
+RoutedOpenFromOtherAppTests passed, including the unchanged refused-profile regression. The app build, lint and
+required aggregate passed; XCUITest was skipped. This verifies the component correction, not App-level forwarding.
+
+The next test-only gate adds six independent real-app warm/cold cases. Actual Settings configure a Space route,
+a Little Arkt route and a different Space default; NSWorkspace targets the validated CI bundle by path with the
+isolated environment. Loopback pages and visible destinations identify delivery. Independent source review found
+no definite P1/P2 test defect within this bounded positive gate. Source parsing, UI-source lint, actionlint,
+parity-report fixtures and whitespace checks passed; preparation API/fixture typechecks are not a full XCUITest
+typecheck. No app was launched locally and the intended runtime failure is unobserved.
+
+The gate cannot force an early event or held/failed routing read, prove no later duplicate without a queue-drained
+barrier, or establish Chromium startup handling/cancellation. A coordinator used by actual App composition with
+controlled routing reads and observable queue/readiness/failure/retry transitions is the next deterministic seam.
+The test-only gate changes no production routing. Whole-issue Peek/archive, profile and optional import scope remain
+unfinished; the PR stays draft.
