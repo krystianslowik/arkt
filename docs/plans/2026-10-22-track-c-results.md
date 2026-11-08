@@ -2965,3 +2965,17 @@ reported the required ShellKit failure. This is a harness access error, not the 
 The test now uses the same `@_spi(Smoke) @testable import ShellUI` as the existing command-bar tests. The test body
 and production code are unchanged. Swift 6.2.4 parsing and diff checks passed; no local suite ran. CI must compile
 and execute the new gate before BH-105 can be considered verified.
+
+### #562: search suggestions Settings gate
+
+A test-only ShellKit GUI gate exercises a real Settings window, the existing persisted `CommandBarSettings`, and
+queries in two command bars sharing that setting. It covers a stored off value, enabling and disabling while bars are
+open, subsequent queries, and persistence in a newly constructed setting and Settings window. The fixture composes
+Settings services itself; it does not test `AppSession` composition. The service closures and Settings row do not yet
+exist. The existing flag controls the locally generated search row; this path has no network suggestions provider or
+in-flight suggestion response to test. The existing `AppSettings.resetToDefaults` does not include this flag, so the
+gate does not change or assert reset semantics.
+
+The GUI gate was not compiled or run locally: the known ShellKit baseline compiler failure and unavailable full Xcode
+prevent a valid local result, and local GUI runs were excluded. CI must establish the intended red before production
+work. No passing or failing test count is claimed for this gate.
