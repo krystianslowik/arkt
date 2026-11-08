@@ -29,9 +29,11 @@ final class SettingsSearchSuggestionsTests: XCTestCase {
 
   private func makeSettings(_ setting: CommandBarSettings) -> SettingsWindowController {
     var services = SettingsServices()
+    services.searchEngine = { setting.searchEngine }
+    services.setSearchEngine = { setting.setSearchEngine($0) }
     services.searchSuggestionsEnabled = { setting.searchSuggestionsEnabled }
     services.setSearchSuggestionsEnabled = { setting.setSearchSuggestionsEnabled($0) }
-    let window = SettingsWindowController(settings: AppSettings(defaults: defaults), services: services)
+    let window = SettingsWindowController(settings: AppSettings(defaults: defaults, commandBar: setting), services: services)
     settingsWindows.append(window)
     window.show(pane: .spaces)
     return window
@@ -64,6 +66,38 @@ final class SettingsSearchSuggestionsTests: XCTestCase {
     let root = try XCTUnwrap(window.window?.contentView)
     let control = try XCTUnwrap(find(AXID.Settings.control("spaces", "searchSuggestions"), in: root))
     return try XCTUnwrap(control as? SettingsSwitch)
+  }
+
+  func testEngineChangeAndResetReachBothBarsWithoutNavigation() throws {
+    let setting = CommandBarSettings(defaults: defaults)
+    let first = try makeBar(setting)
+    let second = try makeBar(setting)
+    let window = makeSettings(setting)
+    first.setQueryForTesting("first query")
+    second.setQueryForTesting("second query")
+    var opened: [URL] = []
+    first.onOpen = { url, _ in opened.append(url) }
+    let root = try XCTUnwrap(window.window?.contentView)
+    let control = try XCTUnwrap(find(AXID.Settings.control("spaces", "searchEngine"), in: root) as? SettingsPopUpButton)
+    XCTAssertEqual(control.items, ["Google", "DuckDuckGo"])
+    XCTAssertEqual(first.results[first.barView.table.selectedRow].kind.name, "search")
+    control.select("DuckDuckGo")
+    XCTAssertEqual(first.results[first.barView.table.selectedRow].kind.name, "search")
+    XCTAssertEqual(setting.searchEngine, .duckDuckGo)
+    for bar in [first, second] {
+      let row = try XCTUnwrap(bar.results.first { $0.kind.name == "search" })
+      XCTAssertEqual(row.subtitle, "Search DuckDuckGo")
+      if case .search(let url) = row.kind { XCTAssertEqual(url.host(), "duckduckgo.com") }
+      else { XCTFail("Expected search row") }
+    }
+    XCTAssertEqual(CommandBarSettings(defaults: defaults).searchEngine, .duckDuckGo)
+    first.commit()
+    XCTAssertEqual(opened.first?.host(), "duckduckgo.com")
+    window.settings.resetToDefaults()
+    XCTAssertEqual(setting.searchEngine, .google)
+    XCTAssertEqual(CommandBarSettings(defaults: defaults).searchEngine, .google)
+    XCTAssertTrue(second.results.contains { $0.subtitle == "Search Google" })
+    XCTAssertEqual(opened.count, 1)
   }
 
   func testLoadedValueAndChangesReachBothOpenBarsAndPersist() throws {

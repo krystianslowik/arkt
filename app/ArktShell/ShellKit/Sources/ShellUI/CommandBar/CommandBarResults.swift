@@ -100,6 +100,7 @@ public enum CommandBarResults {
     public var excluded: Set<String> = []
     /// BH-113 (`searchSuggestEnabled`): off means no "Search <engine>" row and no engine round trip.
     public var searchSuggestionsEnabled = true
+    public var searchEngine: SearchEngine = .google
     public var scope: Scope = .normal
     /// Matches the archive store found for the query, newest first; listed after open tabs (switching to an open
     /// tab beats restoring a closed one) and before the search row (which restoring beats).
@@ -267,14 +268,14 @@ public enum CommandBarResults {
       }
     case .normal:
       if query.isEmpty { return (emptyState(input), CommandBarFilter.counts(of: [])) }
-      return typed(query: query, input: input)
+      return typed(query: query, searchQuery: raw, input: input)
     }
     return (rows, CommandBarFilter.showsCounts(forQuery: query) ? CommandBarFilter.counts(of: rows)
                                                                  : CommandBarFilter.counts(of: []))
   }
 
   /// A typed query in the normal scope: the rows, capped per kind, and the count of every match of each kind.
-  private static func typed(query: String, input: Input) -> (results: [Result], counts: [CommandBarFilter: Int]) {
+  private static func typed(query: String, searchQuery: String, input: Input) -> (results: [Result], counts: [CommandBarFilter: Int]) {
     let isKept = { (removalID: String?) in removalID.map { !input.excluded.contains($0) } ?? true }
     var results: [Result] = []
 
@@ -324,8 +325,8 @@ public enum CommandBarResults {
     let isExplicitURL = url != nil && URLInputParser.hasExplicitScheme(query)
     if !isExplicitURL, input.searchSuggestionsEnabled {
       let removalID = "search:\(query)"
-      results.append(Result(kind: .search(URLInputParser.searchURL(for: query)), title: query,
-                            subtitle: "Search \(CommandBarSettings.searchEngineName)", trailingHint: nil,
+      results.append(Result(kind: .search(URLInputParser.searchURL(for: searchQuery, engine: input.searchEngine)), title: query,
+                            subtitle: "Search \(input.searchEngine.rawValue)", trailingHint: nil,
                             removalID: removalID))
       if isKept(removalID) { uncappedRows += 1 }
     }

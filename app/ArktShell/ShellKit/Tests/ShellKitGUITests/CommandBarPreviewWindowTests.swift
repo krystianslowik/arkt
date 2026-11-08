@@ -213,6 +213,10 @@ final class CommandBarPreviewWindowTests: XCTestCase {
     XCTAssertEqual(bar.barView.previewColumn.content?.title, second.title,
                    "notice refresh must not leave the first result's preview on the retained selection")
 
+    bar.settings.setSearchEngine(.duckDuckGo)
+    XCTAssertEqual(bar.results[bar.barView.table.selectedRow].kind, .switchTo(second.node))
+    XCTAssertEqual(bar.barView.previewColumn.content?.title, second.title)
+
     bar.settings.setSearchSuggestionsEnabled(false)
     XCTAssertEqual(bar.results[bar.barView.table.selectedRow].kind, .switchTo(second.node))
     XCTAssertEqual(bar.barView.previewColumn.content?.title, second.title,
@@ -234,6 +238,9 @@ final class CommandBarPreviewWindowTests: XCTestCase {
     XCTAssertEqual(bar.results[bar.barView.table.selectedRow].siteSearchEngine, engine)
     XCTAssertTrue(bar.barView.hintStrip.hints.items.contains { $0.caption == "Search site" })
 
+    bar.settings.setSearchEngine(.duckDuckGo)
+    XCTAssertEqual(bar.results[bar.barView.table.selectedRow].siteSearchEngine, engine)
+    XCTAssertTrue(bar.barView.hintStrip.hints.items.contains { $0.caption == "Search site" })
     bar.settings.dismissSearchSuggestionNotice()
     XCTAssertEqual(bar.results[bar.barView.table.selectedRow].siteSearchEngine, engine)
     XCTAssertTrue(bar.barView.hintStrip.hints.items.contains { $0.caption == "Search site" },

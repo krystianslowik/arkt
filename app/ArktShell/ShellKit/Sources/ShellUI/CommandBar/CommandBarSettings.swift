@@ -1,5 +1,17 @@
 import Foundation
 
+public enum SearchEngine: String, CaseIterable, Sendable {
+  case google = "Google"
+  case duckDuckGo = "DuckDuckGo"
+
+  public var searchBase: String {
+    switch self {
+    case .google: "https://www.google.com/search?q="
+    case .duckDuckGo: "https://duckduckgo.com/?q="
+    }
+  }
+}
+
 /// Command bar settings (BH-113, spec settings table): whether typed queries may go to the search engine, and
 /// whether the user dismissed the privacy notice about it. Stored in the app's user defaults under Arc's key
 /// names (`searchSuggestEnabled`, `commandBarSearchSuggestionsPrivacyHasBeenExplicitlyDismissed`), so they
@@ -12,9 +24,7 @@ public final class CommandBarSettings {
   public static let searchSuggestionsDefaultsKey = "searchSuggestEnabled"
   /// Arc's key for the dismissed privacy notice (BH-113, [S] string and key).
   public static let noticeDismissedDefaultsKey = "commandBarSearchSuggestionsPrivacyHasBeenExplicitlyDismissed"
-  /// The default engine's display name (Track C open question 5: a Google placeholder). Nonisolated so the
-  /// non-actor results builder reads it.
-  nonisolated public static let searchEngineName = "Google"
+  public static let searchEngineDefaultsKey = "commandBarSearchEngine"
 
   private let defaults: UserDefaults?
   private var observers: [UUID: @MainActor () -> Void] = [:]
@@ -32,6 +42,7 @@ public final class CommandBarSettings {
   }
 
   /// Whether the bar adds a "Search <engine>" row for typed queries. Defaults to true.
+  public private(set) var searchEngine: SearchEngine
   public private(set) var searchSuggestionsEnabled: Bool
   /// BH-113: once dismissed, the notice never comes back.
   public private(set) var searchSuggestionNoticeDismissed: Bool
@@ -41,8 +52,23 @@ public final class CommandBarSettings {
 
   private init(store: UserDefaults?) {
     defaults = store
+    searchEngine = store?.string(forKey: Self.searchEngineDefaultsKey).flatMap(SearchEngine.init(rawValue:)) ?? .google
     searchSuggestionsEnabled = store?.object(forKey: Self.searchSuggestionsDefaultsKey) as? Bool ?? true
     searchSuggestionNoticeDismissed = store?.bool(forKey: Self.noticeDismissedDefaultsKey) ?? false
+  }
+
+  public func setSearchEngine(_ engine: SearchEngine) {
+    guard engine != searchEngine else { return }
+    searchEngine = engine
+    defaults?.set(engine.rawValue, forKey: Self.searchEngineDefaultsKey)
+    notifyObservers()
+  }
+
+  public func resetSearchEngine() {
+    defaults?.removeObject(forKey: Self.searchEngineDefaultsKey)
+    guard searchEngine != .google else { return }
+    searchEngine = .google
+    notifyObservers()
   }
 
   public func setSearchSuggestionsEnabled(_ enabled: Bool) {

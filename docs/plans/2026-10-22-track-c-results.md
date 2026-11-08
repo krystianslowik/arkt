@@ -3018,3 +3018,20 @@ folder/extension activation, forwarding and presentation and search-engine choic
 At `b4badaa`, the informative GUI job reported **2,050 tests, 54 skipped, zero failures**. Both retained-selection regressions and SettingsSearchSuggestionsTests passed. Pure ShellKit and isolation/lint passed; Core and XCUITest were skipped. The app build failed before compilation downloading XcodeGen with curl 56 / HTTP 504. A failed-jobs-only retry then failed at the same download step with curl 56, connection died; the required aggregate reflected that app failure. Neither attempt established an app compilation failure.
 
 Both existing XcodeGen commands now use the bounded retry flags validated during #113's CI correction: three retries including receive errors, a retry budget and connection/transfer bounds. The URL, pinned version, output file, and strict SHA-256 check remain unchanged; exhausted downloads fail the job. The command lines were compared directly with that validated correction. The earlier controlled loopback probe made one attempt for a failed CONNECT and an interrupted tunnel before the correction, and four attempts afterward, still failing on exhaustion. That is prior shared-command evidence, not a new probe run in this branch. `actionlint` and whitespace checks passed. No app source or product behavior changed; new-head app/GUI CI remains pending, and full #562 remains incomplete.
+
+### #562 search engine choice (local implementation gate)
+
+Google remains the default; Settings offers Google and DuckDuckGo. The shared command-bar setting persists the
+choice, Reset all settings returns it to Google, and result URLs preserve literal query characters. The existing
+suggestions switch and notice retain their prior defaults and reset treatment. The folder/extension provider and
+count work above is unchanged; this slice does not wire their production providers or activation.
+
+Test-first: a Swift 6 type-check probe against the actual `CommandBarSettings.swift` and `URLInputParser.swift`
+failed on the missing `searchEngine`, `setSearchEngine` and `searchURL(for:engine:)` APIs before implementation.
+A direct attempt to type-check the Swift Testing files failed earlier because this standalone toolchain did not
+find the `Testing` module; that harness failure is not counted as the behavior red. After implementation, the
+Foundation-only `Probes/SearchEngineProbe.swift` ran 26 checks against those two real sources with a synthetic
+UserDefaults suite; no network or app launch. The new Swift Testing and GUI component cases are unrun locally.
+They cover Settings reset/composition, both open bars, selection, preview and hints, and intercepted activation.
+AppSession composition, real app Settings, native UI and full package/GUI suites remain unverified locally; no
+full Xcode or app build was used. Disk available before the probe was 1.8 GiB.

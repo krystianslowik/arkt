@@ -81,6 +81,7 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
     else { finish(panel.runModal()) }
   }
   /// Settings > Spaces and Profiles > Archive (#448): the two pop-ups, refreshed after Reset all settings.
+  var searchEnginePopUp: SettingsPopUpButton?
   var archiveTabsPopUp: SettingsPopUpButton?
   var archiveLittleArktPopUp: SettingsPopUpButton?
   /// The Reset all settings confirmation while it shows (#617).
@@ -418,6 +419,7 @@ extension SettingsWindowController: ToolbarSettingObserver {
 
 extension SettingsWindowController: AppSettingsObserver {
   public func appSettingsDidChange(_ settings: AppSettings) {
+    searchEnginePopUp?.show((services.searchEngine?() ?? .google).rawValue)
     peekCrossSiteSwitch?.setOn(settings.peekLinks.opensCrossSiteLinks, animated: true)
     peekShiftSwitch?.setOn(settings.peekLinks.opensShiftClickedLinks, animated: true)
     warnBeforeQuittingSwitch?.setOn(settings.warnsBeforeQuitting, animated: true)

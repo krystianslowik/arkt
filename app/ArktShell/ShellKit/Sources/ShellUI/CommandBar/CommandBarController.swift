@@ -238,8 +238,12 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     guard isVisible else { return }
     let selected = results.indices.contains(barView.table.selectedRow) ? results[barView.table.selectedRow] : nil
     reloadResults()
-    if let selected, let index = results.firstIndex(of: selected) {
-      select(index, byKeyboard: false)
+    if let selected {
+      let index = results.firstIndex(of: selected) ?? results.firstIndex {
+        if case .search = selected.kind, case .search = $0.kind { return true }
+        return false
+      }
+      if let index { select(index, byKeyboard: false) }
     }
     relayout()
   }
@@ -866,6 +870,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     input.clipboardURL = scope == .normal && mode == .newTab && queryIsEmpty ? clipboardURLForThisShow() : nil
     input.excluded = removedSuggestionIDs
     input.searchSuggestionsEnabled = settings.searchSuggestionsEnabled
+    input.searchEngine = settings.searchEngine
     input.scope = scope
     input.archived = current
     input.recentTabs = scope == .normal && trimmed.isEmpty ? recentTabsProvider() : []

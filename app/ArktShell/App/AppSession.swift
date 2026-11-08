@@ -29,7 +29,7 @@ final class AppSession {
   let toolbarSetting = ToolbarSetting(defaults: AppEnvironment.userDefaults)
   /// The app-level settings the Settings window edits (#307), over the same defaults and Toolbar setting; every
   /// browser window applies them.
-  private(set) lazy var settings = AppSettings(defaults: AppEnvironment.userDefaults, toolbar: toolbarSetting)
+  private(set) lazy var settings = AppSettings(defaults: AppEnvironment.userDefaults, toolbar: toolbarSetting, commandBar: commandBarSettings)
   /// Crash reporting (#129): capture behind the Settings > Privacy switch, local reports, the one-time ask.
   private(set) lazy var crashCapture = CrashCapture(directory: location.directory, settings: settings)
   /// Search suggestions and the BH-113 notice dismissal, shared by every window's command bar (#112).
@@ -513,6 +513,8 @@ final class AppSession {
     services.crashReportCount = { [weak self] in self?.crashCapture.storedCount ?? 0 }     // #129
     services.sendCrashReport = { [weak self] in self?.crashCapture.sendNewest() }
     services.spaces = { [weak self] in self.map { SettingsSpaceSummary.list(from: $0.source) } ?? [] }
+    services.searchEngine = { [commandBarSettings] in commandBarSettings.searchEngine }
+    services.setSearchEngine = { [commandBarSettings] in commandBarSettings.setSearchEngine($0) }
     services.searchSuggestionsEnabled = { [commandBarSettings] in commandBarSettings.searchSuggestionsEnabled }
     services.setSearchSuggestionsEnabled = { [commandBarSettings] in commandBarSettings.setSearchSuggestionsEnabled($0) }
     services.archiveRows = archiveSettings.settingsRows                                // #448
