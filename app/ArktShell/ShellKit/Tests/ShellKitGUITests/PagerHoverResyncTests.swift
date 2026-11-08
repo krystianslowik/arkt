@@ -7,6 +7,7 @@ import XCTest
 /// Counts the actual window-server lookup through the sidebar hosts while the real pager changes state.
 @MainActor
 final class PagerHoverResyncTests: XCTestCase {
+  @MainActor
   private final class Harness {
     let controller: ShellWindowController
     let outline: SidebarOutlineView
@@ -18,6 +19,7 @@ final class PagerHoverResyncTests: XCTestCase {
       _ = NSApplication.shared
       NSApp.setActivationPolicy(.accessory)
       let controller = ShellWindowController(engine: InMemoryEngine(), sidebar: StubSidebar.sample())
+      controller.window?.isReleasedWhenClosed = false
       controller.showWindow(nil)
       controller.window?.contentView?.layoutSubtreeIfNeeded()
       let window = try XCTUnwrap(controller.window)
