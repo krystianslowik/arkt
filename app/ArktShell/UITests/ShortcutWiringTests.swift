@@ -47,7 +47,8 @@ final class ShortcutWiringTests: ArktUITestCase {
       app.typeKey(key, modifierFlags: .command)
       guard waitFor(settings), selectedPane(pane) else { return }
       let notice = settings.descendants(matching: .any).matching(identifier: "settings.shortcuts.conflict.message").firstMatch
-      let expectedOwner = key == "w" ? "Archive Tab" : "Go to Sidebar Item " + key
+      // Settings validates the Cmd-W menu item as Close Window while it is key.
+      let expectedOwner = key == "w" ? "Close Window" : "Go to Sidebar Item " + key
       guard waitFor(notice) else { return }
       let message = notice.label
       XCTAssertEqual(message, "Command " + key.uppercased() + " is already used by " + expectedOwner +
