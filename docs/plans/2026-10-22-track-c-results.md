@@ -2964,3 +2964,22 @@ Written first. Each failed to compile before the code existed.
 - Swift frontend parsing, changed-file import inspection and `git diff --check` passed. Full ShellKit, GUI and app
   builds were not run. The published integration gate still requires the badge view and window bindings; its status is
   not established by this focused run.
+
+### Favorite unread integration harness repair (#338)
+
+CI run 42435597056 at `5b70828` failed compilation in both ShellKit job 128593765545 and informative GUI job
+128593765492. No tests executed. In addition to the intended missing badge view, live-title and shared-window
+binding APIs, the test harness had unrelated actor-isolation errors and called a private grid configurator with a
+wrong argument label. This is not a clean integration red.
+
+The nested harness now declares its main-actor isolation. Reuse drives the public collection data-source callback
+with a controlled recycled item, preserving the assertion that the same item represents another node and clears
+its badge. No production code or behavior assertions were removed. The helper subclass type-checked against real
+AppKit using Swift 6.2.4 and SDK 15.5; the complete test file passed frontend parsing and diff checks. The suite
+remains uncompiled and unrun locally; CI must confirm the repaired gate before feature implementation continues.
+
+The preferences slice has two focused actual-source tests passing, with no review blockers. Both product defaults
+remain unknown: the stored fallback is provisionally false and is not wired to UI or rendering. Initial and reset
+values need the maintainer's decision. The broader settings suite remains locally blocked by existing optional
+CGPoint equality assertions. Rendering, title observation, shared-window settings and app composition remain
+unimplemented; earlier model-only CI counts do not establish those paths.

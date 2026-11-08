@@ -9,6 +9,7 @@ import XCTest
 /// Title events use the same window and sidebar path as loaded Favorites; URLs and titles are synthetic.
 @MainActor
 final class FavoriteUnreadIntegrationTests: XCTestCase {
+  @MainActor
   private final class Harness {
     let source: ModelSidebarSource
     let engine = InMemoryEngine()
@@ -44,6 +45,15 @@ final class FavoriteUnreadIntegrationTests: XCTestCase {
     func badge(_ id: UUID) throws -> String? {
       let view = try tile(id).unreadBadgeView
       return view.isHidden ? nil : view.stringValue
+    }
+  }
+
+  @MainActor
+  private final class ReusingCollectionView: NSCollectionView {
+    var recycledItem: NSCollectionViewItem?
+    override func makeItem(withIdentifier identifier: NSUserInterfaceItemIdentifier,
+                           for indexPath: IndexPath) -> NSCollectionViewItem {
+      recycledItem ?? super.makeItem(withIdentifier: identifier, for: indexPath)
     }
   }
 
@@ -112,7 +122,11 @@ final class FavoriteUnreadIntegrationTests: XCTestCase {
     _ = try h.load(id, title: "(8) Mail")
     XCTAssertEqual(try h.badge(id), "8")
     item.prepareForReuse()
-    grid.configure(item, for: h.ids[0]) // the same reusable item now represents a different node
+    let recycling = ReusingCollectionView(frame: .zero)
+    recycling.recycledItem = item
+    // Drive the production data-source entry point while controlling which item the collection recycles.
+    let rebound = grid.collectionView(recycling, itemForRepresentedObjectAt: IndexPath(item: 0, section: 0))
+    XCTAssertTrue(rebound === item)
     XCTAssertEqual(item.tileView.nodeID, h.ids[0])
     XCTAssertTrue(item.tileView.unreadBadgeView.isHidden)
     h.source.mutate { $0.remove(id) }
