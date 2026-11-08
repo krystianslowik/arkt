@@ -8,13 +8,13 @@ negative checks use a later ordinary key delivered to a loopback page as an orde
 that the command bar remains closed. They do not click, dismiss a panel or start the next positive command between
 the tested key and that observation. This bounds the check to delivery through that later event; it does not prove
 that no arbitrary future callback can run. The fixture and its synchronization have not yet run in the GUI. Do not
-interpret parsing as runtime coverage. The injected system-warning test does not audit the real macOS conflict source. Website priority remains
-#441. The earlier Settings design specifies focus on Use and Escape as Keep (`docs/design/settings.md`, lines 238–240).
-The later maintainer discussion in PR #828 (comment 6715272110) explicitly leaves the app-shortcut conflict default
-unresolved. Initial focus and Return's default action are therefore not asserted or selected by this gate until that
-answer arrives. Escape remains an explicit Keep cancellation action; both buttons are exercised directly.
+interpret parsing as runtime coverage. The injected system-warning test does not audit the real macOS conflict source. App shortcuts take priority over page shortcuts until RT-29/#78; per-action priority remains #441. The maintainer
+[decided](https://github.com/krystianslowik/arkt/pull/828#issuecomment-6721408776) that app-shortcut conflicts
+default to Keep Existing on Return, as extension shortcuts do. The Settings test now asserts initial Keep focus and
+Return preserving both bindings; that new assertion has not been run. Escape also keeps both bindings, and Use
+Shortcut must be explicit.
 The confirmation described there for Reset All Settings is in Advanced (line 83); no confirmation is specified for
-Reset All Shortcuts. Extensions already use Keep Existing for Return; whether app shortcuts share that choice is pending.
+Reset All Shortcuts. Extensions already use Keep Existing for Return.
 
 The competing Cmd-W and Cmd-1–7 component gate installs the catalog menu temporarily and sends events through
 `NSApplication.sendEvent`, with Settings as the key window. It checks captured bindings, pane and window survival

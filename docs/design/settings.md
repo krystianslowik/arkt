@@ -237,7 +237,8 @@ shadow becomes that edge in dark.
   captions are not focusable.
 - Shortcut recorder: Return or Space on a row starts recording; the next key combination is captured; Escape cancels;
   Delete clears the shortcut (the action stays in the list, unbound); Tab leaves the recorder without changing it. In
-  the conflict state, focus moves to "Use Command-E"; Escape answers "Keep Command-S".
+  the conflict state, focus moves to Keep Existing; Return and Escape keep the existing bindings. Use Shortcut
+  explicitly reassigns the binding ([#828 decision](https://github.com/krystianslowik/arkt/pull/828#issuecomment-6721408776)).
 - VoiceOver: the window is "Settings, General" (title). Toolbar items are radio buttons in a tab group ("General, tab,
   1 of 7, selected"). Each row's control carries the row label as its accessibility label and the caption as its help
   (`setAccessibilityHelp`). Toggles are switches ("Warn before quitting, switch, off"). Keycaps read as words

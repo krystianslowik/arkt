@@ -3013,3 +3013,17 @@ all four definitions and defaults were missing. After mapping, `swift test --pac
 the production menu declarations; it does not compile `MainMenu`, execute the commands, or establish real GUI,
 app dispatch, system-conflict detection or the full app build. The conflict focus and Return decision remains held;
 page priority remains #441.
+
+### #119 conflict default test follow-up
+
+The maintainer chose Keep Existing as the app-shortcut conflict default on Return
+([decision](https://github.com/krystianslowik/arkt/pull/828#issuecomment-6721408776)). The Settings GUI test now
+asserts initial Keep focus, Return preserving both bindings, and Reset All remaining clear after reopening. These new
+assertions have not run. The previously observed GUI run 42441404301 executed 2052 tests, skipped 54, and had six
+assertion failures across five Settings methods; it does not establish a Return-specific failure. The recorder and
+app composition remain outstanding. Native keyboard delivery, VoiceOver and a real macOS system-warning source are
+unverified; the injected warning seam is not a system detector. App shortcuts retain priority over pages until
+RT-29/#78, with per-action priority deferred to #441.
+
+`xcrun swiftc -frontend -parse app/ArktShell/ShellKit/Tests/ShellKitGUITests/SettingsWindowTests.swift` and
+`git diff --check` passed; parsing is not compilation or execution. Full local builds and app/GUI tests were not run.

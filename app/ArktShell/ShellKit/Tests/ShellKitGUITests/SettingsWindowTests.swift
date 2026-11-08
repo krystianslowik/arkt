@@ -469,8 +469,8 @@ final class SettingsWindowTests: XCTestCase {
     let keep = try find("settings.shortcuts.conflict.keep", in: controller, as: NSButton.self)
     XCTAssertTrue((use.accessibilityLabel() ?? use.title).localizedCaseInsensitiveContains("Use"))
     XCTAssertTrue((keep.accessibilityLabel() ?? keep.title).localizedCaseInsensitiveContains("Keep"))
-    // Initial focus and the Return default await the maintainer's decision on app-shortcut conflicts.
-    keep.performClick(nil)
+    XCTAssertTrue(window.firstResponder === keep, "Keep Existing is the initial conflict choice")
+    window.sendEvent(try shortcutEvent("\r", [], code: 36, in: window))
     XCTAssertNil(Self.view("settings.shortcuts.conflict.keep", in: try XCTUnwrap(window.contentView)))
     XCTAssertEqual(model.binding(for: sidebar), ShortcutBinding(key: "s", modifiers: .command))
     XCTAssertEqual(model.binding(for: tab), ShortcutBinding(key: "t", modifiers: .command))
@@ -544,6 +544,12 @@ final class SettingsWindowTests: XCTestCase {
     XCTAssertTrue(reloaded.overrides.isEmpty)
     XCTAssertEqual(reloaded.binding(for: sidebar), model.binding(for: sidebar))
     XCTAssertEqual(reloaded.binding(for: tab), model.binding(for: tab))
+    window.close()
+    controller.show(pane: .shortcuts)
+    XCTAssertFalse(try find(AXID.Settings.control("shortcuts", "resetAll"), in: controller, as: NSButton.self).isEnabled)
+    let reopened = ShortcutEditorModel(catalog: model.catalog, defaults: defaults)
+    XCTAssertEqual(reopened.binding(for: sidebar), ShortcutBinding(key: "s", modifiers: .command))
+    XCTAssertEqual(reopened.binding(for: tab), ShortcutBinding(key: "t", modifiers: .command))
   }
 
   func testRecorderBeatsSettingsWindowKeysUntilRecordingEnds() throws {
