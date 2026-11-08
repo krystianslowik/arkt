@@ -3163,3 +3163,9 @@ The source-reviewed recovery merge `6f04425` was followed by main `859c4ce`. Onl
 conflicted; all four App/session recovery conflict resolutions remain byte-identical to the reviewed merge. Both
 histories remain. Main's additional Swift sources parsed and source/lint/header checks passed. No integrated-head
 App, GUI/native or focused test ran locally; the earlier GREEN2 belongs to `6c5946b`, not these merges.
+
+### #116 recovery coexistence gate
+
+Added a reviewed Shell-boundary test composing ordered window restoration and private exclusion with unanswered recovery, distinguishably stale quit capture, frozen collection writes, cancellation recapture and recovery dismissal. The review follow-up leaves recovery-source writes observable, so the fake cannot hide an incorrect production write during the quit interval. The two persistence domains are asserted independently.
+
+The test was parsed, not type-checked or executed; no mutation or native App termination-ordering proof is claimed. Main `1188868` integrated without conflict. Import/UI-source checks, actionlint, Swift parsing and engine-header parity were checked; no local full build/GUI/app launch was performed. Merged-head CI remains pending. Prior native launch passes remain attributed to their tested heads; cancellation, quit timing, folders and window order remain separate verification boundaries.
