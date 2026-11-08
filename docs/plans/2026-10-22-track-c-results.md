@@ -2897,6 +2897,393 @@ Written first. Each failed to compile before the code existed.
   The app and test bundle build (`xcodebuild ... build-for-testing`: TEST BUILD SUCCEEDED). Not run: the suite needs
   the real pointer and keyboard, and the Mac was in use.
 
+## Link routing Core model (#113, draft PR #825)
+
+- Added a value-only SidebarModel for URL text containment and exact URL text equality, Space, Little Arkt and most
+  recent Space destinations, and the configurable default. All matching routes are exposed. Different matching
+  destinations yield an explicit ambiguous result; matching routes with the same destination resolve to that
+  destination. This does not decide BH-160 / RT-25 precedence and is not integrated into the app.
+- Test-first red: CI run 42428288297, Core job 128571317717, at 773c9adae45abfa6ba030e6bff60ad7f51b8c014
+  failed compilation because `LinkRouting` was missing, with dependent type inference errors. The seven tests did
+  not execute. Two more tests cover ambiguous and agreeing matches.
+- Full Core and ShellKit package tests were not run locally: the local baseline cannot compile full ShellKit and
+  Xcode is unavailable. CI must validate the full packages. Profile integration (#611), RT-26 toast, Settings,
+  persistence, external links, Peek, Archive, deleted Spaces, Meet and import remain pending.
+- Swift 6.2.4 syntax parsing passed for the model and tests. An isolated macOS 15 Swift package containing the
+  actual model and test files and the existing `SpaceID = UUID` alias compiled and passed 9 tests in 1 suite;
+  this is not a full ArktCore package run. The initial isolated attempt used the package's implicit macOS 10.13
+  target and failed to import Testing; setting the repository's macOS 15 target fixed the harness.
+- Review follow-up: `Condition.applies(to:)` and `Route.applies(to:)` avoid overloading the `.matches` case name.
+  Equality uses the exact `URL.absoluteString`, including case, trailing slash, query and fragment; contains is
+  case-sensitive. These are interim characterizations pending the maintainer's normalization decision.
+  Added three tests for those boundaries and the most-recent-Space default. Repeating `swift test --jobs 2`
+  in the isolated package with the updated actual model and tests passed 12 tests in 1 suite: the original 7,
+  2 ambiguity cases and 3 review cases. Full-package baseline-plus-7 evidence still needs CI; these isolated
+  counts do not establish a full ArktCore pass.
+
+### #113 typed link-routing persistence (bounded slice)
+
+- `LinkRouting` is a typed `SettingsGroup` in Persistence, stored as sorted-key JSON under `linkRouting.settings` in the existing SQLite `setting` table. The value types are Codable; SidebarModel remains storage-free. No migration or separate defaults store is needed. Missing or unreadable data returns empty routes with Little Arkt as the default; an explicit save replaces the group, following the existing settings-store convention.
+- Test-first: an isolated macOS 15 package depending on the actual ArktCore Persistence, SidebarModel and Archive products compiled the production dependencies, then failed to compile the four new tests because `LinkRouting` did not conform to `SettingsGroup` and had no `storageKey`. No tests ran at red.
+- Swift 6.2.4, macOS 15.5 SDK, macOS 15 deployment target: the same focused package passed 4 storage tests in 1 suite. Including the existing routing test file passed 16 tests in 2 suites (12 existing + 4 storage). Tests cover ordered competing matches, literal text, destinations and defaults, replacement and removal across reopen, unreadable data and independent settings.
+- Full CI for this persistence head is pending. No local full Core or ShellKit baseline was run. The previously recorded full CI at `8c0085a` remains evidence for that earlier head only.
+- App dispatch, Settings UI, profile destinations (#611), deleted-Space cleanup, external links, Peek, archive, Meet and optional import remain. No precedence or fallback for competing destinations is chosen.
+
+### #113 link-routing store boundary (bounded slice)
+
+- Added a value-only `LinkRoutingSettingsStoring` protocol and real `SettingsStore` conformance. Updates read, change and write the existing typed group in one SQLite transaction; loads retain the typed-store default behavior.
+- Test-first red: a macOS 15 focused package using the actual local ArktCore products compiled Persistence and SidebarModel, then the actual `LinkRoutingEditorStoreTests` failed to compile on the missing protocol and dependent inference errors. No tests ran.
+- Swift 6.2.4, macOS 15.5 SDK: the focused package passed 18 tests in 3 suites: 12 routing model, 4 typed persistence and 2 store boundary tests. The boundary tests cover literal ordered duplicates across database reopen and 40 concurrent appends without assuming order.
+- Full Core and ShellKit CI for this head is pending. The CoreBridge editor and real app entry-point tests are future gates, not locally observed passing tests. Editor controls and app integration remain incomplete; normalization and competing-route precedence remain undecided.
+
+### #113 CoreBridge link-routing editor model (bounded slice)
+
+- Added a main-actor snapshot editor with ordered index-based route edits and an explicit flush. A successful load is required before edits or writes; failed loads and writes are exposed through `lastError`, and `flush()` returns success. Failed writes retain the intended value for retry. Flushes on one model are serialized; edits made during a write stay in the model and can be flushed later. Cancellation does not promise rollback once a write begins.
+- This is a whole-value snapshot contract: independent editors can overwrite one another's changes when they flush. The atomic store transaction alone does not merge their read-modify-write edits. No routing policy or app integration is added.
+- The existing editor gate was red at `1d0d5b47209a9e30d024a1b1fe97c25297b516d4`: [CI run 42435582549, GUI job 128593643236](https://github.com/krystianslowik/arkt/actions/runs/42435582549/job/128593643236) failed compilation on nine missing `LinkRoutingSettingsModel` source errors; no tests ran.
+- Focused actual-source package: Swift 6.2.4, macOS 15 target and macOS 15.5 SDK, `swift test --jobs 2` passed 7 tests in 2 suites: the four existing editor tests and three new failure, retry, concurrent-flush, load-failure and invalid-index cases. It uses the real ArktCore SidebarModel product, the actual new CoreBridge model source and actual editor test file; it is not the full ShellKit package. Syntax parse, changed-source import inspection and `git diff --check` passed.
+- Full CI for the new head is pending. Full local ShellKit, app build and GUI tests were not run; the local ShellKit baseline compiler is broken and full Xcode is unavailable. Settings controls and injection, dispatch, Space cleanup, profile destinations (#611), Peek, Meet, archive and import remain. URL normalization and competing-route precedence remain maintainer decisions.
+
+### Link routing termination and retry follow-up (#113)
+
+- Added ordered detached routing writes shared by normal and blocking termination, with dirty and error state retained on failure or timeout. AppSession includes routing in its termination guard and flushes it without changing archive-before-sidebar ordering.
+- The Settings destination popup retains a save error across reopening and permits retrying the current choice. The ordered route snapshot, including duplicates, stays intact.
+- Test-first focused actual-source package: compilation failed on the missing routing `needsFlush` and `flushBlocking` APIs, including the SQLite reopen regression; no tests ran.
+- Focused actual-source package, Swift 6.4.1, macOS 15 target and macOS 15.5 SDK: 19 tests in 5 suites passed. This includes the real typed SQLite store and reopen, an in-flight older write, timeout and error state, and the plain Settings adapter. It does not build AppSession or the Settings window.
+- Swift syntax parsing and diff whitespace checks passed. The full app build, real AppSession forwarding, GUI window test and XCUITest were not run locally. The new GUI test and whole-feature UI gate still need runtime validation; Add Route remains disabled pending its form.
+
+### Link routing termination integration placement (#113)
+
+- CI run 42440540544, isolation job 128608699888, failed because the SQLite/model test imported Persistence under ShellKit and its test target linked the product. The combined cases now live in the explicitly invoked `integration/LinkRouting` package; ShellKit's test dependency was removed. The package links the actual model and production support sources and the real typed SQLite store, without changing the app or pure target boundaries.
+- Swift 6.4.1, macOS 15.5 SDK: `swift test --package-path integration/LinkRouting --scratch-path /tmp/arkt-routing-placement-build` passed **2 tests in 1 suite**. The first two probe builds failed at compilation while identifying required production support sources; no tests ran in those attempts. The workflow's actual import-layering script passed, both manifests parsed, and `git diff --check` passed. No ShellKit suite or GUI/app launch was run in this follow-up.
+- The 19-test actual-source result above remains historical evidence at dc51a03, not a claim about this placement's CI. The two combined cases are a reproducible standalone probe and are **not run by current CI**. Existing pure model/adapter/window tests and typed SQLite Core tests remain in their proper targets; this probe does not build AppSession or the Settings window. Product normalization, precedence, Add Route and conflict defaults remain held.
+
+
+### Link routing retry full CI and selector warning cleanup (#113)
+
+At `10fbdbf`, run 42441074758 passed Core 594 tests in 48 suites, pure ShellKit 2522 tests in 283 suites,
+and GUI 2046 tests with 54 skipped and no failures. `testFailedSaveSurvivesReopeningAndSameChoiceRetries` passed.
+App build, isolation/lint and the required gate passed; XCUITest was skipped. The separate two-test SQLite probe
+is not included in these CI counts. Real AppSession/Chromium termination remains unverified.
+
+The GUI log also exposed a new explicit-selector construction warning in the test helper. Its private Objective-C
+action is now resolved with `NSSelectorFromString`, without changing the dispatched action or assertions. Source
+parsing and diff checks passed; new-head CI is required. The existing Add/Edit route UI and runtime dispatch remain incomplete.
+
+### Link routing Settings form (#113, bounded slice)
+
+The Spaces pane now lists ordered routes and provides Add and per-row Edit sheets over the shared editor. The sheet
+preserves literal text and Space IDs, including unavailable destinations and duplicate Space names. Cancel and Escape
+leave the editor untouched; failed saves retain the desired snapshot and display an accessible error for retry. The
+existing default destination and termination flush paths remain in place. Dispatch and the rest of #113 remain open.
+
+At the prior head `bb3474f`, CI run 42461929580 executed 2,049 GUI tests with 54 skipped and five assertions failing
+across all three new form tests; the other reported jobs passed or were skipped. A focused adapter test first failed to
+compile against the old boundary, then the actual-source SQLite integration probe passed 3 tests in 2 suites with
+Swift 6.4.1, macOS 15 target and SDK 15.5. The toolchain emitted missing developer framework search-path linker
+warnings. Source parsing, changed-source import checks and diff whitespace checks passed. GUI, app build and XCUITest
+were not run locally; CI must validate the form.
+
+
+### Route form reload and duplicate-title review corrections (#113)
+
+Review of `813de74` found that rebuilding Settings rows starts another store read while Add/Edit remain enabled;
+a Save during that read can be ignored. The Settings adapter now initializes the shared editor only until it is
+loaded; the model's explicit reload API remains available. Duplicate Space titles now use sidebar-order qualifiers
+such as Shared (Space 1) in both destination controls and route descriptions, while choices still carry the same IDs.
+
+A focused actual-source regression ran first against the old adapter: one test failed because two initialization
+calls performed two loads instead of one. A separate label test then failed compilation on the missing choice helper.
+After correction, Swift 6.4.1 with the macOS 15.5 SDK passed 5 tests in 3 suites in the existing standalone integration
+probe, including both new pure regressions plus the prior SQLite/adapter cases. The initial Swift 6.2 probe attempt
+failed in the existing ThemeTexture expression before tests ran; it is not regression evidence. The successful probe
+emitted existing toolchain linker/search-path warnings. The two new pure cases are canonical CoreBridge tests linked
+into the probe; normal CI will also run them.
+
+The GUI form gate additionally holds a redundant read across Save, checks the saved snapshot without another user
+event, and asserts distinct visible/accessibility destination labels while retaining the second Space's ID. It has
+not run locally. Source parsing, import inspection and diff checks passed. New-head CI must verify the actual form;
+AppSession and Chromium runtime validation remain unverified. No routing normalization or ambiguity policy changes.
+
+
+### BH-158: remove routes when a Space is removed (#113)
+
+The AppSession observes `SidebarChange.spaceRemoved` and forwards the ID to the shared routing editor. The editor removes only explicit routes targeting that ID, preserving order, duplicates and the default destination. Pending removals survive a loading or failed read; ordered snapshot writes and the termination dirty guard remain in use. A route sheet rejects a save after a concurrent removal or route-list change, retaining its draft and showing an error. No unavailable-default policy, runtime dispatch or ambiguity rule is added.
+
+Test-first red: the focused actual-source probe failed compilation on the missing removal and guarded-edit APIs; zero tests ran. Green: Swift 6.4.1 with macOS 15.5 SDK, `swift test --package-path integration/LinkRouting --scratch-path /tmp/arkt-bh158-build -j 2` passed 10 tests in 4 suites, including pending-load, failed-load retry, ordered in-flight save, stale edit and typed SQLite reopen. The toolchain emitted missing developer framework search-path warnings. Canonical CoreBridge tests include the pure editor cases and an ArchiveCoordinator/source event case; the latter was not run locally. A new GUI sheet regression was added but not run locally. The standalone probe does not compile AppSession or the Settings window, so production composition and actual GUI behavior await CI. Full ShellKit, app build, GUI and XCUITest were not run locally. Earlier form-stage results and the separately tracked #837 timeout remain unchanged.
+
+
+### BH-158: stale Settings controls and termination cleanup follow-up
+
+Settings now validates the rendered route list and removal generation before opening Edit, refreshes a stale pane, and uses the current Space catalog for route sheets. Sheet saves still retain their draft on conflicts and are rejected while the editor cannot accept changes. Explicit Space-removal intents are submitted through the serialized detached writer even when the initial read is held or failed. The atomic store closure prunes the current stored routes without replacing an unloaded snapshot; a later read cannot restore removed routes. The default and unrelated ordered duplicates are preserved. XcodeGen's existing pinned download now has bounded retries for transient HTTP failures; version, URL and checksum remain unchanged.
+
+Test-first red: the focused typed SQLite reopen regression executed both normal and blocking failed-read cases and reported four failed expectations: both flushes returned false and both databases retained deleted routes. Green: Swift 6.4.1 / macOS 15.5 SDK, `swift test --package-path integration/LinkRouting -j 2` passed **14 tests in 4 suites**; parameterized held-read cases cover removals before and during the read and both termination paths. Existing ordered-write coverage remains. The toolchain emitted missing developer framework search-path linker warnings. Swift source parse, changed-source import inspection, `actionlint` and diff whitespace checks passed. New rendered-Edit and stale-Add GUI regressions, the existing sheet-open and real ArchiveCoordinator/source-event regressions, actual AppSession composition, full App build, GUI and XCUITest were not run locally. The focused probe compiles the actual editor and typed store but not AppSession or the Settings window.
+
+
+### BH-158: retry after cancelled blocking termination
+
+An editor whose initial read failed can now retry that read through the existing Settings adapter after blocking cleanup fails or times out. Pending explicit removals are reapplied before editing is enabled; the guards against replacing a loaded, dirty snapshot remain. If a timed-out blocking write completes after termination is cancelled, its result is reconciled on the main actor without making the store operation depend on that actor.
+
+Test-first red: the canonical CoreBridge regression ran both failed and held-write timeout cases and failed with 12 expectations because Settings could not load, accept an edit, or flush it. The separate late-completion regression failed two expectations: cleanup stayed pending and Settings could not reload. The timeout is forced with a zero bound while the fake store write is explicitly held; no sleep or success-path deadline is used. After the fix, Swift 6.4.1 / macOS 15.5 SDK, `swift test --package-path integration/LinkRouting -j 2`, passed **16 tests in 4 suites**. The two new canonical pure tests are source-linked into that actual-source/SQLite probe and will also run in normal CoreBridge CI. The existing typed SQLite reopen cases remain included. Toolchain linker warnings report missing developer framework search paths. Swift source parsing, changed-file import inspection and whitespace checks passed. No full app, GUI, XCUITest, or AppSession/Chromium cancellation flow ran locally; this proves model recovery after the termination seam returns, not real cancellation composition. The PR remains draft pending full feature work and CI.
+
+
+### XcodeGen download retry correction (#113 CI)
+
+At `1c72a70`, the app job failed before compilation while downloading XcodeGen: curl returned 56 with HTTP 504 and made no retry despite `--retry 3`. Both existing pinned XcodeGen download commands now add `--retry-all-errors`; their retry count, retry budget, connection/transfer bounds, URL, version, output-file handling and strict SHA-256 check remain unchanged. Exhausted downloads still fail the step.
+
+A controlled loopback CONNECT probe with system curl 8.7.1 checked both a proxy returning HTTP 504 (reported locally as exit 22) and a tunnel closed without a response (exit 56). Before the flag, each made one attempt; with the flag, each made four attempts and still returned its nonzero exit after exhaustion: four probe checks passed. The first probe's expectation that the local HTTP 504 case would also return 56 was corrected to the observed exit 22 before these checks; no claim is made that this reproduces the CI network's underlying cause. `actionlint` and `git diff --check` passed. App compilation and full CI remain pending on the next head; no application source changed in this follow-up.
+
+
+### #113: confirmed matching and route precedence
+
+The [maintainer decision](https://github.com/krystianslowik/arkt/pull/825#issuecomment-6721408579) replaces the interim matching policy: Contains ignores case across the URL's absolute string; Matches still compares that exact string without URL normalization; the first matching route in stored list order wins. Nonmatching earlier rules are skipped, and the configured default is used only when none match. All matching routes and exact duplicates remain available in their original order. Existing empty Contains literals retain their matching behavior. No storage schema or live dispatch behavior changes in this stage. The spec records this as Arkt policy without relabeling unpublished Arc behavior as observed.
+
+Tests were updated before implementation. The actual-source probe executed 47 tests in 10 suites and failed with 20 expectations under the old case-sensitive/unresolved policy. After implementation, Swift 6.4.1 / macOS 15.5 SDK, `swift test --package-path integration/LinkRouting -j 2`, passed **47 tests in 10 suites**. The probe now source-links the canonical Core matching, typed Persistence and atomic store, and CoreBridge editor suites as well as the existing termination cases. Coverage includes upper/lower case host, path, query and fragment, unchanged exact-string boundaries, reversed conflicting routes, a nonmatching first rule, specificity not overriding list order, and precedence after typed SQLite reopen. These links run actual source and store dependencies; they do not add a CI job or substitute for full suites. Toolchain linker warnings report missing developer framework search paths. Swift parsing, import inspection and whitespace checks passed. Full Core/ShellKit, app, GUI, XCUITest and actual AppSession dispatch were not run locally; new-head CI remains required.
+
+The earlier Core red at `773c9ad` was inspected directly in [job 128571317717](https://github.com/krystianslowik/arkt/actions/runs/42428288297/job/128571317717): compilation failed because the test-first slice referenced the missing LinkRouting type, with dependent case-inference errors; no tests ran. Commit `0cd92289556491509334db188b9b4a9bf127bd84` added the production type, rather than rerunning that failing code. The later actual Core run at `b3ca41c` passed 594 tests in 48 suites. This is the identified root cause and implementation fix for that historical red, not a claim that new policy CI has passed.
+
+### #113 external-link window-set test gate
+
+Added a test-only component gate at the existing `ShellWindowSet.openFromOtherApp` entry point. The proposed optional
+`externalLinkDestination` resolver returns the existing plain `SettingsLinkDestination`; the proposed
+`LinkRoutingSettingsModel.destination(for:)` maps the canonical Core matcher to that value. An absent resolver keeps
+the historical #446 unconfigured path. Tests use the real model, sidebar and in-memory engine, and inspect Today rows,
+selected Space and Little Arkt engine URLs, including a nonmatching rule, competing rules in both orders, batch schemes,
+and both Blank and Incognito primary windows. The mapping boundary also checks exact-string matching and the configured
+default. These proposed names are test contracts, not production APIs. The fallback for a missing Space is unsettled and
+is not asserted.
+
+This gate does not exercise `AppDelegate.application(_:open:)`, the early-URL queue, AppSession's persisted settings load
+and resolver injection, or Chromium's engine window requests; those require a later composition gate. Source parsing and
+whitespace checks are not a test red. Full ShellKit and the app cannot be compiled locally on this baseline; GUI and
+XCUITest were not run. The focused actual-source probe stopped in the existing Motion dependency: the local compiler rejected `isolated deinit` without its experimental feature flag, before reaching the new tests. Zero tests ran. The intended missing-API red is **UNOBSERVED**; CI must establish it before implementation.
+
+### #113 external-link component dispatch
+
+The loaded CoreBridge editor maps Core's first-match destination to the existing plain ShellUI destination; an unloaded
+or currently loading snapshot returns nil. The optional window-set resolver dispatches each qualifying URL in order to
+Little Arkt, a specified Space, or the most recently main eligible regular window. Private and close-requested windows
+are excluded; if no regular host exists, a regular window is created. The returned per-input results distinguish ignored,
+unresolved and missing-Space URLs from dispatch, without choosing a missing-Space fallback. No resolver preserves #446.
+
+At `4b03f635cf08a7bab96b75617a2a6175bcb386a3`, the actual-source test-first gate compiled its dependencies and failed
+on seven missing `LinkRoutingSettingsModel.destination(for:)` references in the canonical Settings rows tests; zero tests
+ran. This supersedes the unsupported-toolchain attempt above. After implementation, Swift 6.4.1 with the macOS 15.5 SDK,
+`swift test --package-path integration/LinkRouting -j 2`, passed **54 tests in 12 suites**. Existing linker warnings
+reported missing developer framework and library search paths. Source parsing, changed-source import inspection and
+whitespace checks passed; parsing is not compilation or behavioral validation.
+
+The real window-set GUI tests, full ShellKit and App builds, GUI and XCUITest were not run locally. Normal CI must
+validate window behavior. AppDelegate early URL forwarding, AppSession readiness, retry and resolver injection, and
+Chromium startup window requests remain a later composition stage; no persisted startup routing is wired here.
+
+
+### #113: refused profile selection regression gate
+
+Review found that an existing target Space can belong to another profile: SidebarController.showSpace refuses it, but the dispatcher then opens in the unchanged Space and reports success. A new real-window-set regression uses a ModelSidebarSource containing two profiles. It covers an explicit other-profile destination and cold Most Recent with the other-profile Space first. It requires either genuine delivery into that requested Space or an unresolved result with no URL added elsewhere; this does not prescribe future profile routing or a fallback.
+
+The test was written before the dispatch fix. Swift 6.2.4 frontend parsing and whitespace checks passed. Its runtime red is unobserved: the local full GUI baseline cannot build and full Xcode is unavailable, so normal GUI CI must execute this gate before the production correction. No production code changes in this gate; the P2 remains open until corrected and verified. The prior 54-test actual-source result exercises mapping/persistence, not this real-window profile case.
+
+### #113: refused Space selection correction
+
+The runtime red is now observed at `d32aecbf0d8fe7a639426689723dbbca38062ef2`: GUI run 42483560826,
+job 128740543078, reported 2082 tests, 56 skipped and six failed assertions, all in
+`testRefusedProfileSelectionDoesNotDispatchIntoTheUnchangedSpace`. Both the explicit and cold Most Recent cases
+opened the URL in the unchanged local Space while reporting dispatch; the other six routed-opening methods passed.
+
+The smallest correction checks the host's actual current Space immediately after `showSpace` in both configured
+Space branches. A refused selection returns the existing unresolved result before the URL-open call. No cross-profile
+host policy or missing-Space fallback is added; the regression and existing component tests are unchanged. This is
+synchronous main-actor dispatch, with no new animation, I/O or hot-path polling.
+
+Swift 6.2.4 frontend parsing, changed-source import inspection and `git diff --check` passed. No local GUI, full
+ShellKit or App build ran; CI must establish green for the unchanged real-window regression. The historical
+54-test mapping/persistence run is not validation of this correction. App readiness, early URLs, persisted resolver
+injection and Chromium startup requests remain separate unfinished integration work; the PR stays draft.
+
+### #113 routed-opening green and real-app test gate
+
+At `5bf05088ddc053b8ddd641337f696a73595c5ee3`, run 42487745766 passed Core 595 tests in 48 suites,
+pure ShellKit 2544 tests in 288 suites, and GUI 2082 reported tests with 56 skipped and zero failures. All seven
+RoutedOpenFromOtherAppTests passed, including the unchanged refused-profile regression. The app build, lint and
+required aggregate passed; XCUITest was skipped. This verifies the component correction, not App-level forwarding.
+
+The next test-only gate adds six independent real-app warm/cold cases. Actual Settings configure a Space route,
+a Little Arkt route and a different Space default; NSWorkspace targets the validated CI bundle by path with the
+isolated environment. Loopback pages and visible destinations identify delivery. Independent source review found
+no definite P1/P2 test defect within this bounded positive gate. Source parsing, UI-source lint, actionlint,
+parity-report fixtures and whitespace checks passed; preparation API/fixture typechecks are not a full XCUITest
+typecheck. No app was launched locally and the intended runtime failure is unobserved.
+
+The gate cannot force an early event or held/failed routing read, prove no later duplicate without a queue-drained
+barrier, or establish Chromium startup handling/cancellation. A coordinator used by actual App composition with
+controlled routing reads and observable queue/readiness/failure/retry transitions is the next deterministic seam.
+The test-only gate changes no production routing. Whole-issue Peek/archive, profile and optional import scope remain
+unfinished; the PR stays draft.
+
+The first focused-dispatch attempt after publishing the app gate returned HTTP 422: this branch lacked the
+`ui_test_filter` workflow input, so no run started. The branch now carries the identical three selector hunks approved
+for #823 ([decision](https://github.com/krystianslowik/arkt/pull/823#issuecomment-6721409159)): optional empty input,
+environment forwarding and a quoted xcodebuild argument array. Empty input runs the full UI suite; a supplied
+selector runs that target/class. XcodeGen retry and checksum handling remain intact. Actionlint and whitespace checks
+passed. One focused run will be dispatched at the corrected head; no runtime red is established by the rejected
+dispatch or static checks.
+
+
+### #113 pure external-open readiness coordinator
+
+The missing-API test-first compilation red reached the canonical coordinator test target and ran zero tests.
+The implemented main-actor CoreBridge receiver retains URLs before and during reads, coalesces concurrent starts,
+retains inputs after a failed read for explicit retry, and reports all delivery outcomes in FIFO order. Duplicate
+URL events remain distinct; reentrant delivery and result callbacks append to the tail. Ready starts retain the
+original callbacks. No App composition or dispatch wiring changes are included.
+
+The probe source-links the production coordinator. After bounding canonical test waits and adding held-read cleanup,
+`SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX15.5.sdk /opt/homebrew/opt/swift/bin/swift test --package-path integration/LinkRouting -j 2`
+passed 60 tests in 13 suites. The coordinator filter passed 20 consecutive runs under CPU load (six tests in one
+suite per run). Deliberately disabling the coalescing guard made that filter fail with three issues, including a
+bounded incomplete-start failure instead of a hang; the guard was restored before the green run and commit.
+Detailed commands and load observations are in `docs/testing/link-routing-app-gate.md`.
+
+Swift 6.2.4 parsing and whitespace checks passed. Existing missing framework/library search-path linker warnings
+remain. This focused package is not run by CI, and no local full ShellKit, GUI or app build ran. The six real-app
+warm/cold tests have not executed yet: focused run 42491702781 was queued at the latest read. AppComposition ownership,
+AppDelegate early-event retention, session readiness and retry wiring, Chromium engine-window adoption, and native
+runtime validation remain separate gates. The PR stays draft.
+
+
+Independent review of local coordinator revision `8bcb01e` found no P1/P2 blockers and independently passed the
+six-test filter. The follow-up makes the harness's optional Bool unwrap explicit to remove a Swift Testing warning
+and asserts retained delivery callback values. Replacing only that callback deliberately fails the strengthened
+assertion; the final restored full probe passes 60 tests in 13 suites. Existing linker search-path warnings remain.
+Cancellation/lifetime behavior and the uncapped queue's retained peak capacity are documented integration constraints,
+not verified App behavior. The native app gate still has no observed runtime result here.
+
+
+### External-link App composition (#113)
+
+The three warm cases of native run 42491702781 at `0f2f48081d93e8e2222596e6642fa59df4777d1e` delivered their fixture pages to the wrong existing Space, failing the first destination assertion. The three cold cases instead showed onboarding with unverified profile identity; they do not establish routing-specific failures. See [the app gate](../testing/link-routing-app-gate.md) for details and remaining boundaries.
+
+Composition now retains early AppKit batches, starts the single shared routing editor after the window/engine readiness seam, resolves current settings per input, and owns blocked outcomes without choosing a fallback. Failed reads retain the undelivered queue for explicit retry. Existing engine request and recovery ordering remains separate; no Chromium startup-window adoption is claimed. Native App validation of this wiring remains pending.
+
+The focused actual-source probe passed 60 tests in 13 suites, including all six coordinator contracts:
+
+```sh
+SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX15.5.sdk /opt/homebrew/opt/swift/bin/swift test --package-path integration/LinkRouting -j 2
+```
+
+The build reported missing framework and library search-path linker warnings. Swift 6.2.4 frontend parsing of the two changed App sources and `git diff --check` passed. Parsing is not typechecking; the focused package does not compile or exercise App composition. Full local ShellKit, app build, GUI and app launch were not run. No App-specific test count or native green is claimed.
+
+
+### #113 reachable read retry and quit delivery suspension
+
+The App composition review at `1a8f13e` found an unreachable failed-read retry and a held-read delivery race with
+quit capture. Composition now retries after incoming URLs and successful shared-editor reads, with the same editor
+and ordered queue. It pauses delivery before session capture, starts no new reads while terminating, and resumes
+after cancellation has restored session writes. Pending tails survive a pause during callbacks.
+
+Three actual-source regressions first failed compilation on the absent pause/resume/load-notification APIs, with
+zero tests run. After implementation, the supported integration/LinkRouting probe passed 63 tests in 13 suites.
+The nine-test coordinator filter passed 20 consecutive runs under CPU load. Deliberately disabling pause failed six
+assertions; omitting the successful-load notification failed the retry scenario. Both breaks were restored before
+final green. Swift 6.2.4 source parsing, layering and whitespace checks passed; existing linker-path warnings remain.
+
+These results cover production CoreBridge sources and the model's Settings adapter, not actual App forwarding or
+native quit cancellation. No local full App/GUI build or launch ran. Cold OS-open profile identity remains unverified,
+so the prior cold onboarding failures are not routing evidence and no new cold run is dispatched here.
+
+
+### #113 mandatory UI-test startup guard and cold preflight
+
+The Debug guard now precedes defaults migration, NSApplication and delegate construction. An independent bundle
+flag defaults to NO in ordinary configurations and is set to YES only by the UI workflow. Required builds reject
+a missing UI-test flag or incomplete existing overrides; explicit UI-test launches also validate when the bundle
+flag is off. The guard reuses the existing validator and adds no report destination or path-authority claim.
+
+The actual-source StartupPolicy probe first failed compilation on eight missing-policy API errors, with zero tests
+run, then passed 22 tests in one suite (five new policy cases and seventeen existing cases). Publication repeated
+that supported probe successfully: `SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX15.5.sdk /opt/homebrew/opt/swift/bin/swift test --package-path integration/StartupPolicy -j 2`.
+Three linker search-path warnings remain. Independent source review found no P1/P2 blockers; it did not execute the
+probe and did not inspect a generated plist or built binary.
+
+The cold helper now refuses to invoke OS open without the expected String YES in the actual bundle, repeats the
+validated-bundle/no-running-instance preflight, disables substitution, requests a fresh instance, and checks the
+returned bundle URL and nonzero PID. All six route/default cases and assertions remain. Swift parsing, source
+layering/UI lint, actionlint, startup-order inspection and whitespace checks passed. No local full App/GUI build or
+launch ran. Generated flag values, compiled startup behavior, effective sandbox/process correlation and persisted
+profile identity are not established. No cold native run is dispatched by this stage.
+
+
+### #113 loopback process and profile identity barrier
+
+The Debug FakeEngine app captures a digest of a fixed effective-environment whitelist and its PID, then awaits an
+exact one-shot nonce/digest acknowledgement from the existing test fixture before session composition. The endpoint
+accepts literal loopback HTTP only, uses ephemeral transport and refuses redirects. It sends neither raw paths nor
+a full environment. Invalid or rejected identity cannot fall through to AppSession startup. Early URLs remain in
+the existing receiver. The cold harness correlates the report with the returned PID and sole validated bundle
+instance, then inspects the persisted Spaces/default/routes without editing them.
+
+Codec and fixture contracts each first failed compilation on missing APIs with zero tests run. The final supported
+`integration/StartupPolicy` actual-source probe passed 26 tests in three suites, including its existing 22 policy
+tests. It source-links the real codec, fixture server and harness error. Three existing linker search-path warnings
+remain. Independent source review found no P1/P2 blocker; it did not execute the probe. Swift parsing, source-layer
+and UI lint, actionlint and whitespace checks passed separately. No local App/GUI build or launch ran.
+
+This supports the checked-in Debug FakeEngine UI-test scheme; Profile/Release test-target closure and Chromium
+identity reporting are not claimed. Native metadata, handshake, Settings/profile accessibility, process-to-proxy
+association and routing results remain unobserved. One focused disposable-CI run is the next observation; any
+identity/profile setup failure must remain separate from a routing failure. The known cold onboarding failures at
+`0f2f480` are not upgraded to routing evidence by this source change.
+
+
+### Warm external-open App gate green; cold identity still fails (#113)
+
+At `d1c845528a9d69a352fe1ae27552d414401e9b32`, [focused native run 42503418016](https://github.com/krystianslowik/arkt/actions/runs/42503418016)
+executed six cases. The three warm cases passed through real Settings, persisted model composition and OS delivery:
+explicit Space, Little Arkt and a non-fresh default Space. The three cold cases failed immediately at the OS-returned
+application identity guard, before handshake/profile/destination checks. They establish no cold routing result.
+The diagnostic now records PID, process state, bundle paths and identity request/acceptance state without weakening
+the guard or disclosing environment values. One focused cold diagnostic is the next runtime boundary.
+
+The normal PR [GUI run 42503385805](https://github.com/krystianslowik/arkt/actions/runs/42503385805) reported 2111 tests,
+61 skipped and one lifetime failure: routed-open fixtures retained three hidden regular and three Little Arkt
+windows. Teardown only hid them. It now ends controlled engine windows, closes/settles both window types and
+asserts both set collections are empty. The existing lifetime gate is unchanged. Required checks and App build
+passed at `d1c8455`; those results do not establish the repaired teardown. Parsing, exact workflow import/UI-source
+checks, focused SDK typechecking of process diagnostic properties and whitespace checks passed. No local GUI/App
+launch or full build ran, and no new native or GUI result is claimed for the repair.
+
+
+### Cold startup exits before ACK; scoped stage diagnostics (#113)
+
+At `6c3b4a1`, [native run 42505101865](https://github.com/krystianslowik/arkt/actions/runs/42505101865) executed one
+cold Space case. It stopped at the identity guard with PID -1, terminated true, finished-launching false, nil bundle,
+no accepted identity and zero identity requests. No profile or routing assertion ran. The required normal PR checks
+and App build passed; GUI remained in progress at the read. The cause of the early exit is unconfirmed.
+
+Debug-only startup stage logs and a failure-only workflow artifact now distinguish validation, request creation,
+and ACK send/rejection without changing the guards or logging environment values. The existing actual-source policy/
+codec/fixture probe passed 26 tests in three suites. The real pre-migration prefix plus dependencies type-checked
+against the SDK; parsing, import/UI-source checks, actionlint and whitespace checks passed. These checks do not
+compile the entire App delegate or establish native behavior. No local App/GUI launch ran; a single focused cold
+probe after publication remains necessary.
+
+
+### Cold environment loss established; normal URL-open mode probe (#113)
+
+At `536fadb`, startup artifact 13629805156 from run 42508318180 shows a cold PID rejected before migration with
+all four required overrides missing and no identity request. Warm setup had validated its own environment. The
+cause within LaunchServices remains unconfirmed. A single cold probe now uses its normal new-process path after
+no-instance preflight, with forced-new-instance false; substitution remains disabled and every mandatory guard,
+ACK, returned bundle/PID, sole-instance and persisted-profile requirement remains. This test-only change has no
+runtime result yet and is not evidence of a fix.
+
+Normal GUI job128815775358 reported 2120 tests, 63 skipped and two lifetime failures. The owned routed-open fixture
+no longer leaked regular windows, but three Little Arkt windows remained despite engine/close cleanup. Another
+existing class left a DialogWindow. Existing #817 documents similar Little Arkt external retention; this does not
+prove the same retainer. The lifetime guard/allowlist is unchanged, and no new issue was taken. No GUI green is
+claimed. Parser, source and whitespace checks cover the harness edit only; no local App/GUI launch ran.
+
 ## Composite Space theme overlays (#534)
 
 The drawn base and opacity-scaled overlay are expanded in OKLab and source-over composited at the union of their
@@ -2930,3 +3317,82 @@ maintainer hardware after landing. No frame-time improvement is claimed. Merged 
 the deterministic completion and asynchronous download cancellation fixes. The existing 50% contrast fallback may
 remain below target, contrast samples do not cover every point or texture, and the pre-existing empty-base
 opacity-scaling limitation remains unchanged.
+
+
+### Main recovery, retention and theme integration (#113)
+
+The reviewed local merge `863e60c` retained both routing and recovery flush/quit contracts and main's #833 retained-
+window fixes. Independent source review found no P1/P2 defect but established no runtime result. A follow-up main
+`859c4ce` merge resolved only the results-history append; critical AppSession/AppComposition/WindowSet files are
+byte-identical to that reviewed merge. Both histories remain, and inherited patch whitespace is untouched. Source
+validation passed; no merged-head build, GUI/native test or focused probe ran locally. Fresh CI and a representative
+combined recovery/routing gate remain required before whole-feature acceptance.
+
+### #113 reviewed carrier contract and recovery coexistence gate
+
+Added the reviewed pure, Debug-only launch-argument carrier; it remains unwired to App startup and NSWorkspace. Explicit optional switches reject unknown values. The added regression failed with 16 assertions before that fix; the actual-source startup probe passed 31 tests in four suites afterward, with the existing linker search-path warnings. Pure transport green does not prove native argument delivery, pre-migration application of configuration, PID/XCUI association, or cold routing. All mandatory bundle, ACK and profile barriers remain in place.
+
+Added Shell-boundary tests for routed Space/Little Arkt activity during unanswered crashed recovery, cancellation, Restore/Dismiss and empty acknowledgment. Review follow-up leaves the source recorder writable during the quit interval and checks recovery-record count as well as URLs. These tests were parsed, not type-checked or executed; they do not prove App quit ordering or the native #803 crash marker.
+
+Main `1188868` integrated without conflict after these local changes. Import/UI-source checks, actionlint, Swift parsing and engine-header parity were checked; no local full App/ShellKit/GUI build or launch was performed. Merged-head CI remains pending.
+
+### #113 reviewed cold-launch wiring and overlap note
+
+The reviewed carrier application wiring now shares an immutable validated effective configuration across all known Debug startup consumers before migration. The cold helper sends the same whitelisted synthetic values as arguments and retains all existing identity/profile barriers. The mandatory UI workflow uses a distinct Debug app bundle ID and records free space; normal product and other configuration defaults remain unchanged. A fresh focused native probe is required; no cold success is claimed.
+
+Maintainer overlap comment `6726449896` was checked against open PR #854 at `e4d3eb7`: its Appearance switch, inverted `tabReorderingHapticsDisabled` reset key, and `ReorderHapticGate.bind(settings)` are independent of routing. No competing implementation or merge of the unlanded PR is needed. Preserve these hunks when main is next integrated after either side lands.
+
+Root reran the actual-source StartupPolicy probe after integrating the wiring: 34 tests in five suites passed. Seven changed Swift sources parsed; import/UI-source checks, parity-report tests, actionlint, header parity and whitespace checks passed. Root's harness follow-up pins mandatory UI-test metadata to the isolated Debug bundle and registers cleanup for the exact OS-returned application instance. These checks do not compile the full App or exercise the new native transport. One focused cold Space probe is the next observation.
+
+### #113 unsupported carrier removal
+
+The native `cf931df` job `128853920919` signs the actual UI runner with App Sandbox enabled: its packaging output contains `com.apple.security.app-sandbox = 1`, and codesign uses that same `.xcent` for the Runner app. Apple explicitly ignores OpenConfiguration.arguments from sandboxed callers. The unused argument carrier, composition snapshot and their source-linked tests are removed; AppEnvironment, onboarding and main return to the previously reviewed environment-only guard. The mandatory pre-migration metadata/override check and all identity/profile/isolated-bundle/exact-instance cleanup barriers remain. Missing environment transport is still unexplained. The cold test is retained and is not claimed green; no blind native retry is dispatched. The earlier 34-test carrier run is historical evidence for removed code, not retained feature acceptance.
+
+After removal, root reran the retained actual-source StartupPolicy probe: 26 tests in three suites passed (`/tmp/arkt-825-carrier-removed-green.log`). Changed Swift parsing, import/UI-source checks, parity-report tests, actionlint, header parity and whitespace checks passed. Main, AppEnvironment and onboarding match the previously reviewed environment-only startup implementation at `495d2a5`. No native rerun or local full App/GUI build was performed; fresh CI is pending.
+
+
+### #113 explicit archive restore routing (2026-11-08)
+
+The test-only gate at `6bff3b4` reached the intended missing-provider compilation failure in run 42526445558 / ShellKit job 128871049653; zero tests ran. The coordinator now selects the first explicit tab-URL match into an existing same-profile Space before its single source restore mutation and unchanged outbox withdrawal. AppSession supplies the shared editor's loaded snapshot, including unsaved edits. An unloaded/reloading/failed snapshot or unavailable explicit destination leaves the archive entry available for retry. Unmatched restore keeps existing placement; unsupported destinations and Favorite/folder/split behavior remain bounded as documented in `docs/testing/archive-route-restore-gate.md`.
+
+The actual-source ArchiveRouting probe passed **6 tests in 2 suites** on Swift 6.4.1 with the 15.5 SDK. A routing-bypass mutation failed both explicit-match parameter cases with eight issues; the restored implementation passed the full focused suite. The separate readiness test first failed compilation on the missing loaded-snapshot API. Linker warnings identify missing developer framework/library search directories. Parsing and source checks are recorded in the PR; the probe does not compile the AppSession binding or exercise the Archive window/list-model, SQLite, OS delivery or Chromium. Full-target/App and UI validation remain unverified locally. Broader #113 acceptance is incomplete.
+
+
+### #113 full-suite archive fixture correction and main integration (2026-11-08)
+
+At `5006b7e`, run 42528538251 / ShellKit job 128877432002 compiled the new archive path and ran 2,612 tests / 300 suites, reporting 14 issues exclusively at new routing fixtures' termination `flush()` assertions. App build, Core and lint passed. Ordinary fake-store persistence is now awaited through finite writer/store state barriers, retaining placement, identity, row-retention and persisted-removal assertions. Production deadlines and termination tests are unchanged. The actual-source probe passed **6 tests in 2 suites** after this fixture correction; full-suite validation is pending.
+
+Main `a47246b` is integrated. The incoming AddressBarNavigationTests fixture also uses the existing closeAllForTesting helper rather than ordering controllers out; this is the same bounded teardown repair prompted by #828's observed panel leak, with the guard and feature assertions retained. Source checks are recorded in the PR. No local full ShellKit/App build or GUI/native launch ran. SwiftPM cleaned only this session's generated Core probe build outputs to recover disk; source and test logs were retained.
+
+
+### #113 main integration after archive-routing green
+
+Parent `d16a3ed` passed run `42530705642`: Core 598 tests / 50 suites, pure ShellKit 2,612 / 300, GUI 2,189 reported /
+64 skipped / zero failures, App build, lint and required aggregate. Archive explicit-match, unavailable/retry,
+unmatched-placement, loaded-snapshot and list-model cases passed. Normal XCUITest was skipped; no cold green is claimed.
+
+Merged main `ff5bb59`, retaining the landed haptics Appearance row, inverted reset key, observer and AppSession gate
+binding. The sole conflict was the equivalent AddressBarNavigationTests array-release spellings; main's `sets = []`
+and explanatory comment are retained with the already-added `closeAllForTesting()` call. Routing source behavior and
+all guards/assertions are unchanged. Fresh merged-head CI remains necessary; parent passes do not validate this merge.
+Parsing of all 12 incoming/resolved Swift files, workflow import/UI-source checks, parity-script tests, actionlint,
+ABI header comparison and staged whitespace checks passed. No local merged-head App/ShellKit/GUI build or native
+launch ran; the previous archive-routing probe and full CI remain parent-head evidence.
+
+
+### #113 cleanup-success test separates durability from the quit deadline
+
+Run `42533455794` at `a101fd3` compiled the target but failed one of 2,617 pure tests / 301 suites:
+`failedLoadRetainsPendingRemovalForRetry` expected a successful termination flush with the production one-second
+real-clock deadline. Its store fails the initial read but has no paused or failing write; this case tests cleanup
+persistence/retry, not deadline expiry. The success fixture now explicitly injects `flushTimeout: nil`, as the
+existing successful termination-ordering and SQLite cases do. Production deadlines, all persistence assertions,
+and the separate zero-timeout error/dirty-state regressions are unchanged. Core, App build and lint passed;
+the informative GUI job was still running when inspected.
+
+The source-linked `integration/LinkRouting` probe passed **7 Space-removal tests in one suite**, then **8 existing
+editor-failure/termination tests in two suites**, including normal and blocking timeout controls. Commands used
+Swift 6.4.1 with the macOS 15.5 SDK and `-j 2`, filtered by `LinkRoutingSpaceRemovalTests` and
+`LinkRouting(EditorFailure|Termination)Tests`. The build emitted missing toolchain/framework/library search-path
+warnings. The canonical source parsed and whitespace checks passed. No full local ShellKit/App/GUI build or native
+launch ran; fresh full CI remains required and this result does not establish a general CI timing diagnosis.

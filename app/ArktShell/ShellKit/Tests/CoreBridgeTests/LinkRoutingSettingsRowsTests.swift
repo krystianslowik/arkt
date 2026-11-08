@@ -1,0 +1,185 @@
+import CoreBridge
+import Foundation
+import ShellUI
+import SidebarModel
+import Testing
+
+/// The Settings adapter must share its editor; these tests do not substitute for AppSession composition or UI tests.
+@MainActor
+struct LinkRoutingSettingsRowsTests {
+  private let firstSpace = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+  private let secondSpace = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+  private let route = LinkRouting.Route(condition: .contains("literal/Path"), destination: .littleArkt)
+
+  @Test func twoConsumersKeepEditsAndOrderedDuplicatesAcrossReopen() async {
+    let store = RoutingRowsStore(initial: LinkRouting(routes: [route, route]))
+    let model = LinkRoutingSettingsModel(state: store)
+    let first = model.settingsRows
+    let second = model.settingsRows
+    await first.load()
+    #expect(first.destination() == .littleArkt)
+    first.setDestination(.space(firstSpace))
+    #expect(await first.flush())
+    #expect(second.destination() == .space(firstSpace))
+    second.setDestination(.space(secondSpace))
+    #expect(await second.flush())
+    let reopened = LinkRoutingSettingsModel(state: store)
+    await reopened.load()
+    #expect(reopened.settings == LinkRouting(routes: [route, route], defaultDestination: .space(secondSpace)))
+  }
+
+  @Test func allDestinationsRoundTripWithoutTitleIdentity() async {
+    let store = RoutingRowsStore(initial: LinkRouting(routes: [route, route]))
+    let model = LinkRoutingSettingsModel(state: store)
+    let rows = model.settingsRows
+    await rows.load()
+    for destination in [SettingsLinkDestination.mostRecentSpace, .space(firstSpace), .space(secondSpace), .littleArkt] {
+      rows.setDestination(destination)
+      #expect(await rows.flush())
+      let reopened = LinkRoutingSettingsModel(state: store)
+      await reopened.load()
+      #expect(reopened.settingsRows.destination() == destination)
+      #expect(reopened.settings.routes == [route, route])
+    }
+  }
+
+  @Test func concurrentConsumersWaitForTheSameLoad() async {
+    let stored = LinkRouting(routes: [route], defaultDestination: .space(firstSpace))
+    let store = PausedRoutingRowsStore(initial: stored)
+    let model = LinkRoutingSettingsModel(state: store)
+    let first = model.settingsRows
+    let second = model.settingsRows
+    let firstLoad = Task { await first.load() }
+    await store.waitForLoad()
+    let secondLoad = Task { await second.load() }
+    #expect(second.destination() == nil)
+    await store.resume()
+    await firstLoad.value
+    await secondLoad.value
+    #expect(first.destination() == .space(firstSpace))
+    #expect(second.destination() == .space(firstSpace))
+  }
+
+  @Test func failedSaveIsVisibleToReopenedConsumerUntilRetrySucceeds() async {
+    let store = RetryRowsStore(initial: LinkRouting(routes: [route, route]))
+    let model = LinkRoutingSettingsModel(state: store)
+    let first = model.settingsRows
+    await first.load()
+    first.setDestination(.mostRecentSpace)
+    #expect(!(await first.flush()))
+    let reopened = model.settingsRows
+    await reopened.load()
+    #expect(reopened.destination() == .mostRecentSpace)
+    #expect(reopened.hasSaveError())
+    reopened.setDestination(.mostRecentSpace)
+    #expect(await reopened.flush())
+    #expect(!reopened.hasSaveError())
+    #expect(await store.value == LinkRouting(routes: [route, route], defaultDestination: .mostRecentSpace))
+  }
+
+  @Test func failedLoadCannotWriteDefaultAndCanRetry() async {
+    let stored = LinkRouting(routes: [route, route], defaultDestination: .space(secondSpace))
+    let store = RoutingRowsStore(initial: stored, failLoad: true)
+    let model = LinkRoutingSettingsModel(state: store)
+    let rows = model.settingsRows
+    await rows.load()
+    #expect(rows.destination() == nil)
+    #expect(rows.hasLoadError())
+    rows.setDestination(.littleArkt)
+    #expect(await rows.flush() == false)
+    #expect(await store.value == stored)
+    await rows.load()
+    #expect(!rows.hasLoadError())
+    #expect(rows.destination() == .space(secondSpace))
+  }
+}
+
+private actor RoutingRowsStore: LinkRoutingSettingsStoring {
+  enum Failure: Error { case read }
+  private(set) var value: LinkRouting
+  private var failLoad: Bool
+  init(initial: LinkRouting, failLoad: Bool = false) { value = initial; self.failLoad = failLoad }
+  func loadLinkRouting() async throws -> LinkRouting {
+    if failLoad { failLoad = false; throw Failure.read }
+    return value
+  }
+  func updateLinkRouting(at date: Date, _ change: @escaping @Sendable (inout LinkRouting) -> Void) async throws -> LinkRouting {
+    change(&value)
+    return value
+  }
+}
+
+private actor PausedRoutingRowsStore: LinkRoutingSettingsStoring {
+  private let value: LinkRouting
+  private var paused: CheckedContinuation<Void, Never>?
+  private var started: CheckedContinuation<Void, Never>?
+  private var shouldPause = true
+  init(initial: LinkRouting) { value = initial }
+  func waitForLoad() async {
+    if paused != nil { return }
+    await withCheckedContinuation { started = $0 }
+  }
+  func resume() { paused?.resume(); paused = nil }
+  func loadLinkRouting() async throws -> LinkRouting {
+    if shouldPause {
+      shouldPause = false
+      await withCheckedContinuation { continuation in
+        paused = continuation
+        started?.resume()
+        started = nil
+      }
+    }
+    return value
+  }
+  func updateLinkRouting(at date: Date, _ change: @escaping @Sendable (inout LinkRouting) -> Void) async throws -> LinkRouting {
+    var copy = value
+    change(&copy)
+    return copy
+  }
+}
+
+private actor RetryRowsStore: LinkRoutingSettingsStoring {
+  enum Failure: Error { case requested }
+  private(set) var value: LinkRouting
+  private var fail = true
+  init(initial: LinkRouting) { value = initial }
+  func loadLinkRouting() async throws -> LinkRouting { value }
+  func updateLinkRouting(at date: Date, _ change: @escaping @Sendable (inout LinkRouting) -> Void) async throws -> LinkRouting {
+    if fail { fail = false; throw Failure.requested }
+    change(&value)
+    return value
+  }
+}
+
+/// The dispatch adapter returns ShellUI values while Core remains the only matcher.
+@MainActor
+struct LinkRoutingDestinationBoundaryTests {
+  @Test func unloadedModelDoesNotResolveItsPlaceholderSnapshot() {
+    let model = LinkRoutingSettingsModel(state: RoutingRowsStore(initial: LinkRouting(routes: [])))
+    #expect(model.destination(for: URL(string: "https://example.com/")!) == nil)
+  }
+
+  @Test func loadedModelMapsOrderedMatchesAndDefaultToPlainDestinations() async {
+    let space = UUID(uuidString: "00000000-0000-0000-0000-000000000101")!
+    let target = URL(string: "https://example.com/Path?q=One")!
+    let first = LinkRouting.Route(condition: .contains("EXAMPLE.COM/path"), destination: .space(space))
+    let second = LinkRouting.Route(condition: .matches(target.absoluteString), destination: .mostRecentSpace)
+    let store = RoutingRowsStore(initial: LinkRouting(routes: [
+      .init(condition: .contains("absent"), destination: .littleArkt), first, second,
+    ]))
+    let model = LinkRoutingSettingsModel(state: store)
+    await model.load()
+    #expect(model.destination(for: target) == .space(space))
+    model.replaceRoute(at: 1, with: second)
+    model.replaceRoute(at: 2, with: first)
+    #expect(model.destination(for: target) == .mostRecentSpace)
+    #expect(model.destination(for: URL(string: "https://example.org/other")!) == .littleArkt)
+    model.setDefaultDestination(.space(space))
+    #expect(model.destination(for: URL(string: "https://example.org/other")!) == .space(space))
+    // Matches does not normalize case or ignore the query.
+    model.removeRoute(at: 2)
+    model.setDefaultDestination(.littleArkt)
+    #expect(model.destination(for: URL(string: "https://example.com/path?q=One")!) == .littleArkt)
+    #expect(model.destination(for: URL(string: "https://example.com/Path")!) == .littleArkt)
+  }
+}

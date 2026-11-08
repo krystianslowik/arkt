@@ -91,6 +91,14 @@ struct EnvironmentOverrides {
   /// Strict UI-test mode (`ARKT_UITEST=1`): the app refuses to start unless every override is set.
   var isUITest: Bool { environment[Self.uiTestKey] == "1" }
 
+  /// Required builds fail closed even when the launch environment was lost. Explicit UI-test launches always validate.
+  func uiTestStartupViolations(required: Bool, bundleIdentifier: String?) -> [String] {
+    guard required || isUITest else { return [] }
+    var violations = required && !isUITest ? [Self.uiTestKey] : []
+    violations += missingUITestOverrides(bundleIdentifier: bundleIdentifier)
+    return violations
+  }
+
   /// The names of the overrides strict mode needs that are unset, empty or (for the suite) unusable, in key order.
   func missingUITestOverrides(bundleIdentifier: String?) -> [String] {
     var missing: [String] = []

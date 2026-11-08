@@ -41,6 +41,9 @@ public final class ShellWindowSet {
   /// The sidebar banner (#648): every window this set builds shows its notice. Nil: no banner.
   public var sidebarBanner: SidebarBannerCenter?
 
+  /// Nil preserves the historical external-open path. A configured resolver returns nil until routing is ready.
+  public var externalLinkDestination: (@MainActor (URL) -> SettingsLinkDestination?)?
+
   private let hostLookup: HostLookup?
   private let recoveryPageSource: (any RecoveryPageSource)?
   private let priorRecoveryPages: [ShellRecoveryPage]
@@ -140,6 +143,15 @@ public final class ShellWindowSet {
       if let controller = open.first(where: { ObjectIdentifier($0) == id }) { return controller }
     }
     return open.first
+  }
+
+  /// The most recently main regular window eligible to receive a new external link.
+  var externalLinkHost: ShellWindowController? {
+    let eligible = controllers.filter { !$0.isPrivateWindow && !$0.isWindowCloseRequested }
+    for id in mainOrder.reversed() {
+      if let window = eligible.first(where: { ObjectIdentifier($0) == id }) { return window }
+    }
+    return eligible.first
   }
 
   // Test observation after initial recovery routing, before the caller can change the window.

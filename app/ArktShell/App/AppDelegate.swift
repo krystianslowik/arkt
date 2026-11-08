@@ -19,17 +19,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   #endif
 
   func applicationDidFinishLaunching(_ notification: Notification) {
-    #if DEBUG
-    // Strict UI-test mode: refuse to start, before any disk access, unless every override points away from the real
-    // data and defaults.
-    if AppEnvironment.isUITest {
-      let missing = AppEnvironment.missingUITestOverrides()
-      if !missing.isEmpty {
-        AppSession.log.error("uitest missing overrides \(missing.joined(separator: " "), privacy: .public)")
-        exit(64)
-      }
-    }
-    #endif
     MainMenu.install(commands: composition.commands)
     #if DEBUG
     switch EnvironmentOverrides(environment: ProcessInfo.processInfo.environment).appearance {
@@ -39,18 +28,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     #endif
     NSApp.activate()
-    #if DEBUG || ARKT_SMOKE_BUILD
-    // Only the command line counts (`-ArktSmoke YES`), never a persisted default.
-    if SmokeArguments.isEnabled {
-      startSmoke()
-      return
-    }
-    #endif
     Task { [composition] in
+      #if DEBUG
+      if let identity = startupIdentity {
+        startupLog.notice("stage=identity-send")
+        do {
+          try await TestIdentity.send(identity)
+          startupLog.notice("stage=identity-accepted")
+        } catch {
+          startupLog.error("stage=identity-send-rejected")
+          exit(64)
+        }
+      }
+      #endif
+      #if DEBUG || ARKT_SMOKE_BUILD
+      // Only the command line counts (`-ArktSmoke YES`), never a persisted default.
+      if SmokeArguments.isEnabled {
+        startSmoke()
+        return
+      }
+      #endif
       do {
-        try await composition.start(engine: FakeEngine())        // FakeEngine: composition root only
+        try await composition.start(engine: FakeEngine())
       } catch {
-        composition.quit()                                       // Quit in the launch-failure alert
+        composition.quit()
       }
     }
   }
@@ -124,7 +125,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   /// A link or file another app opened with Arkt (it can be the default browser, onboarding section 6.4).
   func application(_ application: NSApplication, open urls: [URL]) {
-    composition.session?.openFromOtherApp(urls)
+    composition.openFromOtherApp(urls)
   }
 
   /// The Dock menu (#356): the Little Arkt windows and their actions, New Window and New Little Arkt Window.

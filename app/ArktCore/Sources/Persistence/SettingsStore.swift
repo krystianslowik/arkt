@@ -2,6 +2,7 @@ import ArcImport
 import Archive
 import Foundation
 import GRDB
+import SidebarModel
 
 /// A typed group of settings stored as one JSON value under `storageKey`.
 public protocol SettingsGroup: Codable, Sendable {
@@ -141,6 +142,26 @@ public struct SettingsStore: Sendable {
     }
   }
 
+  /// Loads routing from the existing typed settings group.
+  @concurrent
+  public func loadLinkRouting() async throws -> LinkRouting { try await load(LinkRouting.self) }
+
+  /// Applies a change to the routing group in one database transaction and returns the stored value.
+  @concurrent
+  public func updateLinkRouting(
+    at date: Date, _ change: @escaping @Sendable (inout LinkRouting) -> Void
+  ) async throws -> LinkRouting {
+    dispatchPrecondition(condition: .notOnQueue(.main))
+    let key = LinkRouting.storageKey
+    let updatedAt = date.timeIntervalSinceReferenceDate
+    return try await database.writer.write { db in
+      var routing = Self.decode(LinkRouting.self, from: try Self.fetchValue(db, key: key))
+      change(&routing)
+      try Self.store(db, key: key, value: try Self.encode(routing), updatedAt: updatedAt)
+      return routing
+    }
+  }
+
   private static func fetchValue(_ db: Database, key: String) throws -> Data? {
     // Optional read: the table is STRICT, so a non-BLOB value cannot occur; nil means missing.
     try Data.fetchOne(db, sql: "SELECT value FROM setting WHERE key = ?", arguments: [key])
@@ -166,6 +187,8 @@ public struct SettingsStore: Sendable {
     return (try? JSONDecoder().decode(Group.self, from: data)) ?? Group.defaultValue
   }
 }
+
+extension SettingsStore: LinkRoutingSettingsStoring {}
 
 extension SettingsStore: ArchiveStateStoring {}
 

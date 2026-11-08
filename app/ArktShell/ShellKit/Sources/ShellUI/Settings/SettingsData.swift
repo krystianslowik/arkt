@@ -29,6 +29,8 @@ public struct SettingsServices {
   public var openLibrary: (@MainActor () -> Void)?
   /// Settings > Spaces and Profiles > Archive (#448); both rows stay planned while nil.
   public var archiveRows: SettingsArchiveRows?
+  /// Link routing uses the session-owned editor; nil keeps the row planned.
+  public var linkRoutingRows: SettingsLinkRoutingRows?
 
   public init() {}
 }
@@ -55,6 +57,74 @@ public struct SettingsArchiveRows {
     self.littleArktAfter = littleArktAfter
     self.setLittleArktAfter = setLittleArktAfter
     self.reset = reset
+  }
+}
+
+/// A destination identified independently of its display title.
+public enum SettingsLinkDestination: Equatable, Sendable {
+  case littleArkt, mostRecentSpace, space(UUID)
+
+  /// Qualifies repeated titles by their sidebar order while preserving the underlying IDs.
+  static func spaceChoices(_ spaces: [SettingsSpaceSummary]) -> [(String, SettingsLinkDestination)] {
+    var counts: [String: Int] = [:]
+    for space in spaces { counts[space.title, default: 0] += 1 }
+    return spaces.enumerated().map { index, space in
+      let title = counts[space.title, default: 0] > 1 ? "\(space.title) (Space \(index + 1))" : space.title
+      return (title, .space(space.id))
+    }
+  }
+}
+
+public struct SettingsLinkRoute: Equatable, Sendable {
+  public enum Condition: Equatable, Sendable { case contains(String), matches(String) }
+  public var condition: Condition
+  public var destination: SettingsLinkDestination
+  public init(condition: Condition, destination: SettingsLinkDestination) {
+    self.condition = condition
+    self.destination = destination
+  }
+}
+
+@MainActor
+public struct SettingsLinkRoutingRows {
+  public var load: @MainActor () async -> Void
+  public var destination: @MainActor () -> SettingsLinkDestination?
+  public var routes: @MainActor () -> [SettingsLinkRoute]
+  public var appendRoute: @MainActor (SettingsLinkRoute) -> Void
+  public var replaceRoute: @MainActor (Int, SettingsLinkRoute) -> Void
+  public var replaceRouteIfUnchanged: @MainActor (Int, [SettingsLinkRoute], SettingsLinkRoute) -> Bool
+  public var removalGeneration: @MainActor () -> Int
+  public var hasLoadError: @MainActor () -> Bool
+  public var hasSaveError: @MainActor () -> Bool
+  public var setDestination: @MainActor (SettingsLinkDestination) -> Void
+  public var flush: @MainActor () async -> Bool
+
+  public init(load: @escaping @MainActor () async -> Void,
+              destination: @escaping @MainActor () -> SettingsLinkDestination?,
+              routes: @escaping @MainActor () -> [SettingsLinkRoute] = { [] },
+              appendRoute: @escaping @MainActor (SettingsLinkRoute) -> Void = { _ in },
+              replaceRoute: @escaping @MainActor (Int, SettingsLinkRoute) -> Void = { _, _ in },
+              replaceRouteIfUnchanged: (@MainActor (Int, [SettingsLinkRoute], SettingsLinkRoute) -> Bool)? = nil,
+              removalGeneration: @escaping @MainActor () -> Int = { 0 },
+              hasLoadError: @escaping @MainActor () -> Bool,
+              hasSaveError: @escaping @MainActor () -> Bool = { false },
+              setDestination: @escaping @MainActor (SettingsLinkDestination) -> Void,
+              flush: @escaping @MainActor () async -> Bool) {
+    self.load = load
+    self.destination = destination
+    self.routes = routes
+    self.appendRoute = appendRoute
+    self.replaceRoute = replaceRoute
+    self.replaceRouteIfUnchanged = replaceRouteIfUnchanged ?? { index, expected, route in
+      guard routes() == expected, expected.indices.contains(index) else { return false }
+      replaceRoute(index, route)
+      return true
+    }
+    self.removalGeneration = removalGeneration
+    self.hasLoadError = hasLoadError
+    self.hasSaveError = hasSaveError
+    self.setDestination = setDestination
+    self.flush = flush
   }
 }
 

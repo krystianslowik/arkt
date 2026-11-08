@@ -46,6 +46,9 @@ final class AppSession {
   /// The archive thresholds Settings edits (#448): each change reaches `autoArchive` at once and is stored. Little
   /// Arkt reads its threshold here (`littleArktThreshold`, 6 hours by default).
   let archiveSettings: ArchiveSettingsModel
+  /// One editor shared by every Settings consumer for the session.
+  let linkRoutingSettings: LinkRoutingSettingsModel
+  private var routingObservation: SidebarObservation?
   /// Archived matches in every window's command bar (#111).
   let archiveSearch: ArchiveCommandBarSearch
   /// The command bar preview's page thumbnails (#370): live tabs through the engine, history items from the cache.
@@ -124,16 +127,27 @@ final class AppSession {
     let archiveSettings = ArchiveSettingsModel(state: settingsStore)
     archiveSettings.onChange = { [weak autoArchive] in autoArchive?.apply($0) }
     self.archiveSettings = archiveSettings
+    self.linkRoutingSettings = LinkRoutingSettingsModel(state: settingsStore)
     self.archiveSearch = ArchiveCommandBarSearch(source: source, store: archiveStore, coordinator: archive)
     self.faviconStore = faviconStore
     let pageImageCache = AppEnvironment.pageImageCache(in: location)
     self.pageImageCache = pageImageCache
     self.pageThumbnails = PageThumbnails(engine: engine, cache: pageImageCache)
+    // Archive restores share the session editor; an unloaded or reloading snapshot defers the action for retry.
+    archive.linkRoutingProvider = { [weak linkRoutingSettings] in linkRoutingSettings?.loadedSettings }
     source.onDidChange = { [weak self] sidebar in
       guard let self else { return }
       autosaver.scheduleSave(sidebar)                 // every model change
       crashCapture.updateRedactions(from: sidebar)    // #129: the names reports must not carry
       changedSinceBackup = true
+    }
+    routingObservation = source.observe { [weak linkRoutingSettings] change in
+      guard case .spaceRemoved(let id) = change, let editor = linkRoutingSettings else { return }
+      editor.removeRoutes(to: id)
+      Task {
+        await editor.load()
+        if editor.needsFlush { _ = await editor.flush() }
+      }
     }
     windows.configure = { [weak self] controller in self?.wire(controller) }
     // #355, BH-138, KB-080: a Little Arkt window the user or the idle timer closed goes to the Archive under the
@@ -514,6 +528,7 @@ final class AppSession {
     services.crashReportCount = { [weak self] in self?.crashCapture.storedCount ?? 0 }     // #129
     services.sendCrashReport = { [weak self] in self?.crashCapture.sendNewest() }
     services.spaces = { [weak self] in self.map { SettingsSpaceSummary.list(from: $0.source) } ?? [] }
+    services.linkRoutingRows = linkRoutingSettings.settingsRows
     services.archiveRows = archiveSettings.settingsRows                                // #448
     return services
   }
@@ -627,10 +642,10 @@ final class AppSession {
   // MARK: - Termination
 
   /// True while a sidebar change is unsaved or being written, an archived entry is not yet in the archive store, a
-  /// favicon batch is pending, or the onboarding record is being written (#344).
+  /// favicon batch is pending, or the onboarding, routing, or recovery records need saving.
   var needsFlush: Bool {
     autosaver.needsFlush || archive.hasPendingWrites || (faviconWriter?.needsFlush ?? false)
-      || onboardingRecords.needsFlush || recoveryPages.needsFlush
+      || onboardingRecords.needsFlush || linkRoutingSettings.needsFlush || recoveryPages.needsFlush
   }
 
   /// Runs before the termination flush: stops the auto-archive timer, then stamps every window's visible tabs
@@ -667,22 +682,24 @@ final class AppSession {
     let onboarding = Task { [onboardingRecords] in
       await onboardingRecords.flush(atMost: Self.onboardingFlushTimeout)
     }
+    let routingSaved = await linkRoutingSettings.flushForTermination()
     let archived = await archive.flush()
     let sidebar = archived ? await autosaver.flush() : false
     await Self.wait(for: favicons, atMost: Self.faviconFlushTimeout)
     let onboardingSaved = await onboarding.value
     let recoverySaved = await recoveryPages.flush()
-    return sidebar && archived && onboardingSaved && recoverySaved
+    return sidebar && archived && onboardingSaved && routingSaved && recoverySaved
   }
 
   /// `flush()` for a quit whose main thread never runs again (#298: Chromium's SIGTERM path blocks the main thread
   /// right after the quit-start seam, then exits). Archive outbox first (#213), then the sidebar, each bounded by its
-  /// flush timeout while this thread waits; favicons are skipped (the engine fetches them again).
+  /// flush timeout while this thread waits; routing is also flushed and favicons are skipped.
   func flushBlocking() -> Bool {
     let archived = archive.flushBlocking()
     let sidebar = archived ? autosaver.flushBlocking() : false
+    let routing = linkRoutingSettings.flushBlocking()
     let recoverySaved = recoveryPages.flushBlocking()
-    return archived && sidebar && recoverySaved
+    return archived && sidebar && routing && recoverySaved
   }
 
   static let faviconFlushTimeout: Duration = .seconds(1)

@@ -15,6 +15,11 @@ final class AppComposition {
 
   /// The open data and windows; nil until `start` finished.
   private(set) var session: AppSession?
+  private let externalOpens = ExternalOpenCoordinator<ExternalLinkOpenResult>()
+  private var windowsReady = false
+  private var isTerminating = false
+  /// Outcomes requiring a product decision remain owned by the composition for this session.
+  private(set) var blockedExternalOpens: [ExternalLinkOpenResult] = []
   /// The main menu's app-level target.
   let commands = AppCommands()
   /// How the app quits: `NSApp.terminate` in both builds. In the Engine build `NSApp` is Chromium's
@@ -47,9 +52,11 @@ final class AppComposition {
         let session = AppSession(state: state, recoveryState: recoveryPages, location: location, engine: engine,
                                  faviconStore: favicons, hostLookup: hostLookup)
         self.session = session
+        session.linkRoutingSettings.onDidLoad = { [weak self] in self?.retryPendingExternalOpens() }
         // The first run's record decides whether the launch window opens on it; loaded before the window exists.
         session.onboardingRecord = (try? await session.settingsStore.load(OnboardingRecord.self)) ?? .defaultValue
         session.start(outcome: state.outcome, defersWindows: defersWindows)
+        if !defersWindows { externalOpenWindowsReady() }
         return
       } catch {
         guard await Self.askAfterLaunchFailure(error) else { throw LaunchCancelled() }
@@ -58,7 +65,61 @@ final class AppComposition {
   }
 
   /// The launch window and auto-archive when `start` deferred them.
-  func finishLaunch(opensWindow: Bool) { session?.finishLaunch(opensWindow: opensWindow) }
+  func finishLaunch(opensWindow: Bool) {
+    guard let session else { return }
+    session.finishLaunch(opensWindow: opensWindow)
+    externalOpenWindowsReady()
+  }
+
+  /// AppKit can deliver a batch before a session or engine window exists.
+  func openFromOtherApp(_ urls: [URL]) {
+    externalOpens.receive(urls)
+    retryPendingExternalOpens()
+  }
+
+  private func retryPendingExternalOpens() {
+    guard windowsReady, !isTerminating else { return }
+    guard externalOpens.state == .waiting || externalOpens.state == .failed else { return }
+    Task { await retryExternalOpens() }
+  }
+
+  private func externalOpenWindowsReady() {
+    windowsReady = true
+    retryPendingExternalOpens()
+  }
+
+  /// An explicit retry retains the queued inputs after a failed read. Ready starts do not reload the editor.
+  @discardableResult
+  func retryExternalOpens() async -> Bool {
+    guard windowsReady, !isTerminating, let session else { return false }
+    let editor = session.linkRoutingSettings
+    session.windows.externalLinkDestination = { [weak editor] url in editor?.destination(for: url) }
+    let ready = await externalOpens.start(read: {
+      if !editor.isLoaded { await editor.load() }
+      guard editor.isLoaded else { throw RoutingReadFailed() }
+    }, deliver: { url in
+      session.windows.openFromOtherApp([url])[0]
+    }, onResult: { [weak self] _, result in
+      self?.recordExternalOpen(result)
+    })
+    if !ready { AppSession.log.error("external link routing read failed") }
+    return ready
+  }
+
+  private struct RoutingReadFailed: Error {}
+
+  private func recordExternalOpen(_ result: ExternalLinkOpenResult) {
+    switch result {
+    case .dispatched: AppSession.log.notice("external link dispatched")
+    case .ignored: AppSession.log.notice("external link ignored")
+    case .unresolved:
+      blockedExternalOpens.append(result)
+      AppSession.log.notice("external link unresolved")
+    case .missingSpace:
+      blockedExternalOpens.append(result)
+      AppSession.log.notice("external link missing space")
+    }
+  }
 
   /// The launch-failure alert; true for Try Again. Shown from a run-loop callout, never from inside this main-actor
   /// job: a modal session there would starve the main actor (week-3 W3-0a), and the engine forbids nested loops in
@@ -95,13 +156,22 @@ final class AppComposition {
   var needsFlush: Bool { session?.needsFlush ?? false }
 
   /// Quit started: stop auto-archive and stamp the visible tabs (decision 10), while the windows still exist.
-  func prepareForTermination() { session?.prepareForTermination() }
+  func prepareForTermination() {
+    isTerminating = true
+    externalOpens.pauseDelivery()
+    session?.prepareForTermination()
+  }
 
   /// Finalize recovery only once quit can no longer be cancelled.
   func finishSessionRecovery(cleanQuit: Bool) { session?.finishSessionRecovery(cleanQuit: cleanQuit) }
 
   /// The quit was cancelled: auto-archive runs again.
-  func terminationCancelled() { session?.terminationCancelled() }
+  func terminationCancelled() {
+    session?.terminationCancelled()
+    isTerminating = false
+    externalOpens.resumeDelivery()
+    retryPendingExternalOpens()
+  }
 
   /// Writes what is pending, bounded by the flush timeouts; true when everything was written.
   func flush() async -> Bool { await session?.flush() ?? true }

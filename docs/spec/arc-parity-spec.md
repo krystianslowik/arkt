@@ -393,6 +393,12 @@ rules are in section 5, not here.
 | BH-160 | Given two routes match the same link, then which wins is unpublished. | P B-ATC6 (gap) | NEEDS-RUNTIME-CHECK |
 | BH-161 | Given a routed link lands in a non-active Space, then a toast ("Tab moved! Click to go there." or equivalent) offers to jump there. String sits among debug strings. | [S/I] toast | NEEDS-RUNTIME-CHECK |
 
+Arkt's [maintainer decision](https://github.com/krystianslowik/arkt/pull/825#issuecomment-6721408579)
+settles the implementation policy: contains is case-insensitive, matches compares the exact string without URL
+normalization, and the first matching route in list order wins when destinations disagree. RT-25 remains an Arc
+reference observation; it no longer holds Arkt's precedence implementation. The evidence status above does not
+claim that the unpublished Arc behavior has been verified.
+
 ### 2.12 Links and clicks
 
 | ID | Rule | Evidence | Status |

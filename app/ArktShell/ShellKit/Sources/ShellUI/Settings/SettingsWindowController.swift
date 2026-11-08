@@ -87,6 +87,7 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
   var archiveLittleArktPopUp: SettingsPopUpButton?
   /// The Reset all settings confirmation while it shows (#617).
   var resetSheet: DialogSheet?
+  var routeSheet: SettingsRouteSheet?
   /// Closure targets of the pills (an action's target is weak).
   var actionTargets: [NSObject] = []
 
@@ -356,7 +357,11 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
 
   public func windowDidMove(_ notification: Notification) { rememberPosition() }
 
-  public func windowWillClose(_ notification: Notification) { rememberPosition() }
+  public func windowWillClose(_ notification: Notification) {
+    routeSheet?.dismiss()
+    routeSheet = nil
+    rememberPosition()
+  }
 
   private func rememberPosition() {
     guard isPlaced, let frame = window?.frame else { return }

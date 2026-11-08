@@ -15,6 +15,12 @@ on:
     # Nightly on main: every job, including the UI tests and the GUI tests.
     - cron: "23 2 * * *"
   workflow_dispatch:
+    inputs:
+      ui_test_filter:
+        description: Optional xcodebuild UI test selector (for example ArktShellUITests/SplitViewTests)
+        required: false
+        default: ""
+        type: string
 
 # A newer push cancels the run it supersedes, on a pull request and on main. A cancelled main run leaves its areas
 # untested on main until the next push that touches them; the nightly run covers everything. Nightly and manual runs
@@ -287,7 +293,7 @@ jobs:
         run: |
           dir=$RUNNER_TEMP/xcodegen
           mkdir -p $dir
-          curl -fsSL -o $dir/xcodegen.zip \
+          curl -fsSL --retry 3 --retry-all-errors --retry-delay 2 --retry-max-time 60 --connect-timeout 15 --max-time 60 -o $dir/xcodegen.zip \
             "https://github.com/yonaskolb/XcodeGen/releases/download/$XCODEGEN_VERSION/xcodegen.zip"
           print "$XCODEGEN_SHA256  $dir/xcodegen.zip" | shasum -a 256 -c -
           unzip -q $dir/xcodegen.zip -d $dir
@@ -330,7 +336,7 @@ jobs:
         run: |
           dir=$RUNNER_TEMP/xcodegen
           mkdir -p $dir
-          curl -fsSL -o $dir/xcodegen.zip \
+          curl -fsSL --retry 3 --retry-all-errors --retry-delay 2 --retry-max-time 60 --connect-timeout 15 --max-time 60 -o $dir/xcodegen.zip \
             "https://github.com/yonaskolb/XcodeGen/releases/download/$XCODEGEN_VERSION/xcodegen.zip"
           print "$XCODEGEN_SHA256  $dir/xcodegen.zip" | shasum -a 256 -c -
           unzip -q $dir/xcodegen.zip -d $dir
@@ -349,10 +355,29 @@ jobs:
         # TEST_RUNNER_* values reach the test runner only through the process environment, not as build settings.
         env:
           TEST_RUNNER_ARKT_UITEST_TIMEOUT_SCALE: "3"
+          UI_TEST_FILTER: ${{ inputs.ui_test_filter }}
         run: |
+          test_filter=()
+          [[ -z "$UI_TEST_FILTER" ]] || test_filter=("-only-testing:$UI_TEST_FILTER")
+          df -h "$RUNNER_TEMP"
           xcodebuild -project ArktShell.xcodeproj -scheme ArktShellUITests -derivedDataPath build \
             -clonedSourcePackagesDirPath build/SourcePackages -resultBundlePath $RUNNER_TEMP/ui.xcresult \
-            -parallel-testing-enabled NO -collect-test-diagnostics never test
+            -parallel-testing-enabled NO -collect-test-diagnostics never ARKT_REQUIRE_UITEST_OVERRIDES=YES \
+            ARKT_DEBUG_BUNDLE_IDENTIFIER=dev.arkt.Arkt.UITestHarness "${test_filter[@]}" test
+      - name: Capture UI startup diagnostics
+        if: ${{ failure() }}
+        run: |
+          /usr/bin/log show --last 20m --style compact \
+            --predicate 'subsystem == "dev.arkt.ui-test-startup"' \
+            > "$RUNNER_TEMP/ui-startup.log" 2>&1 || true
+      - name: Upload UI startup diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ui-startup-diagnostics
+          path: ${{ runner.temp }}/ui-startup.log
+          retention-days: 7
+          if-no-files-found: ignore
       # Runs after a failed test step too. Failing rows do not fail the script; malformed input does, including a test
       # name that cites a row id missing from the spec (the report is still written first). The report goes to the
       # job summary, the artifact and the job log.

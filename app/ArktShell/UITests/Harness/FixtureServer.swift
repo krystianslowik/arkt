@@ -6,6 +6,7 @@ import Synchronization
 /// network. It listens on `127.0.0.1` only, on an ephemeral port, and answers one request per connection
 /// (`Connection: close`):
 /// - `/p/<name>`: a page titled `Fixture <name>` with a link to `/p/<name>-next`;
+/// - `/routing/<name>`: a page with its fixture title also visible in its body;
 /// - `/x/<name>`: the same page, but its link goes to `localhost` instead of `127.0.0.1`, so it is a link to another
 ///   site and the Peek rules apply (BH-144, #348);
 /// - `/favicon.ico`: 404, so the engine's favicon fetch stays on loopback and finds nothing;
@@ -42,6 +43,13 @@ final class FixtureServer: Sendable {
   /// Paths of every request so far, in arrival order. Paths only: the pages are synthetic, but the log stays as small
   /// as what the tests compare against.
   var requestedPaths: [String] { log.paths.withLock { $0 } }
+
+  /// One expected launch at a time; accepted reports remain observable until the next arm.
+  func armIdentity(nonce: String, digest: String) {
+    log.identity.withLock { $0 = IdentityState(nonce: nonce, digest: digest) }
+  }
+
+  var acceptedIdentity: TestIdentity.Report? { log.identity.withLock { $0?.accepted } }
 
   /// Starts listening and returns once the listener is ready. The wait is bounded: a listener that is not ready
   /// within `timeout` seconds is cancelled and the start throws.
@@ -95,21 +103,77 @@ final class FixtureServer: Sendable {
   // MARK: - Requests
 
   /// The paths the server was asked for; shared with the connection handler, which runs on the server's queue.
+  private struct IdentityState: Sendable {
+    let nonce: String
+    let digest: String
+    var accepted: TestIdentity.Report?
+  }
+
   private final class RequestLog: Sendable {
     let paths = Mutex<[String]>([])
+    let identity = Mutex<IdentityState?>(nil)
   }
 
   private static func serve(_ connection: NWConnection, on queue: DispatchQueue, log: RequestLog) {
     connection.start(queue: queue)
-    connection.receive(minimumIncompleteLength: 1, maximumLength: 65_536) { data, _, _, _ in
-      let request = data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
-      let path = request.split(separator: " ", maxSplits: 2).dropFirst().first.map(String.init) ?? "/"
+    receive(connection, accumulated: Data(), log: log)
+  }
+
+  private static func receive(_ connection: NWConnection, accumulated: Data, log: RequestLog) {
+    connection.receive(minimumIncompleteLength: 1, maximumLength: 8192) { data, _, complete, error in
+      var bytes = accumulated
+      bytes.append(data ?? Data())
+      guard error == nil, bytes.count <= 8192 else { connection.cancel(); return }
+      guard let boundary = bytes.range(of: Data("\r\n\r\n".utf8)) else {
+        if complete { connection.cancel() } else { receive(connection, accumulated: bytes, log: log) }
+        return
+      }
+      guard let header = String(data: bytes[..<boundary.lowerBound], encoding: .utf8) else {
+        connection.cancel(); return
+      }
+      let lines = header.components(separatedBy: "\r\n")
+      let first = lines.first?.split(separator: " ") ?? []
+      guard first.count == 3 else { connection.cancel(); return }
+      let path = String(first[1])
+      let lengths = lines.dropFirst().filter { $0.lowercased().hasPrefix("content-length:") }
+      let transfer = lines.dropFirst().contains { $0.lowercased().hasPrefix("transfer-encoding:") }
+      guard !transfer, lengths.count <= 1 else { connection.cancel(); return }
+      let length: Int
+      if let line = lengths.first {
+        guard let parsed = Int(line.dropFirst("content-length:".count).trimmingCharacters(in: .whitespaces)),
+              (0...4096).contains(parsed) else { connection.cancel(); return }
+        length = parsed
+      } else { length = 0 }
+      let body = bytes[boundary.upperBound...]
+      guard body.count >= length else {
+        if complete { connection.cancel() } else { receive(connection, accumulated: bytes, log: log) }
+        return
+      }
       log.paths.withLock { $0.append(path) }
-      let response = response(for: path, crossSiteBase: crossSiteBase(of: request))
-      var bytes = Data(("HTTP/1.1 \(response.status) \(response.status == 200 ? "OK" : "Not Found")\r\n"
-        + "Content-Type: \(response.mime)\r\nContent-Length: \(response.body.count)\r\nConnection: close\r\n\r\n").utf8)
-      bytes.append(response.body)
-      connection.send(content: bytes, completion: .contentProcessed { _ in connection.cancel() })
+      let reply: Response
+      if path.hasPrefix("/identity/") {
+        let payload = Data(body.prefix(length))
+        let object = (try? JSONSerialization.jsonObject(with: payload)) as? [String: Any]
+        let keys = Set(object?.keys.map { $0 } ?? [])
+        let report = keys == Set(["nonce", "pid", "required", "digest"])
+          ? try? JSONDecoder().decode(TestIdentity.Report.self, from: payload) : nil
+        let accepted = log.identity.withLock { state in
+          guard first[0] == "POST", lengths.count == 1, let report, report.isValid,
+                var current = state, current.accepted == nil, current.nonce == report.nonce,
+                current.digest == report.digest, path == "/identity/" + current.nonce else { return false }
+          current.accepted = report
+          state = current
+          return true
+        }
+        reply = Response(status: accepted ? 204 : 403, mime: "text/plain", body: Data())
+      } else {
+        reply = response(for: path, crossSiteBase: crossSiteBase(of: header))
+      }
+      let reason = reply.status == 204 ? "No Content" : reply.status == 200 ? "OK" : "Rejected"
+      var output = Data(("HTTP/1.1 \(reply.status) \(reason)\r\n"
+        + "Content-Type: \(reply.mime)\r\nContent-Length: \(reply.body.count)\r\nConnection: close\r\n\r\n").utf8)
+      output.append(reply.body)
+      connection.send(content: output, completion: .contentProcessed { _ in connection.cancel() })
     }
   }
 
@@ -131,6 +195,11 @@ final class FixtureServer: Sendable {
   private static func response(for path: String, crossSiteBase: String) -> Response {
     if path == "/favicon.ico" {
       return Response(status: 404, mime: "text/plain", body: Data("not found".utf8))
+    }
+    if path.hasPrefix("/routing/"), path.count > 9 {
+      let title = title(ofPage: String(path.dropFirst(9)))
+      return Response(body: Data("<!doctype html><html><head><title>\(escaped(title))</title></head>"
+        .appending("<body><p>\(escaped(title))</p></body></html>").utf8))
     }
     if path.hasPrefix("/x/"), path.count > 3 {
       let name = String(path.dropFirst(3))

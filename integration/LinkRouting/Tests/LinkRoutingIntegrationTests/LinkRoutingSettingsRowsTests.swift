@@ -1,0 +1,1 @@
+../../../../app/ArktShell/ShellKit/Tests/CoreBridgeTests/LinkRoutingSettingsRowsTests.swift

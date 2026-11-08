@@ -203,8 +203,6 @@ extension SettingsWindowController {
     }
     let newProfile = SettingsAddRowView(title: "New Profile...", planned: true)
     identify(newProfile.button, .spaces, "newProfile")
-    let addRoute = SettingsAddRowView(title: "Add Route...", planned: true)
-    identify(addRoute.button, .spaces, "addRoute")
     var blocks: [SettingsBlockView] = []
     if !spaceRows.isEmpty {
       blocks.append(section("Spaces", spaceRows,
@@ -215,13 +213,151 @@ extension SettingsWindowController {
       section("Archive", archiveRows()),
       section("Profiles", profiles + [newProfile],
               note: "Each profile keeps its own Favorites, history, cookies, passwords and extensions."),
-      section("Link routing", [
-        row("Links from other apps open in", nil,
-            [popUp(.spaces, "linksFromOtherApps", ["Current Space", "Little Arkt"], "Little Arkt")], planned: true),
-        addRoute,
-      ]),
+      linkRoutingSection(),
     ]
     return blocks
+  }
+
+  private func linkRoutingSection() -> SettingsBlockView {
+    let container = SettingsRouteSection()
+    let rows = services.linkRoutingRows
+    let refresh: @MainActor () -> Void = { [weak self, weak container] in
+      guard let self, let container else { return }
+      let spaces = self.services.spaces()
+      let displayedRoutes = rows?.routes() ?? []
+      let generation = rows?.removalGeneration() ?? 0
+      var blocks: [SettingsBlockView] = [self.linkRoutingRow(spaces: spaces)]
+      if let rows, rows.destination() != nil {
+        for (index, route) in displayedRoutes.enumerated() {
+          let literal: String
+          let condition: String
+          switch route.condition {
+          case .contains(let text): literal = text; condition = "Contains"
+          case .matches(let text): literal = text; condition = "Matches"
+          }
+          let destination: String
+          switch route.destination {
+          case .littleArkt: destination = "Little Arkt"
+          case .mostRecentSpace: destination = "Most Recent Space"
+          case .space(let id):
+            destination = SettingsLinkDestination.spaceChoices(spaces)
+              .first { $0.1 == .space(id) }?.0 ?? "Unavailable Space"
+          }
+          let edit = self.pill(.spaces, "route.\(index).edit", "Edit") { [weak self, weak container] in
+            guard let self, let container else { return }
+            guard rows.destination() != nil, rows.routes() == displayedRoutes,
+                  rows.removalGeneration() == generation else { container.refresh?(); return }
+            self.showRouteSheet(route: route, index: index, rows: rows, spaces: self.services.spaces()) {
+              container.refresh?()
+            }
+          }
+          blocks.append(self.row("\(condition) \(literal)", destination, [edit]))
+        }
+      }
+      if rows?.hasSaveError() == true {
+        let error = self.row("Could not save link routing settings. Edit and save again to retry.")
+        error.setAccessibilityElement(true)
+        error.setAccessibilityRole(.staticText)
+        error.setAccessibilityLabel("Could not save link routing settings. Edit and save again to retry.")
+        error.setAccessibilityIdentifier("settings.route.saveError")
+        blocks.append(error)
+      }
+      let add = SettingsAddRowView(title: "Add Route...", planned: rows?.destination() == nil)
+      self.identify(add.button, .spaces, "addRoute")
+      if let rows, rows.destination() != nil {
+        let target = SettingsActionTarget { [weak self, weak container] in
+          guard let self, let container else { return }
+          self.showRouteSheet(route: nil, index: nil, rows: rows, spaces: self.services.spaces()) { container.refresh?() }
+        }
+        self.actionTargets.append(target)
+        add.button.target = target
+        add.button.action = #selector(SettingsActionTarget.fire(_:))
+      }
+      blocks.append(add)
+      container.replace(self.section("Link routing", blocks))
+      if self.selectedPane == .spaces { self.layoutPane(); self.updateKeyViewLoop() }
+    }
+    container.refresh = refresh
+    refresh()
+    if let rows {
+      Task { [weak container] in
+        await rows.load()
+        container?.refresh?()
+      }
+    }
+    return container
+  }
+
+  private func showRouteSheet(route: SettingsLinkRoute?, index: Int?, rows: SettingsLinkRoutingRows,
+                              spaces: [SettingsSpaceSummary], refresh: @escaping @MainActor () -> Void) {
+    guard let window, window.attachedSheet == nil else { return }
+    let sheet = SettingsRouteSheet(route: route, spaces: spaces)
+    routeSheet = sheet
+    let originalRoutes = rows.routes()
+    let generation = rows.removalGeneration()
+    sheet.validate = { result in
+      guard rows.destination() != nil, rows.removalGeneration() == generation,
+            rows.routes() == originalRoutes else { return false }
+      if let index { return rows.replaceRouteIfUnchanged(index, originalRoutes, result) }
+      rows.appendRoute(result)
+      return true
+    }
+    sheet.onFinish = { [weak self] result in
+      self?.routeSheet = nil
+      guard result != nil else { return }
+      refresh()
+      Task {
+        _ = await rows.flush()
+        refresh()
+      }
+    }
+    sheet.begin(on: window)
+  }
+
+  private func linkRoutingRow(spaces: [SettingsSpaceSummary]) -> SettingsBlockView {
+    guard let rows = services.linkRoutingRows else {
+      return row("Links from other apps open in", nil,
+                 [popUp(.spaces, "linksFromOtherApps", ["Little Arkt"], "Little Arkt")], planned: true)
+    }
+    let control = popUp(.spaces, "linksFromOtherApps", ["Loading..."], "Loading...")
+    let row = self.row("Links from other apps open in", "Loading...", [control])
+    row.setDimmed(true)
+    Task { [weak self, weak row] in
+      await rows.load()
+      guard let self, let row else { return }
+      self.updateLinkRoutingRow(row, rows: rows, spaces: spaces)
+      if self.selectedPane == .spaces { self.layoutPane(); self.updateKeyViewLoop() }
+    }
+    return row
+  }
+
+  private func updateLinkRoutingRow(_ row: SettingsRowView, rows: SettingsLinkRoutingRows,
+                                    spaces: [SettingsSpaceSummary]) {
+    guard let destination = rows.destination() else {
+      row.setCaption(rows.hasLoadError() ? "Could not load link routing settings. Reopen Settings to retry." : "Loading...")
+      row.setDimmed(true)
+      return
+    }
+    var choices: [(String, SettingsLinkDestination)] = [("Little Arkt", .littleArkt),
+      ("Most Recent Space", .mostRecentSpace)]
+    choices += SettingsLinkDestination.spaceChoices(spaces)
+    if !choices.contains(where: { $0.1 == destination }) {
+      choices.append(("Unavailable Space", destination))
+    }
+    let index = choices.firstIndex(where: { $0.1 == destination }) ?? 0
+    let control = popUp(.spaces, "linksFromOtherApps", choices.map(\.0), choices[index].0)
+    control.showIndex(index)
+    control.reportsRepeatedSelection = true
+    control.onIndexChange = { [weak row] index in
+      rows.setDestination(choices[index].1)
+      Task {
+        _ = await rows.flush()
+        row?.setCaption(rows.hasSaveError() ? "Could not save link routing settings." : nil)
+      }
+    }
+    row.setTrailing([control])
+    row.setCaption(rows.hasSaveError() ? "Could not save link routing settings." : nil)
+    row.setDimmed(false)
   }
 
   /// The pop-ups' titles, shortest first (BH-081; decision on #448: all seven, Never included).
@@ -516,4 +652,18 @@ extension NSView {
     }
     return nil
   }
+}
+
+@MainActor
+private final class SettingsRouteSection: SettingsBlockView {
+  var refresh: (@MainActor () -> Void)?
+  private var content: SettingsBlockView?
+  func replace(_ view: SettingsBlockView) {
+    content?.removeFromSuperview()
+    content = view
+    addSubview(view)
+    needsLayout = true
+  }
+  override func fittingHeight(width: CGFloat) -> CGFloat { content?.fittingHeight(width: width) ?? 0 }
+  override func layout() { super.layout(); content?.frame = bounds }
 }

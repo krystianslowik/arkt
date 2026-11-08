@@ -95,6 +95,23 @@ struct ArchiveCoordinatorTests {
     #expect(await harness.store.addCalls == [.init(ids: items.map(\.id), policy: .replace)])
   }
 
+  @Test func removalEventCanPruneSharedRoutingEditor() async throws {
+    let harness = try Harness(todayTabs: 0)
+    let route = LinkRouting.Route(condition: .contains("literal"), destination: .space(harness.space))
+    let store = RoutingRemovalEventStore(LinkRouting(routes: [route]))
+    let editor = LinkRoutingSettingsModel(state: store)
+    await editor.load()
+    let observation = harness.source.observe { change in
+      if case .spaceRemoved(let id) = change { editor.removeRoutes(to: id) }
+    }
+    _ = harness.coordinator.removeSpace(harness.space)
+    #expect(editor.settings.routes.isEmpty)
+    #expect(await editor.flush())
+    #expect(await store.loadLinkRouting().routes.isEmpty)
+    withExtendedLifetime(observation) {}
+    await harness.drain()
+  }
+
   /// #213: `pendingItems` is populated before `source.onDidChange` fires, and `flushPendingAdds()` holds back a
   /// sidebar save while the archive write is failing or in flight, so a crash between the two writes never loses
   /// archived items (for both `archive` and `removeSpace`).
@@ -871,4 +888,14 @@ private func eventually(
     await Task.yield()
   }
   Issue.record("condition never became true", sourceLocation: sourceLocation)
+}
+
+private actor RoutingRemovalEventStore: LinkRoutingSettingsStoring {
+  private var value: LinkRouting
+  init(_ value: LinkRouting) { self.value = value }
+  func loadLinkRouting() async -> LinkRouting { value }
+  func updateLinkRouting(at date: Date, _ change: @escaping @Sendable (inout LinkRouting) -> Void) async throws -> LinkRouting {
+    change(&value)
+    return value
+  }
 }

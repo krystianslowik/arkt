@@ -109,15 +109,6 @@ enum AppEnvironment {
   #endif
 
   #if DEBUG
-  /// Strict UI-test mode (`ARKT_UITEST=1`, Debug builds only).
-  static var isUITest: Bool { overrides.isUITest }
-
-  /// The overrides strict UI-test mode needs that are missing; the app exits before any disk access when this is not
-  /// empty. Key names only.
-  static func missingUITestOverrides() -> [String] {
-    overrides.missingUITestOverrides(bundleIdentifier: Bundle.main.bundleIdentifier)
-  }
-
   /// The sample sidebar notices `ARKT_SIDEBAR_NOTICE` asks for (#648); empty when unset.
   static var sampleSidebarNotices: [ShellUI.SidebarNotice] {
     switch overrides.sidebarNotice {

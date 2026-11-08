@@ -1,0 +1,1 @@
+../../../../app/ArktShell/ShellKit/Sources/CoreBridge/ExternalOpenCoordinator.swift

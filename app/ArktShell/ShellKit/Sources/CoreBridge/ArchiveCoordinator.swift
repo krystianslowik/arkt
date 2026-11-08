@@ -40,6 +40,10 @@ public final class ArchiveCoordinator {
   public enum RestoreError: Error, Equatable, Sendable {
     /// The sidebar has no Space to put the item in.
     case noSpaceForRestore
+    /// A configured routing snapshot has not loaded; the entry remains available for retry.
+    case routingUnavailable
+    /// This bounded restore path cannot safely place the explicit route's destination.
+    case routingDestinationUnavailable
   }
 
   /// Injected time: `Task.sleep(for:)` in the app, a manual sleeper in tests.
@@ -66,6 +70,10 @@ public final class ArchiveCoordinator {
   /// Called on the main actor after `pendingItems` changed: an archive, a restore that dropped a pending entry, or a
   /// write that landed. One observer: the Archive window's list model sets it.
   public var onPendingItemsChange: (@MainActor () -> Void)?
+
+  /// Shared loaded routing settings for tab restores. An absent provider preserves ordinary restore behavior;
+  /// a configured provider returning nil defers the restore without withdrawing its archive entry.
+  public var linkRoutingProvider: (@MainActor () -> LinkRouting?)?
 
   /// True while an add or remove is unsent or a write is still running. Termination must check this (or always
   /// flush).
@@ -163,25 +171,53 @@ public final class ArchiveCoordinator {
     return archive(ids, reason: .auto)
   }
 
+  /// True when `id` was restored and not archived again since: the store may still hold it until the queued remove
+  /// lands, so searches leave it out.
+  public func isRestored(_ id: NodeID) -> Bool { restoredIDs.contains(id) }
+
   /// Puts `item` back into the sidebar (`Archiver.restore` rules: top of Today in its source Space, folders at the
   /// end of Pinned, fresh ids when an id is taken), then queues its removal from the store, unless it was pending and
   /// never sent (see the type comment). `fallbackSpace` is used when the source Space is gone; when it is nil or gone
   /// too, the first Space is used. Returns nil and changes nothing when `item.id` was already restored and not
   /// archived again since (a repeated click). Throws `.noSpaceForRestore` when the sidebar has no Space, and the
-  /// model's `SidebarError`s; nothing changes on throw.
-  /// True when `id` was restored and not archived again since: the store may still hold it until the queued remove
-  /// lands, so searches leave it out.
-  public func isRestored(_ id: NodeID) -> Bool { restoredIDs.contains(id) }
-
+  /// model's `SidebarError`s; nothing changes on throw. With routing configured, explicit same-profile Space
+  /// matches override the source Space while preserving the recorded section. Unavailable routing or an explicit
+  /// unsupported/missing destination throws before the sidebar or outbox changes.
   @discardableResult
   public func restore(_ item: ArchivedItem, fallbackSpace: UUID?) throws -> RestoredItem? {
     guard !restoredIDs.contains(item.id) else { return nil }
     let sidebar = source.sidebar
     let fallback = fallbackSpace.flatMap { sidebar.spaces[$0] == nil ? nil : $0 } ?? sidebar.spaceOrder.first
     guard let fallback else { throw RestoreError.noSpaceForRestore }
-    let restored = try source.restore(item, fallbackSpace: fallback)
+    let routed = try restoreItem(item, in: sidebar, fallback: fallback)
+    let restored = try source.restore(routed, fallbackSpace: fallback)
     withdraw(item.id)
     return restored
+  }
+
+  /// Project only the placement metadata passed to the existing single restore mutation. The archived snapshot,
+  /// identifier and outbox entry retain their original values. No explicit match keeps the historical rules;
+  /// the default for external links is not an archive placement rule. Folder/split routing is outside this slice.
+  private func restoreItem(_ item: ArchivedItem, in sidebar: SidebarModel.Sidebar,
+                           fallback: UUID) throws -> ArchivedItem {
+    guard let url = item.url, let provider = linkRoutingProvider else { return item }
+    guard let routing = provider() else { throw RestoreError.routingUnavailable }
+    guard let route = routing.routes.first(where: { $0.applies(to: url) }) else { return item }
+    let profile: String
+    switch item.source {
+    case .space(let original):
+      profile = sidebar.spaces[original]?.profile ?? sidebar.spaces[fallback]?.profile ?? source.defaultProfile
+    case .littleArc, .unknown: profile = sidebar.spaces[fallback]?.profile ?? source.defaultProfile
+    }
+    guard case .space(let target) = route.destination,
+          let destination = sidebar.spaces[target], destination.profile == profile else {
+      throw RestoreError.routingDestinationUnavailable
+    }
+    // A Favorite's recorded section has no Space; do not silently reinterpret that unresolved route policy.
+    if case .favorites? = item.section { throw RestoreError.routingDestinationUnavailable }
+    var routed = item
+    routed.source = .space(target)
+    return routed
   }
 
   /// Takes entry `id` out of the archive (the store side of a restore): marks it restored, forgets it for a reopen,

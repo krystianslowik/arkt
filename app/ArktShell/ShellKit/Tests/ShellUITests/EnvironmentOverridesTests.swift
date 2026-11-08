@@ -61,6 +61,39 @@ import Testing
     #expect(overrides(env).defaultBrowser == .isDefault)
   }
 
+  // Startup policy is pure; main.swift owns its ordering before defaults migration.
+  @Test func startupPolicyAllowsNormalLaunchWhenNotRequired() {
+    #expect(overrides([:]).uiTestStartupViolations(required: false, bundleIdentifier: bundleIdentifier).isEmpty)
+  }
+
+  @Test func startupPolicyRequiresExplicitUITestWhenRequired() {
+    #expect(overrides([:]).uiTestStartupViolations(required: true, bundleIdentifier: bundleIdentifier)
+      == ["ARKT_UITEST", "ARKT_DATA_DIR", "ARKT_ARC_DIR", "ARKT_DEFAULTS_SUITE"])
+    var environment = complete
+    environment["ARKT_UITEST"] = "0"
+    #expect(overrides(environment).uiTestStartupViolations(required: true, bundleIdentifier: bundleIdentifier)
+      == ["ARKT_UITEST"])
+  }
+
+  @Test func startupPolicyRequiresExistingOverrides() {
+    #expect(overrides(["ARKT_UITEST": "1"]).uiTestStartupViolations(required: true, bundleIdentifier: bundleIdentifier)
+      == ["ARKT_DATA_DIR", "ARKT_ARC_DIR", "ARKT_DEFAULTS_SUITE"])
+    var environment = complete
+    environment["ARKT_DEFAULTS_SUITE"] = bundleIdentifier
+    #expect(overrides(environment).uiTestStartupViolations(required: true, bundleIdentifier: bundleIdentifier)
+      == ["ARKT_DEFAULTS_SUITE"])
+  }
+
+  @Test func startupPolicyAllowsCompleteRequiredEnvironment() {
+    #expect(overrides(complete).uiTestStartupViolations(required: true, bundleIdentifier: bundleIdentifier).isEmpty)
+  }
+
+  @Test func explicitUITestStillValidatesWhenNotRequired() {
+    #expect(overrides(["ARKT_UITEST": "1"]).uiTestStartupViolations(required: false, bundleIdentifier: bundleIdentifier)
+      == ["ARKT_DATA_DIR", "ARKT_ARC_DIR", "ARKT_DEFAULTS_SUITE"])
+    #expect(overrides(complete).uiTestStartupViolations(required: false, bundleIdentifier: bundleIdentifier).isEmpty)
+  }
+
   // MARK: - Strict UI-test mode
 
   @Test func uiTestModeOnlyForTheValueOne() {
