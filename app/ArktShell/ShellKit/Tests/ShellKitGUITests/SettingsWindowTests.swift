@@ -323,10 +323,42 @@ final class SettingsWindowTests: XCTestCase {
       XCTAssertTrue(row.captionText.hasSuffix("Not available yet."))
       XCTAssertEqual(row.labelColor, ShellTokens.secondaryText.resolve(row.archiveFlavor))
     }
-    let restore = try find(AXID.Settings.control("general", "whenArktOpens"), in: controller,
-                           as: SettingsPopUpButton.self)
-    XCTAssertFalse(restore.isEnabled)
-    XCTAssertEqual(restore.selectedTitle, "Restore last windows")
+  }
+
+  /// The real General popup and all other users of this supplied store share one preference.
+  func testOpeningPreferenceUsesSharedSettingsAndReset() throws {
+    let settings = AppSettings(defaults: defaults)
+    let controller = make(settings: settings)
+    controller.show()
+    let popup = try find(AXID.Settings.control("general", "whenArktOpens"), in: controller,
+                         as: SettingsPopUpButton.self)
+    XCTAssertTrue(popup.isEnabled)
+    XCTAssertEqual(popup.items, ["Restore last windows", "Open a new window"])
+    XCTAssertEqual(popup.selectedTitle, "Restore last windows")
+    XCTAssertTrue(settings.restoreWindowsOnLaunch)
+
+    popup.select("Open a new window") // The control's menu selection path.
+    XCTAssertFalse(settings.restoreWindowsOnLaunch)
+    XCTAssertEqual(defaults.object(forKey: AppSettings.Key.restoreWindowsOnLaunch) as? Bool, false)
+    XCTAssertFalse(AppSettings(defaults: defaults).restoreWindowsOnLaunch)
+
+    settings.restoreWindowsOnLaunch = true // Another consumer of the same shared instance.
+    XCTAssertEqual(popup.selectedTitle, "Restore last windows")
+    settings.restoreWindowsOnLaunch = false
+    XCTAssertEqual(popup.selectedTitle, "Open a new window")
+    settings.resetToDefaults()
+    XCTAssertTrue(settings.restoreWindowsOnLaunch)
+    XCTAssertNil(defaults.object(forKey: AppSettings.Key.restoreWindowsOnLaunch))
+    XCTAssertEqual(popup.selectedTitle, "Restore last windows")
+
+    settings.restoreWindowsOnLaunch = false
+    let reopened = make(settings: AppSettings(defaults: defaults))
+    reopened.show(pane: .general)
+    let reread = try find(AXID.Settings.control("general", "whenArktOpens"), in: reopened,
+                          as: SettingsPopUpButton.self)
+    XCTAssertEqual(reread.selectedTitle, "Open a new window")
+    reread.select("Restore last windows")
+    XCTAssertTrue(AppSettings(defaults: defaults).restoreWindowsOnLaunch)
   }
 
   /// BH-177: the row is a real switch, off until the user turns it on, and a later change follows the setting.

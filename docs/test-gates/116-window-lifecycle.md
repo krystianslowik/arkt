@@ -35,3 +35,61 @@ without activating its remembered tab. That check now asserts both complete rest
 uses the real dot/keyboard switch path with Reduce Motion enabled for synchronous settling. It still requires each
 window's distinct tab on every switch; no persistence or history assertion is removed. Current-head CI must verify
 the unchanged empty-Space regression and corrected interaction path.
+
+## App composition gate plan
+
+Issue #116 requires the General opening preference and actual app launch/quit composition for ordered regular
+windows; each window retains its Space, tab and available folder state, while live private windows are excluded.
+The existing component and legacy tests remain unchanged. The gate uses the supplied shared `AppSettings` and real
+General popup, then an isolated real-app Cmd-Q/relaunch with distinct window identities. Disabled restore needs a
+reliable launch-completion boundary; cancellation needs observation of the frozen and immediately resumed store.
+Neither may be inferred from a first-window wait or a later incidental event.
+
+Tests and UI state run on the main actor. The only edits are test files and this gate note; no production hot file,
+animation, per-frame or sidebar hot-path change is planned. Production integration hot files are `AppSession`,
+`AppDelegate`, the Chromium termination composition, and Settings pane/controller. Only App may import Persistence;
+ShellUI exchanges plain values and actions. Two distinct Spaces and tabs, plus a live private window, exercise the
+relevant state. The intended first runtime red is the disabled General popup and/or failure to restore both windows,
+not a missing test API. A red is not claimed until executed.
+
+Supported local validation: the Swift 6.2.4 frontend `-parse` on edited Swift files, `git diff --check`, and
+repository static import/UI-source/parity checks where available. Parsing is neither typechecking nor execution.
+Full package and App builds and GUI execution are unavailable here; CI must typecheck and execute the focused gates.
+
+## App composition gate and remaining boundaries
+
+The earlier statement that the preference does not exist describes the `ac7231d` gate, not the current code.
+The in-process General test now exercises the real popup's selection path against one supplied `AppSettings`,
+including both persisted values, shared-instance notifications and reset removing the preference key. The old
+assertion that this row stays disabled is retired; other planned-row assertions remain.
+
+The real-app test creates two regular windows with different selected Space/tab pairs, keeps a private window open,
+reads the ordered collection before Cmd-Q, compares its selections after process exit, and identifies both restored
+selections in actual windows. Loopback request baselines are taken after shutdown. It uses existing UI and defaults
+facilities; it does not seed a session or call the WindowSet termination methods. Folder state is not asserted here.
+The test is a positive restoration gate, not proof that no extra window can appear. Neither new test has been
+executed or typechecked locally; its intended failure has not been observed. In particular, CI must establish that
+the sandboxed runner can observe the app's defaults suite and that the window-scoped accessibility queries work.
+
+A complete disabled-restore assertion still needs a supported completion signal: scoped to a specific launch,
+emitted after the app has finished deciding and opening all session windows (including the disabled and empty
+cases), without changing window creation, focus or persisted state. Only then may a test assert one default window
+and saved-collection preservation. No such hook is currently implemented or assumed by these tests.
+
+The native cancellation gate is also outstanding. `ChromiumShell` forwards begin/cancel callbacks to the composition,
+and `AppDelegate` uses its own termination path, but neither forwarding nor its ordering is proven by the component
+tests. The current UI harness has no supported armed beforeunload fixture and no controlled observation point for a
+stale collection at quit start, frozen state before dismissal, and the immediate post-cancel refresh before another
+window event. A representative gate needs a loopback page armed by a user gesture, the actual Leave site dialog,
+read-only observations at those boundaries, dismissal and a responsive survivor. A later tab action or a FakeEngine
+close alone cannot demonstrate the immediate refresh or Chromium wiring. No cancellation test is claimed here.
+Recovery composition (#690) and navigation history (#612) remain separate and unverified.
+
+The smallest production path is to connect the existing popup to the shared setting and its observer, then have
+`AppSession.finishLaunch` invoke the existing collection restoration with that same setting and supply a normal
+window only when needed, while preserving queued Chromium-window and recovery behavior. Termination callbacks must
+be verified through both actual composition paths before any further change is inferred.
+
+Local source validation for this gate: Swift 6.2.4 frontend parsing of both edited Swift files, the workflow's
+import-layering and UI-test-source checks, `scripts/ui-tests/parity-report-test.sh`, `actionlint`, and
+`git diff --check` passed. No full build, typecheck, test execution, app launch or GUI run was performed here.
