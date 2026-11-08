@@ -8,9 +8,9 @@ The tests check the visible destination and unique page identity after delivery.
 system default browser or register a handler. The cold launch uses the sandbox environment and normal test launch
 arguments in the OS open configuration.
 
-At this head the intended red is the destination assertion: AppSession forwards to the window set without wiring its
-routing editor as the resolver, and AppDelegate drops events arriving before the session exists. A cold failure alone
-does not deterministically identify which defect caused it. The checks are app-composition coverage, not proof of every
+Before App composition wiring, the intended red was the destination assertion: the window set had no routing
+resolver and AppDelegate dropped events before session creation. A cold failure alone does not deterministically
+identify either defect. The checks are app-composition coverage, not proof of every
 startup ordering. NSWorkspace completion confirms Launch Services accepted the request, while fixture page identity
 and accessibility state confirm delivery; neither is a general queue-drained signal. There is no observable application-open completion
 barrier that proves all resulting work has drained. The tests
@@ -47,7 +47,7 @@ that editor, check `isLoaded` after `load()` (which reports errors via state rat
 not a captured snapshot. The App owns and handles the returned `ExternalLinkOpenResult` values, including unresolved
 and missing-Space outcomes; their user-facing handling remains an integration boundary. The coordinator and editor are
 one per composition/session, not one per event or Settings window. An explicit retry must reuse the retained queue.
-This is a proposed wiring path only; neither app integration nor an automatic retry policy is implemented here.
+App composition now follows this wiring path; no automatic retry or user-facing blocked-outcome policy is implemented.
 
 The component gate is designed to exercise held and failed reads, coalescing, reentrant arrivals, duplicate inputs, ordered outcome
 reporting and a later edit to the real shared editor. It does not construct AppSession or establish that AppDelegate
@@ -106,8 +106,7 @@ SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX15.5.sdk /opt/homebrew/op
 
 Swift 6.2.4 parsing and whitespace checks passed. The focused build still emits the previously recorded missing
 framework/library search-path linker warnings, with no coordinator source warning. The standalone probe is not
-currently a CI job and does not establish AppSession, AppDelegate, Chromium, GUI or app behavior. Focused native run
-42491702781 remained queued at the latest inspection; no native runtime red is claimed.
+currently a CI job and does not establish AppSession, AppDelegate, Chromium, GUI or app behavior. At that inspection focused native run 42491702781 had not yet been observed; its later result is recorded below.
 
 
 ### Independent component review
@@ -127,3 +126,14 @@ unstructured task retains the coordinator until completion. The queue has no siz
 capacity after a drain. During callbacks, pendingCount includes the current input until reporting returns. Direct
 cancellation/lifetime and in-callback pendingCount tests are not present. These constraints require deliberate App
 ownership and recovery handling; the pure component's tests do not establish those future composition behaviors.
+
+
+### Native red and bounded App composition
+
+Focused manual run 42491702781 (UI job 128765333816), tested head `0f2f48081d93e8e2222596e6642fa59df4777d1e`, completed all six cases. The three warm cases loaded their unique fixture pages but failed their first expected-destination assertions: the unmatched default stayed in Space 1 instead of configured Space 2, the Little Arkt route stayed in Space 2, and the Space 1 route stayed in Space 2. Accessibility attachments establish real OS delivery and the wrong destination. The three cold cases showed Welcome instead of the configured profile; their profile/environment identity is unestablished and they are setup failures, not routing-specific red evidence.
+
+AppComposition now owns the receiver before session creation. After normal FakeEngine launch or deferred Chromium finishLaunch, it uses the shared session editor, checks load success, installs a current-state resolver, and drains each input through the window set. A failed initial read retains the queue for an explicit composition retry. Reported unresolved and missing-Space outcomes remain in composition-owned memory until termination; user-facing handling and fallback are undecided. Dispatch means the open was handed to the window path, not that a page loaded. No automatic retry or queue cap is provided. Suspended coordinator reads retain their task and coordinator until completion; cancelling a waiter does not cancel the shared read.
+
+This stage does not establish held/failed-read behavior in the actual App, early OS event timing, queue-drained duplicate absence, cold persisted-profile relaunch, or Chromium startup-window adoption. Chromium's existing queued engine requests are not replayed as external URLs. The six app tests remain unchanged and require a new native run before any app-green claim.
+
+The post-wiring actual-source focused probe passed 60 tests in 13 suites, including six coordinator tests; linker search-path warnings remained. Swift 6.2.4 frontend parsing of the changed App sources and whitespace checks passed. The probe does not compile App or prove the wiring; no full local ShellKit/App build, GUI run or app launch was performed.

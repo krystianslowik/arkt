@@ -3158,3 +3158,18 @@ and asserts retained delivery callback values. Replacing only that callback deli
 assertion; the final restored full probe passes 60 tests in 13 suites. Existing linker search-path warnings remain.
 Cancellation/lifetime behavior and the uncapped queue's retained peak capacity are documented integration constraints,
 not verified App behavior. The native app gate still has no observed runtime result here.
+
+
+### External-link App composition (#113)
+
+The three warm cases of native run 42491702781 at `0f2f48081d93e8e2222596e6642fa59df4777d1e` delivered their fixture pages to the wrong existing Space, failing the first destination assertion. The three cold cases instead showed onboarding with unverified profile identity; they do not establish routing-specific failures. See [the app gate](../testing/link-routing-app-gate.md) for details and remaining boundaries.
+
+Composition now retains early AppKit batches, starts the single shared routing editor after the window/engine readiness seam, resolves current settings per input, and owns blocked outcomes without choosing a fallback. Failed reads retain the undelivered queue for explicit retry. Existing engine request and recovery ordering remains separate; no Chromium startup-window adoption is claimed. Native App validation of this wiring remains pending.
+
+The focused actual-source probe passed 60 tests in 13 suites, including all six coordinator contracts:
+
+```sh
+SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX15.5.sdk /opt/homebrew/opt/swift/bin/swift test --package-path integration/LinkRouting -j 2
+```
+
+The build reported missing framework and library search-path linker warnings. Swift 6.2.4 frontend parsing of the two changed App sources and `git diff --check` passed. Parsing is not typechecking; the focused package does not compile or exercise App composition. Full local ShellKit, app build, GUI and app launch were not run. No App-specific test count or native green is claimed.

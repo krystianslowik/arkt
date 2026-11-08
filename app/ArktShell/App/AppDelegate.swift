@@ -123,7 +123,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
   /// A link or file another app opened with Arkt (it can be the default browser, onboarding section 6.4).
   func application(_ application: NSApplication, open urls: [URL]) {
-    composition.session?.openFromOtherApp(urls)
+    composition.openFromOtherApp(urls)
   }
 
   /// The Dock menu (#356): the Little Arkt windows and their actions, New Window and New Little Arkt Window.

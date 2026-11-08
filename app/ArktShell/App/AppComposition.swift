@@ -15,6 +15,10 @@ final class AppComposition {
 
   /// The open data and windows; nil until `start` finished.
   private(set) var session: AppSession?
+  private let externalOpens = ExternalOpenCoordinator<ExternalLinkOpenResult>()
+  private var windowsReady = false
+  /// Outcomes requiring a product decision remain owned by the composition for this session.
+  private(set) var blockedExternalOpens: [ExternalLinkOpenResult] = []
   /// The main menu's app-level target.
   let commands = AppCommands()
   /// How the app quits: `NSApp.terminate` in both builds. In the Engine build `NSApp` is Chromium's
@@ -49,6 +53,7 @@ final class AppComposition {
         // The first run's record decides whether the launch window opens on it; loaded before the window exists.
         session.onboardingRecord = (try? await session.settingsStore.load(OnboardingRecord.self)) ?? .defaultValue
         session.start(outcome: state.outcome, defersWindows: defersWindows)
+        if !defersWindows { externalOpenWindowsReady() }
         return
       } catch {
         guard await Self.askAfterLaunchFailure(error) else { throw LaunchCancelled() }
@@ -57,7 +62,52 @@ final class AppComposition {
   }
 
   /// The launch window and auto-archive when `start` deferred them.
-  func finishLaunch(opensWindow: Bool) { session?.finishLaunch(opensWindow: opensWindow) }
+  func finishLaunch(opensWindow: Bool) {
+    guard let session else { return }
+    session.finishLaunch(opensWindow: opensWindow)
+    externalOpenWindowsReady()
+  }
+
+  /// AppKit can deliver a batch before a session or engine window exists.
+  func openFromOtherApp(_ urls: [URL]) { externalOpens.receive(urls) }
+
+  private func externalOpenWindowsReady() {
+    windowsReady = true
+    Task { await retryExternalOpens() }
+  }
+
+  /// An explicit retry retains the queued inputs after a failed read. Ready starts do not reload the editor.
+  @discardableResult
+  func retryExternalOpens() async -> Bool {
+    guard windowsReady, let session else { return false }
+    let editor = session.linkRoutingSettings
+    session.windows.externalLinkDestination = { [weak editor] url in editor?.destination(for: url) }
+    let ready = await externalOpens.start(read: {
+      if !editor.isLoaded { await editor.load() }
+      guard editor.isLoaded else { throw RoutingReadFailed() }
+    }, deliver: { url in
+      session.windows.openFromOtherApp([url])[0]
+    }, onResult: { [weak self] _, result in
+      self?.recordExternalOpen(result)
+    })
+    if !ready { AppSession.log.error("external link routing read failed") }
+    return ready
+  }
+
+  private struct RoutingReadFailed: Error {}
+
+  private func recordExternalOpen(_ result: ExternalLinkOpenResult) {
+    switch result {
+    case .dispatched: AppSession.log.notice("external link dispatched")
+    case .ignored: AppSession.log.notice("external link ignored")
+    case .unresolved:
+      blockedExternalOpens.append(result)
+      AppSession.log.notice("external link unresolved")
+    case .missingSpace:
+      blockedExternalOpens.append(result)
+      AppSession.log.notice("external link missing space")
+    }
+  }
 
   /// The launch-failure alert; true for Try Again. Shown from a run-loop callout, never from inside this main-actor
   /// job: a modal session there would starve the main actor (week-3 W3-0a), and the engine forbids nested loops in
