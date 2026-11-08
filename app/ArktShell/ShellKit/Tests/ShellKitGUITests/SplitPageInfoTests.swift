@@ -24,8 +24,9 @@ final class SplitPageInfoTests: XCTestCase {
       let source = ModelSidebarSource(sidebar: sidebar, now: { SplitPageInfoTests.now })
       self.source = source
       controller = ShellWindowController(engine: engine, sidebar: source, toolbarSetting: .ephemeral())
-      controller.window?.setFrame(NSRect(x: 100, y: 100, width: width, height: 800), display: false)
       controller.showWindow(nil)
+      // After showing: showing constrains the frame to the screen, which is small on a CI runner.
+      controller.window?.setFrame(NSRect(x: 100, y: 100, width: width, height: 800), display: false)
       controller.rootView.split.reduceMotion = { true }
       controller.rootView.reduceMotion = { true }
       controller.pageInfo.reduceMotion = { true }         // a hide takes the panel down at once
@@ -235,6 +236,8 @@ final class SplitPageInfoTests: XCTestCase {
 
     XCTAssertTrue(peek.isOpen)
     let root = harness.controller.rootView
+    XCTAssertGreaterThanOrEqual(root.split.paneCards[0].frame.width, PeekLayout.minimumWidth,
+                                "the premise: a pane wide enough for a Peek of its own")
     let scrim = try XCTUnwrap(peek.overlay?.scrim.frame)
     let rightBar = root.convert(harness.bar(1).bounds, from: harness.bar(1))
     XCTAssertFalse(scrim.intersects(rightBar), "the scrim leaves the other pane's Toolbar reachable")
