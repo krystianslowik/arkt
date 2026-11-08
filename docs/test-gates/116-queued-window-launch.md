@@ -41,3 +41,18 @@ The gate also covers a queued Dock reopen, which can otherwise become a legacy s
 Implementation-stage validation: three changed Swift files parsed; workflow import/UI-source checks, parity tests, header parity and whitespace passed. No ShellKit typecheck/build, GUI test, App build or native launch ran locally. The new lifecycle behavior remains unverified until CI executes the gate and the real App path.
 
 The same CI run independently failed Core with six SidebarAutosaver wait failures (579 tests / 47 suites, six issues). Neither the autosaver source nor its tests changed in this branch. A local supported-toolchain focused run passed all **23 SidebarAutosaver tests in one suite**; missing developer framework/library search-path linker warnings were emitted. That focused pass does not explain or waive the full-CI failures. A fresh full Core run remains required.
+
+
+## Executed component result at `0036e82`
+
+Run `42529445007` passed all six `QueuedWindowLaunchGateTests` methods, covering enabled and disabled queued regular
+launch, private-only preservation, Dock/legacy protection, unreadable collections and explicit empty/legacy input.
+Core passed 579 tests in 47 suites, pure ShellKit passed 2,572 in 293 suites, and the app build, lint and required
+aggregate passed. The earlier Core autosaver failures did not recur in this run; no cause for those failures is claimed.
+Normal XCUITest was skipped, so this does not establish native Chromium startup delivery or App launch/cancellation.
+
+The GUI job executed 2,193 reported tests, 64 skipped, with one failure: the window guard attributed five retained
+CommandBarPanels to AddressBarNavigationTests. Its teardown only ordered windows out. The follow-up calls the existing
+`closeAllForTesting()` helper before releasing the sets, matching the repair already used on the other owned branches.
+The guard and behavior assertions are unchanged. This fixture-only follow-up needs fresh CI; its local check is source
+parsing and whitespace, not a GUI run. No production lifecycle code changes in this follow-up.

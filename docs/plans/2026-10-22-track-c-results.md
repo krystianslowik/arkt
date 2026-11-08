@@ -3176,3 +3176,14 @@ The test was parsed, not type-checked or executed; no mutation or native App ter
 The queued-window gate at `7f74603` reached the intended missing-API compilation failure in run 42527108969: `defersLaunchCapture` and `defaultWindowAllowed` were absent, so no lifecycle tests ran. AppSession now defers both session formats before engine readiness and forwards one complete launch decision after queued adoption, including when the engine already supplied a window. Existing helper calls remain compatible. Regular startup windows no longer bypass restoration; explicit private-only launch preserves prior regular history through launch and quit/cancellation until a regular window is explicitly opened. The gate includes Dock-reopen legacy writes, original adopted-tab ownership and complete post-restore captures.
 
 Parsing of three changed Swift files, workflow import/UI-source checks, parity/header checks and whitespace passed. No local ShellKit/App build, GUI or native launch ran; implementation-stage lifecycle and actual App forwarding remain unverified. Separately, Core at the pre-implementation head reported six SidebarAutosaver wait failures out of 579 tests / 47 suites. The unchanged autosaver suite passed **23 tests in one suite** in a focused local Swift 6.4.1 / macOS 15.5 SDK run, with missing developer framework/library search-path linker warnings. This does not establish the cause of the full-CI failures; fresh Core validation remains required. Details: `docs/test-gates/116-queued-window-launch.md`.
+
+
+### #116 queued-startup component green and fixture cleanup
+
+At `0036e82`, run `42529445007` passed all six queued-window launch GUI regression methods, Core 579 tests /
+47 suites, pure ShellKit 2,572 / 293, app build, lint and the required aggregate. The GUI suite reported 2,193 tests,
+64 skipped and one failure: AddressBarNavigationTests retained five CommandBarPanels, detected by the unchanged
+window guard in the next class. Its teardown now closes each set with the existing `closeAllForTesting()` helper
+before clearing its array; production lifecycle and all behavior assertions are unchanged. The changed source parsed
+and whitespace checks passed; no local GUI run was performed and the follow-up head awaits CI. Normal XCUITest was
+skipped. These component passes do not establish actual Chromium queued startup delivery or native quit cancellation.
