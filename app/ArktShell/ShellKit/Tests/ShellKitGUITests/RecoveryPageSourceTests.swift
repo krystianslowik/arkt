@@ -366,14 +366,13 @@ final class RecoveryPageSourceTests: XCTestCase {
     XCTAssertEqual(frozen.map(\.currentTab), [a, d])
     XCTAssertEqual(frozen.first?.selectedTabs, [personal: a, work: b])
     XCTAssertEqual(frozen.last?.selectedTabs, [personal: c, work: d])
-    records.isSuspended = true
+    // Leave recovery writes observable while the production session collection is frozen.
     set.finishSessionRecovery(cleanQuit: true)
     first.activate(node: c)
     let changed = URL(string: "https://example.invalid/changed")!
     engine.navigate(liveTab, to: changed)
     XCTAssertEqual(store.loadWindows(), frozen)
     XCTAssertEqual(records.pages, [old])
-    records.isSuspended = false
     set.resumeSessions()
     set.finishSessionRecovery(cleanQuit: false)
     let resumed = try XCTUnwrap(store.loadWindows())
