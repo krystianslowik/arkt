@@ -2986,3 +2986,15 @@ work. No passing or failing test count is claimed for this gate.
 - Settings now edits the existing `CommandBarSettings` through the app's shared instance. Open bars refresh the retained query and notice when it changes; observers are detached on replacement, invalidation and deallocation. The control is unavailable without both services. This gates the local Search Google row, with no network provider. The storage key, default, notice dismissal and reset policy remain unchanged.
 - A focused actual-source package using Swift 6.2.4 and the macOS 15.5 SDK passed 5 settings tests in 2 suites, including observer removal. Swift 6.2.4 frontend parsing passed for the five changed production files and three settings test files; `git diff --check` passed. These do not establish a GUI or app build. The existing GUI gate and the new replacement/invalidation GUI case were not run locally; CI is needed. No full ShellKit baseline retry, GUI launch or XCUITest was performed.
 - Folder/extension production forwarding, activation and presentation, search-engine selection and issue-wide checks remain open. Provider order is provisional and no new product policy is chosen.
+
+
+### Suggestions setting retained-selection review gate (#562)
+
+Review of `9cf91ca` found that a setting notification reloads results, previews the first actionable result, then
+restores a retained selection without refreshing its preview or hints. The shared-setting ownership and observer
+cleanup had no other identified P1/P2 finding. The production correction is not applied in this test-first stage.
+
+Two GUI regressions drive keyboard selection through the existing preview harness. They retain a non-first tab
+through notice dismissal and suggestions changes, and retain a site-search row with its Search site hint through
+notice dismissal. Source parsing and diff checks passed; no GUI test ran locally. The expected stale-preview/hint
+runtime failure remains unobserved and must be established in CI before the small production correction.
