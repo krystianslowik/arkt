@@ -82,13 +82,6 @@ enum SessionWindowPolicy {
 @MainActor
 public final class WindowSessionStore {
   public static let defaultsKey = "windowSession"
-  public static let windowsDefaultsKey = "windowSessions"
-
-  private struct Collection: Codable {
-    let version: Int
-    let windows: [WindowSessionState]
-  }
-  private static let collectionVersion = 1
 
   private let defaults: UserDefaults?
 
@@ -104,23 +97,6 @@ public final class WindowSessionStore {
           let state = try? JSONDecoder().decode(WindowSessionState.self, from: data),
           WindowFramePlacement.isUsable(state.frame) else { return nil }
     return state
-  }
-
-  /// A missing collection falls back to the legacy single window. An unreadable collection does not.
-  public func loadWindows() -> [WindowSessionState]? {
-    guard let defaults else { return nil }
-    guard defaults.object(forKey: Self.windowsDefaultsKey) != nil else { return load().map { [$0] } }
-    guard let data = defaults.data(forKey: Self.windowsDefaultsKey),
-          let collection = try? JSONDecoder().decode(Collection.self, from: data),
-          collection.version == Self.collectionVersion,
-          collection.windows.allSatisfy({ WindowFramePlacement.isUsable($0.frame) }) else { return nil }
-    return collection.windows
-  }
-
-  public func saveWindows(_ windows: [WindowSessionState]) {
-    guard let data = try? JSONEncoder().encode(Collection(version: Self.collectionVersion, windows: windows))
-    else { return }
-    defaults?.set(data, forKey: Self.windowsDefaultsKey)
   }
 
   public func save(_ state: WindowSessionState) {

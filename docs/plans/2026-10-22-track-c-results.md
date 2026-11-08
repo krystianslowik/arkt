@@ -2899,8 +2899,12 @@ Written first. Each failed to compile before the code existed.
 
 ### Multi-window session store (#116, in progress)
 
-The session store now supports an ordered collection of window states, each with its own collapsed folder IDs.
-The existing single-window defaults key and API remain intact. A missing collection reads the legacy value; a saved
+The provisional implementation at `2a49f3c` supported an ordered collection of window states, each with its own
+collapsed folder IDs. That collection backend has been removed from the draft pending the maintainer's storage
+decision (PR #829, comment 6715272280). The tests remain as a proposed contract, along with backend-neutral folder
+state; the published code retains only the existing single-window store API. The prototype commit is preserved.
+
+In that prototype, the existing single-window defaults key and API remained intact. A missing collection read the legacy value; a saved
 empty collection stays empty. The new defaults value is a version 1 JSON envelope. Unreadable or unsupported
 collections and collections containing an unusable window frame are rejected without falling back to legacy data.
 States written before folder collapse was included decode with an empty set. This bounded slice uses injected user
@@ -2908,10 +2912,11 @@ defaults, following the existing session store; the full issue's storage decisio
 
 The five collection tests failed to compile against the unchanged model because the collection APIs and folder state
 were absent. An isolated macOS 15 package using the actual session source, relevant EngineAPI declarations, ID aliases,
-and both session test files passed 30 tests: 21 existing single-window tests, the five initial collection tests, and
+and both session test files at `2a49f3c` passed 30 tests: 21 existing single-window tests, the five initial collection tests, and
 four compatibility and invalid-data tests. This is a focused check, not the full ShellKit suite or an app build.
-Swift source parsing, changed-file import inspection, and diff whitespace checks passed. Full CI remains to validate
-this slice.
+Swift source parsing, changed-file import inspection, and diff whitespace checks passed for that prototype.
+After removing the unapproved backend, the focused actual-source package again fails compilation on the missing
+collection load/save APIs and defaults key; no tests execute. This is the expected held test gate, not a runtime pass.
 
 Capturing and reopening regular windows, excluding private windows, the General setting, deleted-item fallback,
 screen clamping during multi-window restore, and lifecycle integration remain. Preserve #690 recovery behavior during
