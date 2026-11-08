@@ -31,6 +31,9 @@ public final class AppSettings {
     /// The Library section last shown (BH-181).
     public static let libraryLastSection = "libraryLastSection"
 
+    public static let twitterBadgeEnabled = "twitterBadgeEnabled"
+    public static let whatsAppBadgeEnabled = "whatsAppBadgeEnabled"
+
     /// The preferences the panes edit, the Toolbar's and the Peek switches' keys included: what Reset all settings
     /// (#617) removes. Not here: window state (`lastPane`, `windowTopLeft`, `libraryLastSection`) and the one-time
     /// crash ask (`crashReportAskAnswered`), which are state, not preferences (docs/design/settings.md, section 2).
@@ -39,7 +42,8 @@ public final class AppSettings {
     @MainActor public static let preferences = [
       excludeFavoritesInSwitchToNthTab, switchToNinthSidebarItemEnabled, globalLittleBrowserHotkeyEnabled,
       optionCommandClickLittleArcEntryPointEnabled, sendsCrashReports, shouldWarnBeforeQuitting,
-      downloadsAskWhereToSave, downloadsFolder, PeekLinkSettings.crossSiteKey, PeekLinkSettings.shiftClickKey,
+      downloadsAskWhereToSave, downloadsFolder, twitterBadgeEnabled, whatsAppBadgeEnabled,
+      PeekLinkSettings.crossSiteKey, PeekLinkSettings.shiftClickKey,
       ToolbarSetting.defaultsKey, ToolbarSetting.showsFullURLDefaultsKey,
     ]
   }
@@ -79,6 +83,21 @@ public final class AppSettings {
       guard newValue != tabNavigation else { return }
       set(!newValue.countsFavorites, Key.excludeFavoritesInSwitchToNthTab)
       set(newValue.ninthOpensNinth, Key.switchToNinthSidebarItemEnabled)
+      notifyObservers()
+    }
+  }
+
+  /// Stored Favorite badge preferences. The false fallback is provisional until the product defaults are decided;
+  /// this storage group is not yet wired to badge rendering.
+  public var favoriteBadges: FavoriteBadgePreferences {
+    get {
+      FavoriteBadgePreferences(twitterBadgeEnabled: bool(Key.twitterBadgeEnabled, default: false),
+                               whatsAppBadgeEnabled: bool(Key.whatsAppBadgeEnabled, default: false))
+    }
+    set {
+      guard newValue != favoriteBadges else { return }
+      set(newValue.twitterBadgeEnabled, Key.twitterBadgeEnabled)
+      set(newValue.whatsAppBadgeEnabled, Key.whatsAppBadgeEnabled)
       notifyObservers()
     }
   }
@@ -295,5 +314,16 @@ public enum SettingsPane: String, CaseIterable, Sendable {
   public init?(commandNumber: Int) {
     guard (1...Self.allCases.count).contains(commandNumber) else { return nil }
     self = Self.allCases[commandNumber - 1]
+  }
+}
+
+/// Independent per-service Favorite badge preferences (BH-051).
+public struct FavoriteBadgePreferences: Equatable, Sendable {
+  public var twitterBadgeEnabled: Bool
+  public var whatsAppBadgeEnabled: Bool
+
+  public init(twitterBadgeEnabled: Bool, whatsAppBadgeEnabled: Bool) {
+    self.twitterBadgeEnabled = twitterBadgeEnabled
+    self.whatsAppBadgeEnabled = whatsAppBadgeEnabled
   }
 }

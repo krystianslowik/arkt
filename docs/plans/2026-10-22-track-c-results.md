@@ -2941,3 +2941,26 @@ Written first. Each failed to compile before the code existed.
 - Results moved here from the engine week-3 file as requested in PR #830 comment 6715272520. Other results remain
   intact. Renderer implementation, AppSession composition/forwarding, actual service formats, pixel placement and
   contrast, and music coexistence remain unverified.
+
+### Favorite badge preferences (#338): bounded storage slice
+
+- The shared defaults-backed `AppSettings` now exposes independent X/Twitter and WhatsApp Boolean values, removes
+  both keys on reset, and sends its existing weak-observer notification on changes and reset. The ephemeral store
+  follows the same path. No badge renderer or window binding is included.
+- Product question for the maintainer: what should the initial and reset values of `twitterBadgeEnabled` and
+  `whatsAppBadgeEnabled` be in Arkt? The spec's settings table marks both defaults unknown, while the approved Settings
+  design's parity notes omit these controls. The storage fallback is provisionally false for each; it is not wired to
+  badge display and does not decide the eventual UI behavior. The pure parser's synthetic helper defaults are not
+  evidence of product defaults.
+- Test-first red: Swift 6.2.4, macOS 15 deployment target and selected macOS SDK; an isolated Swift package used the
+  actual `AppSettings.swift`, the published `FavoriteBadgeSettingsTests.swift`, and extracted existing declarations
+  for its small dependencies. Compilation reached the test and failed because `favoriteBadges` and
+  `FavoriteBadgePreferences` were missing. No tests executed on that red.
+- After implementation, the same focused package passed **2 tests in 1 suite**: persistence/reopen/reset and
+  independent changes with observer notifications, no-op assignment and key removal. This is not a full ShellKit run.
+  An attempt to include the actual `AppSettingsTests` could not compile its existing optional `CGPoint` equality
+  assertions with the selected toolchain/SDK; no tests executed in that attempt. The existing reset helper was updated
+  to change both new preferences, but that broader test file remains unvalidated locally.
+- Swift frontend parsing, changed-file import inspection and `git diff --check` passed. Full ShellKit, GUI and app
+  builds were not run. The published integration gate still requires the badge view and window bindings; its status is
+  not established by this focused run.
