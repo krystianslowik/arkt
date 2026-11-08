@@ -209,7 +209,8 @@ cannot be switched off.
 
 ### 2.4 Hooks, and the `EmbedderBrowserWindowFeatures` hook
 
-Hooks are allowed within the cap (decision 5). A seam that needs no patch still comes first. Every item that is not a guard or a generalization, classified:
+Hooks are allowed within the cap (decision 5). A seam that needs no patch still comes first. Every item that is not a
+guard or a generalization, classified:
 
 | Item | Class | Batch | Status |
 |---|---|---|---|
@@ -253,7 +254,7 @@ definition. It counts **seam patch files** (the tolerate-a-non-BrowserView theme
 | E2: rows 6-7 added to the generalization theme | 14 | 20-21 | 6 | planned |
 | E2: page context menu hook (#588), only if needed | 14-15 | 20-23 | 6-7 | only if needed |
 | E3a: planned hooks: permission prompt factory, device pickers and permission element, beforeunload, low disk (low disk adds no file) | 15-17 | 22-26 | 7-9 | allowed (decision 5) |
-| E3b: two choke-point guards (`constrained_window_views.cc`, `tab_dialog_manager.cc`) and sheet hooks | 16-19 | 25-29 | 8-11 | allowed (decision 6), capped below |
+| E3b: two choke-point guards (`constrained_window_views.cc`, `tab_dialog_manager.cc`) and sheet hooks | 16-19 | 24-29 | 8-11 | allowed (decision 6), capped below |
 | toast routing and `SetResizable` hooks | | | | not planned; only within the cap |
 | gated sites that cannot be switched off | | | | only if needed, within the cap |
 | `EmbedderBrowserWindowFeatures`, if ever wired | | | | reserved, within the cap |
@@ -363,8 +364,8 @@ about twice the old E3 and too big for one pull request, so it splits:
 - **E3b: in-tab sheets.** The two choke-point guards and hooks, the sheet routes and the sheet inventory below.
 
 Rough size, as a guide only: E3a is close to the old E3 (12 surfaces, 2-4 hook sites, 1-2 hook patch files). E3b is
-larger in shell work (about 8-12 native sheets) but smaller in patches (2 guards and a few sheet hooks, 1-2 patch files).
-E3b starts once E3a's hooks have landed, so it knows how much of the cap is left. Either may split again into two pull
+larger in shell work (about 8-12 native sheets) but smaller in patches (2 guards and a few sheet hooks, 1-2 patch
+files). E3b starts once E3a's hooks have landed, so it knows how much of the cap is left. Either may split again into two pull
 requests if review asks (section 5).
 
 The rule for both: the engine seam can land before the shell draws the surface, but the prompt or sheet stays switched
@@ -429,10 +430,10 @@ Chromium shows a tab-modal sheet through two paths:
   `CreateTabScopedDialog` (`:303`), which builds its own widget (`:313-314`) and skips `ShowWebModalDialogViews`.
   23 non-test files match `CreateAndShowDialog(` or `CreateShowDialogAndBlockTabInteraction` (the same grep shape;
   a few are a dialog class's own static of the same name, such as `DeprecatedAppsDialogView::CreateAndShowDialog`,
-  and one is `tab_dialog_manager.cc` itself). `CreateTabScopedDialog` does `CHECK(host)` on `GetHostWidget()` (`:306-307`), which is
-  `BrowserElementsViews::GetPrimaryWindowWidget()` (`:435-445`). On an Arkt window that widget is null (E1 results,
-  row T), so a caller that reaches this path on an Arkt window would crash today, not draw a sheet. The E3b gate
-  confirms that with one caller first.
+  and one is `tab_dialog_manager.cc` itself). `CreateTabScopedDialog` does `CHECK(host)` on `GetHostWidget()`
+  (`:306-307`), which is `BrowserElementsViews::GetPrimaryWindowWidget()` (`:435-445`). On an Arkt window that widget
+  is null (E1 results, row T), so a caller that reaches this path on an Arkt window would crash today, not draw a
+  sheet. That crash is tracked as engine bug #846.
 
 The E3b gate greps both paths, with the Mac-build and reachability checks of section 2.3.
 
@@ -460,7 +461,7 @@ How a sheet goes native, in order of preference:
 Inventory, with the proposed route per row. The E3b gate confirms each route against the pinned source before any
 work:
 
-| Group | Sheet (path under `ui/views/`; a path starting with `actor/`, `enterprise/`, `glic/`, `skills/`, `ssl/` or `ui/` is under `chrome/browser/`) | Proposed route |
+| Group | Sheet (path under `ui/views/`; a path starting with `actor/`, `enterprise/`, `glic/`, `policy/`, `skills/`, `ssl/` or `ui/` is under `chrome/browser/`) | Proposed route |
 |---|---|---|
 | page-facing, must be native | HTTP login (`login_handler_views.cc`) | 4: hook in `LoginHandler::Create` |
 | | Open-app, external protocol (`external_protocol_dialog.cc`) | 4: hook in `RunExternalProtocolDialog` |
@@ -477,18 +478,19 @@ work:
 | gated or off | Digital credentials (`digital_credentials/digital_identity_multi_step_dialog.cc`), extension chooser and media galleries (`extensions/chooser_dialog_view.cc`, `extensions/media_galleries_dialog_views.cc`) | 5: behind a flag or reachable only from Chrome Apps |
 | | Web apps (`web_apps/`, 10 files, plus `shortcuts/create_desktop_shortcut.cc` and `apps/app_info_dialog/`), enterprise (`enterprise/connectors/analysis/`, `enterprise/data_controls/`), Google-only features (`actor/`, `skills/`), Safe Browsing tailored security (`safe_browsing/tailored_security_unconsented_modal.cc`) | 5: off or unreachable in Arkt |
 | already native | JavaScript dialogs (`javascript_tab_modal_dialog_view_views.cc`) | 2: #400 |
-| `TabDialogManager` path, page-facing | Ask before HTTP (`ssl/ask_before_http_dialog_controller.cc`, built from a `ui::DialogModel`) | 3 through the `TabDialogManager` hook |
+| `TabDialogManager` path, page-facing | Ask before HTTP (`ssl/ask_before_http_dialog_controller.cc`, built from a `ui::DialogModel`) | switched off by #846 until the `TabDialogManager` hook lands; then 3 through that hook |
 | | Edit address profile (`autofill/edit_address_profile_view.cc`) | native with address save (E3a), or 5 until then |
 | | Credential leak warning (`passwords/credential_leak_dialog_view.cc`) | to check: whether leak checks run without sign-in; native with password save (#632), or 5 |
 | `TabDialogManager` path, gated or off | Autofill payments (`autofill/payments/`, 7 files: error, progress, BNPL terms and issuer, unmask authentication selection, save and fill, card WebAuthn) | 5: server cards and BNPL need a Google Payments account |
 | | Password change (`ui/passwords/password_change_ui_controller.cc`), save to Drive (`save_to_drive/`), Lens permission (`ui/lens/`), glic opt-in (`glic/`), dictation onboarding (`dictation/`) | 5: Google-only, sign-in or unbranded builds |
-| | Enterprise (`chrome/browser/policy/chrome_browser_cloud_management_register_watcher.cc`, `policy/enterprise_startup_dialog_view.cc`), web apps (`web_apps/`, 4 files, and `tab_dialogs_views.cc`, which only forwards to them) | 5: off or unreachable in Arkt |
+| | Enterprise (`policy/chrome_browser_cloud_management_register_watcher.cc`, `ui/views/policy/enterprise_startup_dialog_view.cc`), web apps (`web_apps/`, 4 files, and `tab_dialogs_views.cc`, which only forwards to them) | 5: off or unreachable in Arkt |
 
 Proposed counts: about 4-6 route 4 candidates (HTTP login, open-app, FedCM, and maybe the certificate picker, WebAuthn
 and share this tab), about 8-12 native sheets in the shell, and the rest switched off. Route 4 hooks plus the two
 choke-point guards must fit in the 3-7 upstream files left, so only about 1-5 route 4 hooks fit. The gate tries
 routes 2 and 3 for every candidate first. If the gate finds more route 4 sheets than that, E3b stops and asks the
-maintainer: raise the cap for sheets, or switch more features off for the preview. A Chromium-drawn sheet is never the fallback.
+maintainer: raise the cap for sheets, or switch more features off for the preview. A Chromium-drawn sheet is never
+the fallback.
 
 Order inside E3b:
 
@@ -570,8 +572,8 @@ into two pull requests if review asks.
 
 **Rebase.** The overlay and the Swift side cost nothing at rebase. Patch hunks do: weight 1 per hunk in small files and
 2 in `browser_actions.cc` and `browser_commands.cc` (the audit's weighting). The two themes of section 2.3 are about 48
-lines in 9 hunks, about 68 weighted (lines times weight); the hooks of section 2.4 (E3a, E3b) add to that, within the cap of section 2.5. #222
-(dry-run rebase) runs right after E1, so the first measured number includes the new themes.
+lines in 9 hunks, about 68 weighted (lines times weight); the hooks of section 2.4 (E3a, E3b) add to that, within the
+cap of section 2.5. #222 (dry-run rebase) runs right after E1, so the first measured number includes the new themes.
 
 **One engine worktree.** `arkt-engine-lane` (checklist item 1) stays as it is: one engine worktree with the `$CR/arkt`
 link and one Chromium build at a time (swap, not CPU, is the measured limit, `engine/README.md`). Reviews, overlay edits
@@ -588,7 +590,7 @@ that do not need a build, and docs use a plain repo worktree without the `$CR` l
 | Bedrock moves features out of BWF | `browser_window_features.cc` and per-feature `X::From` | user data rather than a BWF leg; re-run the audit grep on each milestone |
 | Second lookup layer | `ToolbarButtonProvider::From` (34 sites), `BrowserElementsViews::From` (41), `GetWidgetForNativeWindow` (86), `ExtensionsToolbarDesktop` (13): also null on Arkt windows, not audited site by site | the extended grep before E2 |
 | Patched files edited often upstream | `browser_actions.cc` (5369 lines), `browser_commands.cc` (3118); `browser_web_contents_delegate.cc` (1537, two Arkt hunks already) if the row 8 hook is added | the hunk cap in section 2.5; measured in #222 |
-| Gate numbers | the week-2 limits in `engine/REBASE.md`, section 6 | new limits proposed (section 2.5) |
+| Gate numbers | the patch budget limits in `engine/REBASE.md`, section 6 | set (section 2.5, REBASE.md §6) |
 | Native prompts and sheets from day one widen the preview scope | E3a and E3b tables | E3 split in two; prompts and sheets without native UI are switched off, never shown as Views; the two E3b choke-point guards cancel any sheet not handled yet |
 | A second tab-modal path | `TabDialogManager::CreateTabScopedDialog` (`ui/tabs/tab_dialog_manager.cc:303-314`), 23 matching files; `CHECK(host)` on an Arkt window | a second choke-point guard in E3b, or a switch for each reachable caller; both paths in the E3b gate's grep |
 | Sheet hooks outgrow the cap | E3b route 4: about 3-7 upstream files left after E3a, 2 of them for the choke points | the choke points and existing seams first; E3b stops for a maintainer call if more route 4 sheets are needed |
