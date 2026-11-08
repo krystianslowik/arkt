@@ -395,7 +395,7 @@ final class PageInfoPermissionRow: NSView {
     title.font = ShellType.body.font
     title.lineBreakMode = .byTruncatingTail
     title.setAccessibilityElement(false)
-    note.font = .systemFont(ofSize: 11)
+    note.font = ShellType.footnote.font
     note.lineBreakMode = .byTruncatingTail
     note.setAccessibilityElement(false)
     popUp.isBordered = false
