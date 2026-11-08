@@ -2896,3 +2896,48 @@ Written first. Each failed to compile before the code existed.
 - `LittleArktTests` (XCUITest, 4): Opt-Cmd-click opens Little Arkt, Open in, Cmd-W and the chooser's Open in New Window.
   The app and test bundle build (`xcodebuild ... build-for-testing`: TEST BUILD SUCCEEDED). Not run: the suite needs
   the real pointer and keyboard, and the Mac was in use.
+
+## Favorite unread badges (#338): test-first stage
+
+- Added five pure ShellUI test cases for synthetic page-title counts, clearing, malformed counts, lookalike hosts,
+  display boundaries and the two service settings. The synthetic titles are parser contracts, not evidence of live
+  site formats. Formatting in this stage displays 1 through 99 and caps larger counts at `99+`; zero hides the badge.
+- The proposed `FavoriteUnreadBadge.text` seam does not yet exist. CI must first show the intended missing-API red;
+  implementation and a green run remain. No production badge code or engine change is included.
+- Local full suites and GUI checks were not run: this environment lacks Xcode and the baseline ShellKit build cannot
+  compile. Source parsing and diff checks do not establish a test count or a CI red. No visual placement or clipping
+  has been checked. Preserve the music indicator from #117.
+- Future grid changes overlap #822 and #802; follow the approved-first/smaller-first merge order, rebase later work,
+  and retain both hover and split-Favorite callbacks. This test file is independent of #824 layout math.
+
+### Pure model follow-up
+
+- CI run 42429614905, pure ShellKit job 128575434551, confirmed the test-stage red at
+  `FavoriteUnreadBadgeTests.swift:9`: `FavoriteUnreadBadge` was missing. The pure model now accepts a leading
+  parenthesized ASCII integer on the six tested exact hosts, case-insensitively; zero, malformed and overflowing
+  values clear the badge, and counts above 99 display `99+`. The X/Twitter and WhatsApp settings remain independent.
+- Swift 6.2.4, macOS 15 deployment target and the selected macOS SDK: an isolated package containing the actual
+  model and test files passed 7 tests in 1 suite (the original 5 plus 2 boundary tests). Frontend parsing, import
+  inspection and `git diff --check` passed. This is not a full ShellKit suite result; full package, app and GUI builds
+  were not run because the local baseline cannot compile and full Xcode is absent.
+- Runtime follow-up: establish actual service title formats and any supported bare or subdomain hosts before widening
+  the exact allowlist or parser. Synthetic examples do not establish live behavior; no live traffic was used.
+- Next, write integration tests first for title observation, clearing and independent settings changes, then connect
+  the renderer and settings. Coordinate the shared grid and context-menu files with #822 and #802 using the existing
+  merge order and preserve hover and split-Favorite callbacks; coordinate geometry with #824. Verify 0, 1 and 99+
+  clipping, accessibility, appearance and the #117 music indicator. The whole feature remains incomplete. Live
+  Calendar Join remains not planned (OS-06).
+
+### Integration gate and validated model head
+
+- CI run 42431223964 at `bfafdeda`: ShellKit pure passed 2,512 tests in 280 suites. The informative GUI suite
+  executed 2,045 tests, with 54 skipped and no failures. The app build, isolation/lint and required gate passed;
+  Core and UI jobs were skipped. These counts precede the integration gate.
+- The next test-first stage covers live and adopted-tab titles, including empty-title clearing; shared defaults-backed
+  preferences and real reset; tile reuse, accessibility actions, favicon coexistence and positive badge geometry.
+  Source review corrections include using actual tab handoff, one shared settings binding, and resetting while both
+  preferences differ from their defaults. The proposed UI/settings APIs are still missing; first executable red is
+  unobserved. Source parsing and diff checks do not establish compilation or runtime behavior.
+- Results moved here from the engine week-3 file as requested in PR #830 comment 6715272520. Other results remain
+  intact. Renderer implementation, AppSession composition/forwarding, actual service formats, pixel placement and
+  contrast, and music coexistence remain unverified.
