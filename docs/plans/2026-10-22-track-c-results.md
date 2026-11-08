@@ -2896,3 +2896,9 @@ Written first. Each failed to compile before the code existed.
 - `LittleArktTests` (XCUITest, 4): Opt-Cmd-click opens Little Arkt, Open in, Cmd-W and the chooser's Open in New Window.
   The app and test bundle build (`xcodebuild ... build-for-testing`: TEST BUILD SUCCEEDED). Not run: the suite needs
   the real pointer and keyboard, and the Mac was in use.
+
+### #278 — Defer hover resync during Space paging
+
+- The outline and Favorites hosts coalesce pointer resyncs during tracking, frozen gestures and animated settling; pending hosts resync at final rest using the current pointer and geometry. A jump flushes pending work, while closing or detaching discards stale requests.
+- Test-first CI run 42428504805, GUI job 128571999129 at `00b8116`: 2,050 tests executed, 54 skipped, 10 assertion failures, all in `PagerHoverResyncTests`. Four of five methods failed; Reduce Motion/idle passed. Tracking queried both hosts `[1, 1]` instead of `[0, 0]` (line 74); settling reached `[2, 2]` instead of `[0, 0]` (line 79). The required Swift gate, pure tests, app build and lint passed at that test-only head.
+- Implementation verification: Swift frontend syntax parsing of the four changed production files and the GUI test file, `git diff --check`, and import-layer grep passed. These are not compilation or executable tests. Full local ShellKit builds and GUI tests were not run because the local baseline cannot build and full Xcode is unavailable. Current-head CI and separate review are pending; rerun the GUI suite after #816 lands. No #275 timing or physical 120 Hz performance claim is made.

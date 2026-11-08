@@ -132,6 +132,30 @@ final class PagerHoverResyncTests: XCTestCase {
     XCTAssertTrue(row.isHovered, "the final pointer position determines the row hover")
   }
 
+  func testQueuedIdleRequestWaitsForPagingAndJumpFlushes() throws {
+    let h = try Harness()
+    defer { h.controller.close() }
+    h.request()
+    h.controller.pager.beginTracking()
+    h.drain()
+    XCTAssertEqual(h.counts, [0, 0])
+    h.controller.pager.jump(to: 0)
+    h.drain()
+    XCTAssertEqual(h.counts, [1, 1])
+  }
+
+  func testDetachedHostDoesNotFlushItsOldRequest() throws {
+    let h = try Harness()
+    defer { h.controller.close() }
+    h.controller.pager.beginTracking()
+    h.request()
+    h.drain()
+    h.grid.removeFromSuperview()
+    h.controller.pager.jump(to: 0)
+    h.drain()
+    XCTAssertEqual(h.tilePointer.windowServerQueries, 0)
+  }
+
   func testClosingDuringMotionDoesNotRunDeferredQueries() throws {
     let h = try Harness()
     h.controller.pager.beginTracking()

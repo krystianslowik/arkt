@@ -42,6 +42,27 @@ public final class SpacePagerView: NSView {
   /// Test hook: called after `onSettle`.
   @_spi(Smoke) public var onSettleForTesting: (@MainActor (Int) -> Void)?
 
+  private final class PendingHover {
+    weak var scheduler: HoverResyncScheduler?
+    init(_ scheduler: HoverResyncScheduler) { self.scheduler = scheduler }
+  }
+  private var pendingHover: [PendingHover] = []
+
+  /// Keeps one request per host until the interaction has really ended, including a frozen settle.
+  func deferHoverResync(_ scheduler: HoverResyncScheduler) -> Bool {
+    guard isTracking || driver.isRunning || frozenTarget != nil else { return false }
+    if !pendingHover.contains(where: { $0.scheduler === scheduler }) {
+      pendingHover.append(PendingHover(scheduler))
+    }
+    return true
+  }
+
+  private func flushHoverResyncs() {
+    let pending = pendingHover
+    pendingHover.removeAll()
+    for entry in pending { entry.scheduler?.flushDeferred(in: self) }
+  }
+
   let strip = NSView(frame: .zero)
   /// Tests: force the Reduce Motion path on (true) or off (false) whatever the system setting; nil follows it.
   var reduceMotionForTesting: Bool?
@@ -374,6 +395,7 @@ public final class SpacePagerView: NSView {
     index = clamped
     targetIndex = clamped
     apply(offset: -CGFloat(clamped) * pageWidth)
+    flushHoverResyncs()
   }
 
   /// Animates to page `target` (keyboard, Ctrl-N, dots). A running settle hands its velocity over.
@@ -417,6 +439,8 @@ public final class SpacePagerView: NSView {
     isTracking = false
     frozenTarget = nil
     targetIndex = index
+    for entry in pendingHover { entry.scheduler?.cancel() }
+    pendingHover.removeAll()
     syncStripFrame()
     updatePageVisibility()
   }
@@ -443,6 +467,7 @@ public final class SpacePagerView: NSView {
   private func settled(_ target: Int) {
     onSettle?(target)
     onSettleForTesting?(target)
+    flushHoverResyncs()
   }
 
   // MARK: Tracking (scrollWheel and scripted swipes share these)
