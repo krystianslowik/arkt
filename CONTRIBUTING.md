@@ -307,12 +307,12 @@ and keep your hands off the keyboard and mouse until they finish:
 ```zsh
 cd app/ArktShell && xcodegen generate
 xcodebuild -project ArktShell.xcodeproj -scheme ArktShellUITests -derivedDataPath build \
-  -resultBundlePath build/ui-$(date +%s).xcresult -collect-test-diagnostics never test
+  -resultBundlePath "<artifacts folder>/<issue number>/ui-$(date +%s).xcresult" -collect-test-diagnostics never test
 ```
 
-Result bundles are large. If you have an artifacts folder off the boot disk, point `-resultBundlePath` there instead
-of `build/`, and delete the bundle once its counts are in the pull request
-(`.claude/skills/arkt-local-app-safety/SKILL.md`, section 2).
+Result bundles are large, so write them to an artifacts folder outside the repo, one subfolder per issue. Use the
+one your brief names; without one, use `$TMPDIR/arkt-<issue number>/` and check its free space. Delete the bundle
+once its counts are in the pull request (`.claude/skills/arkt-local-app-safety/SKILL.md`, section 2).
 
 Add `-only-testing:ArktShellUITests/<Class>/<test>` for one test. To scale the harness wait timeouts (default 10 s),
 set `TEST_RUNNER_ARKT_UITEST_TIMEOUT_SCALE=3` in the environment of `xcodebuild`; as a build setting argument it does

@@ -1,6 +1,6 @@
 ---
 name: arkt-local-app-safety
-description: Use before launching, testing or driving a local Arkt build (app copies, engine bundles, UI tests, synthetic input) - keep test builds away from the user's real apps, links, browser data and processes, and clean up after.
+description: Use before launching, testing or driving a local Arkt build (app copies, engine bundles, UI tests, profiling (`xctrace`), synthetic input) - keep test builds away from the user's real apps, links, browser data and processes, and clean up after.
 ---
 
 # Arkt local app safety
@@ -13,7 +13,7 @@ behind. These rules hold for every launch, test run and build.
 1. What you will launch, from which path, under which bundle id.
 2. The throwaway data folder or profile it will use.
 3. How you will record its PID and stop it.
-4. Free disk now (`df -h .`).
+4. Free disk now (`df -h .` and `df -h <artifacts folder>`).
 
 **STOP** if the bundle id equals an installed release build's, or the data folder is a real profile.
 
@@ -35,10 +35,11 @@ behind. These rules hold for every launch, test run and build.
 
 ## 2. Heavy local outputs
 
-1. **Artifacts folder, not the boot disk.** `xctrace` traces, `.xcresult` bundles, DMGs, app copies, and perf logs
-   or screenshots you are not committing go under the maintainer's artifacts folder, given in the task brief, in one
-   subfolder per issue (`<artifacts folder>/<issue number>/`). Never write them to the boot disk, the repo or
-   `build/`. **STOP** and ask if the brief names no artifacts folder.
+1. **Artifacts folder for heavy outputs.** Build products stay where the build puts them (section 1, item 3). Write
+   traces, result bundles, perf logs, extra app copies and DMGs to an artifacts folder, one subfolder per issue
+   (`<artifacts folder>/<issue number>/`). When a brief names one, use it. Without one, use a folder outside the
+   repo, for example `$TMPDIR/arkt-<issue number>/`, and check its free space. **STOP** before an `xctrace`
+   recording if no artifacts folder is given and that volume is short on space.
 2. **Time-limit every recording.** Every `xctrace record` passes `--time-limit` (`30s` by default, `120s` at most) and
    `--output` inside the issue subfolder. Record a bounded probe: a fixed number of steps that ends on its own, never
    a loop that repeats until stopped.
@@ -59,5 +60,5 @@ behind. These rules hold for every launch, test run and build.
 
 - UI tests keeping screenshots for passing runs until the disk filled (#426, fixed in #427).
 - A test build registered under the real bundle id, which took over the user's link opens.
-- Profiling recordings without a time limit on the boot disk, which filled it several times, once with a single
-  48 GB trace.
+- Profiling recordings without a time limit, which filled the boot disk several times, once with a
+  single 48 GB trace.
