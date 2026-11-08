@@ -4,7 +4,7 @@ import EngineAPI
 import EngineAPITestSupport
 import SidebarModel
 import XCTest
-@testable import ShellUI
+@_spi(Smoke) @testable import ShellUI
 
 /// Folders (#109): the spring that opens and closes a folder (interruptible, with a Reduce Motion variant), rows
 /// peeking out of a closed folder (BH-092, BH-105), Collapse All / Expand All Folders (BH-097), each window's own

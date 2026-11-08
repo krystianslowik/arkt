@@ -2954,3 +2954,14 @@ extensions, real data refresh, activation, closed-folder peek or Settings accept
 - The existing command-bar switch callback calls window activation, which updates the sidebar's current tab; the outline already recalculates its transient peek on that change. A GUI regression now selects an actual open-tab result and commits it through the bar, checking a long-titled tab in nested closed folders, hidden siblings, both closed states, switching away and an archived target. The test uses the existing main-actor window/model harness; it adds no production API or behavior.
 - `swiftc -frontend -parse app/ArktShell/ShellKit/Tests/ShellKitGUITests/FolderTests.swift` and `git diff --check` passed. Parsing is not a test run or an observed red. The GUI test and full suites were not run locally: the local ShellKit baseline is compiler-broken and full Xcode is unavailable. CI must execute the gate before any production change or BH-105 completion claim. Missing-source and private-node stale-result cases remain unverified, as do accessibility and visual layout for the long title.
 - This is a test-only gate; it does not establish a new folder or extension selection policy. The provider remains non-actionable and unforwarded. Keep #562 open for its remaining integration and Settings work.
+
+
+### Closed-folder integration test SPI import repair (#562)
+
+At `fbfcb02`, run 42441040095 failed compilation before executing any tests: the three new query calls in
+`FolderTests` could not access `setQueryForTesting` through its existing Smoke SPI. The aggregate Swift job
+reported the required ShellKit failure. This is a harness access error, not the intended BH-105 behavior red.
+
+The test now uses the same `@_spi(Smoke) @testable import ShellUI` as the existing command-bar tests. The test body
+and production code are unchanged. Swift 6.2.4 parsing and diff checks passed; no local suite ran. CI must compile
+and execute the new gate before BH-105 can be considered verified.
