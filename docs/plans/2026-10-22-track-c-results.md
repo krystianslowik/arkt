@@ -2955,3 +2955,10 @@ The 32 focused backend passes in the preceding section apply to commit
 `a671d67f4dedc078c09742e1ed3d9539f2794fe0`; they are not lifecycle results. The lifecycle gate has not been compiled
 or executed, so the intended missing-API red and CI status are unobserved. Full local ShellKit, app and GUI builds
 were not run because the local package baseline fails and full Xcode is unavailable. #612 and #690 remain separate.
+
+
+### #116: lifecycle gate review corrections
+
+The capture and restoration cases now give each window distinct selected tabs in both Spaces. Capture checks complete dictionaries; after restore, each window switches to its other Space and back to prove its own history survived independently. Termination teardown unwraps both engine window IDs instead of silently skipping it. The preference case enables restoration on a fresh window set sharing the persisted settings and collection, preserving the once-at-launch contract; repeated forwarding on that fresh set additionally must not create duplicate windows.
+
+These are test-only corrections to two P2 review findings, not lifecycle implementation. Swift 6.2.4 parsing and whitespace checks passed. The missing-API red and GUI results remain unobserved. The intended missing APIs are restoreWindowsAtLaunch and AppSettings.restoreWindowsOnLaunch (and any absent folder restoration seam); saveSessionsForTermination and resumeSessions already exist but need collection behavior. The restore-on default is specified in issue #116 and the Settings design. Backend evidence stays attributed to a671d67; App lifecycle, relaunch, General UI and unsupported-collection write behavior remain separate boundaries.

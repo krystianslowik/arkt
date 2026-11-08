@@ -43,8 +43,12 @@ final class MultiWindowLifecycleGateTests: XCTestCase {
     let personal = sidebar.spaceOrder[0], work = sidebar.spaceOrder[1]
     let a = sidebar.children(of: .today(personal))[1]
     let b = sidebar.children(of: .today(work))[0]
+    let c = sidebar.children(of: .pinned(personal))[1]
+    let d = sidebar.children(of: .pinned(work))[1]
+    first.activate(node: b)
     first.activate(node: a)
-    second.activate(node: b)
+    second.activate(node: c)
+    second.activate(node: d)
     first.window?.setFrame(CGRect(x: 80, y: 100, width: 720, height: 520), display: false)
     second.window?.setFrame(CGRect(x: 140, y: 160, width: 800, height: 600), display: false)
     let frameA = try XCTUnwrap(first.window?.frame)
@@ -56,14 +60,13 @@ final class MultiWindowLifecycleGateTests: XCTestCase {
     let captured = try XCTUnwrap(store.loadWindows())
     XCTAssertEqual(captured.count, 2)
     guard captured.count == 2 else { return }
-    XCTAssertEqual(captured.map(\.currentTab), [a, b])
+    XCTAssertEqual(captured.map(\.currentTab), [a, d])
     XCTAssertEqual(captured.map(\.space), [personal, work])
     XCTAssertEqual(captured.map(\.frame), [frameA, frameB])
-    XCTAssertEqual(captured[0].selectedTabs[personal], a)
-    XCTAssertEqual(captured[1].selectedTabs[work], b)
-    for controller in [first, second] {
-      if let id = controller.engineWindow { engine.engineEndWindow(id, reason: .appQuit) }
-    }
+    XCTAssertEqual(captured[0].selectedTabs, [personal: a, work: b])
+    XCTAssertEqual(captured[1].selectedTabs, [personal: c, work: d])
+    let windowIDs = try [first, second].map { try XCTUnwrap($0.engineWindow) }
+    for id in windowIDs { engine.engineEndWindow(id, reason: .appQuit) }
     XCTAssertEqual(store.loadWindows(), captured, "teardown must not overwrite the quit snapshot")
   }
 
@@ -113,6 +116,8 @@ final class MultiWindowLifecycleGateTests: XCTestCase {
     let personal = sidebar.spaceOrder[0], work = sidebar.spaceOrder[1]
     let a = sidebar.children(of: .today(personal))[1]
     let b = sidebar.children(of: .today(work))[0]
+    let c = sidebar.children(of: .pinned(personal))[1]
+    let d = sidebar.children(of: .pinned(work))[1]
     let screen = ScreenGeometry(frame: CGRect(x: 0, y: 0, width: 1024, height: 768),
       visibleFrame: CGRect(x: 0, y: 63, width: 1024, height: 674))
     set.screens = { [screen] }
@@ -121,13 +126,13 @@ final class MultiWindowLifecycleGateTests: XCTestCase {
       WindowSessionState(frame: CGRect(x: 8100, y: 8100, width: 640, height: 430), screenFrame: disconnected,
                          space: personal, currentTab: a, selectedTabs: [personal: a, work: b]),
       WindowSessionState(frame: CGRect(x: 8400, y: 8200, width: 700, height: 450), screenFrame: disconnected,
-                         space: work, currentTab: b, selectedTabs: [personal: a, work: b])
+                         space: work, currentTab: d, selectedTabs: [personal: c, work: d])
     ]
     store.saveWindows(states)
     let windows = set.restoreWindowsAtLaunch()
     XCTAssertEqual(windows.count, 2)
     guard windows.count == 2 else { return }
-    XCTAssertEqual(windows.map(\.currentNode), [a, b])
+    XCTAssertEqual(windows.map(\.currentNode), [a, d])
     XCTAssertEqual(windows.map(\.currentSpace), [personal, work])
     for (window, state) in zip(windows, states) {
       let native = try XCTUnwrap(window.window)
@@ -135,6 +140,14 @@ final class MultiWindowLifecycleGateTests: XCTestCase {
                                                          screens: [screen], minSize: native.minSize)
       XCTAssertEqual(native.frame, expected)
     }
+    windows[0].sidebarController.showSpace(work)
+    XCTAssertEqual(windows[0].currentNode, b)
+    windows[1].sidebarController.showSpace(personal)
+    XCTAssertEqual(windows[1].currentNode, c)
+    windows[0].sidebarController.showSpace(personal)
+    XCTAssertEqual(windows[0].currentNode, a)
+    windows[1].sidebarController.showSpace(work)
+    XCTAssertEqual(windows[1].currentNode, d)
   }
 
   func testBlankAndIncognitoIncludingReopenedWindowsStayOutOfCollection() throws {
@@ -205,9 +218,17 @@ final class MultiWindowLifecycleGateTests: XCTestCase {
     XCTAssertTrue(set.controllers.isEmpty)
     XCTAssertEqual(store.loadWindows(), [state])
     reread.restoreWindowsOnLaunch = true
-    let windows = set.restoreWindowsAtLaunch(settings: AppSettings(defaults: defaults))
+    let nextLaunch = ShellWindowSet(engine: InMemoryEngine(), sidebar: sidebar, sessionStore: store)
+    addTeardownBlock { @MainActor in
+      for controller in nextLaunch.controllers { controller.window?.orderOut(nil) }
+    }
+    let windows = nextLaunch.restoreWindowsAtLaunch(settings: AppSettings(defaults: defaults))
     XCTAssertEqual(windows.count, 1)
     XCTAssertEqual(windows.first?.currentNode, tab)
+    let identities = nextLaunch.controllers.map(ObjectIdentifier.init)
+    _ = nextLaunch.restoreWindowsAtLaunch(settings: AppSettings(defaults: defaults))
+    XCTAssertEqual(nextLaunch.controllers.map(ObjectIdentifier.init), identities,
+                   "repeated launch forwarding must not create another window")
   }
 
   func testDeletedSpaceAndTabFallBackPerRestoredWindow() throws {
