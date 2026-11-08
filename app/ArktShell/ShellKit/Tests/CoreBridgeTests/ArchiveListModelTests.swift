@@ -51,6 +51,48 @@ struct ArchiveListModelTests {
 
   // MARK: - Paging
 
+  /// BH-086 / BH-157: an explicit route for a restored tab wins over both its surviving source and current Space.
+  @Test func matchingRouteRestoresArchiveRowIntoItsDestination() async throws {
+    let harness = try Harness()
+    let original = try #require(harness.space)
+    let current = try harness.source.addSpace(title: "Current")
+    let destination = try harness.source.addSpace(title: "Destination")
+    let url = URL(string: "https://docs.example.test/guide")!
+    let tab = try harness.source.addTab(url: url, title: "Guide", in: .today(original))
+    let originalNeighbor = try harness.source.addTab(url: Self.urlForRoutingNeighbor, title: "Original neighbor", in: .today(original))
+    let currentNeighbor = try harness.source.addTab(url: Self.urlForRoutingNeighbor, title: "Current neighbor", in: .today(current))
+    let destinationNeighbor = try harness.source.addTab(url: Self.urlForRoutingNeighbor, title: "Destination neighbor", in: .today(destination))
+    let item = try #require(harness.coordinator.archive([tab], reason: .manual).first)
+    #expect(await harness.coordinator.flush())
+    let routing = LinkRouting(routes: [
+      .init(condition: .contains("DOCS.EXAMPLE.TEST"), destination: .space(destination)),
+      .init(condition: .matches("https://unrelated.example.test/"), destination: .space(current)),
+    ])
+    // Proposed production seam: provide the shared, already-loaded routing value, not a test-side match.
+    harness.coordinator.linkRoutingProvider = { routing }
+    harness.model.currentSpaceProvider = { current }
+
+    let page = await harness.model.loadPage()
+    #expect(page.rows.map(\.id).contains(item.id))
+    #expect(harness.model.restore(item.id))
+    let restored = try #require(harness.restored.first?.0)
+    #expect(restored.nodeID == item.id)
+    #expect(restored.space == destination)
+    #expect(restored.location == .today(destination))
+    #expect(harness.source.sidebar.snapshot(of: item.id) == item.snapshot)
+    #expect(harness.source.children(of: .today(original)) == [originalNeighbor])
+    #expect(harness.source.children(of: .today(current)) == [currentNeighbor])
+    #expect(harness.source.children(of: .today(destination)) == [item.id, destinationNeighbor])
+    #expect(!harness.model.rows.contains { $0.id == item.id })
+    #expect(await harness.coordinator.flush())
+    #expect(await harness.store.removed == [[item.id]])
+    let remaining = try await harness.store.items(matching: ArchiveFilter(), limit: nil)
+    #expect(!remaining.items.contains { $0.id == item.id })
+    #expect(harness.coordinator.linkRoutingProvider?() == routing)
+  }
+
+  private static let urlForRoutingNeighbor = URL(string: "https://neighbor.example.test/")!
+
   @Test func firstPageAsksForTwoHundredNewestFirst() async throws {
     let harness = try Harness(items: Self.tabs(450).shuffled(), unreadable: 3)
 
