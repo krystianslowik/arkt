@@ -13,6 +13,7 @@ public final class ExternalOpenCoordinator<Outcome> {
   private var pending: [URL] = []
   private var nextIndex = 0
   private var isDraining = false
+  private var deliveryPaused = false
   private var loading: Task<Bool, Never>?
   private var deliver: (@MainActor (URL) -> Outcome)?
   private var onResult: (@MainActor (URL, Outcome) -> Void)?
@@ -21,6 +22,15 @@ public final class ExternalOpenCoordinator<Outcome> {
 
   public func receive(_ urls: [URL]) {
     pending.append(contentsOf: urls)
+    drain()
+  }
+
+  /// Freeze delivery before quit capture. A read may finish while paused, but its inputs stay queued.
+  public func pauseDelivery() { deliveryPaused = true }
+
+  /// The caller restores session writes before resuming queued delivery after a cancelled quit.
+  public func resumeDelivery() {
+    deliveryPaused = false
     drain()
   }
 
@@ -52,14 +62,16 @@ public final class ExternalOpenCoordinator<Outcome> {
   }
 
   private func drain() {
-    guard state == .ready, !isDraining, let deliver, let onResult else { return }
+    guard state == .ready, !deliveryPaused, !isDraining, let deliver, let onResult else { return }
     isDraining = true
     defer {
-      pending.removeAll(keepingCapacity: true)
-      nextIndex = 0
+      if nextIndex == pending.count {
+        pending.removeAll(keepingCapacity: true)
+        nextIndex = 0
+      }
       isDraining = false
     }
-    while nextIndex < pending.count {
+    while !deliveryPaused, nextIndex < pending.count {
       let url = pending[nextIndex]
       let outcome = deliver(url)
       onResult(url, outcome)

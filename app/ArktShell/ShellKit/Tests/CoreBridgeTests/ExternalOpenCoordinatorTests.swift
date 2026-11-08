@@ -157,6 +157,78 @@ struct ExternalOpenCoordinatorTests {
     #expect(results.map(\.1) == [.unresolved, .missingSpace(missing), .ignored])
     #expect(coordinator.pendingCount == 0)
   }
+
+  @Test func heldReadCannotDeliverUntilQuitCancellationResumes() async throws {
+    let coordinator = ExternalOpenCoordinator<String>()
+    let read = HeldRead()
+    var delivered: [URL] = []
+    coordinator.receive([a, b])
+    let start = StartAttempt { await coordinator.start(read: { try await read.run() },
+      deliver: { $0.absoluteString }, onResult: { url, _ in delivered.append(url) }) }
+    defer { start.cancel(); read.cancel() }
+    try await read.waitUntilStarted()
+    coordinator.pauseDelivery()
+    read.succeed()
+    #expect(try await start.result())
+    #expect(coordinator.state == .ready)
+    #expect(delivered.isEmpty)
+    coordinator.receive([c, a])
+    #expect(coordinator.pendingCount == 4)
+    #expect(delivered.isEmpty)
+    coordinator.resumeDelivery()
+    #expect(delivered == [a, b, c, a])
+    #expect(coordinator.pendingCount == 0)
+    #expect(read.count == 1)
+  }
+
+  @Test func pauseDuringReportingRetainsTheUndeliveredTail() async throws {
+    let coordinator = ExternalOpenCoordinator<String>()
+    var delivered: [URL] = []
+    var paused = false
+    coordinator.receive([a, b, c])
+    #expect(try await completed { await coordinator.start(read: {}, deliver: { $0.absoluteString },
+      onResult: { url, _ in
+        delivered.append(url)
+        if !paused { paused = true; coordinator.pauseDelivery() }
+      }) })
+    #expect(delivered == [a])
+    #expect(coordinator.pendingCount == 2)
+    coordinator.receive([a])
+    #expect(coordinator.pendingCount == 3)
+    coordinator.resumeDelivery()
+    #expect(delivered == [a, b, c, a])
+    #expect(coordinator.pendingCount == 0)
+  }
+
+  @Test func successfulSettingsReadCanRestartTheFailedReceiver() async throws {
+    let editor = LinkRoutingSettingsModel(state: FailsFirstRoutingRead())
+    let coordinator = ExternalOpenCoordinator<String>()
+    var delivered: [URL] = []
+    var retry: StartAttempt?
+    let read: @MainActor () async throws -> Void = {
+      if !editor.isLoaded { await editor.load() }
+      guard editor.isLoaded else { throw ReadFailure.failed }
+    }
+    editor.onDidLoad = {
+      if coordinator.state == .failed {
+        retry = StartAttempt { await coordinator.start(read: read, deliver: { $0.absoluteString },
+          onResult: { url, _ in delivered.append(url) }) }
+      }
+    }
+    defer { retry?.cancel(); editor.onDidLoad = nil }
+    coordinator.receive([a, b])
+    #expect(try await completed { await coordinator.start(read: read, deliver: { $0.absoluteString },
+      onResult: { url, _ in delivered.append(url) }) } == false)
+    #expect(coordinator.state == .failed)
+    #expect(coordinator.pendingCount == 2)
+    #expect(retry == nil)
+    await editor.settingsRows.load()
+    let restarted = try #require(retry)
+    #expect(try await restarted.result())
+    #expect(delivered == [a, b])
+    #expect(coordinator.pendingCount == 0)
+  }
+
 }
 
 private enum ReadFailure: Error { case failed }
@@ -229,6 +301,21 @@ private actor ImmediateRoutingStore: LinkRoutingSettingsStoring {
   private var value = LinkRouting(routes: [])
   func loadLinkRouting() async throws -> LinkRouting { value }
   func updateLinkRouting(at date: Date, _ change: @escaping @Sendable (inout LinkRouting) -> Void) async throws -> LinkRouting {
+    change(&value)
+    return value
+  }
+}
+
+
+private actor FailsFirstRoutingRead: LinkRoutingSettingsStoring {
+  private var reads = 0
+  func loadLinkRouting() async throws -> LinkRouting {
+    reads += 1
+    if reads == 1 { throw ReadFailure.failed }
+    return LinkRouting(routes: [])
+  }
+  func updateLinkRouting(at date: Date, _ change: @escaping @Sendable (inout LinkRouting) -> Void) async throws -> LinkRouting {
+    var value = LinkRouting(routes: [])
     change(&value)
     return value
   }

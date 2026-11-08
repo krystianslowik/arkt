@@ -11,6 +11,8 @@ public final class LinkRoutingSettingsModel {
   /// The most recent load or flush error; cleared by a successful operation.
   public private(set) var lastError: (any Error)?
   public private(set) var isLoaded = false
+  /// A successful shared read finished; the App can retry inputs retained while routing was unavailable.
+  public var onDidLoad: (@MainActor () -> Void)?
 
   private let state: any LinkRoutingSettingsStoring
   private let now: @MainActor () -> Date
@@ -64,6 +66,7 @@ public final class LinkRoutingSettingsModel {
     loading = task
     await task.value
     loading = nil
+    if isLoaded { onDidLoad?() }
   }
 
   /// Nil means the snapshot is unavailable or Core could not resolve the URL.

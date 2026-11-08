@@ -137,3 +137,35 @@ AppComposition now owns the receiver before session creation. After normal FakeE
 This stage does not establish held/failed-read behavior in the actual App, early OS event timing, queue-drained duplicate absence, cold persisted-profile relaunch, or Chromium startup-window adoption. Chromium's existing queued engine requests are not replayed as external URLs. The six app tests remain unchanged and require a new native run before any app-green claim.
 
 The post-wiring actual-source focused probe passed 60 tests in 13 suites, including six coordinator tests; linker search-path warnings remained. Swift 6.2.4 frontend parsing of the changed App sources and whitespace checks passed. The probe does not compile App or prove the wiring; no full local ShellKit/App build, GUI run or app launch was performed.
+
+
+## Retry and termination review repair
+
+Review of `1a8f13e63771553124cedb290892002290de73b5` identified two App composition gaps: no reachable
+retry after the initial routing read failed, and delivery after quit had frozen session saves. The receiver now
+pauses before session capture and resumes only after session cancellation restores writes. A successful read while
+paused leaves its inputs queued. Pausing reentrantly during reporting retains the undelivered tail and current
+index; it does not clear or shift queued inputs one at a time.
+
+Composition retries a waiting or failed receiver after window readiness, on a new external-open event, after a
+successful shared-editor read (including Settings recovery), and after quit cancellation. It starts no new read
+while terminating. The model's main-actor onDidLoad notification runs only after a successful read has completed;
+failed reads do not trigger it. Ready starts still preserve callbacks and dirty editor state.
+
+Three new canonical tests first failed compilation on the missing pause/resume and load-notification APIs; zero
+tests ran at red. The supported actual-source probe then passed 63 tests in 13 suites. Removing pause deliberately
+failed six assertions across the held-read and reentrant-tail cases; removing the successful-load notification
+failed the retained-queue retry case. Both mutations were restored before the final 63-test green. The nine-test
+coordinator filter passed 20 consecutive runs with two CPU-load workers (load averages 0.96/1.29/1.31 at start,
+1.51/1.39/1.34 at end). Commands are the same supported probe and coordinator filter recorded above.
+
+App-source parsing, layering and whitespace checks are separate from execution. The focused package proves the
+actual coordinator/model behavior and notification-driven retry, not that App forwards each lifecycle callback.
+No local full App build, app launch, GUI or native termination/cancellation ran. Existing linker search-path
+warnings remain; current-head App and native validation are pending.
+
+The three cold OS-open cases remain unrepresentative: their captured processes showed onboarding despite the
+requested skip flag. SDK environment semantics and the discarded returned process identity do not establish which
+bundle/process or effective sandbox was used. They must not be rerun as routing evidence until a pre-disk Debug
+identity/isolation observation, returned bundle/PID correlation, and the persisted two-Space routing profile are
+established on a disposable runner. No cold-harness repair or native green is claimed by this source change.

@@ -3173,3 +3173,21 @@ SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX15.5.sdk /opt/homebrew/op
 ```
 
 The build reported missing framework and library search-path linker warnings. Swift 6.2.4 frontend parsing of the two changed App sources and `git diff --check` passed. Parsing is not typechecking; the focused package does not compile or exercise App composition. Full local ShellKit, app build, GUI and app launch were not run. No App-specific test count or native green is claimed.
+
+
+### #113 reachable read retry and quit delivery suspension
+
+The App composition review at `1a8f13e` found an unreachable failed-read retry and a held-read delivery race with
+quit capture. Composition now retries after incoming URLs and successful shared-editor reads, with the same editor
+and ordered queue. It pauses delivery before session capture, starts no new reads while terminating, and resumes
+after cancellation has restored session writes. Pending tails survive a pause during callbacks.
+
+Three actual-source regressions first failed compilation on the absent pause/resume/load-notification APIs, with
+zero tests run. After implementation, the supported integration/LinkRouting probe passed 63 tests in 13 suites.
+The nine-test coordinator filter passed 20 consecutive runs under CPU load. Deliberately disabling pause failed six
+assertions; omitting the successful-load notification failed the retry scenario. Both breaks were restored before
+final green. Swift 6.2.4 source parsing, layering and whitespace checks passed; existing linker-path warnings remain.
+
+These results cover production CoreBridge sources and the model's Settings adapter, not actual App forwarding or
+native quit cancellation. No local full App/GUI build or launch ran. Cold OS-open profile identity remains unverified,
+so the prior cold onboarding failures are not routing evidence and no new cold run is dispatched here.

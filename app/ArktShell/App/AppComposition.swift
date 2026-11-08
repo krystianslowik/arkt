@@ -17,6 +17,7 @@ final class AppComposition {
   private(set) var session: AppSession?
   private let externalOpens = ExternalOpenCoordinator<ExternalLinkOpenResult>()
   private var windowsReady = false
+  private var isTerminating = false
   /// Outcomes requiring a product decision remain owned by the composition for this session.
   private(set) var blockedExternalOpens: [ExternalLinkOpenResult] = []
   /// The main menu's app-level target.
@@ -50,6 +51,7 @@ final class AppComposition {
         let session = AppSession(state: state, location: location, engine: engine, faviconStore: favicons,
                                  hostLookup: hostLookup)
         self.session = session
+        session.linkRoutingSettings.onDidLoad = { [weak self] in self?.retryPendingExternalOpens() }
         // The first run's record decides whether the launch window opens on it; loaded before the window exists.
         session.onboardingRecord = (try? await session.settingsStore.load(OnboardingRecord.self)) ?? .defaultValue
         session.start(outcome: state.outcome, defersWindows: defersWindows)
@@ -69,17 +71,26 @@ final class AppComposition {
   }
 
   /// AppKit can deliver a batch before a session or engine window exists.
-  func openFromOtherApp(_ urls: [URL]) { externalOpens.receive(urls) }
+  func openFromOtherApp(_ urls: [URL]) {
+    externalOpens.receive(urls)
+    retryPendingExternalOpens()
+  }
+
+  private func retryPendingExternalOpens() {
+    guard windowsReady, !isTerminating else { return }
+    guard externalOpens.state == .waiting || externalOpens.state == .failed else { return }
+    Task { await retryExternalOpens() }
+  }
 
   private func externalOpenWindowsReady() {
     windowsReady = true
-    Task { await retryExternalOpens() }
+    retryPendingExternalOpens()
   }
 
   /// An explicit retry retains the queued inputs after a failed read. Ready starts do not reload the editor.
   @discardableResult
   func retryExternalOpens() async -> Bool {
-    guard windowsReady, let session else { return false }
+    guard windowsReady, !isTerminating, let session else { return false }
     let editor = session.linkRoutingSettings
     session.windows.externalLinkDestination = { [weak editor] url in editor?.destination(for: url) }
     let ready = await externalOpens.start(read: {
@@ -144,10 +155,19 @@ final class AppComposition {
   var needsFlush: Bool { session?.needsFlush ?? false }
 
   /// Quit started: stop auto-archive and stamp the visible tabs (decision 10), while the windows still exist.
-  func prepareForTermination() { session?.prepareForTermination() }
+  func prepareForTermination() {
+    isTerminating = true
+    externalOpens.pauseDelivery()
+    session?.prepareForTermination()
+  }
 
   /// The quit was cancelled: auto-archive runs again.
-  func terminationCancelled() { session?.terminationCancelled() }
+  func terminationCancelled() {
+    session?.terminationCancelled()
+    isTerminating = false
+    externalOpens.resumeDelivery()
+    retryPendingExternalOpens()
+  }
 
   /// Writes what is pending, bounded by the flush timeouts; true when everything was written.
   func flush() async -> Bool { await session?.flush() ?? true }
