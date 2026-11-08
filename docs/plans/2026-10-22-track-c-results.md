@@ -3021,3 +3021,23 @@ quoted argument array), retaining its existing workflow and XcodeGen retry/check
 import/UI-source lint, parity-report fixtures, actionlint and whitespace checks are the local validation; no new
 gate was typechecked or executed locally. Expected runtime failures at the planned General popup and app
 restoration remain unobserved until CI runs.
+
+
+### #116 General preference runtime red and shared identifier repair
+
+At `899a4f76f161f3e93ef99a910314e0e640fab48d`, focused [run 42494525891](https://github.com/krystianslowik/arkt/actions/runs/42494525891)
+GUI job 128773873220 reported 2058 tests, 54 skipped and eight failed assertions, all in
+`testOpeningPreferenceUsesSharedSettingsAndReset`. The actual General popup was disabled and did not write or
+observe the shared preference; those failures establish the intended runtime red for this bounded UI connection.
+The popup now reads/writes the supplied AppSettings restore flag and follows its existing observer, including reset.
+The regression assertions remain unchanged. New-head GUI validation is pending.
+
+The same run's XCUITest job 128773873246 failed compilation at `AXID.Incognito`; zero app tests executed.
+The shared declaration exists, but project.yml did not include its file in the out-of-process test target. Adding
+`AXID+Incognito.swift` beside that target's other shared AXID files repairs the source closure without weakening
+private-window identification or duplicating the identifier. The four actual shared AXID files typecheck together
+with Swift 6.4.1/SDK 15.5; the toolchain emitted a libSwiftScan fallback warning. This is not an XCUITest typecheck.
+
+Changed-source frontend parsing and whitespace checks passed. No local full build, GUI, app launch or native
+relaunch ran. The app-restoration behavior still has no observed runtime red; a new focused run must reach it
+before production launch composition is changed. The earlier component green remains attributed to `fc87d51`.

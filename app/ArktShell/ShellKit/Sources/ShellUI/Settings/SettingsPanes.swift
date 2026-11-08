@@ -101,12 +101,17 @@ extension SettingsWindowController {
       self?.settings.warnsBeforeQuitting = on
     }
     warnBeforeQuittingSwitch = warnBeforeQuitting
+    let opening = popUp(.general, "whenArktOpens", ["Restore last windows", "Open a new window"],
+                        settings.restoreWindowsOnLaunch ? "Restore last windows" : "Open a new window")
+    opening.onChange = { [weak self] title in
+      self?.settings.restoreWindowsOnLaunch = title == "Restore last windows"
+    }
+    restoreWindowsPopUp = opening
     return [
       section("Default browser", [browser]),
       section("Opening and quitting", [
         row("When Arkt opens", "Your Spaces, pinned tabs and Favorites are always kept.",
-            [popUp(.general, "whenArktOpens", ["Restore last windows", "Open a new window"], "Restore last windows")],
-            planned: true),
+            [opening]),
         row("Warn before quitting", "Hold Command-Q to quit while a window is open.", [warnBeforeQuitting]),
       ]),
       section("Links", [

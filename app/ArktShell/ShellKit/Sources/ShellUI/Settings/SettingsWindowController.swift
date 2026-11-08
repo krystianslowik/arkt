@@ -48,6 +48,8 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
   var peekShiftSwitch: SettingsSwitch?
   /// Settings > General > Warn before quitting (#487, BH-177).
   var warnBeforeQuittingSwitch: SettingsSwitch?
+  /// Settings > General > When Arkt opens (#116).
+  var restoreWindowsPopUp: SettingsPopUpButton?
   /// The lookup hotkey's switch and row (#354); the row's caption carries the registration answer.
   var littleArktHotKeySwitch: SettingsSwitch?
   var littleArktHotKeyRow: SettingsRowView?
@@ -421,6 +423,7 @@ extension SettingsWindowController: AppSettingsObserver {
     peekCrossSiteSwitch?.setOn(settings.peekLinks.opensCrossSiteLinks, animated: true)
     peekShiftSwitch?.setOn(settings.peekLinks.opensShiftClickedLinks, animated: true)
     warnBeforeQuittingSwitch?.setOn(settings.warnsBeforeQuitting, animated: true)
+    restoreWindowsPopUp?.show(settings.restoreWindowsOnLaunch ? "Restore last windows" : "Open a new window")
     applyLittleArktHotKeyState()                    // #354
     littleArktClickSwitch?.setOn(settings.opensLittleArktOnOptionCommandClick, animated: true)   // #356
     countFavoritesSwitch?.setOn(settings.tabNavigation.countsFavorites, animated: true)

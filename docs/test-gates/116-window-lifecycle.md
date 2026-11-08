@@ -111,3 +111,13 @@ with GUI 2083 reported/60 skipped/zero failures and pure ShellKit 2535 tests/285
 required gate passed; XCUITest and Core were skipped. The new General and app gates have not run and do not inherit
 that green result. The optional focused UI workflow selector is copied unchanged from the maintainer-approved
 #823 input so this branch can dispatch its actual app gate once; empty selection preserves full-suite behavior.
+
+
+## First published app-gate result
+
+At `899a4f7`, run 42494525891 reached the General GUI scenario and failed its eight popup/persistence/observer
+assertions. The popup is now connected to the existing shared AppSettings instance and its observer. The app job
+never ran a test: its source closure omitted the shared Incognito AXID declaration and failed compilation.
+project.yml now includes that existing file alongside AXID, Peek and LittleArkt. A focused Swift 6.4.1 typecheck
+passes for all four declarations (libSwiftScan fallback warning), but native relaunch and XCUITest compilation remain
+for CI. No AppSession launch/restoration wiring is changed by this repair.
