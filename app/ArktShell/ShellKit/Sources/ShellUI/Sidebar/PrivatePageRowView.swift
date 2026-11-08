@@ -82,8 +82,8 @@ final class PrivatePageRowView: NSView {
     wantsLayer = true
     background.cornerRadius = SidebarMetrics.rowCornerRadius
     background.cornerCurve = .continuous
-    background.shadowRadius = 2
-    background.shadowOffset = CGSize(width: 0, height: -1)
+    background.shadowRadius = ShellTokens.rowLiftShadow.radius
+    background.shadowOffset = ShellTokens.rowLiftShadow.flippedOffset   // a sublayer of this flipped view
     faviconView.imageScaling = .scaleProportionallyUpOrDown
     faviconView.wantsLayer = true
     faviconView.layer?.cornerRadius = Self.faviconRadius
@@ -174,7 +174,7 @@ final class PrivatePageRowView: NSView {
     CATransaction.begin()
     CATransaction.setDisableActions(true)
     background.backgroundColor = backgroundFill?.cgColor
-    let shadow = ShellTokens.tabCurrentShadow.resolve(flavor)
+    let shadow = ShellTokens.rowLiftShadow.color.resolve(flavor)
     background.shadowColor = shadow.cgColor
     background.shadowOpacity = isShown && shadow.alpha > 0 ? 1 : 0
     CATransaction.commit()

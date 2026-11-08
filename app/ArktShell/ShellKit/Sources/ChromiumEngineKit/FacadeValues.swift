@@ -93,7 +93,8 @@ extension HistoryEntry {
 
 extension ExtensionAction {
   @MainActor init(facade action: any ArktExtensionAction) {
-    self.init(id: action.actionId, name: action.name, iconPNG: action.iconPNG, isEnabled: action.isEnabled)
+    self.init(id: action.actionId, name: action.name, iconPNG: action.iconPNG, isEnabled: action.isEnabled,
+              canUninstall: action.canUninstall, canReportAbuse: action.canReportAbuse)
   }
 }
 

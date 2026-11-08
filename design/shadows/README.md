@@ -12,6 +12,8 @@ ARKT_SHADOW_SHOTS_DIR=/tmp/shadow-shots swift test --filter FlippedShadowScreens
 pngquant --force --nofs --ext .png 256 /tmp/shadow-shots/*.png
 ```
 
+That filter matches the whole class, so it also writes the settings and row shots of the next section.
+
 The test draws the window's layer tree directly (`cacheDisplay` leaves out the floating sidebar's own shadow).
 
 ## Settings controls and row lifts (#773)
@@ -27,5 +29,19 @@ light only.
 ```zsh
 cd app/ArktShell/ShellKit
 ARKT_SHADOW_SHOTS_DIR=/tmp/shadow-shots swift test --filter FlippedShadowScreenshotTests/testSettingsAndRowShots
+pngquant --force --nofs --ext .png 256 /tmp/shadow-shots/*.png
+```
+
+## Archive table selection (#796)
+
+The Archive table drew AppKit's own selection over its selected row, so the row's `tabCurrent` fill and lift never
+showed. The table now sets `selectionHighlightStyle = .none` and `ArchiveRowView` draws the selection.
+
+Shots: `shots/archive-selected-row-<light|dark>.png` (2x, the Archive window with its second row selected, focused).
+The lift is light only.
+
+```zsh
+cd app/ArktShell/ShellKit
+ARKT_SHADOW_SHOTS_DIR=/tmp/shadow-shots swift test --filter FlippedShadowScreenshotTests/testArchiveTableShots
 pngquant --force --nofs --ext .png 256 /tmp/shadow-shots/*.png
 ```

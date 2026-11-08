@@ -99,7 +99,8 @@ final class ExtensionRemoveSheetTests: XCTestCase {
     open([action("a", name: "A"), action("b", name: "B")])
     let sheet = try openSheet("a")
     sheet.sheet.view.primaryButton.performClick(nil)
-    XCTAssertEqual(engine.uninstalledExtensions, [.init(extensionID: "a", reportAbuse: false)])
+    XCTAssertEqual(engine.uninstalledExtensions, [.init(extensionID: "a", reportAbuse: false, window: window)],
+                   "the sheet's window is named, so a report page would open there (#721)")
     XCTAssertNil(panel.removeSheet)
     button.performClick(nil)
     XCTAssertEqual(panel.contentView?.displayedRowIDs, ["b"], "the row left the panel")
@@ -110,7 +111,37 @@ final class ExtensionRemoveSheetTests: XCTestCase {
     let sheet = try openSheet("a")
     try XCTUnwrap(sheet.sheet.view.checkboxButton).performClick(nil)
     sheet.sheet.view.primaryButton.performClick(nil)
-    XCTAssertEqual(engine.uninstalledExtensions, [.init(extensionID: "a", reportAbuse: true)])
+    XCTAssertEqual(engine.uninstalledExtensions, [.init(extensionID: "a", reportAbuse: true, window: window)])
+  }
+
+  // MARK: What the user may do (#721)
+
+  func testRemoveFromArktIsLeftOutForAnExtensionTheUserMayNotRemove() throws {
+    open([ExtensionAction(id: "kept", name: "Kept", canUninstall: false), action("b", name: "B")])
+    let row = try XCTUnwrap(panel.contentView?.row(for: "kept"))
+    let rightClick = try XCTUnwrap(NSEvent.mouseEvent(with: .rightMouseDown, location: .zero, modifierFlags: [],
+                                                      timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0,
+                                                      clickCount: 1, pressure: 1))
+    let menu = try XCTUnwrap(row.menu(for: rightClick), "the rest of the menu stays")
+    XCTAssertFalse(menu.items.contains { $0.tag == ExtensionContextCommand.remove.rawValue })
+    XCTAssertTrue(menu.items.contains { $0.tag == ExtensionContextCommand.manage.rawValue })
+    let (_, item) = try removeItem("b")
+    XCTAssertTrue(item.isEnabled, "a removable extension keeps the item")
+  }
+
+  func testTheSheetDoesNotOpenForAnExtensionTheUserMayNotRemove() throws {
+    open([ExtensionAction(id: "kept", name: "Kept", canUninstall: false)])
+    panel.presentRemoveSheet(for: ExtensionAction(id: "kept", name: "Kept", canUninstall: false))
+    XCTAssertNil(panel.removeSheet)
+    XCTAssertTrue(engine.uninstalledExtensions.isEmpty)
+  }
+
+  func testNoReportAbuseCheckboxForAnExtensionWithoutAReportPage() throws {
+    open([ExtensionAction(id: "a", name: "A", canReportAbuse: false)])
+    let sheet = try openSheet("a")
+    XCTAssertNil(sheet.sheet.view.checkboxButton)
+    sheet.sheet.view.primaryButton.performClick(nil)
+    XCTAssertEqual(engine.uninstalledExtensions, [.init(extensionID: "a", reportAbuse: false, window: window)])
   }
 
   func testCancelAndEscapeRemoveNothing() throws {

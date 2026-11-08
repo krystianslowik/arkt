@@ -27,6 +27,7 @@ class NewTabFooterController;
 
 namespace arkt {
 
+class ArktAcceleratorProvider;
 class ArktAutofillBubbleHandler;
 class ArktExclusiveAccessContext;
 class ArktExtensionsContainer;
@@ -35,7 +36,8 @@ class ArktModalDialogHost;
 class ArktSidePanelUI;
 class ArktStubLocationBar;
 
-// Chromium's BrowserWindow for a TYPE_NORMAL Browser, implemented on a plain
+// Chromium's BrowserWindow for the Browsers Arkt takes (TYPE_NORMAL in a main
+// window, TYPE_POPUP and TYPE_APP_POPUP in Little Arkt), implemented on a plain
 // NSWindow owned by an ArktWindowHost (variant P, week-2 plan Decision 1).
 // There is no views::Widget and no BrowserView: lookups that expect one return
 // nullptr, and BrowserWindow::FromBrowser falls back to Browser::GetWindow().
@@ -338,6 +340,7 @@ class ArktBrowserWindow : public BrowserWindow,
   std::map<content::WebContents*, std::unique_ptr<ArktInfobarPresenter>>
       infobar_presenters_;
   std::unique_ptr<ArktStubLocationBar> location_bar_;
+  std::unique_ptr<ArktAcceleratorProvider> accelerator_provider_;
   std::unique_ptr<ArktSidePanelUI> side_panel_ui_;
   std::unique_ptr<new_tab_footer::NewTabFooterController>
       new_tab_footer_controller_;
