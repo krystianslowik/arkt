@@ -3252,3 +3252,18 @@ asserts both set collections are empty. The existing lifetime gate is unchanged.
 passed at `d1c8455`; those results do not establish the repaired teardown. Parsing, exact workflow import/UI-source
 checks, focused SDK typechecking of process diagnostic properties and whitespace checks passed. No local GUI/App
 launch or full build ran, and no new native or GUI result is claimed for the repair.
+
+
+### Cold startup exits before ACK; scoped stage diagnostics (#113)
+
+At `6c3b4a1`, [native run 42505101865](https://github.com/krystianslowik/arkt/actions/runs/42505101865) executed one
+cold Space case. It stopped at the identity guard with PID -1, terminated true, finished-launching false, nil bundle,
+no accepted identity and zero identity requests. No profile or routing assertion ran. The required normal PR checks
+and App build passed; GUI remained in progress at the read. The cause of the early exit is unconfirmed.
+
+Debug-only startup stage logs and a failure-only workflow artifact now distinguish validation, request creation,
+and ACK send/rejection without changing the guards or logging environment values. The existing actual-source policy/
+codec/fixture probe passed 26 tests in three suites. The real pre-migration prefix plus dependencies type-checked
+against the SDK; parsing, import/UI-source checks, actionlint and whitespace checks passed. These checks do not
+compile the entire App delegate or establish native behavior. No local App/GUI launch ran; a single focused cold
+probe after publication remains necessary.

@@ -31,7 +31,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     Task { [composition] in
       #if DEBUG
       if let identity = startupIdentity {
-        do { try await TestIdentity.send(identity) } catch { exit(64) }
+        startupLog.notice("stage=identity-send")
+        do {
+          try await TestIdentity.send(identity)
+          startupLog.notice("stage=identity-accepted")
+        } catch {
+          startupLog.error("stage=identity-send-rejected")
+          exit(64)
+        }
       }
       #endif
       #if DEBUG || ARKT_SMOKE_BUILD

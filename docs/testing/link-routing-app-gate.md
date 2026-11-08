@@ -296,3 +296,25 @@ hidden windows to `RoutedOpenFromOtherAppTests` (three regular and three Little 
 windows out. Teardown now ends its controlled engine windows, closes regular windows, settles Little Arkt close
 motion, closes them and asserts that both window-set collections are empty. The lifetime gate remains unchanged.
 The revised teardown and diagnostic have not run locally; CI must verify them.
+
+
+## Cold process exits before identity acknowledgement
+
+The single cold Space diagnostic in [run 42505101865](https://github.com/krystianslowik/arkt/actions/runs/42505101865)
+at `6c3b4a1` failed with `pid=-1`, `terminated=true`, `finishedLaunching=false`, no returned bundle, no accepted
+identity and zero identity requests. It never reached persisted-profile or routing checks. The required normal
+PR checks and App build passed at that head; the normal GUI job was still running when inspected. The process
+metadata does not prove whether overrides were lost, validation rejected them, startup failed before main, or
+another early exit occurred. No fallback or relaxed identity policy is justified by that evidence.
+
+The next bounded diagnostic adds Debug-only unified log stages around validation, identity request construction,
+and identity send/accept/rejection. Only stage names, booleans and missing key names are recorded; no environment
+values, paths, nonce or digest is logged. The UI workflow collects only the dedicated startup subsystem after a
+failure into `ui-startup-diagnostics`. Logger availability or an empty artifact cannot itself prove which startup
+branch ran. Public process metadata and the existing mandatory guard, ACK, PID, bundle and profile checks remain
+unchanged. One cold case will be run again after publication; no success is claimed before reading that result.
+
+The unchanged codec/fixture policy probe passed 26 tests in three suites. The actual pre-migration source prefix
+(with its real policy and codec dependencies) type-checked with Debug enabled against the macOS 15.5 SDK; this is
+not a full App build or delegate typecheck. Parsing, exact import/UI-source checks, actionlint and whitespace
+checks passed. No local app or GUI was launched.
