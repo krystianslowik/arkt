@@ -1369,3 +1369,12 @@ screenshots immediately after each click and after the bounded query. Attachment
 run before the feature assertions. This independent control has not yet been runtime verified in this scenario.
 A focused diagnostic run is pending; the five-of-six result above applies only to `97486f0`. No cause or product
 bug has been established, and the Separate All Tabs assertion and action remain unverified.
+
+
+#### U15 selector decision and completed popup diagnosis
+
+The maintainer confirmed keeping the existing `ui_test_filter` input in `swift-tests.yml` ([decision](https://github.com/krystianslowik/arkt/pull/823#issuecomment-6721409159)). No workflow behavior changes are required for this decision; the earlier ownership hold is resolved.
+
+The completed [single-method diagnostic run](https://github.com/krystianslowik/arkt/actions/runs/42437413210/job/128599279661) at `fe9a0f7` failed at the regular-row menu assertion. Its screenshots establish that both click methods open the row menus, including enabled Rename and Separate All Tabs, while the URL-bar control is both visible and queryable. The row items are absent from the captured app-wide accessibility tree. The sidebar proxy replacing the real outline is a plausible explanation, not an established cause or a verified VoiceOver defect. The action itself was not reached. This is one failed diagnostic method, not a new six-method result; the earlier five-of-six result remains attributed to `97486f0`. The evidence and limits are recorded in the [diagnostic comment](https://github.com/krystianslowik/arkt/pull/823#issuecomment-6716380425).
+
+The remaining work is a verified accessibility scope or legitimate real-input selection that exercises Separate All Tabs and asserts the resulting split/tab state. No product defect or completed action coverage is claimed. The PR stays draft; the existing overlap with #802 still requires an integrated rerun if it lands first.
