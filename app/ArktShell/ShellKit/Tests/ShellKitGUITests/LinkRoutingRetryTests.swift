@@ -41,7 +41,7 @@ final class LinkRoutingRetryTests: XCTestCase {
     func choose(_ index: Int, on button: SettingsPopUpButton) {
       let item = NSMenuItem(title: button.items[index], action: nil, keyEquivalent: "")
       item.tag = index
-      _ = button.perform(Selector(("chose:")), with: item)
+      _ = button.perform(NSSelectorFromString("chose:"), with: item)
     }
 
     let first = open()

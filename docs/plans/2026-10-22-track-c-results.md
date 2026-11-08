@@ -2957,3 +2957,15 @@ Written first. Each failed to compile before the code existed.
 - CI run 42440540544, isolation job 128608699888, failed because the SQLite/model test imported Persistence under ShellKit and its test target linked the product. The combined cases now live in the explicitly invoked `integration/LinkRouting` package; ShellKit's test dependency was removed. The package links the actual model and production support sources and the real typed SQLite store, without changing the app or pure target boundaries.
 - Swift 6.4.1, macOS 15.5 SDK: `swift test --package-path integration/LinkRouting --scratch-path /tmp/arkt-routing-placement-build` passed **2 tests in 1 suite**. The first two probe builds failed at compilation while identifying required production support sources; no tests ran in those attempts. The workflow's actual import-layering script passed, both manifests parsed, and `git diff --check` passed. No ShellKit suite or GUI/app launch was run in this follow-up.
 - The 19-test actual-source result above remains historical evidence at dc51a03, not a claim about this placement's CI. The two combined cases are a reproducible standalone probe and are **not run by current CI**. Existing pure model/adapter/window tests and typed SQLite Core tests remain in their proper targets; this probe does not build AppSession or the Settings window. Product normalization, precedence, Add Route and conflict defaults remain held.
+
+
+### Link routing retry full CI and selector warning cleanup (#113)
+
+At `10fbdbf`, run 42441074758 passed Core 594 tests in 48 suites, pure ShellKit 2522 tests in 283 suites,
+and GUI 2046 tests with 54 skipped and no failures. `testFailedSaveSurvivesReopeningAndSameChoiceRetries` passed.
+App build, isolation/lint and the required gate passed; XCUITest was skipped. The separate two-test SQLite probe
+is not included in these CI counts. Real AppSession/Chromium termination remains unverified.
+
+The GUI log also exposed a new explicit-selector construction warning in the test helper. Its private Objective-C
+action is now resolved with `NSSelectorFromString`, without changing the dispatched action or assertions. Source
+parsing and diff checks passed; new-head CI is required. The existing Add/Edit route UI and runtime dispatch remain incomplete.
