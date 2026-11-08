@@ -25,9 +25,12 @@ final class PageInfoSystemPermissionTests: XCTestCase {
     controller.pageInfo.deniedInMacOS = { [weak self] in self?.denied ?? [] }
   }
 
+  // XCTest keeps each test case object until the run ends: release the windows too, not only hide them (#805).
   override func tearDown() async throws {
     controller.pageInfo.hide(keyboard: true)
     controller.close()
+    controller = nil
+    engine = nil
   }
 
   private func openPanel(_ address: String = "https://fieldguide.example/trails") throws -> PageInfoPanelView {
