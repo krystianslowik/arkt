@@ -3004,3 +3004,10 @@ The GUI form gate additionally holds a redundant read across Save, checks the sa
 event, and asserts distinct visible/accessibility destination labels while retaining the second Space's ID. It has
 not run locally. Source parsing, import inspection and diff checks passed. New-head CI must verify the actual form;
 AppSession and Chromium runtime validation remain unverified. No routing normalization or ambiguity policy changes.
+
+
+### BH-158: remove routes when a Space is removed (#113)
+
+The AppSession observes `SidebarChange.spaceRemoved` and forwards the ID to the shared routing editor. The editor removes only explicit routes targeting that ID, preserving order, duplicates and the default destination. Pending removals survive a loading or failed read; ordered snapshot writes and the termination dirty guard remain in use. A route sheet rejects a save after a concurrent removal or route-list change, retaining its draft and showing an error. No unavailable-default policy, runtime dispatch or ambiguity rule is added.
+
+Test-first red: the focused actual-source probe failed compilation on the missing removal and guarded-edit APIs; zero tests ran. Green: Swift 6.4.1 with macOS 15.5 SDK, `swift test --package-path integration/LinkRouting --scratch-path /tmp/arkt-bh158-build -j 2` passed 10 tests in 4 suites, including pending-load, failed-load retry, ordered in-flight save, stale edit and typed SQLite reopen. The toolchain emitted missing developer framework search-path warnings. Canonical CoreBridge tests include the pure editor cases and an ArchiveCoordinator/source event case; the latter was not run locally. A new GUI sheet regression was added but not run locally. The standalone probe does not compile AppSession or the Settings window, so production composition and actual GUI behavior await CI. Full ShellKit, app build, GUI and XCUITest were not run locally. Earlier form-stage results and the separately tracked #837 timeout remain unchanged.
