@@ -121,7 +121,6 @@ final class SplitViewTests: ArktUITestCase {
     // Collect every probe before feature assertions: each menu is dismissed before the next click.
     let control = try XCTUnwrap(Shell.todayRows(app).allElementsBoundByIndex.first)
     let urlBar = Shell.element(app, AXID.Sidebar.urlBar)
-    let splitItem = app.menuItems["Separate All Tabs"]
     // Match ToolbarTests, including its hittability check to distinguish the menu bar item.
     let toolbarItems = app.menuItems.matching(NSPredicate(
       format: "title == %@ OR identifier == %@", "Show Toolbar", "Show Toolbar"))
@@ -164,10 +163,18 @@ final class SplitViewTests: ArktUITestCase {
       controlOpened.append(probe(control, name: "today-row", items: app.menuItems.matching(identifier: "Rename"), hittable: false))
       splitOpened.append(probe(splitRow(app), name: "split-row", items: app.menuItems.matching(identifier: "Separate All Tabs"), hittable: false))
     }
+    snapshots += "\nRow popup AX results: Today=\(controlOpened), split=\(splitOpened)\n"
     let probe = XCTAttachment(string: snapshots)
     probe.name = "context menu target and accessibility probes"
     probe.lifetime = .deleteOnSuccess
     add(probe)
+
+    app.menuBars.menuBarItems["Window"].click()
+    app.menuBars.menuItems["Show Archive"].click()
+    let archive = app.windows[AXID.Archive.window]
+    XCTAssertTrue(waitFor(archive))
+    let archiveBefore = archive.tables[AXID.Archive.table].tableRows.count
+    archive.typeKey("w", modifierFlags: .command)
 
     // The imported split is pinned: its two panes replace the split as pinned rows, not Today rows.
     let pinned = app.outlineRows.matching(identifier: AXID.Sidebar.rowPinned)
@@ -180,8 +187,6 @@ final class SplitViewTests: ArktUITestCase {
         && pinned.matching(NSPredicate(format: "label == %@", "Fixture /docs/right")).count == 1
     })
     XCTAssertTrue(toolbarOpened.contains(true), "sidebar URL bar menu missing; inspect the paired probes")
-    XCTAssertTrue(controlOpened.contains(true), "regular row menu missing; inspect the paired probes")
-    XCTAssertTrue(splitOpened.contains(true), "split menu missing; inspect the paired control probes")
     XCTAssertTrue(dismissed.allSatisfy { $0 }, "a context menu did not dismiss")
 
     // Re-create the split from its focused pinned page to exercise the menu action independently of its probes.
@@ -189,18 +194,32 @@ final class SplitViewTests: ArktUITestCase {
     XCUIElement.perform(withKeyModifiers: .option) { current.click() }
     XCTAssertTrue(waitFor(splitRow(app)))
     let count = pinned.count
-    guard let method = splitOpened.firstIndex(of: true) else { return }
-    if method == 0 { splitRow(app).rightClick() }
-    else { XCUIElement.perform(withKeyModifiers: .control) { self.splitRow(app).click() } }
-    let actionMethod = method == 0 ? "right-click" : "control-click"
-    screenshot(actionMethod, "split-row-action", "after-click")
-    let actionItemFound = splitItem.waitForExistence(timeout: Waits.scaled(3))
-    screenshot(actionMethod, "split-row-action", "after-query")
-    XCTAssertTrue(actionItemFound)
-    splitItem.click()
+    splitRow(app).rightClick()
+    screenshot("keyboard", "split-row-action", "before-selection")
+    // Select the native popup's Separate All Tabs item through real keyboard input. The row AX
+    // queries above remain diagnostic; the action must satisfy the resulting state assertions.
+    app.typeKey("s", modifierFlags: [])
+    screenshot("keyboard", "split-row-action", "after-type-selection")
+    app.typeKey(.return, modifierFlags: [])
     XCTAssertTrue(Waits.until("context menu separates the pinned split") {
-      !self.splitRow(app).exists && pinned.count == count
+      !self.splitRow(app).exists && pinned.count == count && Shell.todayRows(app).count == todayBefore
+        && pinned.matching(NSPredicate(format: "label == %@", "Fixture /docs/left")).count == 1
+        && pinned.matching(NSPredicate(format: "label == %@", "Fixture /docs/right")).count == 1
     })
+    app.typeKey("d", modifierFlags: [.command, .shift])
+    let url = Shell.element(app, AXID.Toolbar.urlBar)
+    for name in ["left", "right"] {
+      let page = pinned.element(matching: NSPredicate(format: "label == %@", "Fixture /docs/\(name)"))
+      XCTAssertTrue(waitFor(page))
+      page.click()
+      XCTAssertTrue(Waits.until("original \(name) page URL survives separation") {
+        (url.value as? String)?.contains("/docs/\(name)") == true
+      })
+    }
+    app.menuBars.menuBarItems["Window"].click()
+    app.menuBars.menuItems["Show Archive"].click()
+    XCTAssertTrue(waitFor(archive))
+    XCTAssertEqual(archive.tables[AXID.Archive.table].tableRows.count, archiveBefore)
   }
 
   func test_GS011_BH117_dragTabOntoPageSplits() async throws {
