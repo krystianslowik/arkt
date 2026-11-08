@@ -23,14 +23,16 @@ final class LittleArktDialogTests: XCTestCase {
     NSApp.setActivationPolicy(.accessory)
   }
 
+  // XCTest keeps each test case object until the run ends: release the windows too, not only hide them (#805).
   override func tearDown() async throws {
     for set in sets {
-      for controller in set.controllers { controller.window?.orderOut(nil) }
+      for controller in set.controllers { controller.close() }
       for little in set.littleArkts {
         little.flight?.abort(.closeRequested)
-        little.window.orderOut(nil)
+        little.window.close()
       }
     }
+    for set in sets { set.closeAllForTesting() }
     sets = []
   }
 
