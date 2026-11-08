@@ -55,6 +55,13 @@ public final class ShortcutEditorModel {
   public private(set) var overrides: [ShortcutActionID: ShortcutOverride] = [:]
   public private(set) var recordingAction: ShortcutActionID?
   public private(set) var conflictingActions: [ShortcutActionID] = []
+  public struct ProtectedConflict: Equatable {
+    public let title: String
+    public let binding: ShortcutBinding
+  }
+  public private(set) var protectedConflicts: [ProtectedConflict] = []
+  public var pendingShortcut: ShortcutBinding? { pendingBinding }
+  var protectedOwners: (@MainActor (ShortcutBinding) -> [ProtectedConflict])?
   private var pendingBinding: ShortcutBinding?
   private let defaults: UserDefaults
   private var observers: [UUID: @MainActor () -> Void] = [:]
@@ -109,10 +116,12 @@ public final class ShortcutEditorModel {
     guard let definition = catalog.first(where: { $0.id == id }) else { return }
     if let binding = definition.defaultBinding {
       let conflicts = catalog.filter { $0.id != id && self.binding(for: $0.id) == binding }.map(\.id)
-      if !conflicts.isEmpty {
+      let protected = protectedOwners?(binding) ?? []
+      if !conflicts.isEmpty || !protected.isEmpty {
         beginRecording(id)
         pendingBinding = binding
         conflictingActions = conflicts
+        protectedConflicts = protected
         return
       }
     }
@@ -137,6 +146,7 @@ public final class ShortcutEditorModel {
     recordingAction = nil
     pendingBinding = nil
     conflictingActions = []
+    protectedConflicts = []
   }
 
   public func record(event: NSEvent) {
@@ -150,12 +160,14 @@ public final class ShortcutEditorModel {
     guard let key = event.charactersIgnoringModifiers, !key.isEmpty else { return }
     let binding = ShortcutBinding(key: key.lowercased(), modifiers: event.modifierFlags)
     let conflicts = catalog.filter { $0.id != id && self.binding(for: $0.id) == binding }.map(\.id)
-    if conflicts.isEmpty {
+    let protected = protectedOwners?(binding) ?? []
+    if conflicts.isEmpty && protected.isEmpty {
       setBinding(binding, for: id)
       cancelRecording()
     } else {
       pendingBinding = binding
       conflictingActions = conflicts
+      protectedConflicts = protected
     }
   }
 
@@ -163,6 +175,9 @@ public final class ShortcutEditorModel {
 
   public func useRecordedShortcut() {
     guard let id = recordingAction, let binding = pendingBinding else { return }
+    // A dynamic menu owner may have appeared while the notice was open.
+    protectedConflicts = protectedOwners?(binding) ?? []
+    guard protectedConflicts.isEmpty else { return }
     // Recompute conflicts so changes made while the notice is open cannot create duplicates.
     for definition in catalog where definition.id != id && self.binding(for: definition.id) == binding {
       overrides[definition.id] = .cleared

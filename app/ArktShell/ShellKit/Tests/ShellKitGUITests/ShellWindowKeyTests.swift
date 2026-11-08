@@ -115,6 +115,47 @@ final class ShellWindowKeyTests: XCTestCase {
     XCTAssertTrue(probe.hits.isEmpty)
   }
 
+  func testEditedBindingsReachMenuBeforePageInBothWindows() throws {
+    let menu = NSMenu()
+    let item = NSMenuItem(title: "New Tab", action: #selector(MenuProbe.newTab(_:)), keyEquivalent: "t")
+    let probe = MenuProbe()
+    item.target = probe
+    let file = NSMenu()
+    file.addItem(item)
+    let holder = NSMenuItem(title: "File", action: nil, keyEquivalent: "")
+    holder.submenu = file
+    menu.addItem(holder)
+    NSApp.mainMenu = menu
+    let suite = "dev.arkt.tests.route.\(UUID().uuidString)"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite); ShortcutCatalog.unbind(from: menu) }
+    let first = ShortcutEditorModel(catalog: ShortcutCatalog.definitions(from: menu), defaults: defaults)
+    let id = ShortcutActionID("newTab")
+    ShortcutCatalog.bind(model: first, to: menu)
+    let windows: [NSWindow] = [ShellWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 600)),
+                                LittleArktWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 600))]
+    for window in windows {
+      let view = SwallowingView(frame: .zero)
+      window.contentView?.addSubview(view)
+      XCTAssertTrue(window.makeFirstResponder(view))
+      first.setBinding(ShortcutBinding(key: "y", modifiers: .control), for: id)
+      XCTAssertTrue(window.performKeyEquivalent(with: try key(kVK_ANSI_Y, .maskControl)))
+      XCTAssertEqual(view.keyEquivalents, 0)
+      first.setBinding(nil, for: id)
+      XCTAssertTrue(window.performKeyEquivalent(with: try key(kVK_ANSI_Y, .maskControl)))
+      XCTAssertEqual(view.keyEquivalents, 1)
+      first.reset(id)
+      XCTAssertTrue(window.performKeyEquivalent(with: try key(kVK_ANSI_Y, .maskControl)))
+      XCTAssertEqual(view.keyEquivalents, 2)
+    }
+    let second = ShortcutEditorModel(catalog: first.catalog, defaults: defaults)
+    ShortcutCatalog.bind(model: second, to: menu)
+    second.setBinding(ShortcutBinding(key: "y", modifiers: .control), for: id)
+    first.setBinding(nil, for: id)
+    XCTAssertTrue(windows[0].performKeyEquivalent(with: try key(kVK_ANSI_Y, .maskControl)))
+    XCTAssertEqual(probe.hits.count, 3)
+  }
+
   // MARK: Window menu items on the borderless window
 
   func testMinimizeZoomAndFullScreenAreEnabledAndMinimizeWorks() throws {
@@ -160,5 +201,6 @@ private final class SwallowingView: NSView {
 @MainActor
 private final class MenuProbe: NSObject {
   var hits: [String] = []
+  @objc func newTab(_ sender: Any?) { hit(sender) }
   @objc func hit(_ sender: Any?) { hits.append((sender as? NSMenuItem)?.title ?? "") }
 }

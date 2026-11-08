@@ -23,17 +23,38 @@ final class ShortcutWiringTests: ArktUITestCase {
       recorder.click()
       app.typeKey(key, modifierFlags: .command)
       guard waitFor(settings), waitForSelected(pane) else { return }
+      let notice = settings.descendants(matching: .any).matching(identifier: "settings.shortcuts.conflict.message").firstMatch
+      let expectedOwner = key == "w" ? "Archive Tab" : "Go to Sidebar Item " + key
+      guard waitFor(notice) else { return }
+      let message = notice.label
+      XCTAssertEqual(message, "Command " + key.uppercased() + " is already used by " + expectedOwner +
+                     ". This command cannot be changed here; keep the existing shortcut and try another.")
       let use = settings.buttons.matching(identifier: "settings.shortcuts.conflict.use").firstMatch
-      if use.exists { use.click() }
+      XCTAssertFalse(use.isEnabled)
+      settings.buttons.matching(identifier: "settings.shortcuts.conflict.keep").firstMatch.click()
+      guard waitFor(settings), waitForSelected(pane) else { return }
+      // The original binding remains searchable after declining a protected conflict.
+      search.click()
+      search.typeText("Command S")
+      guard Waits.until("prior binding retained", { recorder.exists && !newTab.exists }) else { return }
+      search.typeKey("a", modifierFlags: .command)
+      search.typeKey(.delete, modifierFlags: [])
+      guard Waits.until("shortcut search cleared", { (search.value as? String) == "" && newTab.exists }) else { return }
+    }
+    recorder.click()
+    app.typeKey("y", modifierFlags: [.control, .option])
+    guard waitFor(settings), waitForSelected(pane) else { return }
+    do {
+      let key = "y"
       // The effective-binding search must retain this particular action. A different captured key cannot satisfy it.
       search.click()
-      search.typeText("Command " + key.uppercased())
-      guard Waits.until("effective binding search applied for Command-" + key, {
+      search.typeText("Control Option " + key.uppercased())
+      guard Waits.until("effective binding search applied for Control-Option-" + key, {
         recorder.exists && !newTab.exists
       }) else { return }
       search.typeKey("a", modifierFlags: .command)
       search.typeKey(.delete, modifierFlags: [])
-      guard Waits.until("shortcut search cleared after recording Command-" + key, {
+      guard Waits.until("shortcut search cleared after recording Control-Option-" + key, {
         (search.value as? String) == "" && newTab.exists
       }) else { return }
     }
@@ -99,8 +120,23 @@ final class ShortcutWiringTests: ArktUITestCase {
     }
 
     openRecorder(app)
+    app.typeKey("y", modifierFlags: .control)
+    closeSettings(app)
+    guard loadBarrierPage(app), waitFor(app.webViews.firstMatch) else { return }
+    app.webViews.firstMatch.click()
+    let pageCount = server.requestedPaths.filter { $0 == "/events/shortcut-key-page-y" }.count
+    expectNewTab(app, key: "y", modifiers: .control)
+    XCTAssertEqual(server.requestedPaths.filter { $0 == "/events/shortcut-key-page-y" }.count, pageCount)
+    openRecorder(app)
     app.typeKey("k", modifierFlags: [.control, .option])
     closeSettings(app)
+    guard loadBarrierPage(app), waitFor(app.webViews.firstMatch) else { return }
+    app.webViews.firstMatch.click()
+    let beforePageY = server.requestedPaths.filter { $0 == "/events/shortcut-key-page-y" }.count
+    app.typeKey("y", modifierFlags: .control)
+    guard Waits.until("unassigned Control-Y reached page", {
+      server.requestedPaths.filter { $0 == "/events/shortcut-key-page-y" }.count > beforePageY
+    }) else { return }
     guard loadBarrierPage(app),
           expectNoNewTab(app, key: "t", modifiers: .command,
                          message: "the old binding no longer dispatches") else { return }

@@ -690,6 +690,26 @@ final class SettingsWindowTests: XCTestCase {
     XCTAssertEqual(reopened.binding(for: tab), ShortcutBinding(key: "t", modifiers: .command))
   }
 
+  func testProtectedMenuConflictExplainsWhyUseIsUnavailable() throws {
+    let menu = MainMenu.make(commands: AppCommands()).menu
+    let model = ShortcutEditorModel(catalog: ShortcutCatalog.definitions(from: menu), defaults: defaults)
+    ShortcutCatalog.bind(model: model, to: menu)
+    defer { ShortcutCatalog.unbind(from: menu) }
+    let controller = make(menu: menu, editor: model)
+    controller.show(pane: .shortcuts)
+    let window = try XCTUnwrap(controller.window)
+    let id = ShortcutActionID("newTab")
+    try find("settings.shortcuts.record.newTab", in: controller, as: NSButton.self).performClick(nil)
+    XCTAssertTrue(window.performKeyEquivalent(with: try shortcutEvent("n", .command, code: 45, in: window)))
+    let notice = try find("settings.shortcuts.conflict.message", in: controller, as: NSTextField.self)
+    XCTAssertEqual(notice.stringValue, "Command N is already used by New Window. This command cannot be changed here; keep the existing shortcut and try another.")
+    let use = try find("settings.shortcuts.conflict.use", in: controller, as: NSButton.self)
+    XCTAssertFalse(use.isEnabled)
+    try find("settings.shortcuts.conflict.keep", in: controller, as: NSButton.self).performClick(nil)
+    XCTAssertEqual(model.binding(for: id), ShortcutBinding(key: "t", modifiers: .command))
+    XCTAssertEqual(controller.selectedPane, .shortcuts)
+  }
+
   /// Component coverage for SettingsWindow's key-equivalent boundary. Actual app dispatch lives in ShortcutWiringTests.
   func testRecorderBeatsSettingsWindowKeyEquivalentsUntilRecordingEnds() throws {
     let menu = MainMenu.make(commands: AppCommands()).menu

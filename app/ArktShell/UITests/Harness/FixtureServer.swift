@@ -139,6 +139,10 @@ final class FixtureServer: Sendable {
         <body tabindex="0">Shortcut key barrier<script>
         let sequence = 0;
         document.addEventListener('keydown', event => {
+          if (event.key.toLowerCase() === 'y' && event.ctrlKey && !event.metaKey && !event.altKey) {
+            event.preventDefault();
+            fetch('/events/shortcut-key-page-y', {cache: 'no-store'});
+          }
           if (event.key === 'z' && !event.metaKey && !event.ctrlKey && !event.altKey) {
             fetch('/events/shortcut-key-barrier/' + (++sequence), {cache: 'no-store'});
           }

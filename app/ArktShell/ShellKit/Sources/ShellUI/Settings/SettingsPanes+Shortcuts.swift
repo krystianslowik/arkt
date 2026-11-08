@@ -36,7 +36,7 @@ extension SettingsWindowController {
       self.cancelShortcutRecording()
       editor.reset(id)
       self.refreshShortcutPresentation()
-      if !editor.conflictingActions.isEmpty { self.showShortcutConflict() }
+      if (!editor.conflictingActions.isEmpty || !editor.protectedConflicts.isEmpty) { self.showShortcutConflict() }
     }
     actionTargets.append(resetTarget)
     let reset = NSMenuItem(title: "Reset Shortcut to Default", action: #selector(SettingsActionTarget.fire(_:)),
@@ -52,7 +52,7 @@ extension SettingsWindowController {
   func refreshShortcutControls() {
     guard let editor = services.shortcutEditor else { return }
     for (id, button) in shortcutRecorders {
-      if editor.recordingAction == id && editor.conflictingActions.isEmpty {
+      if editor.recordingAction == id && editor.conflictingActions.isEmpty && editor.protectedConflicts.isEmpty {
         button.title = "Type shortcut…"
       } else if let binding = editor.binding(for: id) {
         button.title = shortcutDescription(binding)
@@ -78,7 +78,7 @@ extension SettingsWindowController {
   func handleShortcutKey(_ event: NSEvent) -> Bool {
     guard selectedPane == .shortcuts, let editor = services.shortcutEditor,
           editor.recordingAction != nil else { return false }
-    if !editor.conflictingActions.isEmpty {
+    if (!editor.conflictingActions.isEmpty || !editor.protectedConflicts.isEmpty) {
       if event.keyCode == 53 || event.keyCode == 36 || event.keyCode == 76 {
         editor.keepExisting()
         dismissShortcutConflict()
@@ -100,7 +100,7 @@ extension SettingsWindowController {
     }
     editor.record(event: event)
     refreshShortcutPresentation()
-    if !editor.conflictingActions.isEmpty {
+    if (!editor.conflictingActions.isEmpty || !editor.protectedConflicts.isEmpty) {
       showShortcutConflict()
     } else if event.keyCode != 53, let binding = editor.binding(for: id),
               services.isSystemShortcut(binding) {
@@ -124,29 +124,41 @@ extension SettingsWindowController {
   }
 
   private func showShortcutConflict() {
-    guard let editor = services.shortcutEditor, let conflict = editor.conflictingActions.first,
-          let definition = editor.catalog.first(where: { $0.id == conflict }),
-          let binding = editor.binding(for: conflict), let root = window?.contentView else { return }
+    guard let editor = services.shortcutEditor, let binding = editor.pendingShortcut,
+          let root = window?.contentView else { return }
+    let protected = editor.protectedConflicts.first
+    let title = protected?.title ?? editor.conflictingActions.first.flatMap { id in
+      editor.catalog.first(where: { $0.id == id })?.title
+    }
+    guard let title else { return }
     dismissShortcutConflict()
-    let panel = NSView(frame: NSRect(x: 40, y: 105, width: max(300, root.bounds.width - 80), height: 104))
+    let panel = NSView(frame: NSRect(x: 40, y: 105, width: max(300, root.bounds.width - 80), height: 130))
     panel.wantsLayer = true
     panel.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
     panel.layer?.cornerRadius = ShellRadius.popover
     panel.autoresizingMask = [.width]
-    let message = settingsLabel("\(shortcutDescription(binding)) is already used by \(definition.title).", size: 13)
+    let explanation = protected == nil ? "" : " This command cannot be changed here; keep the existing shortcut and try another."
+    let message = settingsLabel("\(shortcutDescription(binding)) is already used by \(title).\(explanation)", size: 13)
+    message.setAccessibilityLabel(message.stringValue)
     message.setAccessibilityIdentifier("settings.shortcuts.conflict.message")
-    message.frame = NSRect(x: 12, y: 12, width: panel.bounds.width - 24, height: 38)
+    message.frame = NSRect(x: 12, y: 12, width: panel.bounds.width - 24, height: 64)
     message.autoresizingMask = [.width]
     panel.addSubview(message)
     let keep = NSButton(title: "Keep Existing", target: nil, action: nil)
     let use = NSButton(title: "Use Shortcut", target: nil, action: nil)
     keep.setAccessibilityIdentifierWithCell("settings.shortcuts.conflict.keep")
     use.setAccessibilityIdentifierWithCell("settings.shortcuts.conflict.use")
+    use.isEnabled = protected == nil
+    if protected != nil { use.toolTip = "This shortcut belongs to a command that cannot be changed here." }
     let keepTarget = SettingsActionTarget { [weak self] in self?.cancelShortcutRecording() }
     let useTarget = SettingsActionTarget { [weak self] in
       guard let self, let editor = self.services.shortcutEditor else { return }
       let id = editor.recordingAction
       editor.useRecordedShortcut()
+      if !editor.protectedConflicts.isEmpty {
+        self.showShortcutConflict()
+        return
+      }
       self.dismissShortcutConflict()
       self.refreshShortcutPresentation()
       if let id, let binding = editor.binding(for: id), self.services.isSystemShortcut(binding) {
@@ -158,8 +170,8 @@ extension SettingsWindowController {
     keep.action = #selector(SettingsActionTarget.fire(_:))
     use.target = useTarget
     use.action = #selector(SettingsActionTarget.fire(_:))
-    keep.frame = NSRect(x: 12, y: 58, width: 140, height: 30)
-    use.frame = NSRect(x: 160, y: 58, width: 140, height: 30)
+    keep.frame = NSRect(x: 12, y: 84, width: 140, height: 30)
+    use.frame = NSRect(x: 160, y: 84, width: 140, height: 30)
     panel.addSubview(keep)
     panel.addSubview(use)
     root.addSubview(panel)

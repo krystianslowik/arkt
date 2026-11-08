@@ -7,7 +7,7 @@ import ObjectiveC
 public enum ShortcutCatalog {
   // Only selectors audited as unique commands are editable. Dynamic and tagged commands remain read-only.
   private static func actionID(_ item: NSMenuItem) -> ShortcutActionID? {
-    guard let action = item.action else { return nil }
+    guard item.tag == 0, let action = item.action else { return nil }
     switch NSStringFromSelector(action) {
     case "newTab:": return ShortcutActionID("newTab")
     case "toggleSidebarVisibility:": return ShortcutActionID("toggleSidebarVisibility")
@@ -46,8 +46,17 @@ public enum ShortcutCatalog {
   public static func unbind(from menu: NSMenu) {
     if let previous = objc_getAssociatedObject(menu, &bindingKey) as? MenuBinding {
       previous.model.removeObserver(previous.observer)
+      previous.model.protectedOwners = nil
       objc_setAssociatedObject(menu, &bindingKey, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
     }
+  }
+
+  /// The bound model is the source of the equivalents routed before a focused page.
+  static func reserves(_ event: NSEvent, in menu: NSMenu?) -> Bool {
+    guard let menu, let binding = objc_getAssociatedObject(menu, &bindingKey) as? MenuBinding,
+          event.type == .keyDown, let key = event.charactersIgnoringModifiers, !key.isEmpty else { return false }
+    let candidate = ShortcutBinding(key: key, modifiers: event.modifierFlags)
+    return binding.model.catalog.contains { binding.model.binding(for: $0.id) == candidate }
   }
 
   private static var bindingKey: UInt8 = 0
@@ -74,6 +83,18 @@ public enum ShortcutCatalog {
     var observer = UUID()
     init(model: ShortcutEditorModel, menu: NSMenu) { self.model = model; self.menu = menu }
     func start() {
+      model.protectedOwners = { [weak self, weak menu] candidate in
+        guard let self, let menu else { return [] }
+        let editable = Set(self.model.catalog.map(\.id))
+        return ShortcutCatalog.items(in: menu).compactMap { item in
+          guard item.submenu == nil, !item.isSeparatorItem,
+                !item.keyEquivalent.isEmpty else { return nil }
+          if let id = ShortcutCatalog.actionID(item), editable.contains(id) { return nil }
+          let binding = ShortcutBinding(key: item.keyEquivalent, modifiers: item.keyEquivalentModifierMask)
+          guard binding == candidate else { return nil }
+          return ShortcutEditorModel.ProtectedConflict(title: item.title, binding: binding)
+        }
+      }
       observer = model.observe { [weak self] in self?.apply() }
       apply()
     }

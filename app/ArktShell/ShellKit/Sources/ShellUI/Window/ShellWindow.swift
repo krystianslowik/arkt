@@ -109,7 +109,8 @@ public final class ShellWindow: NSWindow {
   /// the usual way. This is where Chromium reserves its own keys on macOS (the window's command dispatcher runs before
   /// the first responder), and it covers the FakeEngine build too.
   public override func performKeyEquivalent(with event: NSEvent) -> Bool {
-    if reservedKeys.matches(event), NSApp.mainMenu?.performKeyEquivalent(with: event) == true { return true }
+    if (reservedKeys.matches(event) || ShortcutCatalog.reserves(event, in: NSApp.mainMenu)),
+       NSApp.mainMenu?.performKeyEquivalent(with: event) == true { return true }
     return super.performKeyEquivalent(with: event)
   }
 

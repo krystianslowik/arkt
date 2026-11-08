@@ -18,6 +18,34 @@ struct ShortcutMenuBindingTests {
     #expect(ShortcutCatalog.definitions(from: menu).map(\.id) == definitions.map(\.id))
   }
 
+  @Test func readOnlyMenuOwnersCannotBeStolen() throws {
+    let menu = NSMenu()
+    let tab = NSMenuItem(title: "New Tab", action: NSSelectorFromString("newTab:"), keyEquivalent: "t")
+    let window = NSMenuItem(title: "New Window", action: NSSelectorFromString("newWindow:"), keyEquivalent: "n")
+    let hidden = NSMenuItem(title: "Hidden Alias", action: NSSelectorFromString("dynamic:"), keyEquivalent: "y")
+    hidden.isHidden = true
+    [tab, window, hidden].forEach { menu.addItem($0) }
+    let suite = "dev.arkt.tests.protected.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let model = ShortcutEditorModel(catalog: ShortcutCatalog.definitions(from: menu), defaults: defaults)
+    ShortcutCatalog.bind(model: model, to: menu)
+    let id = ShortcutActionID("newTab")
+    for (key, title) in [("n", "New Window"), ("y", "Hidden Alias")] {
+      model.beginRecording(id)
+      let event = try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command,
+        timestamp: 0, windowNumber: 0, context: nil, characters: key, charactersIgnoringModifiers: key,
+        isARepeat: false, keyCode: 0))
+      model.record(event: event)
+      #expect(model.protectedConflicts.first?.title == title)
+      #expect(model.pendingShortcut == ShortcutBinding(key: key, modifiers: .command))
+      model.useRecordedShortcut()
+      #expect(model.binding(for: id) == ShortcutBinding(key: "t", modifiers: .command))
+      #expect(window.keyEquivalent == "n")
+      model.keepExisting()
+    }
+  }
+
   @Test func replacingModelDetachesPreviousModelAndUpdatesAliases() throws {
     let menu = NSMenu()
     let visible = NSMenuItem(title: "New Tab", action: NSSelectorFromString("newTab:"), keyEquivalent: "t")
