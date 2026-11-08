@@ -5458,3 +5458,21 @@ it was cleared afterwards. Nothing under `~/Applications/ArktTest` or `/Applicat
   has been checked. Preserve the music indicator from #117.
 - Future grid changes overlap #822 and #802; follow the approved-first/smaller-first merge order, rebase later work,
   and retain both hover and split-Favorite callbacks. This test file is independent of #824 layout math.
+
+#### #338 pure model follow-up
+
+- CI run 42429614905, pure ShellKit job 128575434551, confirmed the test-stage red at
+  `FavoriteUnreadBadgeTests.swift:9`: `FavoriteUnreadBadge` was missing. The pure model now accepts a leading
+  parenthesized ASCII integer on the six tested exact hosts, case-insensitively; zero, malformed and overflowing
+  values clear the badge, and counts above 99 display `99+`. The X/Twitter and WhatsApp settings remain independent.
+- Swift 6.2.4, macOS 15 deployment target and the selected macOS SDK: an isolated package containing the actual
+  model and test files passed 7 tests in 1 suite (the original 5 plus 2 boundary tests). Frontend parsing, import
+  inspection and `git diff --check` passed. This is not a full ShellKit suite result; full package, app and GUI builds
+  were not run because the local baseline cannot compile and full Xcode is absent.
+- Runtime follow-up: establish actual service title formats and any supported bare or subdomain hosts before widening
+  the exact allowlist or parser. Synthetic examples do not establish live behavior; no live traffic was used.
+- Next, write integration tests first for title observation, clearing and independent settings changes, then connect
+  the renderer and settings. Coordinate the shared grid and context-menu files with #822 and #802 using the existing
+  merge order and preserve hover and split-Favorite callbacks; coordinate geometry with #824. Verify 0, 1 and 99+
+  clipping, accessibility, appearance and the #117 music indicator. The whole feature remains incomplete. Live
+  Calendar Join remains not planned (OS-06).
