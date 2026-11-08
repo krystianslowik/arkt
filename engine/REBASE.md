@@ -194,8 +194,12 @@ The rebase passes the gate when:
 
 - the two counts on the first line are equal,
 - the patch files stay under 30 (design target), and the rebase added none,
-- the hot-file hunk count did not grow, and the seam limits from the week-2 plan still hold (at most 8 seam patch
-  files, 25 upstream files, 6 hot-file hunks, no widely included header),
+- the hot-file hunk count did not grow, and the seam limits hold (set by the maintainer on 2026-11-08, replacing the
+  week-2 plan's 8 seam patch files and 25 upstream files; see `docs/plans/2026-11-07-engine-connector-design.md`,
+  section 2.5): at most about 12 seam and hook patch files; under 30 upstream files outside 0001-0004, except that
+  in-tab sheet files (the sheet hooks and both tab-modal choke-point guards, 0015's `tab_dialog_manager.cc`
+  included) may take the total up to 40; at most 4 hunks each in `browser_actions.cc` and `browser_commands.cc`; at
+  most 6 hot-file hunks; no widely included header,
 - the patch budget table in the current engine results file is updated with the new numbers.
 
 If the gate fails, stop and set the issue to `status:needs-user` with the numbers; the maintainer decides.

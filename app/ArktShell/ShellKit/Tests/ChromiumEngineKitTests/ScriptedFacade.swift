@@ -518,11 +518,25 @@ final class ScriptedTab: NSObject, ArktTabHandle {
 
   // MARK: ArktTabHandle
 
-  func navigate(to target: URL) {
+  func navigate(to target: URL) { load(target, fromAddressBar: false) }
+
+  /// #784: FROM_ADDRESS_BAR, except for a browser debug URL without the test API (`ScriptedAddressBar.swift`).
+  func navigate(fromAddressBarTo target: URL) {
+    load(target, fromAddressBar: !ScriptedHistory.isBrowserDebugURL(target) || facade.testAPIEnabled)
+  }
+
+  private func load(_ target: URL, fromAddressBar: Bool) {
     whenInserted { [self] in
       guard owner != nil else { return }
+      if ScriptedHistory.isBrowserDebugURL(target) {   // never a navigation; run only from the address bar
+        if fromAddressBar { facade.history.ran(target) }
+        return
+      }
       endJSDialog()                 // Chromium closes it when the navigation starts
       endPermission()               // and drops the ask
+      let sameURL = current?.url == target && !isInitialBlank
+      facade.history.record(ScriptedVisit(url: target, fromAddressBar: fromAddressBar,
+                                          ranAsReload: sameURL && !fromAddressBar))
       if let current, current.url != target, !isInitialBlank {
         back.insert(current, at: 0)
         forward = []
@@ -927,6 +941,8 @@ final class ScriptedFacade: NSObject, ArktEngine {
   /// While set, batches wait for `flush()`.
   var holdsBatches = false
   var testAPIEnabled = true
+  /// The visits navigations record and the browser debug URLs that ran (#784, `ScriptedAddressBar.swift`).
+  let history = ScriptedHistory()
   /// Answers engine window requests (`-hostForEngineWindowRequest:` on the embedder).
   var hostProvider: ((any ArktWindowRequest) -> any ArktWindowHost)?
 

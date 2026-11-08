@@ -150,7 +150,9 @@ public struct PageInfo: Equatable, Sendable {
   public var connection: PageConnection
   /// Nil without a secure connection, or when the engine does not report one.
   public var certificate: CertificateSummary?
-  /// Nil while the engine is still counting, or for a page with no site (a local file, an internal page).
+  /// Nil while the engine is still counting, or for a page with no site (a local file, an internal page). The engine
+  /// counts only while the tab's page info panel is open (`EngineSiteSettings.pageInfoDidOpen(tab:)`); a read with no
+  /// panel open reports the last count it has, however old, or nil.
   public var siteData: SiteData?
   /// The site's permissions in the engine's order: the ones it changed or used, then the common ones. Empty for a
   /// local file or an internal page.
@@ -187,7 +189,9 @@ public struct SitePermissions: Equatable, Sendable, Identifiable {
 
 /// The engine's page info and per-site permissions. Changes apply at once: the next `pageInfo(of:)` and
 /// `sitesWithPermissions()` read the new values. The reload a change needs is offered when the panel closes
-/// (`pageInfoDidClose(tab:)`), as Chromium's page info does.
+/// (`pageInfoDidClose(tab:)`), as Chromium's page info does. Site data is counted only between `pageInfoDidOpen(tab:)`
+/// and `pageInfoDidClose(tab:)`: counting reads the whole profile, and the address pill reads page info on every
+/// refresh.
 @MainActor
 public protocol EngineSiteSettings: AnyObject {
   /// The page info of the tab's current page; nil for an unknown or closed tab, or a tab without a page.
@@ -203,11 +207,21 @@ public protocol EngineSiteSettings: AnyObject {
   /// Chromium the origin-scoped ones; a broader `[*.]host` exception stays, as with its page info). Cookies and site
   /// data stay.
   func resetPermissions(forOrigin origin: String, from tab: TabID)
+  /// The page info panel of `tab` opened (#782). Until `pageInfoDidClose(tab:)` or the tab closing, the engine counts
+  /// the site's data for this tab's reads, and announces `.pageInfoChanged` when a new count differs from the one it
+  /// reported. A second call while open does nothing more.
+  func pageInfoDidOpen(tab: TabID)
   /// The page info panel of `tab` closed. If a setting of its site changed while it was open, the engine raises the
-  /// reload infobar (`InfobarKind.reload`) once, on that tab; otherwise nothing happens.
+  /// reload infobar (`InfobarKind.reload`) once, on that tab; otherwise nothing happens. The engine stops counting the
+  /// site's data for the tab.
   func pageInfoDidClose(tab: TabID)
   /// Opens the browser's settings for the site next to `tab` (Chromium: `chrome://settings/content/siteDetails`).
   func openSiteSettings(forOrigin origin: String, from tab: TabID)
+}
+
+extension EngineSiteSettings {
+  /// An engine whose site data count costs nothing to keep current ignores the signal.
+  public func pageInfoDidOpen(tab: TabID) {}
 }
 
 extension EngineClient {
