@@ -23,10 +23,25 @@ identified message field itself, including the occupied action and binding, rath
 These test-only revisions have been parsed but not compiled or executed; the first missing integration API failure
 and the subsequent supported-environment GUI runs are still required.
 
-The editable catalog currently recognizes only `newTab:` and `toggleSidebarVisibility:`. IDs come from those
+The initial editable catalog recognized `newTab:` and `toggleSidebarVisibility:`. IDs come from those
 selectors, not mutable menu titles; the first visible non-alternate occurrence defines each default. Hidden aliases
 of a supported selector receive the same binding and are cleared with it. Dynamic Space items, tagged dispatcher
-commands and all other menu actions remain read-only until their identities and defaults are audited. The existing
+commands and other unaudited menu actions remain read-only. The existing
 read-only listing and search continue to cover visible keyed menu items independently of this bounded catalog.
 Binding a menu applies the model immediately and on subsequent changes; rebinding disconnects the old model. This
 component does not install itself into the app or provide Settings controls.
+
+The catalog additionally supports the four distinct responder-chain selectors `copyCurrentURL:`,
+`copyCurrentURLAsMarkdown:`, `copyCurrentURLAsQuote:` and `pasteURLAsNewTab:`. Their defaults are read from the
+pristine menu items, not a second defaults table. The component test recreates the production menu entries; it does
+not compile `MainMenu` or prove actual app dispatch.
+
+Remaining read-only scope: `commandDispatch:` carries the EngineCommand tag for Save Page As, Print, Find/Next/
+Previous, Stop, Reload/Force Reload, Actual Size/Zoom In/Out, View Source, Developer Tools, Inspect Elements,
+JavaScript Console, Back, Forward, Show All History and Downloads; a selector alone conflates these rows. The
+numbered `goToSpace:` rows use changing Space order and tags, `goToSidebarItem:` rows 1–9 use tags, and
+`focusSplitPane:` rows 1–4 use tags. Their identity and persistence across dynamic rebuilds need separate design.
+Next Tab and Previous Tab each have a visible arrow binding and a hidden, separately keyed brace alias; collapsing
+both to one binding would erase an existing default. Other selector-based App, File, Edit, View, Spaces, Tabs,
+Window and Help commands remain read-only pending their own identity, alias and routing audit. Visible keyed rows
+remain listed by the existing read-only sections; unbound and hidden rows are not shown there.

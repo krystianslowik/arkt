@@ -2997,3 +2997,19 @@ and the held conflict-focus decision are unchanged.
 A Swift 6.2.4 complete-concurrency type-check probe passed using the actual shortcut model source and the service's
 predicate declaration. The changed test file passed source parsing, and diff checks passed. The probe is not a
 ShellKit test-suite result: no tests or full app/GUI build ran locally. New-head CI must validate the full gate.
+
+### #119 bounded action-catalog audit (continued)
+
+Audited `MainMenu`, `SpacesMenu`, `TabsMenu`, `SplitMenu`, and copy-link selector ownership. Added the four existing
+Copy URL / Markdown / Quote and Paste URL as New Tab selector identities to the existing New Tab and Sidebar
+catalog. Their original responder-chain targets and menu defaults are unchanged; binding only changes key equivalents.
+Tagged dispatch, numbered Space/sidebar/split rows, differently keyed hidden tab aliases, and unaudited selectors
+remain read-only as detailed in `docs/shortcut-wiring-test-notes.md`. No recorder or app composition was added.
+
+Test first: the focused actual catalog/model source package with synthetic menu items ran
+`swift test --package-path <isolated-package> --filter CopyLinkCatalogTests`: 1 test failed with 3 issues because
+all four definitions and defaults were missing. After mapping, `swift test --package-path <isolated-package>` ran
+13 tests in 3 suites successfully (Swift 6.1.2, macOS 15 deployment target). The synthetic component setup follows
+the production menu declarations; it does not compile `MainMenu`, execute the commands, or establish real GUI,
+app dispatch, system-conflict detection or the full app build. The conflict focus and Return decision remains held;
+page priority remains #441.

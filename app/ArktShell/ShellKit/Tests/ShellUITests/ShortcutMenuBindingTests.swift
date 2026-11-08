@@ -85,3 +85,69 @@ struct ShortcutMenuBindingTests {
   }
 
 }
+
+@MainActor
+struct CopyLinkCatalogTests {
+  @Test func taggedAndDynamicRowsStayReadOnlyButListed() {
+    let root = NSMenu()
+    let holder = NSMenuItem(title: "Commands", action: nil, keyEquivalent: "")
+    let menu = NSMenu(title: "Commands")
+    holder.submenu = menu
+    root.addItem(holder)
+    for (title, action, key, tag) in [("Find", "commandDispatch:", "f", 1),
+                                      ("Reload", "commandDispatch:", "r", 2),
+                                      ("Space 1", "goToSpace:", "1", 0),
+                                      ("Sidebar 1", "goToSidebarItem:", "1", 1),
+                                      ("Pane 1", "focusSplitPane:", "1", 0)] {
+      let item = NSMenuItem(title: title, action: NSSelectorFromString(action), keyEquivalent: key)
+      item.tag = tag
+      menu.addItem(item)
+    }
+    #expect(ShortcutCatalog.definitions(from: root).isEmpty)
+    #expect(ShortcutCatalog.sections(from: root).flatMap(\.entries).map(\.title) ==
+            ["Find", "Reload", "Space 1", "Sidebar 1", "Pane 1"])
+  }
+
+  @Test func copyAndPasteCommandsKeepDistinctIdentitiesAndPristineDefaults() throws {
+    let menu = NSMenu()
+    let selectors = ["copyCurrentURL:", "copyCurrentURLAsMarkdown:", "copyCurrentURLAsQuote:", "pasteURLAsNewTab:"]
+    let ids = selectors.map { ShortcutActionID(String($0.dropLast())) }
+    let keys = ["c", "c", "c", "v"]
+    let flags: [NSEvent.ModifierFlags] = [[.command, .shift], [.command, .shift, .option],
+                                          [.command, .shift, .control], [.command, .option]]
+    let items = selectors.indices.map { index in
+      let item = NSMenuItem(title: "Command \(index)", action: NSSelectorFromString(selectors[index]),
+                            keyEquivalent: keys[index])
+      item.keyEquivalentModifierMask = flags[index]
+      return item
+    }
+    items.forEach { menu.addItem($0) }
+    let definitions = ShortcutCatalog.definitions(from: menu)
+    #expect(definitions.map(\.id) == ids)
+    #expect(Set(definitions.map(\.id)).count == 4)
+    #expect(definitions.map(\.defaultBinding) == selectors.indices.map { ShortcutBinding(key: keys[$0], modifiers: flags[$0]) })
+    guard definitions.count == 4 else { return }
+    let suite = "dev.arkt.tests.copyLinkCatalog.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let model = ShortcutEditorModel(catalog: definitions, defaults: defaults)
+    ShortcutCatalog.bind(model: model, to: menu)
+    model.setBinding(ShortcutBinding(key: "e", modifiers: .command), for: ids[0])
+    model.setBinding(nil, for: ids[1])
+    items[0].title = "Validated title"
+    let rebuilt = ShortcutCatalog.definitions(from: menu)
+    #expect(rebuilt.map(\.defaultBinding) == definitions.map(\.defaultBinding))
+    #expect(rebuilt[0].title == "Validated title")
+    let reloaded = ShortcutEditorModel(catalog: rebuilt, defaults: defaults)
+    ShortcutCatalog.bind(model: reloaded, to: menu)
+    #expect(items[0].keyEquivalent == "e")
+    #expect(items[1].keyEquivalent.isEmpty)
+    for id in ids { reloaded.reset(id) }
+    for index in items.indices {
+      #expect(items[index].keyEquivalent == keys[index])
+      #expect(items[index].keyEquivalentModifierMask == flags[index])
+      #expect(items[index].action == NSSelectorFromString(selectors[index]))
+      #expect(items[index].target == nil)
+    }
+  }
+}

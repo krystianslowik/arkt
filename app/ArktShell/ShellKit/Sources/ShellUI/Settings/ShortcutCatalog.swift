@@ -11,6 +11,10 @@ public enum ShortcutCatalog {
     switch NSStringFromSelector(action) {
     case "newTab:": return ShortcutActionID("newTab")
     case "toggleSidebarVisibility:": return ShortcutActionID("toggleSidebarVisibility")
+    case "copyCurrentURL:": return ShortcutActionID("copyCurrentURL")
+    case "copyCurrentURLAsMarkdown:": return ShortcutActionID("copyCurrentURLAsMarkdown")
+    case "copyCurrentURLAsQuote:": return ShortcutActionID("copyCurrentURLAsQuote")
+    case "pasteURLAsNewTab:": return ShortcutActionID("pasteURLAsNewTab")
     default: return nil
     }
   }
