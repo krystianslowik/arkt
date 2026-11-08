@@ -2920,3 +2920,11 @@ Written first. Each failed to compile before the code existed.
   in the isolated package with the updated actual model and tests passed 12 tests in 1 suite: the original 7,
   2 ambiguity cases and 3 review cases. Full-package baseline-plus-7 evidence still needs CI; these isolated
   counts do not establish a full ArktCore pass.
+
+### #113 typed link-routing persistence (bounded slice)
+
+- `LinkRouting` is a typed `SettingsGroup` in Persistence, stored as sorted-key JSON under `linkRouting.settings` in the existing SQLite `setting` table. The value types are Codable; SidebarModel remains storage-free. No migration or separate defaults store is needed. Missing or unreadable data returns empty routes with Little Arkt as the default; an explicit save replaces the group, following the existing settings-store convention.
+- Test-first: an isolated macOS 15 package depending on the actual ArktCore Persistence, SidebarModel and Archive products compiled the production dependencies, then failed to compile the four new tests because `LinkRouting` did not conform to `SettingsGroup` and had no `storageKey`. No tests ran at red.
+- Swift 6.2.4, macOS 15.5 SDK, macOS 15 deployment target: the same focused package passed 4 storage tests in 1 suite. Including the existing routing test file passed 16 tests in 2 suites (12 existing + 4 storage). Tests cover ordered competing matches, literal text, destinations and defaults, replacement and removal across reopen, unreadable data and independent settings.
+- Full CI for this persistence head is pending. No local full Core or ShellKit baseline was run. The previously recorded full CI at `8c0085a` remains evidence for that earlier head only.
+- App dispatch, Settings UI, profile destinations (#611), deleted-Space cleanup, external links, Peek, archive, Meet and optional import remain. No precedence or fallback for competing destinations is chosen.
