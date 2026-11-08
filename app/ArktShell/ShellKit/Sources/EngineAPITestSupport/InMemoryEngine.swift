@@ -80,6 +80,8 @@ public final class InMemoryEngine: EngineClient, EngineExtensions, EngineImporti
   /// Tabs whose page info changed a setting since their panel last closed: each gets the reload infobar on close.
   var pendingReloads: Set<TabID> = []
   public internal(set) var openedSiteSettings: [(origin: String, tab: TabID)] = []
+  /// Tabs whose page info panel is open, from `pageInfoDidOpen(tab:)` until `pageInfoDidClose(tab:)` (#782).
+  public internal(set) var openPageInfoPanels: Set<TabID> = []
 
   /// Builds hosts for `openEngineWindow(_:)`, as the app's provider does for a real engine.
   public var windowHostProvider: EngineWindowHostProvider?
@@ -808,6 +810,7 @@ public final class InMemoryEngine: EngineClient, EngineExtensions, EngineImporti
     heldCloses[id] = nil
     connectionOverrides[id] = nil
     pendingReloads.remove(id)
+    openPageInfoPanels.remove(id)
     selections[id] = nil
     hub.emit(.tabClosed(id, reason: reason))
     if let successor { setActive(successor) }

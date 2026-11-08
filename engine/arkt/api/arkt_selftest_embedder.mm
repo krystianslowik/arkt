@@ -1226,6 +1226,10 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
                    << base::SysNSStringToUTF8(origin);
       [self logPageInfoOf:tab];
     }
+  } else if (command == "pageinfo-open") {
+    // #782: the panel opened, so the tab's reads count site data.
+    [tab pageInfoDidOpen];
+    LOG(WARNING) << "ARKT selftest pageinfo-open tab=" << tab.sessionId;
   } else if (command == "pageinfo-close") {
     [tab pageInfoDidClose];
     LOG(WARNING) << "ARKT selftest pageinfo-close tab=" << tab.sessionId;

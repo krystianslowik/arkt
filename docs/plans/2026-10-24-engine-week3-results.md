@@ -5941,3 +5941,101 @@ In sync; nothing exported. Facade header copies `cmp` identical.
 Every run stopped by exact PID (SIGKILL or SIGTERM; `ps -p` printed nothing for each). The throwaway profiles under
 `profiles/785-20261107/` and the run logs were deleted. No clipboard use. Nothing under `~/Applications/ArktTest` or
 `/Applications/Arkt.app` was touched.
+
+## #782: count site data only while the page info panel is open
+
+### Gate
+
+1. Seam, no patch. Before, every `pageInfo` read more than 10 s after the last count started
+   `BrowsingDataModel::BuildFromDisk` over the whole profile; the address pill reads page info on every refresh.
+2. Facade header: additive. `ArktTabHandle` gains `-pageInfoDidOpen` next to `-pageInfoDidClose`. The comments of
+   `pageInfo`, `hasSiteData` and `ArktEngineEventKindPageInfoChanged` now say when the engine counts. Both copies
+   `cmp` identical.
+3. `.patches` unchanged (14).
+4. `out/Spike` only, `nice -n 15`, 4 jobs; self-test smoke on a fresh profile with `--use-mock-keychain`.
+
+### What landed
+
+- **`PageInfoHub`** (`arkt_page_info.cc`): keeps the tabs whose panel is open (weak pointers, so a closed tab drops
+  out). `PageInfoOpened` records the tab and starts the count when the profile's count is stale or missing;
+  `PageInfoClosed` removes it. `SiteData` starts `BuildFromDisk` only for an open tab. With no panel open, a read
+  returns the profile's last count, however old, or none. When a count arrives, only tabs that are still open get
+  `PageInfoChanged`. A `VLOG(1)` line gives the entry count and the build time (`--vmodule=arkt_page_info=1`).
+- **Facade**: `-pageInfoDidOpen` runs through `runOrQueue`, as `-pageInfoDidClose` does. The self-test embedder adds a
+  `pageinfo-open` command.
+- **EngineAPI**: `EngineSiteSettings.pageInfoDidOpen(tab:)`, with an empty default in a protocol extension.
+  `ChromiumEngine` forwards it to the handle. `InMemoryEngine` records `openPageInfoPanels`; its site data is a test
+  driver that costs nothing to read, so it is still reported with no panel open. `FakeEngine` has an explicit no-op
+  (WebKit's site data is not counted). The scripted facade and `ConformanceTests.TestTab` implement the new method.
+  Contract rule 26's reload-infobar check now opens the panel first, as the shell does.
+- **Shell**: `PageInfoPanelController.show(for:anchoredTo:)` calls `pageInfoDidOpen(tab:)` once the panel is
+  committed to a tab. Every close path already went through `hide`, which calls `pageInfoDidClose(tab:)`.
+
+### Tests first
+
+New: `PageInfoTests.openAndCloseAreRecordedPerTab` (EngineAPITests),
+`ChromiumPageInfoTests.openingThePanelTellsTheFacade`, the open call in `callsForAnUnknownTabDoNothing`,
+`FakeEnginePageInfoTests.engineOffersSiteSettings` calling it, and
+`PageInfoPanelTests.testTheEngineCountsSiteDataOnlyWhileThePanelIsOpen` (GUI). Red run: `swift build --build-tests`
+failed to compile (`InMemoryEngine` has no member `openPageInfoPanels`). Deliberate break: with
+the controller's `pageInfoDidOpen` call commented out, the GUI test fails ("the panel tells the engine it opened");
+restored.
+
+### Swift tests (`nice -n 20`, `-j 2`, in `app/ArktShell/ShellKit`)
+
+| Command | Result |
+|---|---|
+| `swift test --filter "EngineAPITests\|ChromiumEngineKitTests\|ArktEngineABITests\|FakeEngineKitTests.FakeEnginePageInfoTests"` | 286 + 171 + 33 + 6 passed, 0 failed (EngineAPITests +1, ChromiumEngineKitTests +1) |
+| `swift test --filter "ShellKitGUITests.PageInfoPanelTests"` | 28 passed, 0 failed (+1) |
+| Full suite (`swift test --skip ShellKitGUITests`) | not run locally (other lanes building on this Mac); CI's Swift tests job |
+
+### Build
+
+| Step | Result |
+|---|---|
+| `nice -n 15 autoninja -C out/Spike chrome -j 4` | `The build has finished successfully.`; the header change rebuilt the 15 overlay objects and relinked `libchrome_dll.dylib` (41 s) |
+
+### Smoke (`out/Spike/Chromium.app`, `--no-startup-window --arkt-facade-selftest --vmodule=arkt_page_info=1`, fresh profile `profiles/782-20261107/`, `--use-mock-keychain`)
+
+A synthetic profile: a loopback server on `127.0.0.1:8782` led one tab through 400 origins
+(`s0.localhost` to `s399.localhost`), each writing three cookies, 8 KB of local storage and a 32 KB IndexedDB record,
+then to a test page on `127.0.0.1:8782` (two cookies, 2 KB of local storage) whose title ran the commands on a timer.
+The profile was 519 MB on disk afterwards, most of it caches.
+
+| Time | Command | Panel | Result |
+|---|---|---|---|
+| 0 s | `pageinfo` | closed | `siteData=counting`, no count started |
+| 11 s | `pageinfo` | closed | `siteData=counting`, no count started |
+| 12 s | `pageinfo-open` | open | `site data counted entries=1603 in 37 ms`, then `pageInfoChanged siteData=2 cookies 2003 bytes` |
+| 19 s | `pageinfo` | open | `2 cookies 2003 bytes` (fresh, no count) |
+| 25 s | `pageinfo` | open | the old count at once, then `entries=1603 in 12 ms` (older than 10 s); same count, so no `pageInfoChanged` |
+| 27 s | `pageinfo-close` | closed | |
+| 39 s | `pageinfo` | closed | the last count, no count started though it is 14 s old |
+| 40 s | `pageinfo-open` | open | `entries=1603 in 11 ms`; a read at 47 s reports the count |
+| 48 s | `pageinfo-close` | closed | |
+
+Three counts in the run, each after a `pageinfo-open`; none for the closed reads, nor for the reads the self-test
+makes on each `pageInfoChanged` while the 400 pages loaded. `FATAL`, `Check failed`, `NOTREACHED`: 0.
+
+`BuildFromDisk` on this profile: 37 ms for the first count, 11 to 12 ms after that. This is a synthetic profile of 1603
+entries on an SSD; a real profile with years of data was not measured (only throwaway profiles are used here).
+
+### Patch budget
+
+| Source | Count |
+|---|---|
+| `.patches` lines | 14 |
+| `arkt` commits above `156.0.8078.48` | 14 |
+
+In sync; nothing exported. Facade header copies `cmp` identical.
+
+### Left open
+
+- `BuildFromDisk` on a large real profile: the number above is from a synthetic one. A maintainer run on a copy of a
+  real profile would confirm it.
+- The profile's model stays in memory after the last panel closes, as before; it could be dropped then.
+
+### Cleanup
+
+Chromium and the loopback server were stopped by exact PID; `ps -p` prints nothing for either. The profile
+`profiles/782-20261107/` and the build log were deleted. Nothing else on the Chromium volume was touched.
