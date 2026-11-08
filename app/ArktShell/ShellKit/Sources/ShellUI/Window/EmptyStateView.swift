@@ -5,6 +5,8 @@ import AppKit
 /// `layout()`; no onboarding beyond this (BH-211 is a later track).
 @MainActor
 final class EmptyStateView: NSView {
+  /// The heading.
+  static let headingFontSize: CGFloat = 22
   static let heading = "Welcome to Arkt"                                                  // [I] open question 3
   static let body = "Bring your Spaces, pinned tabs and Archive over, or start fresh."
   private static let panelWidth: CGFloat = 420
@@ -31,9 +33,9 @@ final class EmptyStateView: NSView {
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
     wantsLayer = true
-    headingLabel.font = .systemFont(ofSize: 22, weight: .semibold)
+    headingLabel.font = .systemFont(ofSize: Self.headingFontSize, weight: .semibold)
     headingLabel.alignment = .center
-    bodyLabel.font = .systemFont(ofSize: 13)
+    bodyLabel.font = ShellType.body.font
     bodyLabel.textColor = .secondaryLabelColor
     bodyLabel.alignment = .center
     for button in [importButton, newSpaceButton] {

@@ -103,12 +103,12 @@ final class DialogSheetView: NSView {
   private func build() {
     if let iconView { addSubview(iconView) }
     titleField.stringValue = content.title
-    titleField.font = .systemFont(ofSize: 15, weight: .semibold)
+    titleField.font = ShellType.dialogTitle.font
     if content.titleMaxLines > 0 {
       titleField.maximumNumberOfLines = content.titleMaxLines
       titleField.cell?.truncatesLastVisibleLine = true
     }
-    subtitleField?.font = .systemFont(ofSize: 12)
+    subtitleField?.font = ShellType.caption.font
     for (field, paragraph) in zip(paragraphFields, content.paragraphs) {
       field.attributedStringValue = Self.body(paragraph.text)
     }
@@ -129,7 +129,7 @@ final class DialogSheetView: NSView {
     if let inputView { addSubview(inputView) }
     if let listField { addSubview(listField) }
     if let checkboxButton {
-      checkboxButton.font = .systemFont(ofSize: 13)
+      checkboxButton.font = ShellType.body.font
       checkboxButton.setAccessibilityIdentifier(AXID.Dialog.checkbox)
       addSubview(checkboxButton)
     }
@@ -190,7 +190,7 @@ final class DialogSheetView: NSView {
     let paragraph = NSMutableParagraphStyle()
     paragraph.minimumLineHeight = bodyLineHeight
     paragraph.maximumLineHeight = bodyLineHeight
-    return NSAttributedString(string: text, attributes: [.font: NSFont.systemFont(ofSize: 13),
+    return NSAttributedString(string: text, attributes: [.font: ShellType.body.font,
                                                           .paragraphStyle: paragraph])
   }
 
@@ -206,7 +206,7 @@ final class DialogSheetView: NSView {
     }
     if let checkboxButton {
       checkboxButton.attributedTitle = NSAttributedString(string: checkboxButton.title, attributes: [
-        .font: NSFont.systemFont(ofSize: 13), .foregroundColor: ShellTokens.primaryText.resolve(flavor).nsColor(),
+        .font: ShellType.body.font, .foregroundColor: ShellTokens.primaryText.resolve(flavor).nsColor(),
       ])
     }
   }
@@ -375,14 +375,14 @@ final class DialogInputView: NSView {
   init(input: DialogContent.Input) {
     super.init(frame: .zero)
     wantsLayer = true
-    layer?.cornerRadius = 8
+    layer?.cornerRadius = DialogMetrics.inputRadius
     layer?.cornerCurve = .continuous
     field.stringValue = input.text
     field.isBordered = false
     field.isBezeled = false
     field.drawsBackground = false
     field.focusRingType = .none
-    field.font = .systemFont(ofSize: 13)
+    field.font = ShellType.body.font
     field.lineBreakMode = .byTruncatingTail
     field.cell?.usesSingleLineMode = true
     field.setAccessibilityLabel(input.accessibilityLabel)
@@ -416,9 +416,10 @@ final class DialogInputView: NSView {
 
 enum DialogMetrics {
   static let buttonHeight: CGFloat = 28
-  static let sheetCornerRadius: CGFloat = 14
-  static let panelCornerRadius: CGFloat = 12
-  static let alertCornerRadius: CGFloat = 14
+  static let sheetCornerRadius = ShellRadius.sheet
+  static let panelCornerRadius = ShellRadius.popover
+  static let alertCornerRadius = ShellRadius.sheet
+  static let inputRadius = ShellRadius.control
 }
 
 // MARK: - Icon
@@ -426,6 +427,8 @@ enum DialogMetrics {
 /// The dialog's icon: the plain app icon, or a Space's theme swatch (32 pt, radius 8) with its mark centered.
 @MainActor
 final class DialogIconView: NSView {
+  /// An emoji icon.
+  static let emojiFontSize: CGFloat = 17
   let icon: DialogContent.Icon
   /// The decoded `.image` icon, decoded once here rather than on every draw.
   private let image: NSImage?
@@ -486,7 +489,7 @@ final class DialogIconView: NSView {
       image.draw(in: NSRect(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2,
                             width: size.width, height: size.height))
     case .emoji(let text)?:
-      let string = NSAttributedString(string: text, attributes: [.font: NSFont.systemFont(ofSize: 17)])
+      let string = NSAttributedString(string: text, attributes: [.font: NSFont.systemFont(ofSize: Self.emojiFontSize)])
       let size = string.size()
       string.draw(at: NSPoint(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2))
     case nil:
@@ -510,10 +513,10 @@ final class DialogListView: NSView {
     itemFields = items.map { NSTextField(wrappingLabelWithString: $0) }
     super.init(frame: .zero)
     wantsLayer = true
-    layer?.cornerRadius = 10
+    layer?.cornerRadius = ShellRadius.field
     layer?.cornerCurve = .continuous
-    headingField?.font = .systemFont(ofSize: 12, weight: .semibold)
-    for field in itemFields { field.font = .systemFont(ofSize: 13) }
+    headingField?.font = ShellType.captionEmphasis.font
+    for field in itemFields { field.font = ShellType.body.font }
     for field in [headingField].compactMap({ $0 }) + itemFields { addSubview(field) }
   }
 

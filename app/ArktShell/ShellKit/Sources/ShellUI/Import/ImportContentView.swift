@@ -159,7 +159,7 @@ final class ImportGroupView: NSView {
     if !style.isHero { y += 2 }
     ArchiveMotion.set {
       field.backgroundColor = style.palette.field.cgColor
-      field.cornerRadius = 10
+      field.cornerRadius = ShellRadius.field
       field.cornerCurve = .continuous
       field.frame = CGRect(x: 0, y: fieldTop, width: bounds.width, height: max(0, y - fieldTop))
       field.isHidden = style.isHero

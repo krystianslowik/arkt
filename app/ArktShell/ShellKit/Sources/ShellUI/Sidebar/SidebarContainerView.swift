@@ -429,7 +429,7 @@ public final class SidebarContainerView: NSView {
   /// sidebar (#668). Hidden in a normal window.
   public let windowKindLabel: NSTextField = {
     let label = NSTextField(labelWithString: "Incognito")
-    label.font = .systemFont(ofSize: 11, weight: .semibold)
+    label.font = ShellType.sectionHeader.font
     label.alignment = .center
     label.lineBreakMode = .byTruncatingTail
     label.usesSingleLineMode = true
