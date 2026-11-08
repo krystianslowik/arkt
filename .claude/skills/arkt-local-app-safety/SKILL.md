@@ -33,15 +33,31 @@ behind. These rules hold for every launch, test run and build.
 7. **Never bypass** a blocked permission prompt, a hook or a sandbox. If one blocks you, stop and report it.
 8. **Disk.** Check free space before any build. **STOP** if it is short; never delete files you did not create.
 
-## 2. Cleanup, verify before you claim
+## 2. Heavy local outputs
+
+1. **Artifacts folder, not the boot disk.** `xctrace` traces, `.xcresult` bundles, DMGs, app copies, and perf logs
+   or screenshots you are not committing go under the maintainer's artifacts folder, given in the task brief, in one
+   subfolder per issue (`<artifacts folder>/<issue number>/`). Never write them to the boot disk, the repo or
+   `build/`. **STOP** and ask if the brief names no artifacts folder.
+2. **Time-limit every recording.** Every `xctrace record` passes `--time-limit` (`30s` by default, `120s` at most) and
+   `--output` inside the issue subfolder. Record a bounded probe: a fixed number of steps that ends on its own, never
+   a loop that repeats until stopped.
+3. **Bound the wait too.** Whatever waits on the recording (a `wait`, a poll, a script) has its own limit, a little
+   longer than `--time-limit`. When that limit passes, stop the recorder by its PID and report it.
+4. **Delete traces once their numbers are in the pull request.** Keep only what the pull request still needs.
+
+## 3. Cleanup, verify before you claim
 
 1. Stop every process you started; confirm with `ps -p <PID>` (prints no process).
 2. Remove the throwaway profiles and data folders your run created.
 3. UI-test attachments land outside the repo; where they are and how to clear them is in `CONTRIBUTING.md`,
    section 7, "Attachments". Keep the `deleteOnSuccess` lifetime on any attachment you add.
-4. Report what you stopped and removed, and anything you kept and why.
+4. Remove the traces, result bundles and other outputs from section 2 once their numbers are in the pull request.
+5. Report what you stopped and removed, and anything you kept and why.
 
 ## Common mistakes we made
 
 - UI tests keeping screenshots for passing runs until the disk filled (#426, fixed in #427).
 - A test build registered under the real bundle id, which took over the user's link opens.
+- Profiling recordings without a time limit on the boot disk, which filled it several times, once with a single
+  48 GB trace.
