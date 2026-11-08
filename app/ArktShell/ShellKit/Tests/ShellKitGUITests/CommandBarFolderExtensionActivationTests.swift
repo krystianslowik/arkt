@@ -25,7 +25,8 @@ final class CommandBarFolderExtensionActivationTests: XCTestCase {
     let shell = ShellWindowController(engine: engine, sidebar: source)
     shells.append(shell)
     shell.window?.setFrame(NSRect(x: 100, y: 100, width: 1200, height: 800), display: false)
-    shell.show(node: node)
+    // Activate through the sidebar too: `show` alone changes only the content and leaves its initial Space selected.
+    shell.activate(node: node)
     shell.commandBar.settings.dismissSearchSuggestionNotice()
     shell.commandBar.dismissFinisher = { $0() }
     shell.commandBar.barView.selectionMotion.drivesFramesItself = false
@@ -53,14 +54,17 @@ final class CommandBarFolderExtensionActivationTests: XCTestCase {
       let child = try model.addTab(url: URL(string: "https://child.example.test/")!, title: "Child", in: .folder(folder))
       let source = ModelSidebarSource(sidebar: model)
       let shell = shell(engine: InMemoryEngine(), source: source, node: workTab)
+      XCTAssertEqual(shell.currentSpace, work, "collapse setup belongs to the target Space")
       let outline = try XCTUnwrap(shell.sidebarController.currentPage?.outlineController)
       outline.toggleFolder(untouched, animated: false)
       outline.toggleFolder(folder, animated: false)
       outline.toggleFolder(outer, animated: false)
       XCTAssertFalse(outline.isFolderOpen(outer))
       XCTAssertFalse(outline.isFolderOpen(folder))
+      XCTAssertFalse(outline.isFolderOpen(untouched), "the unrelated folder starts closed on the Work outline")
       shell.activate(node: first)
       XCTAssertEqual(shell.currentSpace, personal)
+      XCTAssertFalse(outline.isFolderOpen(untouched), "switching away preserves the target outline's collapsed state")
       let snapshot = source.sidebar.snapshot(of: outer)
       let bar = shell.commandBar
       bar.show(.newTab)
@@ -71,6 +75,7 @@ final class CommandBarFolderExtensionActivationTests: XCTestCase {
       XCTAssertFalse(bar.isVisible)
       XCTAssertEqual(shell.currentSpace, work)
       let revealed = try XCTUnwrap(shell.sidebarController.currentPage?.outlineController)
+      XCTAssertTrue(revealed === outline, "reveal returns to the outline whose folders were closed during setup")
       XCTAssertTrue(revealed.isFolderOpen(outer))
       XCTAssertTrue(revealed.isFolderOpen(folder))
       XCTAssertFalse(revealed.isFolderOpen(untouched), "reveal must not expand unrelated folders")

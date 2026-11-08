@@ -3106,3 +3106,14 @@ checks, actionlint, UI parity-script tests, ABI header comparison and whitespace
 compile/run is claimed; approximately 1 GiB available disk prevents a full local build. Fresh CI and independent review
 are required. Native keyboard/VoiceOver, real installed-extension popup behavior, visual review and worst-case hot-path
 performance remain unverified. See `docs/test-gates/562-folder-extension-activation.md` for the bounded contract.
+
+
+### #562 activation fixture selects its setup Space
+
+Run `42532419492` at `8c549f9` passed pure ShellKit 2,573 tests / 295 suites, Core, App build, lint and required gate.
+GUI reported 2,184 tests / 64 skipped / four failures, all unrelated-folder state checks in the Pinned/Today cases;
+extension invocation/live updates and profile/private-folder exclusion passed, and the address-bar window guard passed.
+The fixture displayed Work's tab via internal `show` without selecting Work in the sidebar, so it collapsed folders on
+Personal's separate outline. It now uses real `activate`, asserts the target Space and closed state before the action,
+and verifies the same outline after reveal. All existing reveal and stale-target assertions remain. Production is
+unchanged. Parsing and whitespace passed; no local GUI/App run occurred and corrected-head runtime CI is pending.

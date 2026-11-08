@@ -43,3 +43,21 @@ the real haptics row and its AppSession bind. The AddressBarNavigationTests tear
 `closeAllForTesting()` helper before releasing its sets; its window guard and behavior assertions remain intact.
 Google and DuckDuckGo remain the only engine choices, with Google the default. The broader issue remains draft and
 requires current-head CI and independent review before any readiness claim.
+
+
+## Activation run and fixture Space correction
+
+At `8c549f9`, run `42532419492` passed Core, App build, lint and required aggregate; pure ShellKit passed
+2,573 tests / 295 suites, including the provider actionability, Space-context/filter and preview cases. GUI executed
+2,184 reported tests, 64 skipped, with four failures, all the unrelated-folder collapsed-state assertions in the two
+folder locations. Extension invocation, live action updates and profile/private-folder exclusion passed. The prior
+address-bar fixture window guard passed.
+
+The new fixture used internal `show(node:)`, which creates/displays content but does not change SidebarController's
+current Space. With Personal created first and the setup tab in Work, it closed IDs on Personal's outline; the reveal
+correctly switched to Work's separate outline, where the unrelated folder had never been closed. The helper now uses
+public `activate(node:)`, the real Space-selection path. Added assertions establish Work before collapsing, the
+unrelated folder's closed state before and after switching away, and the same outline on return. All post-reveal
+and stale-target assertions are retained. This is a test-only setup repair; production activation is unchanged.
+Parsing and whitespace checks passed; the corrected GUI behavior still needs a fresh run. No local GUI or App build
+ran. The prior component successes do not establish native keyboard/VoiceOver or installed-extension popup behavior.
