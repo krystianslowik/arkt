@@ -41,14 +41,16 @@ the crashed bubble needs a `BrowserView` and replaced it with a facade event.
 
 Two questions followed from these decisions. The maintainer answered both on 2026-11-08:
 
-5. **Hooks: allowed, capped.** Small hook or seam patches are allowed for the native prompts that have no seam:
-   leave-site (beforeunload), the device pickers, the permission prompt factory and low disk. The cap is about 12 hook
-   and seam patch files in total, and under 30 upstream files. Decision 2 still holds for everything else: a patch
-   only guards or generalizes a window lookup, or is one of these capped hooks. Section 2.4 lists each hook.
-6. **In-tab sheets: native from day one, no carve-out.** The roughly 39 Chromium-drawn in-tab sheets (HTTP login,
-   open-app, certificate picker, FedCM and the rest) go native. A Chromium-drawn sheet is not accepted for the
-   preview, even when it is parented on the Arkt window. As with decision 3, a sheet with no native UI yet is switched
-   off, never shown as Views. Section 3 (E3b) carries the inventory and the plan.
+5. **Hooks: allowed, capped.** Hook patches are allowed, capped at about 12 hook and seam patch files in total and
+   under 30 upstream files. A seam that needs no patch still comes first. The question named four native prompts with
+   no seam: leave-site (beforeunload), the device pickers, the permission prompt factory and low disk. Those are the
+   planned hooks (E3a). They were examples, not a closed list: other hooks (in-tab sheets, toasts, the page context
+   menu) are allowed as long as they fit the cap. Section 2.4 lists each hook.
+6. **In-tab sheets: native from day one, no carve-out.** The in-tab sheets (39 files call `ShowWebModalDialogViews`:
+   HTTP login, open-app, certificate picker and the rest; FedCM has its own bubble and modal) go native or are
+   switched off. A Chromium-drawn sheet is not accepted for the preview, even when it is parented on the Arkt window.
+   Section 3 (E3b) carries the inventory and the plan, including a second tab-modal path that does not go through
+   `ShowWebModalDialogViews`.
 
 ### 1.3 What the audit found
 
@@ -196,8 +198,8 @@ reach row T on an Arkt window, not only `CloseTab`. Non-test callers in 156, 33 
   `ui/tabs/shared_tab_group_version_upgrade_modal.cc`, `ui/views/scheduled_restart/`, `ui/webui/watermark/` (18 files).
 
 Whether the reachable ones crash today depends on `BrowserElementsViews::From` on an Arkt window; E1 checks it first.
-Toasts are dropped by the guard. A hook in `ToastController` that routes them to the shell is not one of the four
-named hooks (decision 5); it is taken only if a batch shows a need, and it counts against the cap.
+Toasts are dropped by the guard. A hook in `ToastController` that routes them to the shell is allowed (decision 5),
+but none is planned; it is taken only if a batch shows a need, and it counts against the cap.
 
 **The 15 gated dereferences** get no patch by default. Each feature is switched off in the Arkt build by feature flag,
 policy or build flag: glic, Lens region search, iOS promos, relaunch notification, idle timeout, media remoting, DICE
@@ -207,19 +209,18 @@ cannot be switched off.
 
 ### 2.4 Hooks, and the `EmbedderBrowserWindowFeatures` hook
 
-Hooks are allowed for the native prompts that have no seam, within the cap (decision 5). A seam that needs no patch
-still comes first. Every item that is not a guard or a generalization, classified:
+Hooks are allowed within the cap (decision 5). A seam that needs no patch still comes first. Every item that is not a guard or a generalization, classified:
 
 | Item | Class | Batch | Status |
 |---|---|---|---|
-| Low-disk notice | hook (named) | E3a | E1 landed the guard only (0013, row 1). The hook goes in `storage_pressure_bubble_view.cc`, the file 0013 already patches: instead of returning early, it hands the notice to the overlay. No new upstream file. The overlay's own disk watcher is the fallback |
-| beforeunload ("Leave site?", #585) | hook (named), only if no overlay seam works | E3a | allowed |
-| Named permission prompt factory, replacing `set_view_factory_for_testing` (section 6) | hook (named) | E3a | allowed |
-| Device pickers (`ui/views/permissions/chooser_bubble_ui.cc:303`), embedded permission element | hook (named), only if the E3a gate finds no factory seam | E3a | allowed |
-| In-tab sheets: one guard where Views sheets are shown, plus hooks in sheet factories | guard + hook | E3b | follows from decision 6; within the same cap (E3b) |
-| Toast routing to the shell | hook | none planned | not named. Row T drops toasts; taken only if a batch shows a need, and counted against the cap |
-| `SetResizableFromWebAPI` | hook | E2 | not named. Accept the gap (row 8) |
-| Page context menu on Arkt windows (#588) | hook, only if no delegate seam works | E2 | not named. Taken only if the E2 gate shows a need, and counted against the cap |
+| Low-disk notice | hook (planned) | E3a | E1 landed the guard only (0013, row 1). The hook goes in `storage_pressure_bubble_view.cc`, the file 0013 already patches: instead of returning early, it hands the notice to the overlay. No new upstream file. The overlay's own disk watcher is the fallback |
+| beforeunload ("Leave site?", #585) | hook (planned), only if no overlay seam works | E3a | planned |
+| Named permission prompt factory, replacing `set_view_factory_for_testing` (section 6) | hook (planned) | E3a | planned |
+| Device pickers (`ui/views/permissions/chooser_bubble_ui.cc:303`), embedded permission element | hook (planned), only if the E3a gate finds no factory seam | E3a | planned |
+| In-tab sheets: a guard and hook at each of the two tab-modal choke points, plus hooks in sheet factories | guard + hook | E3b | planned (decision 6); within the cap (E3b) |
+| Toast routing to the shell | hook | none planned | allowed, not planned. Row T drops toasts; taken only if a batch shows a need, and counted against the cap |
+| `SetResizableFromWebAPI` | hook | E2 | allowed, not planned. Accept the gap (row 8) |
+| Page context menu on Arkt windows (#588) | hook, only if no delegate seam works | E2 | allowed. Taken only if the E2 gate shows a need, and counted against the cap |
 | `EmbedderBrowserWindowFeatures` | hook | reserved | not wired (below) |
 
 `EmbedderBrowserWindowFeatures` (`ui/browser_window/public/embedder_browser_window_features.h`) is documented as "should
@@ -251,8 +252,8 @@ definition. It counts **seam patch files** (the tolerate-a-non-BrowserView theme
 | E1: guard theme (rows 1, 3-5, T) and generalization theme (row 2) | 14 | 19 | 6 | landed (#800, 0013 and 0014) |
 | E2: rows 6-7 added to the generalization theme | 14 | 20-21 | 6 | planned |
 | E2: page context menu hook (#588), only if needed | 14-15 | 20-23 | 6-7 | only if needed |
-| E3a: named hooks: permission prompt factory, device pickers and permission element, beforeunload, low disk (low disk adds no file) | 15-17 | 22-26 | 7-9 | allowed (decision 5) |
-| E3b: in-tab sheet guard and sheet hooks | 16-19 | 26-29 | 8-11 | allowed (decision 6), capped below |
+| E3a: planned hooks: permission prompt factory, device pickers and permission element, beforeunload, low disk (low disk adds no file) | 15-17 | 22-26 | 7-9 | allowed (decision 5) |
+| E3b: two choke-point guards (`constrained_window_views.cc`, `tab_dialog_manager.cc`) and sheet hooks | 16-19 | 25-29 | 8-11 | allowed (decision 6), capped below |
 | toast routing and `SetResizable` hooks | | | | not planned; only within the cap |
 | gated sites that cannot be switched off | | | | only if needed, within the cap |
 | `EmbedderBrowserWindowFeatures`, if ever wired | | | | reserved, within the cap |
@@ -262,18 +263,19 @@ Limits, set by the maintainer's answer (decision 5) and kept in the gate's mixed
 
 - at most about 12 seam and hook patch files;
 - under 30 upstream files outside 0001-0004;
-- under 30 patch files in total.
+- under 30 patch files in total;
+- hot-file hunks at most 6, as before (no batch adds one), and no change to a widely included header.
 
-Also proposed, still to confirm: at most 4 hunks in total in `browser_actions.cc` and `browser_commands.cc` (E1 used
-4: Cut, Copy, Paste and `CloseTab`); hot-file hunks unchanged at 6 (no batch adds one); no change to a widely included
-header.
+Still pending: at most 4 hunks in total in `browser_actions.cc` and `browser_commands.cc` (E1 used 4: Cut, Copy, Paste
+and `CloseTab`).
 
 The upstream-file cap is the tight one. After E1, 19 of the 30 are used. E2 and E3a take about 3-7 more, which leaves
-E3b about 3-7 upstream files for all in-tab sheets. That is why E3b draws sheets through one choke point and existing
-seams first, and puts a hook in a sheet's own file only for a few sheets (E3b).
+E3b about 3-7 upstream files for all in-tab sheets. The two choke-point guards take 2 of them, so about 1-5 are left for
+hooks in a sheet's own file. That is why E3b draws sheets through the choke points and existing seams first, and puts a
+hook in a sheet's own file only for a very few sheets (E3b).
 
-`engine/REBASE.md` section 6 still states the week-2 limits (at most 8 seam patch files, 25 upstream files). E3a, the
-first batch that can pass them, updates it to these limits.
+`engine/REBASE.md` section 6 now states these limits, with the `browser_actions.cc` and `browser_commands.cc` hunk cap
+marked as pending.
 
 The gate's own fallback, a widget-backed `ArktBrowserWindow` (variant W in the week-2 plan), does not apply: decisions
 3 and 6 draw prompts and sheets natively, so Views bubbles and sheets anchored on a widget are not wanted.
@@ -292,7 +294,7 @@ same Mac-build and reachability checks; new reachable crash sites join E1 or E2.
 
 Landed in #800 (0013 and 0014): guards and one generalization, no hook. Results:
 `docs/plans/2026-10-24-engine-week3-results.md`, "E1: crash guards". The native low-disk notice (the second half of
-step 1 and its acceptance row) moves to E3a, where the low-disk hook is one of the named hooks.
+step 1 and its acceptance row) moves to E3a, where the low-disk hook is one of the planned hooks.
 
 Composition: (b) rows 1-5 and T; (a) a real `GetAcceleratorProvider`, the overlay disk watcher, the comment follow-ups
 of section 2.1; (c) one low-disk notice (design first, `arkt-design-first`); feature switches for the gated sites.
@@ -306,8 +308,8 @@ of section 2.1; (c) one low-disk notice (design first, `arkt-design-first`); fea
 
 Acceptance:
 
-- Low disk (simulated through the storage notification service or a test switch) on an Arkt window: no crash, one
-  facade event, the shell's notice appears once.
+- Low disk (simulated through the storage notification service or a test switch) on an Arkt window: no crash. The
+  facade event and the shell's notice moved to E3a.
 - A toast triggered on an Arkt window: no crash; dropped.
 - `IDC_CLOSE_TAB` with every selected tab pinned, with and without an `IDC_CLOSE_TAB` accelerator in Arkt's provider,
   and `IDC_CUT`, `IDC_COPY`, `IDC_PASTE` sent through `executeCommand`: no crash; the clipboard commands act on the
@@ -352,29 +354,31 @@ Acceptance:
 ### E3. Native prompts and in-tab sheets (split: E3a, E3b)
 
 Decision 6 adds the in-tab sheets to E3. Before, E3 was about 12 bubble and prompt surfaces. With the sheets it is about
-12 prompt surfaces, about 20 page-facing sheet files, a new census and a new guard. Each native surface needs a design
-pick first (`arkt-design-first`). That is about twice the old E3 and too big for one pull request, so it splits:
+12 prompt surfaces, about 20 page-facing sheet files on the `ShowWebModalDialogViews` path plus the `TabDialogManager`
+callers, a new census and two new guards. Each native surface needs a design pick first (`arkt-design-first`). That is
+about twice the old E3 and too big for one pull request, so it splits:
 
-- **E3a: prompts and the named hooks.** The bubble and prompt table below, and the four named hooks of decision 5.
-- **E3b: in-tab sheets.** The choke-point guard, the sheet routes and the sheet inventory below.
+- **E3a: prompts and the planned hooks.** The bubble and prompt table below, and the four planned hooks of
+  decision 5.
+- **E3b: in-tab sheets.** The two choke-point guards and hooks, the sheet routes and the sheet inventory below.
 
 Rough size, as a guide only: E3a is close to the old E3 (12 surfaces, 2-4 hook sites, 1-2 hook patch files). E3b is
-larger in shell work (about 8-12 native sheets) but smaller in patches (1 guard and a few sheet hooks, 1-2 patch files).
+larger in shell work (about 8-12 native sheets) but smaller in patches (2 guards and a few sheet hooks, 1-2 patch files).
 E3b starts once E3a's hooks have landed, so it knows how much of the cap is left. Either may split again into two pull
 requests if review asks (section 5).
 
 The rule for both: the engine seam can land before the shell draws the surface, but the prompt or sheet stays switched
 off until the shell answers it. Nothing Chromium-drawn is shown in the meantime.
 
-#### E3a. Prompts and the named hooks
+#### E3a. Prompts and the planned hooks
 
-Composition: mostly (c), with an engine seam per prompt; (b) the four named hooks of decision 5 (section 2.4), each only
-where no seam exists.
+Composition: mostly (c), with an engine seam per prompt; (b) the four planned hooks of decision 5 (section 2.4), each
+only where no seam exists.
 
-1. Permission prompt factory: a named hook in place of `set_view_factory_for_testing` (section 6).
+1. Permission prompt factory: a hook in place of `set_view_factory_for_testing` (section 6).
 2. Device pickers (WebUSB, HID, Serial, Bluetooth) and the embedded permission element: a factory seam if the gate
-   finds one; otherwise a named hook at `chooser_bubble_ui.cc:303`.
-3. beforeunload ("Leave site?", #585): an overlay seam if one works; otherwise a named hook.
+   finds one; otherwise a hook at `chooser_bubble_ui.cc:303`.
+3. beforeunload ("Leave site?", #585): an overlay seam if one works; otherwise a hook.
 4. Low disk: the hook in `storage_pressure_bubble_view.cc` (already patched by 0013) hands the notice to the overlay;
    the shell draws it.
 5. The rest of the table below, each through a facade event.
@@ -403,8 +407,8 @@ Acceptance:
 
 - Each prompt in the table: a facade event and a response path, a contract rule on `InMemoryEngine`, and a real-engine
   check with a loopback page; or a recorded switch that keeps it off, with a no-crash check.
-- Low disk (simulated through `chrome://quota-internals`, as in E1) on an Arkt window: no crash, one facade event, the
-  shell's notice appears once.
+- Low disk (simulated with Simulate on `chrome://quota-internals`, the method E1's results used) on an Arkt window:
+  no crash, one facade event, the shell's notice appears once.
 - The permission prompt no longer depends on `set_view_factory_for_testing` (section 6).
 - A widget census: the existing census (`ARKT: browsers normal= arkt= views=`, `arkt_browser_main_extra_parts.mm:199-238`)
   counts Views browser windows only, not bubbles or sheets. E3a adds a count of open `views::Widget`s per Arkt window,
@@ -413,20 +417,34 @@ Acceptance:
 
 #### E3b. In-tab sheets
 
-Composition: (b) one guard at the choke point and a few sheet hooks; (a) overlay sheet handlers; (c) the native sheets.
+Composition: (b) a guard and hook at each of the two choke points, and a few sheet hooks; (a) overlay sheet handlers;
+(c) the native sheets.
 
-`ShowWebModalDialogViews` appears in 39 non-test files under `chrome/browser` (`grep -rl ShowWebModalDialogViews`,
-`*.cc` and `*.mm`, tests excluded). Every one of them reaches
-`constrained_window::ShowWebModalDialogViews` (`components/constrained_window/constrained_window_views.cc:257`), which
-creates the Views widget and shows it as a sheet through `GetWebContentsModalDialogHost`.
+Chromium shows a tab-modal sheet through two paths:
+
+- **`constrained_window::ShowWebModalDialogViews`** (`components/constrained_window/constrained_window_views.cc:257`).
+  It creates the Views widget and shows it as a sheet through `GetWebContentsModalDialogHost`. 39 non-test files
+  under `chrome/browser` call it (`grep -rl ShowWebModalDialogViews`, `*.cc` and `*.mm`, tests excluded).
+- **`TabDialogManager`** (`ui/tabs/tab_dialog_manager.cc`, 621 lines). `CreateAndShowDialog` (`:371`) calls
+  `CreateTabScopedDialog` (`:303`), which builds its own widget (`:313-314`) and skips `ShowWebModalDialogViews`.
+  23 non-test files match `CreateAndShowDialog(` or `CreateShowDialogAndBlockTabInteraction` (the same grep shape;
+  a few are a dialog class's own static of the same name, such as `DeprecatedAppsDialogView::CreateAndShowDialog`,
+  and one is `tab_dialog_manager.cc` itself). `CreateTabScopedDialog` does `CHECK(host)` on `GetHostWidget()` (`:306-307`), which is
+  `BrowserElementsViews::GetPrimaryWindowWidget()` (`:435-445`). On an Arkt window that widget is null (E1 results,
+  row T), so a caller that reaches this path on an Arkt window would crash today, not draw a sheet. The E3b gate
+  confirms that with one caller first.
+
+The E3b gate greps both paths, with the Mac-build and reachability checks of section 2.3.
 
 How a sheet goes native, in order of preference:
 
-1. **The guard at the choke point (one patch site, one upstream file).** In `ShowWebModalDialogViews`, when the
-   WebContents is in an Arkt window, no Views widget is created. The sheet is offered to the overlay. If no handler
-   takes it, it is cancelled and logged with its delegate's class name. So no Chromium-drawn sheet ever appears on an
-   Arkt window, and a sheet that is not handled yet shows up in the logs and the widget census, not on screen. This
-   is a guard in the 0006 shape, and it is what makes decision 6 hold while the native sheets are built one by one.
+1. **A guard and hook at each choke point (two patch sites, two upstream files).** In `ShowWebModalDialogViews`, and
+   in `TabDialogManager::CreateTabScopedDialog` before its `CHECK(host)`: when the WebContents is in an Arkt window, no
+   Views widget is created. The sheet is offered to the overlay (the hook). If no handler takes it, it is cancelled
+   and logged with its delegate's class name (the guard). Once both are in place, no Chromium-drawn sheet appears on
+   an Arkt window, and a sheet that is not handled yet shows up in the logs and the widget census, not on screen.
+   Until both exist, decision 6 rests on the switches of route 5. The fallback for the `TabDialogManager` path, if its
+   guard does not fit the cap, is a switch for each reachable caller.
 2. **An existing seam, no patch.** A model or controller the overlay can already reach. Examples already in place:
    JavaScript dialogs (#400) and the extension dialogs of 0007.
 3. **A generic `ui::DialogModel` sheet.** Some sheets are built from a `ui::DialogModel` (title, text, fields,
@@ -434,14 +452,15 @@ How a sheet goes native, in order of preference:
    `DialogModel` in 7 of the page-facing files below; the gate checks which of them build the whole sheet that way.
 4. **A hook in the sheet's own factory.** One hook site in the file that creates the sheet, in the shape of 0007's
    hook (ask the overlay first). All sheet hooks go into one theme patch file. Each one costs an upstream file, so
-   this route is limited by the cap: about 3-7 upstream files are left for E3b (section 2.5).
+   this route is limited by the cap: about 3-7 upstream files are left for E3b, and the two choke points take 2 of
+   them, so about 1-5 are left for this route (section 2.5).
 5. **Switched off for the preview.** For a feature that is gated, unreachable, or not worth a native sheet yet. The
-   switch is recorded with a no-crash check. The guard covers it too.
+   switch is recorded with a no-crash check. The choke-point guards cover it too.
 
 Inventory, with the proposed route per row. The E3b gate confirms each route against the pinned source before any
 work:
 
-| Group | Sheet (file under `ui/views/` unless stated) | Proposed route |
+| Group | Sheet (path under `ui/views/`; a path starting with `actor/`, `enterprise/`, `glic/`, `skills/`, `ssl/` or `ui/` is under `chrome/browser/`) | Proposed route |
 |---|---|---|
 | page-facing, must be native | HTTP login (`login_handler_views.cc`) | 4: hook in `LoginHandler::Create` |
 | | Open-app, external protocol (`external_protocol_dialog.cc`) | 4: hook in `RunExternalProtocolDialog` |
@@ -458,16 +477,23 @@ work:
 | gated or off | Digital credentials (`digital_credentials/digital_identity_multi_step_dialog.cc`), extension chooser and media galleries (`extensions/chooser_dialog_view.cc`, `extensions/media_galleries_dialog_views.cc`) | 5: behind a flag or reachable only from Chrome Apps |
 | | Web apps (`web_apps/`, 10 files, plus `shortcuts/create_desktop_shortcut.cc` and `apps/app_info_dialog/`), enterprise (`enterprise/connectors/analysis/`, `enterprise/data_controls/`), Google-only features (`actor/`, `skills/`), Safe Browsing tailored security (`safe_browsing/tailored_security_unconsented_modal.cc`) | 5: off or unreachable in Arkt |
 | already native | JavaScript dialogs (`javascript_tab_modal_dialog_view_views.cc`) | 2: #400 |
+| `TabDialogManager` path, page-facing | Ask before HTTP (`ssl/ask_before_http_dialog_controller.cc`, built from a `ui::DialogModel`) | 3 through the `TabDialogManager` hook |
+| | Edit address profile (`autofill/edit_address_profile_view.cc`) | native with address save (E3a), or 5 until then |
+| | Credential leak warning (`passwords/credential_leak_dialog_view.cc`) | to check: whether leak checks run without sign-in; native with password save (#632), or 5 |
+| `TabDialogManager` path, gated or off | Autofill payments (`autofill/payments/`, 7 files: error, progress, BNPL terms and issuer, unmask authentication selection, save and fill, card WebAuthn) | 5: server cards and BNPL need a Google Payments account |
+| | Password change (`ui/passwords/password_change_ui_controller.cc`), save to Drive (`save_to_drive/`), Lens permission (`ui/lens/`), glic opt-in (`glic/`), dictation onboarding (`dictation/`) | 5: Google-only, sign-in or unbranded builds |
+| | Enterprise (`chrome/browser/policy/chrome_browser_cloud_management_register_watcher.cc`, `policy/enterprise_startup_dialog_view.cc`), web apps (`web_apps/`, 4 files, and `tab_dialogs_views.cc`, which only forwards to them) | 5: off or unreachable in Arkt |
 
-Proposed counts: about 4-6 route 4 hooks (HTTP login, open-app, FedCM, and maybe the certificate picker, WebAuthn and
-share this tab), about 8-12 native sheets in the shell, and the rest switched off. Route 4 hooks plus the guard must fit
-in the 3-7 upstream files left. If the gate finds more route 4 sheets than that, E3b stops and asks the maintainer:
-raise the cap for sheets, or switch more features off for the preview. A Chromium-drawn sheet is never the fallback.
+Proposed counts: about 4-6 route 4 candidates (HTTP login, open-app, FedCM, and maybe the certificate picker, WebAuthn
+and share this tab), about 8-12 native sheets in the shell, and the rest switched off. Route 4 hooks plus the two
+choke-point guards must fit in the 3-7 upstream files left, so only about 1-5 route 4 hooks fit. The gate tries
+routes 2 and 3 for every candidate first. If the gate finds more route 4 sheets than that, E3b stops and asks the
+maintainer: raise the cap for sheets, or switch more features off for the preview. A Chromium-drawn sheet is never the fallback.
 
 Order inside E3b:
 
 1. Gate: confirm each route against the source; record the budget after E3a.
-2. The choke-point guard. From here on, no Views sheet shows on an Arkt window.
+2. The two choke-point guards and hooks. From here on, no Views sheet shows on an Arkt window.
 3. HTTP login, open-app and the certificate picker: the sheets a normal browsing session hits first.
 4. FedCM, WebAuthn and passkeys.
 5. The rest of the native rows, then the switches.
@@ -477,8 +503,9 @@ Acceptance:
 - Each sheet row: a facade event and a response path, a contract rule on `InMemoryEngine`, and a real-engine check with
   a loopback page (HTTP 401 for login, a custom scheme link for open-app, a test client certificate, a FedCM test
   provider, a virtual WebAuthn authenticator); or a recorded switch with a no-crash check.
-- With the guard reverted, each checked page shows a Views sheet again (the break check), and with it in place the
-  widget census stays at zero during the check matrix.
+- With the `ShowWebModalDialogViews` guard reverted, each checked page on that path shows a Views sheet again (the
+  break check); with the `TabDialogManager` guard reverted, its checked caller hits `CHECK(host)` again. With both in
+  place, the widget census stays at zero during the check matrix.
 - An unhandled sheet is cancelled, not left pending: the page gets the same result as when the user dismisses it.
 - Budget after E3b recorded: seam and hook patch files at most about 12; upstream files outside 0001-0004 under 30.
 
@@ -562,6 +589,7 @@ that do not need a build, and docs use a plain repo worktree without the `$CR` l
 | Second lookup layer | `ToolbarButtonProvider::From` (34 sites), `BrowserElementsViews::From` (41), `GetWidgetForNativeWindow` (86), `ExtensionsToolbarDesktop` (13): also null on Arkt windows, not audited site by site | the extended grep before E2 |
 | Patched files edited often upstream | `browser_actions.cc` (5369 lines), `browser_commands.cc` (3118); `browser_web_contents_delegate.cc` (1537, two Arkt hunks already) if the row 8 hook is added | the hunk cap in section 2.5; measured in #222 |
 | Gate numbers | the week-2 limits in `engine/REBASE.md`, section 6 | new limits proposed (section 2.5) |
-| Native prompts and sheets from day one widen the preview scope | E3a and E3b tables | E3 split in two; prompts and sheets without native UI are switched off, never shown as Views; the E3b choke-point guard cancels any sheet not handled yet |
-| Sheet hooks outgrow the cap | E3b route 4, about 3-7 upstream files left after E3a | the choke point and existing seams first; E3b stops for a maintainer call if more route 4 sheets are needed |
+| Native prompts and sheets from day one widen the preview scope | E3a and E3b tables | E3 split in two; prompts and sheets without native UI are switched off, never shown as Views; the two E3b choke-point guards cancel any sheet not handled yet |
+| A second tab-modal path | `TabDialogManager::CreateTabScopedDialog` (`ui/tabs/tab_dialog_manager.cc:303-314`), 23 matching files; `CHECK(host)` on an Arkt window | a second choke-point guard in E3b, or a switch for each reachable caller; both paths in the E3b gate's grep |
+| Sheet hooks outgrow the cap | E3b route 4: about 3-7 upstream files left after E3a, 2 of them for the choke points | the choke points and existing seams first; E3b stops for a maintainer call if more route 4 sheets are needed |
 | Shallow checkout | upstream churn not measured from history | #222 |
