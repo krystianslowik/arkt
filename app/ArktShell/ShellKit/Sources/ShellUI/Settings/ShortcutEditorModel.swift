@@ -60,8 +60,12 @@ public final class ShortcutEditorModel {
     public let binding: ShortcutBinding
   }
   public private(set) var protectedConflicts: [ProtectedConflict] = []
+  /// Saved requests that cannot currently be applied without taking a noneditable command's key.
+  public private(set) var blockedOverrides: [ShortcutActionID: [ProtectedConflict]] = [:]
   public var pendingShortcut: ShortcutBinding? { pendingBinding }
-  var protectedOwners: (@MainActor (ShortcutBinding) -> [ProtectedConflict])?
+  var protectedOwners: (@MainActor (ShortcutBinding) -> [ProtectedConflict])? {
+    didSet { refreshBlockedOverrides() }
+  }
   private var pendingBinding: ShortcutBinding?
   private let defaults: UserDefaults
   private var observers: [UUID: @MainActor () -> Void] = [:]
@@ -93,6 +97,7 @@ public final class ShortcutEditorModel {
 
   public func binding(for id: ShortcutActionID) -> ShortcutBinding? {
     guard let definition = catalog.first(where: { $0.id == id }) else { return nil }
+    guard blockedOverrides[id] == nil else { return nil }
     switch overrides[id] {
     case .binding(let binding): return binding
     case .cleared: return nil
@@ -187,6 +192,7 @@ public final class ShortcutEditorModel {
   }
 
   private func persist() {
+    refreshBlockedOverrides()
     var stored: [String: StoredOverride] = [:]
     for (id, value) in overrides {
       switch value {
@@ -199,5 +205,15 @@ public final class ShortcutEditorModel {
     if stored.isEmpty { defaults.removeObject(forKey: Self.defaultsKey) }
     else if let data = try? JSONEncoder().encode(stored) { defaults.set(data, forKey: Self.defaultsKey) }
     for callback in Array(observers.values) { callback() }
+  }
+
+  private func refreshBlockedOverrides() {
+    var blocked: [ShortcutActionID: [ProtectedConflict]] = [:]
+    for (id, value) in overrides {
+      guard case .binding(let binding) = value else { continue }
+      let owners = protectedOwners?(binding) ?? []
+      if !owners.isEmpty { blocked[id] = owners }
+    }
+    blockedOverrides = blocked
   }
 }

@@ -18,6 +18,36 @@ struct ShortcutMenuBindingTests {
     #expect(ShortcutCatalog.definitions(from: menu).map(\.id) == definitions.map(\.id))
   }
 
+  @Test func savedProtectedCollisionIsUnavailableWithoutDiscardingOtherOverrides() throws {
+    let menu = NSMenu()
+    let tab = NSMenuItem(title: "New Tab", action: NSSelectorFromString("newTab:"), keyEquivalent: "t")
+    let sidebar = NSMenuItem(title: "Sidebar", action: NSSelectorFromString("toggleSidebarVisibility:"), keyEquivalent: "s")
+    let window = NSMenuItem(title: "New Window", action: NSSelectorFromString("newWindow:"), keyEquivalent: "n")
+    [tab, sidebar, window].forEach { menu.addItem($0) }
+    let definitions = ShortcutCatalog.definitions(from: menu)
+    let suite = "dev.arkt.tests.savedProtected.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let id = ShortcutActionID("newTab"), other = ShortcutActionID("toggleSidebarVisibility")
+    let conflict = ShortcutBinding(key: "n", modifiers: .command)
+    let valid = ShortcutBinding(key: "k", modifiers: [.control, .option])
+    let writer = ShortcutEditorModel(catalog: definitions, defaults: defaults)
+    writer.setBinding(conflict, for: id)
+    writer.setBinding(valid, for: other)
+    let stored = defaults.data(forKey: "shortcutOverrides")
+    let reader = ShortcutEditorModel(catalog: definitions, defaults: defaults)
+    ShortcutCatalog.bind(model: reader, to: menu)
+    #expect(reader.binding(for: id) == nil)
+    #expect(tab.keyEquivalent.isEmpty && window.keyEquivalent == "n")
+    #expect(reader.blockedOverrides[id]?.first?.title == "New Window")
+    #expect(reader.overrides[id] == .binding(conflict))
+    #expect(reader.binding(for: other) == valid && sidebar.keyEquivalent == "k")
+    #expect(defaults.data(forKey: "shortcutOverrides") == stored)
+    reader.reset(id)
+    #expect(reader.blockedOverrides.isEmpty)
+    #expect(tab.keyEquivalent == "t" && window.keyEquivalent == "n")
+  }
+
   @Test func readOnlyMenuOwnersCannotBeStolen() throws {
     let menu = NSMenu()
     let tab = NSMenuItem(title: "New Tab", action: NSSelectorFromString("newTab:"), keyEquivalent: "t")

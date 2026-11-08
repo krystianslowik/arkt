@@ -126,6 +126,14 @@ final class ShortcutWiringTests: ArktUITestCase {
     app.webViews.firstMatch.click()
     let pageCount = server.requestedPaths.filter { $0 == "/events/shortcut-key-page-y" }.count
     expectNewTab(app, key: "y", modifiers: .control)
+    app.webViews.firstMatch.click()
+    let barrierCount = server.requestedPaths.filter { $0.hasPrefix("/events/shortcut-key-barrier/") }.count
+    app.typeKey("z", modifierFlags: [])
+    guard Waits.until("page reports its Control-Y count after a later key", {
+      server.requestedPaths.filter { $0.hasPrefix("/events/shortcut-key-barrier/") }.count > barrierCount
+    }) else { return }
+    let witness = server.requestedPaths.last { $0.hasPrefix("/events/shortcut-key-barrier/") }
+    XCTAssertTrue(witness?.hasSuffix("/page-y/0") == true, "the focused page did not receive assigned Control-Y before the barrier")
     XCTAssertEqual(server.requestedPaths.filter { $0 == "/events/shortcut-key-page-y" }.count, pageCount)
     openRecorder(app)
     app.typeKey("k", modifierFlags: [.control, .option])

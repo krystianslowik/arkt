@@ -52,13 +52,22 @@ extension SettingsWindowController {
   func refreshShortcutControls() {
     guard let editor = services.shortcutEditor else { return }
     for (id, button) in shortcutRecorders {
+      button.toolTip = nil
       if editor.recordingAction == id && editor.conflictingActions.isEmpty && editor.protectedConflicts.isEmpty {
         button.title = "Type shortcut…"
+      } else if let blocked = editor.blockedOverrides[id], let first = blocked.first {
+        button.title = "Unavailable"
+        let owners = blocked.map(\.title).joined(separator: ", ")
+        let message = "Saved \(shortcutDescription(first.binding)) is unavailable because it is used by \(owners). Record another shortcut or reset it."
+        button.toolTip = message
+        button.setAccessibilityValue(message)
+        continue
       } else if let binding = editor.binding(for: id) {
         button.title = shortcutDescription(binding)
       } else {
         button.title = "None"
       }
+      button.setAccessibilityValue(button.title)
     }
     shortcutResetAll?.isEnabled = !editor.overrides.isEmpty
   }

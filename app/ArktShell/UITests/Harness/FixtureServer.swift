@@ -138,13 +138,15 @@ final class FixtureServer: Sendable {
         <!doctype html><meta charset="utf-8"><title>Shortcut key barrier</title>
         <body tabindex="0">Shortcut key barrier<script>
         let sequence = 0;
+        let pageYCount = 0;
         document.addEventListener('keydown', event => {
           if (event.key.toLowerCase() === 'y' && event.ctrlKey && !event.metaKey && !event.altKey) {
             event.preventDefault();
+            pageYCount += 1;
             fetch('/events/shortcut-key-page-y', {cache: 'no-store'});
           }
           if (event.key === 'z' && !event.metaKey && !event.ctrlKey && !event.altKey) {
-            fetch('/events/shortcut-key-barrier/' + (++sequence), {cache: 'no-store'});
+            fetch('/events/shortcut-key-barrier/' + (++sequence) + '/page-y/' + pageYCount, {cache: 'no-store'});
           }
         });
         fetch('/events/shortcut-key-ready', {cache: 'no-store'});
