@@ -110,7 +110,7 @@ final class AppSession {
                                  sidebarStateStore: SidebarWindowStateStore(defaults: AppEnvironment.userDefaults),
                                  sessionStore: sessionStore,
                                  commandBarSettings: commandBarSettings, hostLookup: hostLookup,
-                                 recoveryPageSource: recoveryPages)
+                                 recoveryPageSource: recoveryPages, defersLaunchCapture: true)
     // BH-196: the one-off Copy URL tip remembers what it showed (#404).
     windows.copyLinkEducation = CopyLinkEducation(defaults: AppEnvironment.userDefaults)
     self.windows = windows
@@ -201,13 +201,8 @@ final class AppSession {
   /// the shown tab. The Chromium engine passes false when the windows it queued before ready (a startup URL, an
   /// extension's `chrome.windows.create`) opened one already.
   func finishLaunch(opensWindow: Bool) {
-    let window: ShellWindowController?
-    if opensWindow {
-      windows.openWindowsAtLaunch(settings: settings)
-      window = windows.primary
-    } else {
-      window = windows.primary
-    }
+    windows.openWindowsAtLaunch(settings: settings, defaultWindowAllowed: opensWindow)
+    let window = windows.primary
     if let window {
       presentOnboardingIfNeeded(on: window)
     }

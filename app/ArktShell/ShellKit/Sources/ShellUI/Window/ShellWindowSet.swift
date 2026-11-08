@@ -58,6 +58,11 @@ public final class ShellWindowSet {
   private var launchWindows: [ShellWindowController] = []
   private var collectionFrozen = false
   private var collectionRestoring = false
+  /// Set before the engine can adopt queued launch windows; both session formats stay untouched until the decision.
+  private var launchCaptureDeferred: Bool
+  private var didCompleteLaunchDecision = false
+  /// An explicit private-only launch must not replace the previous regular collection with an empty one.
+  private var preservingPrivateLaunchCollection = false
   private var protectsUnreadableCollection = false
   /// The session window when a saved frame was applied to it: `place` leaves it where it is.
   private weak var restoredFrameWindow: ShellWindowController?
@@ -106,7 +111,7 @@ public final class ShellWindowSet {
               sidebarStateStore: SidebarWindowStateStore = .ephemeral(),
               sessionStore: WindowSessionStore = .ephemeral(),
               commandBarSettings: CommandBarSettings = .ephemeral(), hostLookup: HostLookup? = nil,
-              recoveryPageSource: (any RecoveryPageSource)? = nil) {
+              recoveryPageSource: (any RecoveryPageSource)? = nil, defersLaunchCapture: Bool = false) {
     self.engine = engine
     self.sidebar = sidebar
     self.toolbarSetting = toolbarSetting
@@ -114,6 +119,7 @@ public final class ShellWindowSet {
     self.sessionStore = sessionStore
     self.commandBarSettings = commandBarSettings
     self.hostLookup = hostLookup
+    self.launchCaptureDeferred = defersLaunchCapture
     self.protectsUnreadableCollection = sessionStore.hasUnreadableCollection
     self.recoveryPageSource = recoveryPageSource
     self.priorRecoveryPages = recoveryPageSource?.pages ?? []
@@ -414,17 +420,40 @@ public final class ShellWindowSet {
 
   // MARK: Session (#116)
 
-  /// The complete launch decision: restore the collection or open one default window if none exists.
-  /// Disabled restoration preserves the stored collection while that fallback is built; later state changes save normally.
+  /// Compatibility entry point: returns restored windows, or the existing/default launch window.
   @discardableResult
   public func openWindowsAtLaunch(settings: AppSettings = .ephemeral()) -> [ShellWindowController] {
-    let restored = restoreWindowsAtLaunch(settings: settings)
+    let restored = openWindowsAtLaunch(settings: settings, defaultWindowAllowed: true)
     if !restored.isEmpty { return restored }
-    if let primary { return [primary] }
-    let wasRestoring = collectionRestoring
-    collectionRestoring = wasRestoring || !settings.restoreWindowsOnLaunch
-    defer { collectionRestoring = wasRestoring }
-    return [openWindow()]
+    return primary.map { [$0] } ?? []
+  }
+
+  /// Completes launch after queued engine-window adoption. Returns only restored controllers; an adopted or default
+  /// window is available through `controllers`/`primary`. False suppresses only default construction, not restoration
+  /// for a regular queued window. An explicit private-only launch preserves regular history without revealing it.
+  @discardableResult
+  public func openWindowsAtLaunch(settings: AppSettings, defaultWindowAllowed: Bool) -> [ShellWindowController] {
+    guard !didCompleteLaunchDecision else { return launchWindows.filter { !$0.isClosed } }
+    didCompleteLaunchDecision = true
+    launchCaptureDeferred = true
+    sessionWindow?.savesSession = false
+    let supplied = controllers
+    if !supplied.isEmpty, supplied.allSatisfy(\.isPrivateWindow) {
+      preservingPrivateLaunchCollection = true
+      didRestoreWindowsAtLaunch = true
+      restoredSession = true
+      launchCaptureDeferred = false
+      return []
+    }
+    let restored = restoreWindowsAtLaunch(settings: settings)
+    let needsDefault = restored.isEmpty && supplied.isEmpty && defaultWindowAllowed
+    if needsDefault { _ = openWindow() }
+    launchCaptureDeferred = false
+    if let owner = sessionWindow, !owner.isPrivateWindow { owner.savesSession = !collectionFrozen }
+    // Disabled restoration preserves the previous collection through the complete decision. Later ordinary
+    // changes capture normally; unreadable collections remain independently protected in either mode.
+    if settings.restoreWindowsOnLaunch, !restored.isEmpty || needsDefault { captureWindowCollection() }
+    return restored
   }
 
   /// Restores the saved collection once. An empty or unavailable collection creates no window.
@@ -435,19 +464,25 @@ public final class ShellWindowSet {
     protectsUnreadableCollection = protectsUnreadableCollection || sessionStore.hasUnreadableCollection
     restoredSession = true
     guard settings.restoreWindowsOnLaunch, let states = sessionStore.loadWindows() else { return [] }
+    let wasRestoring = collectionRestoring
     collectionRestoring = true
+    defer { collectionRestoring = wasRestoring }
     for state in states {
       let controller = make(opensFirstTab: true, origin: .shell, restoring: state)
       controller.showWindow(nil)
       launchWindows.append(controller)
     }
-    collectionRestoring = false
     return launchWindows
   }
 
   private func captureWindowCollection() {
-    guard !collectionFrozen, !collectionRestoring, !protectsUnreadableCollection else { return }
-    sessionStore.saveWindows(controllers.filter { !$0.isPrivateWindow }.compactMap { $0.currentSessionState() })
+    guard !collectionFrozen, !collectionRestoring, !launchCaptureDeferred, !protectsUnreadableCollection else { return }
+    let regular = controllers.filter { !$0.isPrivateWindow }
+    if preservingPrivateLaunchCollection {
+      guard !regular.isEmpty else { return }
+      preservingPrivateLaunchCollection = false
+    }
+    sessionStore.saveWindows(regular.compactMap { $0.currentSessionState() })
   }
 
   /// Capture before the engine tears down tabs and freeze the complete collection during quit.
@@ -464,7 +499,9 @@ public final class ShellWindowSet {
   /// A cancelled quit immediately replaces the snapshot with surviving windows and resumes writes.
   public func resumeSessions() {
     collectionFrozen = false
-    sessionWindow?.savesSession = true
+    if let owner = sessionWindow {
+      owner.savesSession = !launchCaptureDeferred && !owner.isPrivateWindow
+    }
     captureWindowCollection()
   }
 
@@ -696,11 +733,11 @@ public final class ShellWindowSet {
     // #116: the first main window the shell opens restores the saved frame, Space and tabs and keeps them saved;
     // when it closes, the next one takes over saving (without restoring again).
     let isRestored = SessionWindowPolicy.takesSession(origin, ownerIsAlive: sessionWindow.map { !$0.isClosed } ?? false)
-    let session = explicitSession ?? (isRestored && !restoredSession ? sessionStore.load() : nil)
-    if isRestored { restoredSession = true }
+    let session = explicitSession ?? (isRestored && !restoredSession && !launchCaptureDeferred ? sessionStore.load() : nil)
+    if isRestored && !launchCaptureDeferred { restoredSession = true }
     let controller = ShellWindowController(engine: engine, sidebar: sidebar, toolbarSetting: toolbarSetting,
                                            sidebarStateStore: sidebarStateStore, sessionStore: sessionStore,
-                                           restoring: session, savesSession: isRestored,
+                                           restoring: session, savesSession: isRestored && !launchCaptureDeferred && !collectionFrozen,
                                            commandBarSettings: commandBarSettings, opensFirstTab: opensFirstTab)
     switch kind {
     case .regular: break

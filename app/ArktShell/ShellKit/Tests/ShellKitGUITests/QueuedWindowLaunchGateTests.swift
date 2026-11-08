@@ -65,10 +65,11 @@ final class QueuedWindowLaunchGateTests: XCTestCase {
     ]
   }
 
-  private func queue(_ engine: InMemoryEngine, in set: ShellWindowSet, offTheRecord: Bool = false) throws -> (ShellWindowController, EngineWindowID, TabID, URL) {
+  private func queue(_ engine: InMemoryEngine, in set: ShellWindowSet, offTheRecord: Bool = false,
+                     kind: EngineWindowRequestKind = .startupURL) throws -> (ShellWindowController, EngineWindowID, TabID, URL) {
     let url = URL(string: "https://startup.example.test/path")!
     let id = try XCTUnwrap(engine.openEngineWindow(EngineWindowRequest(
-      kind: .startupURL, profile: EngineProfileID("default"), initialURL: url, isOffTheRecord: offTheRecord)))
+      kind: kind, profile: EngineProfileID("default"), initialURL: url, isOffTheRecord: offTheRecord)))
     let controller = try XCTUnwrap(set.controllers.first { $0.engineWindow == id })
     let tab = try XCTUnwrap(engine.tabIDs.first { engine.snapshot(of: $0)?.window == id })
     XCTAssertEqual(engine.snapshot(of: tab)?.url, url)
@@ -192,6 +193,35 @@ final class QueuedWindowLaunchGateTests: XCTestCase {
     XCTAssertEqual(set.controllers.count, 1)
     XCTAssertTrue(set.controllers.first === queued)
     XCTAssertEqual(store.loadWindows(), saved)
+    set.saveSessionsForTermination()
+    XCTAssertEqual(defaults.data(forKey: WindowSessionStore.windowsDefaultsKey), collectionBytes)
+    XCTAssertEqual(defaults.data(forKey: WindowSessionStore.defaultsKey), legacyBytes)
+    set.resumeSessions()
+    XCTAssertEqual(store.loadWindows(), saved, "cancelled private-only quit must not erase regular history")
+    let regular = set.openWindow()
+    XCTAssertFalse(regular.isPrivateWindow)
+    let captured = try XCTUnwrap(store.loadWindows())
+    XCTAssertEqual(captured.count, 1, "ordinary regular-window activity resumes collection capture")
+    XCTAssertEqual(captured.first?.currentTab, regular.currentNode)
+  }
+
+  func testQueuedDockReopenAlsoDefersLegacyWritesAndRestoration() throws {
+    let (set, engine, store, defaults, sidebar) = try fixture()
+    let saved = states(sidebar)[1]
+    store.save(saved)
+    let legacyBytes = try XCTUnwrap(defaults.data(forKey: WindowSessionStore.defaultsKey))
+    let (queued, id, tab, url) = try queue(engine, in: set, kind: .reopen)
+    XCTAssertEqual(defaults.data(forKey: WindowSessionStore.defaultsKey), legacyBytes)
+    XCTAssertNil(defaults.object(forKey: WindowSessionStore.windowsDefaultsKey))
+    XCTAssertEqual(store.loadWindows(), [saved])
+
+    let restored = set.openWindowsAtLaunch(settings: .ephemeral(), defaultWindowAllowed: false)
+    XCTAssertEqual(restored.count, 1)
+    XCTAssertEqual(restored.first?.currentNode, saved.currentTab)
+    XCTAssertEqual(set.controllers.count, 2)
+    XCTAssertTrue(set.controllers.first === queued)
+    XCTAssertEqual(engine.snapshot(of: tab)?.window, id)
+    XCTAssertEqual(engine.snapshot(of: tab)?.url, url)
   }
 
   func testQueuedWindowDoesNotRewriteUnreadableCollection() throws {

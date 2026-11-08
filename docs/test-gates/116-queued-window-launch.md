@@ -28,3 +28,16 @@ published base before production changes; then run the focused GUI gate and appr
 environment. No native app or GUI test was launched to prepare this gate.
 
 Review repairs add the private-only regression, post-decision complete persistence, adopted-tab ownership, and raw legacy protection. Parsing is the only local Swift validation; no compile or runtime red is claimed.
+
+
+## Observed red and implementation (2026-11-08)
+
+At `7f74603`, run 42527108969 / GUI job 128873084670 and pure job 128873084765 reached the intentionally missing `defersLaunchCapture` and `defaultWindowAllowed` APIs. The resulting inferred-type diagnostics were at the dependent test expressions; zero runtime tests ran. The app itself built successfully at that pre-implementation head.
+
+AppSession now creates its window set in deferred mode before Chromium can call `embedderReady`, and calls the complete decision unconditionally from `finishLaunch`, after queued adoption. Default creation is controlled separately from restoration. A private-only launch is detected from the supplied controllers' actual privacy, preserves both saved formats through quit/cancel, and does not restore regular history. Once a regular window is explicitly opened, collection capture resumes. Regular queued windows coexist with the ordered restored collection. Both collection callbacks and legacy ownership writes are suppressed before the decision. The previous no-extra-argument helper remains compatible. Recovery's independent protection and unreadable-collection protection are retained.
+
+The gate also covers a queued Dock reopen, which can otherwise become a legacy session writer before the decision, and complete ordinary capture after restoration. Mixed privacy is not inferred merely from controller count: the presence of a regular controller takes the regular launch path; explicit private-only controllers take the preservation path. This fixture does not establish Chromium's profile selection or unknown future privacy representations.
+
+Implementation-stage validation: three changed Swift files parsed; workflow import/UI-source checks, parity tests, header parity and whitespace passed. No ShellKit typecheck/build, GUI test, App build or native launch ran locally. The new lifecycle behavior remains unverified until CI executes the gate and the real App path.
+
+The same CI run independently failed Core with six SidebarAutosaver wait failures (579 tests / 47 suites, six issues). Neither the autosaver source nor its tests changed in this branch. A local supported-toolchain focused run passed all **23 SidebarAutosaver tests in one suite**; missing developer framework/library search-path linker warnings were emitted. That focused pass does not explain or waive the full-CI failures. A fresh full Core run remains required.
