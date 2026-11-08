@@ -2897,6 +2897,231 @@ Written first. Each failed to compile before the code existed.
   The app and test bundle build (`xcodebuild ... build-for-testing`: TEST BUILD SUCCEEDED). Not run: the suite needs
   the real pointer and keyboard, and the Mac was in use.
 
+### Multi-window session store (#116, in progress)
+
+The provisional implementation at `2a49f3c` supported an ordered collection of window states, each with its own
+collapsed folder IDs. That collection backend has been removed from the draft pending the maintainer's storage
+decision (PR #829, comment 6715272280). The tests remain as a proposed contract, along with backend-neutral folder
+state; the published code retains only the existing single-window store API. The prototype commit is preserved.
+
+In that prototype, the existing single-window defaults key and API remained intact. A missing collection read the legacy value; a saved
+empty collection stays empty. The new defaults value is a version 1 JSON envelope. Unreadable or unsupported
+collections and collections containing an unusable window frame are rejected without falling back to legacy data.
+States written before folder collapse was included decode with an empty set. This bounded slice uses injected user
+defaults, following the existing session store; the full issue's storage decision remains open.
+
+The five collection tests failed to compile against the unchanged model because the collection APIs and folder state
+were absent. An isolated macOS 15 package using the actual session source, relevant EngineAPI declarations, ID aliases,
+and both session test files at `2a49f3c` passed 30 tests: 21 existing single-window tests, the five initial collection tests, and
+four compatibility and invalid-data tests. This is a focused check, not the full ShellKit suite or an app build.
+Swift source parsing, changed-file import inspection, and diff whitespace checks passed for that prototype.
+After removing the unapproved backend, the focused actual-source package again fails compilation on the missing
+collection load/save APIs and defaults key; no tests execute. This is the expected held test gate, not a runtime pass.
+
+Capturing and reopening regular windows, excluding private windows, the General setting, deleted-item fallback,
+screen clamping during multi-window restore, and lifecycle integration remain. Preserve #690 recovery behavior during
+integration; navigation history is tracked separately by #612. Real relaunch and multi-display checks remain.
+
+### Multi-window session store: approved backend restoration (#116, in progress)
+
+The maintainer [decided](https://github.com/krystianslowik/arkt/pull/829#issuecomment-6721408956) that session state
+stays in UserDefaults. This follows the single-window convention shipped in #485 and supersedes Track D question 11's
+session-table proposal and the hold described above. The ordered version 1 collection and existing single-window key
+and API coexist. An absent collection reads the legacy state; an empty collection stays empty; malformed, unsupported,
+or invalid-frame collections return nil without legacy fallback. Failed JSON encoding leaves the prior value intact.
+The raw frame size is checked because CoreGraphics' width and height accessors standardize negative sizes.
+
+A fresh isolated macOS 15 SwiftPM test run with Swift 6.4.1, the actual WindowSession source, real EngineAPI source
+files and the relevant source declarations, and real isolated UserDefaults passed **32 tests**: 21 existing single-window,
+9 collection and boundary, and 2 compatibility tests. The frozen pre-collection encoder payload preserves every old
+field; a separate case checks non-finite encoding failure against invalid persisted frames. The negative-size case
+failed before the raw-size validation fix. The toolchain reported missing developer framework and library search paths
+at link time. This focused run is not the full ShellKit suite, app build or GUI run; the local full package baseline is
+compiler-broken and full Xcode is unavailable. The earlier 30-test prototype result above is historical evidence only.
+
+Capturing and reopening regular windows, private exclusion, the General setting, deleted-item fallback, per-window
+screen clamping and quit/cancel lifecycle remain. Compose with #690 when it lands; navigation history is #612. Manual
+relaunch and display checks remain unverified.
+
+### Multi-window lifecycle gate (#116, in progress)
+
+A test-only `ShellWindowSet` gate specifies ordered capture and restoration, independent folder state, quit freeze and
+cancel refresh, private exclusion, deleted-item fallback and deterministic display placement. It uses the real
+model-backed sidebar, in-memory engine and isolated UserDefaults session store. The proposed launch boundary and its
+limits are recorded in `docs/test-gates/116-window-lifecycle.md`. The shared General setting boundary is specified test-first; actual app lifecycle and relaunch are not covered by
+this component gate.
+
+The 32 focused backend passes in the preceding section apply to commit
+`a671d67f4dedc078c09742e1ed3d9539f2794fe0`; they are not lifecycle results. The lifecycle gate has not been compiled
+or executed, so the intended missing-API red and CI status are unobserved. Full local ShellKit, app and GUI builds
+were not run because the local package baseline fails and full Xcode is unavailable. #612 and #690 remain separate.
+
+
+### #116: lifecycle gate review corrections
+
+The capture and restoration cases now give each window distinct selected tabs in both Spaces. Capture checks complete dictionaries; after restore, each window switches to its other Space and back to prove its own history survived independently. Termination teardown unwraps both engine window IDs instead of silently skipping it. The preference case enables restoration on a fresh window set sharing the persisted settings and collection, preserving the once-at-launch contract; repeated forwarding on that fresh set additionally must not create duplicate windows.
+
+These are test-only corrections to two P2 review findings, not lifecycle implementation. Swift 6.2.4 parsing and whitespace checks passed. The missing-API red and GUI results remain unobserved. The intended missing APIs are restoreWindowsAtLaunch and AppSettings.restoreWindowsOnLaunch (and any absent folder restoration seam); saveSessionsForTermination and resumeSessions already exist but need collection behavior. The restore-on default is specified in issue #116 and the Settings design. Backend evidence stays attributed to a671d67; App lifecycle, relaunch, General UI and unsupported-collection write behavior remain separate boundaries.
+
+
+## WindowSet session lifecycle implementation (#116)
+
+Implemented ordered regular-window collection capture, launch restoration, quit freeze and cancellation refresh, per-window folder state and the shared restore preference. The existing single-window store remains available; unreadable collections are protected from automatic replacement. The launch boundary does not create a default window for an empty or unavailable collection. Frame changes are captured at resize end, key resignation and termination, not on every movement event.
+
+The test-first gate at `ac7231d` failed compilation in CI run 42484606253, ShellKit job 128743709058, on missing launch and preference APIs and dependent inference diagnostics; zero tests ran. The implementation received Swift frontend parsing and whitespace checks only; no lifecycle tests, full ShellKit build, GUI run or app build ran locally. Backend tests at `a671d67` remain historical evidence, not validation of this implementation. App launch and termination composition, the General UI, full relaunch and #690 recovery composition remain to be gated and verified; navigation history is #612.
+
+### Empty-Space lifecycle review gate (#116)
+
+Source review of `de8df5b` found that an empty Space switch does not immediately save the new Space and empty
+selection. The new two-window regression switches the first window to two successive empty Spaces, reading the
+collection immediately after each switch. It checks persisted Space, nil current tab, retained per-Space selection
+history and an unchanged second window. No quit capture, focus transition, sleep or forced save can mask the bug.
+The second empty Space also covers a nil-to-nil current-tab transition. Production code is unchanged in this gate.
+
+Swift 6.2.4 frontend parsing, test import inspection and `git diff --check` passed. The new test has not compiled or
+executed locally; its expected runtime red remains unobserved. CI must establish the regression failure before the
+small persistence correction. The earlier missing-API red and historical backend passes do not establish this
+regression or a passing lifecycle implementation. The PR remains draft with the reviewed P2 open.
+
+### Empty-Space persistence correction and remembered-tab test repair (#116)
+
+At `c6ba758576ad86fc417cc0a7e43318abb26c9ec8`, GUI run 42487571348, job 128752869704, reported 2079 tests,
+56 skipped and six failed assertions in two methods. Four assertions in the new empty-Space regression confirm the
+collection retained the previous Space and non-nil tab after both switches. The existing Space-change callback now
+saves the session as well as refreshing suggestions, so nil-to-nil tab transitions also capture the new Space.
+
+The remaining two assertions were test errors: `showSpace` positions a page with no settle callback, while the
+dot/keyboard path selects the Space's remembered tab on settling. The history test now checks both complete restored
+selection dictionaries, then uses that user-switch path with the existing Reduce Motion seam for synchronous
+settling. It retains all four distinct per-window selection assertions. The empty-Space regression is unchanged.
+
+Swift 6.2.4 frontend parsing and `git diff --check` passed. No local full package, GUI or App build ran; green at the
+new head remains unobserved. The separate unpublished App/General gate is not included here, and app launch, actual
+termination/cancellation composition, full relaunch and #690 recovery remain unfinished.
+
+
+### #116 lifecycle green and app integration gate
+
+At `fc87d5123b406ad7e5c66a65c465d60f3f39e2a9`, [run 42490834029](https://github.com/krystianslowik/arkt/actions/runs/42490834029)
+passed pure ShellKit 2535 tests in 285 suites and GUI 2083 reported tests with 60 skipped and zero failures.
+All 12 MultiWindowLifecycleGateTests passed, including immediate empty-Space capture and distinct per-window
+remembered selections. The app build, lint and required aggregate passed; Core and XCUITest were skipped.
+This validates the window-set component, not App launch/termination forwarding or native relaunch.
+
+The next test-only gate exercises the actual General popup with the supplied shared preference, persistence,
+observer updates and Reset All. Its isolated app test creates two distinct regular-window selections while an
+identified Incognito window remains open, asserts exactly two raw saved entries before projection and after quit,
+and checks selected pages and new HTTP requests after relaunch. Independent source review's private-entry false
+pass was corrected before publication; final restored count/order still need a launch-completion observation.
+No new production integration is included. Disabled restore, native quit cancellation, folder restoration in the
+app and recovery composition remain unverified.
+
+The branch also receives the identical optional UI-selector changes approved for #823 (input, environment and
+quoted argument array), retaining its existing workflow and XcodeGen retry/checksum behavior. Source parsing,
+import/UI-source lint, parity-report fixtures, actionlint and whitespace checks are the local validation; no new
+gate was typechecked or executed locally. Expected runtime failures at the planned General popup and app
+restoration remain unobserved until CI runs.
+
+
+### #116 General preference runtime red and shared identifier repair
+
+At `899a4f76f161f3e93ef99a910314e0e640fab48d`, focused [run 42494525891](https://github.com/krystianslowik/arkt/actions/runs/42494525891)
+GUI job 128773873220 reported 2058 tests, 54 skipped and eight failed assertions, all in
+`testOpeningPreferenceUsesSharedSettingsAndReset`. The actual General popup was disabled and did not write or
+observe the shared preference; those failures establish the intended runtime red for this bounded UI connection.
+The popup now reads/writes the supplied AppSettings restore flag and follows its existing observer, including reset.
+The regression assertions remain unchanged. New-head GUI validation is pending.
+
+The same run's XCUITest job 128773873246 failed compilation at `AXID.Incognito`; zero app tests executed.
+The shared declaration exists, but project.yml did not include its file in the out-of-process test target. Adding
+`AXID+Incognito.swift` beside that target's other shared AXID files repairs the source closure without weakening
+private-window identification or duplicating the identifier. The four actual shared AXID files typecheck together
+with Swift 6.4.1/SDK 15.5; the toolchain emitted a libSwiftScan fallback warning. This is not an XCUITest typecheck.
+
+Changed-source frontend parsing and whitespace checks passed. No local full build, GUI, app launch or native
+relaunch ran. The app-restoration behavior still has no observed runtime red; a new focused run must reach it
+before production launch composition is changed. The earlier component green remains attributed to `fc87d51`.
+
+
+### Native session-store observation repair (#116)
+
+The previously green head `b2d2efc` did not establish native restoration: the focused UI test stopped before quit
+on its unsupported runner-side defaults read. The repaired gate observes the actual store injected into the window
+set, with an immutable initial snapshot before any window-set writes, per-launch identity and a completion latch.
+The AX adapter is read-only, noninteractive and restricted to Debug UI-test sessions. AX discovery and refreshed
+values remain unverified. App restoration remains unchanged.
+
+The bounded actual-source [WindowSession probe](../../integration/WindowSession/README.md) passed **34 tests in
+four suites: 32 existing store/compatibility tests plus two new observation tests**. Temporarily ignoring actual
+collection saves made the observation filter execute two tests and fail the save test with `missing saved data`.
+The mutation was removed before the full green run. Missing developer-framework/library search-path warnings were
+reported. This is store evidence, not App capture or native AX evidence.
+
+Independent source review supports a focused native observation experiment, but identified that the round trip
+cannot prove quit-time capture if ordinary writes already saved the correct value. The test and notes now state
+that boundary explicitly. A separate distinguishable-state capture mutation remains required before claiming
+native quit-capture coverage. No local App build, full ShellKit/GUI build, launch, XCUITest or capture mutation ran.
+
+
+### Actual App collection restoration runtime red (#116)
+
+Native [run 42504717042](https://github.com/krystianslowik/arkt/actions/runs/42504717042) at `ce5ba72` passed the new
+store observation boundary, including raw count, per-launch identity/latch and matching initial selections. It
+failed at the missing two-window restore assertion; the AX attachment shows only Space 2/session-beta restored.
+This is the intended App behavior red, distinct from the prior unsupported runner-side defaults read. The focused
+workflow's GUI suite passed 2058 reported tests, 54 skipped, zero failures; Core, pure ShellKit, App build, lint and
+aggregate passed. It does not prove native quit-capture timing or complete issue acceptance.
+
+The next bounded App change invokes the existing collection restore through the shared setting before deciding
+whether to create a default launch window. The existing engine-startup `opensWindow: false` behavior and subsequent
+onboarding, crash/recovery notices, auto-archive and observation completion order are retained. Parser, source and
+whitespace checks do not establish App behavior; new-head review and native execution remain necessary.
+
+
+### Enabled App restore green; disabled fallback preservation gate (#116)
+
+Head `88d7d56` passed the enabled native round trip in [run 42507901483](https://github.com/krystianslowik/arkt/actions/runs/42507901483)
+(49.345 seconds). Normal PR run 42507899180 passed all executed checks, with GUI 2118 reported, 63 skipped, zero
+failures. The native test verifies restored selected pages and private exclusion at capture; it does not establish
+quit-capture timing or complete issue acceptance.
+
+A new test-only native case closes the helper/App boundary gap for disabled restore: set the real General popup,
+quit with the identified private window and two regular selections, relaunch, require the old two-entry initial
+snapshot plus a fresh launch-completion report, then check exactly one regular window and unchanged current bytes.
+The enabled test retains all behavior assertions through shared setup. The new preservation case has not run;
+source parsing, workflow import/UI-source checks and whitespace validation are preliminary evidence only. The
+production disabled-launch path is unchanged until an intended runtime red is observed.
+
+
+### Disabled App launch preservation runtime red (#116)
+
+At `7a377dd`, native run 42510853793 passed the enabled case in 56.126 seconds. The disabled case reached its exact
+preservation assertion and failed: 327 current collection bytes versus 707 frozen initial bytes, after launch
+completion and the one-window check. This is a behavior red for the real fallback path, not a harness failure.
+Normal required/Core/pure/App/lint checks passed; GUI was still running when inspected.
+
+The local fix centralizes restore plus fallback in the window set's `openWindowsAtLaunch`, invoked by AppSession.
+It suppresses collection capture during disabled fallback construction and restores normal capture on return.
+A component gate uses that complete entry point with seeded collection and legacy state, requires preservation,
+no duplicate forwarding and a later ordinary selection saved normally. Existing native assertions remain intact.
+Parsing and whitespace checks passed; no component/GUI/App or native fixed-head execution is claimed. Independent
+review and supported CI remain outstanding. Other native lifecycle/cancellation and #690 recovery boundaries remain.
+
+
+### Both native launch cases green; integrate landed recovery (#116)
+
+Head `6c5946b` passed both real-app cases in run 42513197636: enabled restore 52.943 seconds and disabled-launch
+preservation 54.519 seconds, two tests with zero failures. Normal PR CI passed all executed checks; GUI reported
+2136 tests, 63 skipped, zero failures. The same-head complete-boundary component regression passed. These results
+do not establish necessary quit-capture timing or native cancellation.
+
+The local merge of main `a9457aa` resolves AppSession, ShellWindowSet, ShellWindowController and its Incognito
+extension. It retains shared-store observation and recovery persistence, explicit per-window restore and early
+private classification, both close/private event callbacks, and the existing recovery presentation sequence after
+collection restoration. Main's retention and GUI cleanup fixes remain intact. Four resolved sources parsed;
+source/lint/header and resolution whitespace checks passed. The full staged whitespace findings are inherited,
+byte-identical main README/patch context. No merged-head runtime test or build ran; review and CI remain required.
+
 ## Composite Space theme overlays (#534)
 
 The drawn base and opacity-scaled overlay are expanded in OKLab and source-over composited at the union of their
@@ -2930,3 +3155,46 @@ maintainer hardware after landing. No frame-time improvement is claimed. Merged 
 the deterministic completion and asynchronous download cancellation fixes. The existing 50% contrast fallback may
 remain below target, contrast samples do not cover every point or texture, and the pre-existing empty-base
 opacity-scaling limitation remains unchanged.
+
+
+### Current main theme follow-up after reviewed recovery integration (#116)
+
+The source-reviewed recovery merge `6f04425` was followed by main `859c4ce`. Only append-only results history
+conflicted; all four App/session recovery conflict resolutions remain byte-identical to the reviewed merge. Both
+histories remain. Main's additional Swift sources parsed and source/lint/header checks passed. No integrated-head
+App, GUI/native or focused test ran locally; the earlier GREEN2 belongs to `6c5946b`, not these merges.
+
+### #116 recovery coexistence gate
+
+Added a reviewed Shell-boundary test composing ordered window restoration and private exclusion with unanswered recovery, distinguishably stale quit capture, frozen collection writes, cancellation recapture and recovery dismissal. The review follow-up leaves recovery-source writes observable, so the fake cannot hide an incorrect production write during the quit interval. The two persistence domains are asserted independently.
+
+The test was parsed, not type-checked or executed; no mutation or native App termination-ordering proof is claimed. Main `1188868` integrated without conflict. Import/UI-source checks, actionlint, Swift parsing and engine-header parity were checked; no local full build/GUI/app launch was performed. Merged-head CI remains pending. Prior native launch passes remain attributed to their tested heads; cancellation, quit timing, folders and window order remain separate verification boundaries.
+
+
+### #116 queued-window launch decision (2026-11-08)
+
+The queued-window gate at `7f74603` reached the intended missing-API compilation failure in run 42527108969: `defersLaunchCapture` and `defaultWindowAllowed` were absent, so no lifecycle tests ran. AppSession now defers both session formats before engine readiness and forwards one complete launch decision after queued adoption, including when the engine already supplied a window. Existing helper calls remain compatible. Regular startup windows no longer bypass restoration; explicit private-only launch preserves prior regular history through launch and quit/cancellation until a regular window is explicitly opened. The gate includes Dock-reopen legacy writes, original adopted-tab ownership and complete post-restore captures.
+
+Parsing of three changed Swift files, workflow import/UI-source checks, parity/header checks and whitespace passed. No local ShellKit/App build, GUI or native launch ran; implementation-stage lifecycle and actual App forwarding remain unverified. Separately, Core at the pre-implementation head reported six SidebarAutosaver wait failures out of 579 tests / 47 suites. The unchanged autosaver suite passed **23 tests in one suite** in a focused local Swift 6.4.1 / macOS 15.5 SDK run, with missing developer framework/library search-path linker warnings. This does not establish the cause of the full-CI failures; fresh Core validation remains required. Details: `docs/test-gates/116-queued-window-launch.md`.
+
+
+### #116 queued-startup component green and fixture cleanup
+
+At `0036e82`, run `42529445007` passed all six queued-window launch GUI regression methods, Core 579 tests /
+47 suites, pure ShellKit 2,572 / 293, app build, lint and the required aggregate. The GUI suite reported 2,193 tests,
+64 skipped and one failure: AddressBarNavigationTests retained five CommandBarPanels, detected by the unchanged
+window guard in the next class. Its teardown now closes each set with the existing `closeAllForTesting()` helper
+before clearing its array; production lifecycle and all behavior assertions are unchanged. The changed source parsed
+and whitespace checks passed; no local GUI run was performed and the follow-up head awaits CI. Normal XCUITest was
+skipped. These component passes do not establish actual Chromium queued startup delivery or native quit cancellation.
+
+
+### #116 landed haptics integration
+
+Merged main `cfc4e69` after the queued-startup follow-up. The two conflicts were the AppSettings Reset All key list
+and the fresh-default assertions: both restore-windows and reorder-haptics keys/defaults are retained. The merge
+preserves main's real Appearance haptics switch, observer, tests and AppSession gate binding alongside the shared
+restore preference. Session launch/termination behavior and the address-bar fixture cleanup remain unchanged.
+Parsing of 11 incoming/resolved Swift files, workflow import/UI-source checks, parity-script tests, actionlint,
+ABI header parity and staged whitespace checks passed. Merged-head compilation and GUI/native behavior await CI;
+the six queued-startup passes remain attributed to `0036e82`, before this integration.

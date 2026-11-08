@@ -24,6 +24,7 @@ extension ShellWindowController {
   private func keepVisitsOutOfTheSharedSidebar() {
     isPrivateWindow = true
     onBecomingPrivate?()
+    onSessionChanged?()
     commandBar.onOpen = { [weak self] url, _ in self?.openPrivately(url, fromAddressBar: true) }
     sidebarController.onPasteAndGo = { [weak self] url in self?.openPrivately(url) }
     let pages = sidebarController.view.privatePages

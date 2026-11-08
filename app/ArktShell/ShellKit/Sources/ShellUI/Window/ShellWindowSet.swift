@@ -54,6 +54,16 @@ public final class ShellWindowSet {
   private weak var sessionWindow: ShellWindowController?
   /// The saved session was applied (or looked for) once; a window that takes over later only saves.
   private var restoredSession = false
+  private var didRestoreWindowsAtLaunch = false
+  private var launchWindows: [ShellWindowController] = []
+  private var collectionFrozen = false
+  private var collectionRestoring = false
+  /// Set before the engine can adopt queued launch windows; both session formats stay untouched until the decision.
+  private var launchCaptureDeferred: Bool
+  private var didCompleteLaunchDecision = false
+  /// An explicit private-only launch must not replace the previous regular collection with an empty one.
+  private var preservingPrivateLaunchCollection = false
+  private var protectsUnreadableCollection = false
   /// The session window when a saved frame was applied to it: `place` leaves it where it is.
   private weak var restoredFrameWindow: ShellWindowController?
   /// Built for an engine request, waiting for their window's `.windowOpened`.
@@ -101,7 +111,7 @@ public final class ShellWindowSet {
               sidebarStateStore: SidebarWindowStateStore = .ephemeral(),
               sessionStore: WindowSessionStore = .ephemeral(),
               commandBarSettings: CommandBarSettings = .ephemeral(), hostLookup: HostLookup? = nil,
-              recoveryPageSource: (any RecoveryPageSource)? = nil) {
+              recoveryPageSource: (any RecoveryPageSource)? = nil, defersLaunchCapture: Bool = false) {
     self.engine = engine
     self.sidebar = sidebar
     self.toolbarSetting = toolbarSetting
@@ -109,6 +119,8 @@ public final class ShellWindowSet {
     self.sessionStore = sessionStore
     self.commandBarSettings = commandBarSettings
     self.hostLookup = hostLookup
+    self.launchCaptureDeferred = defersLaunchCapture
+    self.protectsUnreadableCollection = sessionStore.hasUnreadableCollection
     self.recoveryPageSource = recoveryPageSource
     self.priorRecoveryPages = recoveryPageSource?.pages ?? []
     self.preservingUnansweredRecovery = engine.sessionRecovery?.lastSessionCrashed == true
@@ -285,6 +297,7 @@ public final class ShellWindowSet {
     if !opensFirstTab, let space = opener?.currentSpace { controller.sidebarController.showSpace(space) }
     place(controller, near: anchor)
     controller.showWindow(nil)
+    captureWindowCollection()
     return controller
   }
 
@@ -307,6 +320,7 @@ public final class ShellWindowSet {
     controller.showWindow(nil)
     controller.window?.setFrameTopLeftPoint(point)   // after showing: the first show places a window itself
     controller.activate(node: node)
+    captureWindowCollection()
     return controller
   }
 
@@ -401,23 +415,94 @@ public final class ShellWindowSet {
     let controller = awaitingAdoption.remove(at: index)
     controller.adopt(engineWindow: id)
     controller.showWindow(nil)
+    captureWindowCollection()
   }
 
   // MARK: Session (#116)
 
-  /// A quit started: writes every restored window's final state, then freezes saving, so the tabs the engine closes
-  /// while shutting down cannot overwrite it.
+  /// Compatibility entry point: returns restored windows, or the existing/default launch window.
+  @discardableResult
+  public func openWindowsAtLaunch(settings: AppSettings = .ephemeral()) -> [ShellWindowController] {
+    let restored = openWindowsAtLaunch(settings: settings, defaultWindowAllowed: true)
+    if !restored.isEmpty { return restored }
+    return primary.map { [$0] } ?? []
+  }
+
+  /// Completes launch after queued engine-window adoption. Returns only restored controllers; an adopted or default
+  /// window is available through `controllers`/`primary`. False suppresses only default construction, not restoration
+  /// for a regular queued window. An explicit private-only launch preserves regular history without revealing it.
+  @discardableResult
+  public func openWindowsAtLaunch(settings: AppSettings, defaultWindowAllowed: Bool) -> [ShellWindowController] {
+    guard !didCompleteLaunchDecision else { return launchWindows.filter { !$0.isClosed } }
+    didCompleteLaunchDecision = true
+    launchCaptureDeferred = true
+    sessionWindow?.savesSession = false
+    let supplied = controllers
+    if !supplied.isEmpty, supplied.allSatisfy(\.isPrivateWindow) {
+      preservingPrivateLaunchCollection = true
+      didRestoreWindowsAtLaunch = true
+      restoredSession = true
+      launchCaptureDeferred = false
+      return []
+    }
+    let restored = restoreWindowsAtLaunch(settings: settings)
+    let needsDefault = restored.isEmpty && supplied.isEmpty && defaultWindowAllowed
+    if needsDefault { _ = openWindow() }
+    launchCaptureDeferred = false
+    if let owner = sessionWindow, !owner.isPrivateWindow { owner.savesSession = !collectionFrozen }
+    // Disabled restoration preserves the previous collection through the complete decision. Later ordinary
+    // changes capture normally; unreadable collections remain independently protected in either mode.
+    if settings.restoreWindowsOnLaunch, !restored.isEmpty || needsDefault { captureWindowCollection() }
+    return restored
+  }
+
+  /// Restores the saved collection once. An empty or unavailable collection creates no window.
+  @discardableResult
+  public func restoreWindowsAtLaunch(settings: AppSettings = .ephemeral()) -> [ShellWindowController] {
+    if didRestoreWindowsAtLaunch { return launchWindows.filter { !$0.isClosed } }
+    didRestoreWindowsAtLaunch = true
+    protectsUnreadableCollection = protectsUnreadableCollection || sessionStore.hasUnreadableCollection
+    restoredSession = true
+    guard settings.restoreWindowsOnLaunch, let states = sessionStore.loadWindows() else { return [] }
+    let wasRestoring = collectionRestoring
+    collectionRestoring = true
+    defer { collectionRestoring = wasRestoring }
+    for state in states {
+      let controller = make(opensFirstTab: true, origin: .shell, restoring: state)
+      controller.showWindow(nil)
+      launchWindows.append(controller)
+    }
+    return launchWindows
+  }
+
+  private func captureWindowCollection() {
+    guard !collectionFrozen, !collectionRestoring, !launchCaptureDeferred, !protectsUnreadableCollection else { return }
+    let regular = controllers.filter { !$0.isPrivateWindow }
+    if preservingPrivateLaunchCollection {
+      guard !regular.isEmpty else { return }
+      preservingPrivateLaunchCollection = false
+    }
+    sessionStore.saveWindows(regular.compactMap { $0.currentSessionState() })
+  }
+
+  /// Capture before the engine tears down tabs and freeze the complete collection during quit.
   public func saveSessionsForTermination() {
+    for controller in controllers { controller.settlePendingClear() }
+    captureWindowCollection()
+    collectionFrozen = true
     for controller in controllers {
-      controller.settlePendingClear()                // #413: a Clear mid-exit is saved archived
       controller.saveSession()
       controller.savesSession = false
     }
   }
 
-  /// The quit was cancelled: saving continues.
+  /// A cancelled quit immediately replaces the snapshot with surviving windows and resumes writes.
   public func resumeSessions() {
-    sessionWindow?.savesSession = true
+    collectionFrozen = false
+    if let owner = sessionWindow {
+      owner.savesSession = !launchCaptureDeferred && !owner.isPrivateWindow
+    }
+    captureWindowCollection()
   }
 
   // MARK: Little Arkt (#314)
@@ -644,15 +729,15 @@ public final class ShellWindowSet {
   // MARK: Building
 
   private func make(opensFirstTab: Bool, origin: SessionWindowOrigin,
-                    kind: WindowKind = .regular) -> ShellWindowController {
+                    kind: WindowKind = .regular, restoring explicitSession: WindowSessionState? = nil) -> ShellWindowController {
     // #116: the first main window the shell opens restores the saved frame, Space and tabs and keeps them saved;
     // when it closes, the next one takes over saving (without restoring again).
     let isRestored = SessionWindowPolicy.takesSession(origin, ownerIsAlive: sessionWindow.map { !$0.isClosed } ?? false)
-    let session = isRestored && !restoredSession ? sessionStore.load() : nil
-    if isRestored { restoredSession = true }
+    let session = explicitSession ?? (isRestored && !restoredSession && !launchCaptureDeferred ? sessionStore.load() : nil)
+    if isRestored && !launchCaptureDeferred { restoredSession = true }
     let controller = ShellWindowController(engine: engine, sidebar: sidebar, toolbarSetting: toolbarSetting,
                                            sidebarStateStore: sidebarStateStore, sessionStore: sessionStore,
-                                           restoring: session, savesSession: isRestored,
+                                           restoring: session, savesSession: isRestored && !launchCaptureDeferred && !collectionFrozen,
                                            commandBarSettings: commandBarSettings, opensFirstTab: opensFirstTab)
     switch kind {
     case .regular: break
@@ -685,6 +770,7 @@ public final class ShellWindowSet {
       (self?.controllers ?? []).filter { $0 !== controller }.reduce(into: []) { $0.formUnion($1.visibleNodes) }
     }
     windows.append(controller)
+    controller.onSessionChanged = { [weak self] in self?.captureWindowCollection() }
     controller.peek.onRecoveryPagesChanged = { [weak self] in self?.recordRecoveryPages() }
     controller.onRecoveryWindowClosed = { [weak self, weak controller] in
       guard let self else { return }

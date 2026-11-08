@@ -7,16 +7,20 @@ extension ShellWindowController {
   /// The state to save now; nil without a window.
   func currentSessionState() -> WindowSessionState? {
     guard let window else { return nil }
-    return .capturing(frame: window.frame, windowedFrame: frameBeforeFullScreen,
+    var state = WindowSessionState.capturing(frame: window.frame, windowedFrame: frameBeforeFullScreen,
                       isFullScreen: window.styleMask.contains(.fullScreen), screenFrame: window.screen?.frame,
                       space: sidebarController.currentSpace, currentTab: currentNode,
                       selectedTabs: sidebarController.selectedTabs)
+    state.collapsedFolderIDs = sidebarController.collapsedFolderIDs
+    return state
   }
 
   /// Saves the window's state, unless this is not the restored window, a quit froze saving, or the window is going
   /// away (its tabs closing would otherwise leave an empty selection behind).
   func saveSession() {
-    guard savesSession, !isClosed, !isWindowCloseRequested, let state = currentSessionState() else { return }
+    guard !isClosed, !isWindowCloseRequested else { return }
+    onSessionChanged?()
+    guard savesSession, let state = currentSessionState() else { return }
     sessionStore.save(state)
   }
 
@@ -24,6 +28,7 @@ extension ShellWindowController {
   /// current tab when it is still a tab of that Space (or a Favorite). Nil: show the Space's own pick.
   func restoreSession(_ state: WindowSessionState) -> NodeID? {
     sidebarController.restoreSelections(state.selectedTabs)
+    sidebarController.restoreCollapsedFolders(state.collapsedFolderIDs)
     if let space = state.space { sidebarController.showSpace(space) }
     guard let tab = state.currentTab, case .tab? = sidebar.node(tab) else { return nil }
     if let space = sidebar.spaceID(containing: tab) { return space == sidebarController.currentSpace ? tab : nil }

@@ -239,6 +239,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   let sessionStore: WindowSessionStore
   /// False for a window that is not the one a relaunch restores, and while a quit has written the final state.
   var savesSession = false
+  var onSessionChanged: (@MainActor () -> Void)?
   /// The window's frame when it last entered full screen, saved in place of the screen-sized frame (#116).
   var frameBeforeFullScreen: CGRect?
   /// Scrolls the sidebar to a row a keyboard command landed on, with the overflow pill (BH-018).
@@ -348,7 +349,10 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     commandBar.onSwitchSpace = { [weak self] id in self?.sidebarController.showSpace(id) }
     commandBar.actionsProvider = { [weak self] in self?.commandBarActions() ?? [] }
     commandBar.onAction = { [weak self] id in self?.runCommandBarAction(id) }
-    sidebarController.onCurrentSpaceChanged = { [weak self] _ in self?.commandBar.refreshSuggestions() }
+    sidebarController.onCurrentSpaceChanged = { [weak self] _ in
+      self?.commandBar.refreshSuggestions()
+      self?.saveSession()
+    }
     sidebarController.clipboardURLProvider = { CommandBarController.pasteboardURL(NSPasteboard.general) }
     sidebarController.onPasteAndGo = { [weak self] url in self?.open(url, inNewTab: true) }
     wireAddressBars()
@@ -378,6 +382,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       self?.updateEmptyState()
       NotificationCenter.default.post(name: SpacesMenu.listDidChangeNotification, object: self)   // #387
     }
+    sidebarController.onFolderCollapseChanged = { [weak self] in self?.saveSession() }
     refreshThemes()
     updateEmptyState()
     root.themeBackground.setPosition(sidebarController.view.pager.position)
@@ -1036,7 +1041,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     reapplyTrafficLights()
     extensionsPanel?.windowDidResize()
   }
-  public func windowDidEndLiveResize(_ notification: Notification) { reapplyTrafficLights() }
+  public func windowDidEndLiveResize(_ notification: Notification) { reapplyTrafficLights(); saveSession() }
   public func windowWillEnterFullScreen(_ notification: Notification) {
     frameBeforeFullScreen = window?.frame
     extensionsPanel?.windowWillEnterFullScreen()
@@ -1083,6 +1088,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     handOverClosedPrivateWindow()                    // #746
     isClosed = true
     onRecoveryWindowClosed?()
+    onSessionChanged?()
     for node in shownNodes { onTabHidden?(node) }
     removePaneMouseMonitor()
     javaScriptDialogs.closeAll()

@@ -14,10 +14,14 @@ public struct WindowSessionState: Codable, Equatable, Sendable {
   public var selectedTabs: [SpaceID: NodeID]
   /// The window was in full screen; `frame` is then the windowed frame from before. Not re-entered at launch.
   public var isFullScreen: Bool
+  /// Folders collapsed in this window.
+  public var collapsedFolderIDs: Set<NodeID>
 
   public init(frame: CGRect, screenFrame: CGRect? = nil, space: SpaceID? = nil, currentTab: NodeID? = nil,
-              selectedTabs: [SpaceID: NodeID] = [:], isFullScreen: Bool = false) {
+              selectedTabs: [SpaceID: NodeID] = [:], isFullScreen: Bool = false,
+              collapsedFolderIDs: Set<NodeID> = []) {
     self.isFullScreen = isFullScreen
+    self.collapsedFolderIDs = collapsedFolderIDs
     self.frame = frame
     self.screenFrame = screenFrame
     self.space = space
@@ -36,6 +40,7 @@ extension WindowSessionState {
     currentTab = try values.decodeIfPresent(NodeID.self, forKey: .currentTab)
     selectedTabs = try values.decodeIfPresent([SpaceID: NodeID].self, forKey: .selectedTabs) ?? [:]
     isFullScreen = try values.decodeIfPresent(Bool.self, forKey: .isFullScreen) ?? false
+    collapsedFolderIDs = try values.decodeIfPresent(Set<NodeID>.self, forKey: .collapsedFolderIDs) ?? []
   }
 
   /// The state of a window now. In full screen the window's own frame is the whole screen, so the frame from before
@@ -77,6 +82,13 @@ enum SessionWindowPolicy {
 @MainActor
 public final class WindowSessionStore {
   public static let defaultsKey = "windowSession"
+  public static let windowsDefaultsKey = "windowSessions"
+
+  private struct Collection: Codable {
+    let version: Int
+    let windows: [WindowSessionState]
+  }
+  private static let collectionVersion = 1
 
   private let defaults: UserDefaults?
 
@@ -86,12 +98,39 @@ public final class WindowSessionStore {
   /// Never touches user defaults (tests and the smoke).
   public static func ephemeral() -> WindowSessionStore { WindowSessionStore(store: nil) }
 
+  #if DEBUG
+  /// The actual injected collection value, without decoding or modifying it (UI-test observation only).
+  public var rawCollectionValue: Any? { defaults?.object(forKey: Self.windowsDefaultsKey) }
+  #endif
+
   /// The stored state; nil when nothing was saved, the value cannot be read, or its frame is empty or not finite.
   public func load() -> WindowSessionState? {
     guard let data = defaults?.data(forKey: Self.defaultsKey),
           let state = try? JSONDecoder().decode(WindowSessionState.self, from: data),
           WindowFramePlacement.isUsable(state.frame) else { return nil }
     return state
+  }
+
+  /// A missing collection falls back to the legacy single window. An unreadable collection does not.
+  public func loadWindows() -> [WindowSessionState]? {
+    guard let defaults else { return nil }
+    guard defaults.object(forKey: Self.windowsDefaultsKey) != nil else { return load().map { [$0] } }
+    guard let data = defaults.data(forKey: Self.windowsDefaultsKey),
+          let collection = try? JSONDecoder().decode(Collection.self, from: data),
+          collection.version == Self.collectionVersion,
+          collection.windows.allSatisfy({ WindowFramePlacement.isUsable($0.frame) }) else { return nil }
+    return collection.windows
+  }
+
+  /// An existing collection we cannot decode must not be replaced by automatic lifecycle writes.
+  var hasUnreadableCollection: Bool {
+    defaults?.object(forKey: Self.windowsDefaultsKey) != nil && loadWindows() == nil
+  }
+
+  public func saveWindows(_ windows: [WindowSessionState]) {
+    guard let data = try? JSONEncoder().encode(Collection(version: Self.collectionVersion, windows: windows))
+    else { return }
+    defaults?.set(data, forKey: Self.windowsDefaultsKey)
   }
 
   public func save(_ state: WindowSessionState) {
@@ -120,8 +159,8 @@ public struct ScreenGeometry: Equatable, Sendable {
 /// Where a saved frame lands on the screens connected now.
 public enum WindowFramePlacement {
   static func isUsable(_ frame: CGRect) -> Bool {
-    let values = [frame.origin.x, frame.origin.y, frame.width, frame.height]
-    return values.allSatisfy(\.isFinite) && frame.width > 0 && frame.height > 0
+    let values = [frame.origin.x, frame.origin.y, frame.size.width, frame.size.height]
+    return values.allSatisfy(\.isFinite) && frame.size.width > 0 && frame.size.height > 0
   }
 
   /// `saved` kept on the screen it overlaps most; when no screen shows any of it, on the screen with `savedScreen`'s

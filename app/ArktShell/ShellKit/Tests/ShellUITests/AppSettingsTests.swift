@@ -30,6 +30,7 @@ struct AppSettingsTests {
     #expect(!settings.toolbar.isVisible)
     #expect(settings.toolbar.showsFullURL)
     #expect(!settings.warnsBeforeQuitting)
+    #expect(settings.restoreWindowsOnLaunch)
     #expect(settings.playsReorderHaptics)
   }
 
@@ -146,6 +147,7 @@ struct AppSettingsTests {
     settings.opensLittleArktWithHotKey = true
     settings.opensLittleArktOnOptionCommandClick = false
     settings.warnsBeforeQuitting = true
+    settings.restoreWindowsOnLaunch = false
     settings.sendsCrashReports = true
     settings.playsReorderHaptics = false
     settings.downloadLocation = DownloadLocationSetting(

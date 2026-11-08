@@ -593,6 +593,10 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   /// Folders the user collapsed in this outline; the keyboard skips their tabs (`SidebarTabOrder`).
   public var collapsedFolderIDs: Set<NodeID> { display.collapsed }
 
+  func restoreCollapsedFolders(_ ids: Set<NodeID>) {
+    setCollapsed(Set(ids.filter { if case .folder? = source.node($0) { return source.spaceID(containing: $0) == spaceID }; return false }), animated: false)
+  }
+
   /// Opens every collapsed folder that holds `id` (BH-019) and returns its row, or nil when this outline does not
   /// show it. A keyboard reveal: no motion.
   @discardableResult

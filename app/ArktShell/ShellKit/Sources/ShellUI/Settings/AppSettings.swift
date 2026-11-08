@@ -23,6 +23,7 @@ public final class AppSettings {
     public static let sendsCrashReports = "crashReportsEnabled"
     /// Settings > General > Warn before quitting (#487, BH-177). Off: Cmd-Q quits without asking.
     public static let shouldWarnBeforeQuitting = "shouldWarnBeforeQuitting"
+    public static let restoreWindowsOnLaunch = "restoreWindowsOnLaunch"
     /// The launch's one-time "Send a report?" was answered (Send, Don't Send or Always Send): never asked again.
     public static let crashReportAskAnswered = "crashReportAskAnswered"
     /// Settings > General > Downloads (#132, BH-182): "Ask Where to Save", and the folder for "Save to Folder" as a path.
@@ -40,7 +41,7 @@ public final class AppSettings {
     /// (`AppSettingsTests`), or the reset and its tests miss it.
     @MainActor public static let preferences = [
       excludeFavoritesInSwitchToNthTab, switchToNinthSidebarItemEnabled, globalLittleBrowserHotkeyEnabled,
-      optionCommandClickLittleArcEntryPointEnabled, sendsCrashReports, shouldWarnBeforeQuitting,
+      optionCommandClickLittleArcEntryPointEnabled, sendsCrashReports, shouldWarnBeforeQuitting, restoreWindowsOnLaunch,
       downloadsAskWhereToSave, downloadsFolder, tabReorderingHapticsDisabled,
       PeekLinkSettings.crossSiteKey, PeekLinkSettings.shiftClickKey,
       ToolbarSetting.defaultsKey, ToolbarSetting.showsFullURLDefaultsKey,
@@ -131,6 +132,16 @@ public final class AppSettings {
     set {
       guard newValue != opensLittleArktOnOptionCommandClick else { return }
       set(newValue, Key.optionCommandClickLittleArcEntryPointEnabled)
+      notifyObservers()
+    }
+  }
+
+  /// Restore the previous regular windows at launch by default.
+  public var restoreWindowsOnLaunch: Bool {
+    get { bool(Key.restoreWindowsOnLaunch, default: true) }
+    set {
+      guard newValue != restoreWindowsOnLaunch else { return }
+      set(newValue, Key.restoreWindowsOnLaunch)
       notifyObservers()
     }
   }

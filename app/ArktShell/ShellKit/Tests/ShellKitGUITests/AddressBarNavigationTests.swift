@@ -18,7 +18,7 @@ final class AddressBarNavigationTests: XCTestCase {
   }
 
   override func tearDown() async throws {
-    for set in sets { for controller in set.controllers { controller.window?.orderOut(nil) } }
+    for set in sets { set.closeAllForTesting() }
     sets = []
   }
 
