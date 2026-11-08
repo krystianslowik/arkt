@@ -5724,3 +5724,112 @@ and whitespace/conflict-marker checks passed. No full local package/App build, G
 run was performed. CI must validate the merged head; the last full green remains run 42424301771 at `aa72ced`.
 #803 remains open, so production-engine repeated unanswered recovery and cross-launch validation still depend on
 that retained crash marker. Native killed-process recovery, quit/cancellation and VoiceOver remain unverified.
+
+## #851: a tab-modal dialog on an Arkt window is cancelled, not a crash (patch 0015)
+
+Date 2026-11-08. Branch `engine/851-tab-dialog-guard` from `engine/846-https-first-dialog` (PR #849, not merged
+yet). The maintainer chose to land E3b's one-file guard now (#851, acceptance 2).
+
+### Gate
+
+- Why a patch: `TabDialogManager::CreateTabScopedDialog` does `CHECK(host)` on the tab's Views host widget, which an
+  Arkt window does not have. Every tab-modal dialog reaches it (`CreateAndShowDialog`, and the direct
+  `CreateTabScopedDialog` callers `chrome_webui_dialog.cc:93` and `indigo_onboarding_dialog.cc:199`), and no overlay
+  seam sits in front of it. #849's switch closes only the HTTPS-First dialog.
+- Facade header: unchanged (`cmp` identical). `.patches`: 14 to 15, number 0015 claimed in the pull request; no open
+  engine pull request touches `engine/patches` and no earlier patch touches `tab_dialog_manager.cc`.
+- Overlay link checked before each build: `$CR/arkt` points at this worktree's `engine/arkt`.
+- Builds: `nice -n 10 autoninja -j 4 -C out/Arkt chrome`. Chromium disk 1.9 TB free, internal 72 GB, swap 5.7 GB of
+  7 GB throughout (under the 6.5 GB stop line), load average 4 to 5.
+
+### Why the guard returns a widget, not nothing
+
+Patch 0013's toast guard drops the toast and returns. Here that would move the crash one line: most callers
+dereference the returned widget at once (`dialog_widget_->MakeCloseSynchronous(...)` in the ask-before-HTTP, credential
+leak, Lens permission, password change, autofill progress, account chooser and Indigo callers). So patch 0015:
+
+- `CreateTabScopedDialog`: with no host widget, the dialog widget is created as usual but parented to the tab's own
+  view (`GetContents()->GetNativeView()`, inside the Arkt window). It is not shown.
+- `ShowDialog` (every path, including the two direct callers' own calls): with no host widget it logs
+  `ARKT: tab-modal dialog cancelled, the window has no Views widget`, posts `Close()` through the widget's weak
+  pointer and returns. The close runs on the next turn, after the caller has set its close handling, so the caller
+  sees an ordinary dismissal (its `MakeCloseSynchronous` callback, or the delegate's close callback).
+
+One file, 27 insertions and 1 deletion.
+
+### Smoke (`out/Arkt/Arkt.app`, `--no-startup-window --arkt-facade-selftest --arkt-engine-test-api`, fresh profiles in a scratch folder, `--use-mock-keychain`, the #846 page `http://http-only.example.com/` mapped to `127.0.0.1:8851`)
+
+"Old list" is the shell's list without `HttpsFirstDialogUi`, so the HTTPS-First dialog is on for that run only;
+"new list" is the shipping list from #849.
+
+| Run | Window | List | Patch 0015 | Result |
+|---|---|---|---|---|
+| g-private-old | off the record (`private-window`) | old | in | PASS: `ARKT: tab-modal dialog cancelled, the window has no Views widget`, then `state ... url=http://http-only.example.com/ title=http-only.example.com loading=no crash=0`; engine alive 20 s, stopped by PID |
+| g-strict-old | regular, "Always use secure connections" | old | in | PASS: the same log line, engine alive |
+| g-default-old | regular, fresh profile, defaults | old | in | PASS: the same log line, engine alive |
+| g-private-new | off the record | new | in | PASS: unchanged from #849, `Site is not secure \| Go back`, no cancel line |
+| break-private-old | off the record | old | removed (`tab_dialog_manager.cc` back to the pin, rebuilt) | CRASH: `Check failed: host.`, `Received signal 6`, exit 134 |
+| break-default-old | regular, defaults | old | removed | CRASH: the same, exit 134 |
+
+`FATAL`, `NOTREACHED` and `DumpWithoutCrashing` lines in the g-runs: 0. With the dialog cancelled, the tab stays on an
+empty page at the HTTP URL: the HTTPS-First throttle has already stopped the navigation, and the dialog that would
+have let the user go on is gone. So the guard is a backstop against the crash, not the user path; the user path stays
+#849's interstitial.
+
+| Step | Result |
+|---|---|
+| Build with patch 0015 | `The build has finished successfully.`, `FAILED:` 0, 75 s |
+| Break build (file back to `156.0.8078.48`) | finished, `FAILED:` 0, 69 s |
+| Restore build | finished, `FAILED:` 0, 69 s; `git status` in `$CR` clean apart from the untracked `build/util/MINIBRANCH` |
+
+### Reachability of the credential leak and edit address dialogs (acceptance 1)
+
+One probe run on the patched build with the new list: a normal window, loopback forms on `127.0.0.1:8851`, values
+typed with DevTools `Input.insertText` (`--remote-debugging-port=9851`), then the button clicked from script with a
+user gesture; `--log-net-log` into the artifacts folder.
+
+- **Edit address: not reachable on an Arkt window.** The only way in is `AddressBubblesController::ShowEditor`, from
+  the Edit button of the save and update address bubbles (`save_address_bubble_controller.cc:244`,
+  `update_address_bubble_controller.cc:124`). The overlay's `ArktAutofillBubbleHandler` closes those prompts without
+  showing them (#768), so there is no Edit button to press. Runtime: a full US address submitted logged
+  `ARKT: autofill bubble SaveAddressProfile not shown`, no tab-modal line, no crash.
+- **Credential leak: the check runs, the warning cannot come back on this build.** Signed out, a sign-in form
+  submitted with a well-known leaked test pair started the lookup: the net log shows
+  `passwordsleakcheck-pa.googleapis.com/v1/leaks:lookupSingle`, which this run sent to `~NOTFOUND`
+  (`--host-resolver-rules`) so nothing left the machine. A signed-out lookup carries the build's Google API key, and
+  this build has none: the framework holds only the `dummytoken` placeholder, not a valid key (the rejection itself was
+  not observed, since nothing was sent). So no leak answer and no dialog here. It becomes reachable in a build with Google API keys, or once a user signs in to a
+  Google account in the engine. With patch 0015 it would then be cancelled rather than crash; drawing it natively,
+  or switching the warning off (the `profile.password_manager_leak_detection` pref), is the follow-up's call.
+
+### Patch budget
+
+| Source | Count |
+|---|---|
+| `.patches` lines | 15 |
+| `arkt` commits above `156.0.8078.48` | 15 |
+
+In sync. Export added 0015 and its `.patches` line; 0001 to 0014 byte-identical. Facade header copies `cmp` identical.
+
+| Gate (design section 2.5) | Before | After #851 |
+|---|---|---|
+| Patch files | 14 | 15 |
+| Upstream files outside 0001-0004 | 19 | 20 |
+| Hunks in `browser_actions.cc` and `browser_commands.cc` | 4 | 4 |
+| Hot-file hunks (`browser_window_features.cc`, `tab_features.cc`) | 0 | 0 |
+| Widely included headers changed | 0 | 0 |
+
+### Left open
+
+- #795's E3b gate grep should also match `CreateTabScopedDialog(` (#851, acceptance 3); #795 is still open, so the
+  line is noted in this pull request instead of edited on that branch.
+- Upstream unit tests for `TabDialogManager` were not run; tests whose tab has no host widget would now get a
+  cancelled dialog instead of the CHECK.
+- The leak warning above, once a build has API keys or sign-in.
+
+### Cleanup
+
+Every engine run and the loopback server stopped by exact PID (`ps -p` prints nothing for each); nothing listens on
+8851 or 9851. The throwaway profiles were deleted. Three macOS crash reports from these runs (the two break runs, and
+one renderer helper that failed to set up its sandbox while g-strict-old was quitting after its `kill`) were copied
+to the artifacts folder and removed from `DiagnosticReports`. The runs did not use the clipboard.

@@ -307,7 +307,7 @@ final class ArchivePillCell: NSButtonCell {
 /// link is `destructiveText` and underlines on hover; a secondary one turns `primaryText` on hover. Accessibility
 /// reads it as a button.
 @MainActor
-final class ArchiveLinkButton: NSButton {
+final class ArchiveLinkButton: TokenTitleButton {
   enum Style { case secondary, destructive }
 
   let style: Style

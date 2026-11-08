@@ -21,6 +21,11 @@ final class CommandBarTableView: NSTableView {
 
   override func reloadData() {
     super.reloadData()
+    rowsDidChange()
+  }
+
+  /// The rows' contents changed, by a reload or in place: accessibility and the selection indicator follow.
+  func rowsDidChange() {
     axProxyRows.invalidate()
     onSelectionOrDataChange?()
   }
