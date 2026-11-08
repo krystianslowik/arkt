@@ -17,7 +17,12 @@ final class SpacePagerTests: XCTestCase {
     controller.window?.contentView?.layoutSubtreeIfNeeded()
   }
 
-  override func tearDown() async throws { controller.close() }
+  // XCTest keeps each test case object until the run ends: release the window too, not only close it (#805).
+  override func tearDown() async throws {
+    controller.close()
+    controller = nil
+    sidebar = nil
+  }
 
   private func awaitSettle(_ body: () -> Void) async {
     let settled = expectation(description: "settled")
@@ -181,9 +186,12 @@ final class SpacePagerTests: XCTestCase {
     controller.rootView.sidebarWidth = 260
     controller.rootView.layoutSubtreeIfNeeded()
     XCTAssertEqual(pager.bounds.width, 260, accuracy: 0.001)
+    // Mid-swipe a shown page's view frame sits in the visible slot and its layer translation shows it at its own
+    // place in the strip (#415, #841): its place on screen is the frame plus that translation.
     for (index, page) in pager.pages.enumerated() {
       XCTAssertEqual(page.frame.width, 260, accuracy: 0.001)
-      XCTAssertEqual(page.frame.minX, CGFloat(index) * 260, accuracy: 0.001)
+      let shownX = page.frame.minX + (page.layer?.affineTransform().tx ?? 0)
+      XCTAssertEqual(shownX, CGFloat(index) * 260, accuracy: 0.001)
     }
     XCTAssertEqual(pager.offset, -260 - 30, accuracy: 0.001, "strip offset follows the new page width during swipe")
     await awaitSettle { pager.endTracking() }
@@ -329,7 +337,9 @@ final class SpacePagerTests: XCTestCase {
     XCTAssertFalse(controller.pager.isTracking)
   }
 
-  // Frame pacing: a display-paced scripted swipe and a keyboard switch, measured on the pager's display link.
+  /// Frame pacing: a display-paced scripted swipe and a keyboard switch, measured on the pager's display link.
+  /// NOT-MEASURABLE below 120 Hz or under load; the hitch count is asserted only with `ARKT_PACING_GATE=1` or when
+  /// this class runs alone (`PacingEnvironment.checkFrameGate`, #671).
   func testFramePacingDuringSwipeAndKeyboardSwitch() async throws {
     try PacingEnvironment.skipIfNotMeasurable(screen: controller.window?.screen)
     let pager = controller.pager
@@ -347,8 +357,10 @@ final class SpacePagerTests: XCTestCase {
                       done: { pager.endTracking() })
     }
     let swipe = try XCTUnwrap(pager.lastPacing)
+    var details = pager.pacer.hitchDetails
     await awaitSettle { controller.nextSpace(nil) }
     let key = try XCTUnwrap(pager.lastPacing)
+    details += pager.pacer.hitchDetails
     XCTAssertEqual(controller.currentSpace, sidebar.spaceOrder[2])
     XCTAssertEqual(controller.sidebarController.view.flavor, .dark)
     // #99 (M9): swipe from Dev (.dark) back to Work (.light) crosses the halfway flavor flip (.darkAqua -> .aqua).
@@ -359,36 +371,13 @@ final class SpacePagerTests: XCTestCase {
                       done: { pager.endTracking() })
     }
     let flavorSwipe = try XCTUnwrap(pager.lastPacing)
+    details += pager.pacer.hitchDetails
     XCTAssertEqual(controller.currentSpace, sidebar.spaceOrder[1])
     XCTAssertEqual(controller.sidebarController.view.flavor, .light)
 
-    var load = [0.0]
-    let cores = ProcessInfo.processInfo.activeProcessorCount
-    let loaded = getloadavg(&load, 1) != 1 || load[0] >= Double(cores)
-    let fps = NSScreen.main?.maximumFramesPerSecond ?? 0
-    for (label, stats) in [("space-swipe", swipe), ("space-key", key), ("space-swipe-flavor", flavorSwipe)] {
-      // "frame@ms": which frame of the interaction went over (the swipe tracks for 20 frames, then settles).
-      // Indices count from the first gated interval; the lead-in (display-link start-up) is printed apart.
-      let hitches = stats.intervals.enumerated().filter { $0.element > stats.hitchThreshold }
-        .map { String(format: "%d@%.2f", $0.offset, $0.element * 1000) }
-      let summary = String(
-        format: "spacepager.pacing label=%@ screenMaxFPS=%d frames=%d over8.6=%d overBudgetPct=%.2f maxMs=%.2f "
-          + "p99Ms=%.2f leadInMs=%.2f load1=%.2f cores=%d asserted=%@ hitchesMs=[%@]",
-        label, fps, stats.frameCount, stats.hitchCount, stats.overBudgetRatio * 100, stats.maxInterval * 1000,
-        stats.p99 * 1000, (stats.leadInInterval ?? 0) * 1000, load[0], cores, loaded ? "no" : "yes",
-        hitches.joined(separator: ","))
-      print(summary)
-      let attachment = XCTAttachment(string: summary)
-      attachment.name = "spacepager.pacing.\(label)"
-      attachment.lifetime = .keepAlways
-      add(attachment)
-      XCTAssertGreaterThan(stats.frameCount, 10, "\(label): the display link ran (is the display awake?)")
-      if loaded {
-        print("spacepager.pacing skipped assert: 1-minute load \(load[0]) >= \(cores) active cores")
-      } else {
-        XCTAssertEqual(stats.hitchCount, 0, "\(label): frames over 8.6 ms")
-      }
-    }
+    PacingEnvironment.checkFrameGate(
+      "spacepager", results: [("space-swipe", swipe), ("space-key", key), ("space-swipe-flavor", flavorSwipe)],
+      details: details, gate: Self.self, in: self, fps: controller.window?.screen?.maximumFramesPerSecond ?? 0)
   }
 
   // C6 review I1: offscreen pages stay out of accessibility and the key loop.

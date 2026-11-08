@@ -30,7 +30,12 @@ final class ShadowDirectionInWindowTests: XCTestCase {
     content.addSubview(container)
   }
 
-  override func tearDown() async throws { window.close() }
+  // XCTest keeps each test case object until the run ends: release the windows too, not only hide them (#805).
+  override func tearDown() async throws {
+    window.close()
+    container = nil
+    window = nil
+  }
 
   func testTheSliderKnobAndTheSpacePreviewCastDownInAFlippedHost() throws {
     let slider = ThemeSliderView(label: "Grain", identifier: "test.slider")

@@ -59,6 +59,8 @@ final class CommandBarRowView: NSTableRowView {
 /// semibold, a secondary URL (13) that truncates first, and a right-aligned trailing group of captions and key caps.
 @MainActor
 final class CommandBarCellView: NSTableCellView {
+  /// A result's title; the part that matches the query is set semibold.
+  static let titleFontSize: CGFloat = 14
   static let identifier = NSUserInterfaceItemIdentifier("commandBar.cell")
   static let iconSize: CGFloat = CommandBarGeometry.iconSize
   private static let keyCapGap: CGFloat = 5
@@ -95,7 +97,7 @@ final class CommandBarCellView: NSTableCellView {
     icon.imageScaling = .scaleProportionallyUpOrDown
     title.lineBreakMode = .byTruncatingTail
     title.cell?.usesSingleLineMode = true
-    header.font = .systemFont(ofSize: 11, weight: .semibold)
+    header.font = ShellType.sectionHeader.font
     header.lineBreakMode = .byTruncatingTail
     header.cell?.usesSingleLineMode = true
     header.isHidden = true
@@ -169,10 +171,10 @@ final class CommandBarCellView: NSTableCellView {
     let strong = ShellTokens.commandBarText.resolve(flavor).nsColor()
     let rest = (isRowSelected ? strong : ShellTokens.commandBarSecondaryText.resolve(flavor).nsColor())
     let attributed = NSMutableAttributedString(string: result.title, attributes: [
-      .font: NSFont.systemFont(ofSize: 14), .foregroundColor: rest,
+      .font: NSFont.systemFont(ofSize: Self.titleFontSize), .foregroundColor: rest,
     ])
     if let range = CommandBarTitleMatch.range(of: query, in: result.title) {
-      attributed.addAttributes([.font: NSFont.systemFont(ofSize: 14, weight: .semibold), .foregroundColor: strong],
+      attributed.addAttributes([.font: NSFont.systemFont(ofSize: Self.titleFontSize, weight: .semibold), .foregroundColor: strong],
                                range: NSRange(range, in: result.title))
     }
     title.attributedStringValue = attributed
