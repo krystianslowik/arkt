@@ -217,6 +217,9 @@ final class PermissionPresenterTests: XCTestCase {
     now += 0.1
     panel.view.primaryButton.performClick(nil)
     XCTAssertEqual(engine.permissionAnswers.count, 1)
+    // The answer fades the panel out over 0.10 s; the fade's completion holds the panel until it ends, so the test
+    // lets it end rather than leave the panel to a later class (#817).
+    waitUntil("the answered panel faded out") { !panel.panel.isVisible && panel.panel.parent == nil }
   }
 
   func testAnOccludedPanelIsProtectedFromTheMomentItBecomesVisible() throws {

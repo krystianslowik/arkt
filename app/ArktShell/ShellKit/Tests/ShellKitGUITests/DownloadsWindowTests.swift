@@ -501,6 +501,10 @@ final class DownloadsWindowTests: XCTestCase {
     sheet.keepLink?.performClick(nil)
     XCTAssertEqual(engine.download(id)?.dangerType, .userValidated)
     XCTAssertNil(center.sheet)
+    let window = try XCTUnwrap(sheet.window)
+    XCTAssertNil(window.sheetParent, "Keep Anyway takes the sheet down like the buttons do (#817)")
+    XCTAssertFalse(window.isVisible)
+    XCTAssertTrue(controller.window?.attachedSheet == nil)
   }
 
   func testEscapeDisarmsKeepAnywayBeforeItDismissesTheSheet() throws {

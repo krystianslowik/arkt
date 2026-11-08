@@ -5446,6 +5446,173 @@ it was cleared afterwards. Nothing under `~/Applications/ArktTest` or `/Applicat
   The clipboard held text this time and the run replaced it with the page URL; it was cleared afterwards and the
   earlier text was not restored.
 
+### Restore pages Swift boundary (#580)
+
+The Swift recovery contract carries only non-private Little Arkt and Peek page titles, URLs and kinds, and supplies the list to the shell, which requests reopening outside the sidebar. The shell presents the offer after its own window
+session restoration; an empty offer acknowledges the crash and shows the status notice. The crashed-session state seam shipped in #577; recoverable-page data integration and
+feature-level killed-process validation remain unverified.
+
+Test-first CI run 42112475936 at 75b3800 failed to compile the missing model in ShellKit tests (job 127543462923)
+and GUI tests (job 127543462890); the Swift tests gate (job 127547434337) consequently failed. No tests executed in
+those jobs. Local builds and tests were not run: the installed toolchain cannot compile the baseline. Syntax parsing
+and diff checks are recorded in the pull request. GUI, accessibility, motion, app and real-engine validation remain
+pending.
+
+### Restore pages review fixes (#580)
+
+The window set retains an unanswered decision across regular-window closure and presents it when another window is
+available. The panel remains above the content in Split View. The shell requests the pages before acknowledging; an unavailable shell path retains the offer and crash. Crash-only providers expose no page capability. A persistent
+database-recovery notice remains underneath the six-second crash notice and reappears after dismissal or expiry.
+
+Regression coverage exercises the production window-set coordinator and window lifecycle, capability and unavailable shell paths,
+Split View, and notice ordering. These additions have not run locally because the installed toolchain cannot compile the
+baseline; syntax parsing alone does not validate behavior. Direct `AppSession.finishLaunch`, GUI, keyboard, accessibility,
+motion and real-engine killed-process validation remain pending. The crashed-session state seam shipped in #577; recoverable-page data integration remains unverified.
+
+### Restore pages privacy routing (#580)
+
+Only ordinary regular windows may host the decision. The window set selects an eligible window even when the primary
+window is private, retains the unanswered offer while only private windows exist, and classifies Blank and Incognito
+windows before considering presentation. A host changing to private mode relinquishes the offer before that mode is
+shown. Little Arkt and popup requests use separate hosts.
+
+New GUI regressions cover both private modes, transfer with a private primary, deferred presentation after the last
+regular host closes, private creation while an offer is pending, and a host changing mode. They were written before
+the fix but not run locally: the installed toolchain cannot compile the baseline. CI must validate compilation and
+behavior on the new head; syntax parsing and source checks do not establish test results.
+
+### Maintainer feedback on restore pages (#580)
+
+The provider supplies a list only; the shell reopens Little Arkt and Peek pages using the host's current tab for Peek.
+A missing source or multiple Peek pages retain the offer: the current Peek controller replaces an existing Peek from
+the same source, so multiple Peek recovery requires a further shell solution. Closing windows are ineligible and a
+cancelled close retries pending presentation. New regression tests and the private-routing suite are not run locally;
+CI must validate the merged head. Recoverable-page data integration and feature-level killed-process validation remain unverified; the crashed-session state seam shipped in #577.
+
+### Restore pages Peek preservation (#580)
+
+Recovery declines a Peek when the host has any live or hidden Peek, and attempts its one supported Peek before
+opening Little Arkt windows. A missing Peek content view closes the new tab and retains the unanswered offer. Ordinary
+link opening retains its replacement behavior. Little Arkt's API does not report presentation success; the shell
+can only report that its opening was requested. Multiple recovered Peeks remain unanswered pending the maintainer's
+routing decision. The crashed-session state seam shipped in #577; recoverable-page data integration and feature-level killed-process validation remain unverified.
+
+GUI regressions cover live and hidden Peek preservation, missing-view cleanup and retry, and Find closing on Escape.
+They were written before the fix but not run locally because the installed toolchain cannot compile the baseline.
+Syntax parsing is not a runtime test. CI on the new head, GUI appearance, VoiceOver, Reduce Motion and UI tests remain
+unverified.
+
+### Restore pages CI evidence and remaining decision (#580)
+
+CI run [42364783894](https://github.com/krystianslowik/arkt/actions/runs/42364783894) applies only to commit
+`4158a3411c5a5e286b2f05b7f7b4ebfd8592c0b7`: all 8 reported checks passed. ShellKit pure tests ran 2,454 tests
+across 278 suites; GUI tests executed 2,025, skipped 48 and had 0 failures. The app build, lint and required Swift gate
+passed; Core and optional UI tests were skipped. The held-close and recovery-window suite passed. These results do not
+validate the subsequent merge head, which requires new CI.
+
+The multi-Peek routing decision is tracked in [#776](https://github.com/krystianslowik/arkt/issues/776)
+(`status:needs-user`); the maximum-one-Peek safety remains in place. #577 shipped crash state and dismissal, but
+recoverable page payload and source grouping integration and feature-level killed-process validation remain missing.
+
+Test-first integration of #777: private-window reopen coverage observes recovery routing during creation and checks
+that a separate empty-crash notice remains available to a regular window. Both private kinds are covered. The current
+`makePrivateWindow` creates a regular window before converting it, so CI is expected to expose the regression; this
+has not yet been observed. Production routing remains unchanged pending that red run. Local tests were not executed:
+the installed toolchain cannot compile baseline ShellKit. Swift source parsing and diff checks passed. The prior green
+for this integration is attributable only to `22d4906e12ddb3cd053b4f836e3be00810c0e1d1`: 2,454 pure tests in 278
+suites, 2,038 GUI tests executed, 51 skipped, zero failures, and all eight reported checks passed. Those results do not
+validate this test-first merge. The PR stays draft while #776 awaits the maintainer; maximum-one-Peek safety remains.
+
+### Private reopen creation routing (#777)
+
+Blank and Incognito reopen windows now receive their final kind during construction, before recovery routing runs.
+The private-window handover still precedes `isClosed`, and recovery reassignment follows it. The existing synchronous
+GUI regressions were not run locally because the installed toolchain cannot compile baseline ShellKit. Swift source
+parsing and `git diff --check` passed; they do not establish compilation or runtime behavior. The shell-owned
+recovery migration remains incomplete and the test-first APIs at `781c729` remain missing.
+
+
+### Restore pages combined migration and live recording (#580)
+
+The local combined head includes the App/Persistence snapshot adapter, shell-owned recovery records and source-node
+routing, removal of the engine page payload, and live Little Arkt and Peek recording. Controller events track opens,
+navigation, titles and actual closes, including hidden Peeks. Private windows and sidebar pages are excluded. The
+initial offer remains immutable; at offer time missing or archived Peek sources are excluded and duplicates keep the
+last. Empty offers show the notice and acknowledge. Confirmed clean quit clears and stops further shell writes; a
+cancelled quit resumes tracking. The App suspends writes during teardown and resumes them after the outcome.
+
+There is no final confirmed-termination hook for SIGTERM: its flush retains the snapshot. Normal confirmed quit
+requests a clear; a failed flush is logged and the existing quit flow allows failure. Neither durable clearing nor
+feature completion is guaranteed by this change. Killed-process validation and App adapter integration remain open.
+
+No migration tests or builds were executed locally: the installed toolchain cannot compile the baseline. Source
+parsing, diff and import checks are static checks only; CI on this combined head is pending. Prior CI green at
+`22d4906` (2,454 pure tests; 2,038 GUI executed, 51 skipped) does not validate this head. The `da223` GUI run had
+eight assertion failures; the private creation path was fixed in `b203`, but has not been runtime verified locally.
+
+### Restore pages cancellation snapshot refresh (#580)
+
+The combined migration at `0fdd51c` passed CI run 42377016354: ArktCore 579 tests in 47 suites, ShellKit pure
+2,489 tests in 281 suites, and GUI 2,068 executed with 53 skipped and no failures. The app build, lint and required
+Swift gate passed; optional UI tests were skipped. These counts apply to that revision.
+
+Independent review found that changes ignored during a cancellable quit left stale recovery records after
+cancellation. The test-first GUI run 42378422902 at `8a9f1df` executed 2,069 tests, with 53 skipped and one failure:
+`testCancelledQuitRebuildsRecordsAfterSuspendedChanges` retained a closed Little Arkt and the old metadata of a
+surviving page. Cancellation now immediately rebuilds records after tracking resumes, without waiting for another
+page event. Current main is merged with both results histories preserved. At `98e63f7`, [CI run 42380522535](https://github.com/krystianslowik/arkt/actions/runs/42380522535) passed all eight reported checks: ArktCore 579 tests in 47 suites, ShellKit pure 2,508 tests in 282 suites, GUI 2,075 executed, 53 skipped and zero failures (including the cancellation regression), app build, lint and the required gate. Optional UI tests were skipped. These results apply to `98e63f7`; the subsequent screenshot fixture head requires fresh CI and a manual workflow for XCUITest. Manual appearance, VoiceOver, Reduce Motion and
+killed-process validation, plus the documented SIGTERM and failed-flush limits, remain outstanding.
+
+
+### Restore pages screenshot evidence (#580)
+
+`RestorePagesScreenshotTests` exports synthetic light and dark window captures with a long title and overflow when
+`ARKT_RESTORE_SHOTS_DIR` is set. The existing GUI CI job exports `restore-pages-screenshots` as a seven-day artifact.
+Rendering, visual inspection and the manually dispatched XCUITest workflow remain pending on the evidence head.
+
+### Restore pages final CI and screenshots (#580)
+
+CI run 42385504787 at `1c110df` passed all eight reported checks: ArktCore 579 tests in 47 suites, ShellKit pure
+2,508 tests in 282 suites, and GUI 2,077 executed with 54 skipped and zero failures. The cancellation regression
+and screenshot fixture passed; the app build, lint and required gate passed. Optional UI tests were skipped.
+The light/dark synthetic 1000 × 674 window-content PNGs are preserved in `docs/evidence/restore-pages/` and
+were visually inspected for the panel, long-title truncation, overflow and action count. This evidence applies
+to `1c110df`; the subsequent evidence commit changes documentation and images only.
+
+Manual XCUITest run 42382637990 at `dd8e937` built the app but did not complete: import/onboarding consent queries
+timed out and a command-bar accessibility snapshot was interrupted before the 40-minute job limit cancelled it.
+The preceding main nightly run 42357672719 has the same signature; #799 tracks the import/onboarding diagnosis.
+This is not a complete XCUITest pass. Real killed-process, VoiceOver, appearance and motion checks remain for
+maintainer validation, together with review of the documented SIGTERM and failed-flush limits. #580 remains open.
+
+### Restore pages full-review cleanup (#580)
+
+The full review of `844074a` found no blocking issue. The engine protocol comment now describes the shell's offer,
+and the noted Swift declarations and expressions are wrapped. Main is merged with both results histories retained,
+main's sections first. Source parsing and diff checks validate syntax and whitespace only; fresh CI must validate the
+integrated revision. The GUI screenshot upload step and committed PNGs remain unchanged pending the maintainer's
+answer. Manual killed-process, VoiceOver and motion checks, and the documented quit limits, remain outstanding.
+
+### Unanswered restore offer contract tests (#580)
+
+The maintainer follow-up requires retaining the crashed snapshot through live page changes and a clean quit until the
+offer is answered, matching the marker behavior proposed in [#803](https://github.com/krystianslowik/arkt/pull/803).
+The test-first GUI cases cover repeated offers using the same record store and persisted sidebar NodeID with fresh fake
+engines, independent overwrite and clear assertions, and resumed recording and clearing after Restore or Dismiss. This
+is a Shell contract test, not a real Chromium or database roundtrip; Core Persistence already tests database reopening.
+The empty filtered offer notice remains covered. At test-first head `912443b`, [GUI run 42422178440](https://github.com/krystianslowik/arkt/actions/runs/42422178440/job/128552912724) executed 2,081 tests, skipped 54 and reported 9 assertion failures in the four unanswered-offer regressions. The earlier `4beeeec` compile error was not a behavioral red.
+
+The window set now protects the captured crashed records from initialization through an unanswered offer, including
+live changes, cancelled quit and confirmed clean quit. Restore, Dismiss and the empty notice release protection and
+immediately rebuild the live snapshot; a failed Restore retains the offer. A pre-offer and cancelled-quit boundary
+regression and an immediate empty-notice refresh assertion supplement the existing tests. The fake engine models the
+retained marker; this is not a Chromium relaunch. #803 remains unmerged.
+
+Swift 6.2.4 source parsing and scoped diff/import checks are static only. Local full builds and tests were not run
+because the baseline cannot compile; CI on the implementation head is pending. Earlier green run 42407828692 at
+`004e3ca` reported Core 579 tests/47 suites, pure ShellKit 2,510/282 and GUI 2,077 executed/54 skipped/0 failures;
+those results predate these regressions and the fix.
+
 ## #846: an HTTP-only site crashes the engine at `TabDialogManager`'s `CHECK(host)`
 
 Date 2026-11-08. Branch `engine/846-https-first-dialog` from `origin/main` (`3a0263c`). Found while reviewing #795.
@@ -5537,6 +5704,26 @@ Unchanged: 14 patch files, 14 `arkt` commits, in sync. No upstream file touched.
 Every engine run and the loopback server stopped by exact PID (`ps -p` prints nothing for each). The throwaway
 profiles were deleted. The two macOS crash reports the crashing runs wrote (bundle `dev.arkt.Arkt`) were copied to the
 artifacts folder and removed from `DiagnosticReports`. The runs did not use the clipboard.
+
+
+### Restore pages integration with current main (#580)
+
+Merged main `4d40f38` into the recovery branch. The sole conflict was this shared results document; both the
+complete recovery history and main's #846 engine diagnosis/results were retained. ToastView's automatic merge
+keeps the recovery-specific multiline decision and main's radius/type roles. The unanswered-offer coordinator,
+AppSession recording guard and their existing regression files are byte-identical to the previously tested recovery
+head `aa72ced6a94c478b9c83cead32f09804b19c88c7`.
+
+#810 is now merged. The recovery panel uses `ShellRadius.sheet` and its recessed list uses `ShellRadius.field`,
+preserving their 14 pt and 10 pt values. A source scan mirroring CornerRadiusLintTests' exact regex and exemptions
+found two offending assignments before that correction and zero afterward. This is a static source check, not an
+executed Swift Testing result. No screenshots were regenerated; the existing captures remain historical evidence.
+
+Swift 6.2.4 frontend parsing passed for all 80 changed Swift files. The workflow import/UI-source checks, actionlint
+and whitespace/conflict-marker checks passed. No full local package/App build, GUI, engine or manual accessibility
+run was performed. CI must validate the merged head; the last full green remains run 42424301771 at `aa72ced`.
+#803 remains open, so production-engine repeated unanswered recovery and cross-launch validation still depend on
+that retained crash marker. Native killed-process recovery, quit/cancellation and VoiceOver remain unverified.
 
 ## #851: a tab-modal dialog on an Arkt window is cancelled, not a crash (patch 0015)
 
