@@ -34,6 +34,9 @@ These are main's values and stay as they are in every direction.
 | No favicon: the letter tile (25 % radius, `letterTileFill`, semibold at 0.62 of its size, `primaryText`) | `SidebarGlyphs.letter` |
 | Increase Contrast: the 1 pt `increasedContrastEdge` on every filled shape | `IncreasedContrast.setEdge` |
 
+New in every direction: a split tile's X sits on a round 16 pt plate in the hovered tile's color, because at 3
+and 4 panes the X covers a pane's favicon.
+
 `ShellRadius` (#810) and the type roles (#812) are open pull requests, not on main yet. The Favorites tile keeps its
 own `tileCornerRadius`; #810 does not change it.
 
@@ -55,8 +58,7 @@ The pane favicons sit next to each other in the favicon slot, in pane order, fol
 | 4 | 2 x 2, 3 pt apart (31 x 31) | 14 pt |
 
 - Selected: the tile's fill, as any Favorite. Which pane has focus is not shown on the tile; the content shows it.
-- Hover: the X covers part of the top trailing favicon at 3 and 4 panes, so a split tile's X gets a round plate in
-  the hovered tile's color.
+- Hover: the X, on its plate, covers part of the top trailing favicon at 3 and 4 panes.
 - For: reads as "these sites together" at a glance; every pane is visible; orientation shown for 2 panes; the
   closest to the tile people know.
 - Against: 14 pt favicons at 3 and 4 panes; the X covers a pane while hovered.
@@ -96,7 +98,7 @@ favicon. Outer corners keep the tile's radius 10; inner corners are 4.
 - Selected: the focused pane's cell takes `tabCurrent` with the lift shadow, the other cells `tabContentVisible` (the
   existing token for a page that is visible but not focused). Focus moving between panes moves the bright cell (fill
   cross-fade 150 ms; Reduce Motion: at once).
-- Hover: the X sits on a round plate over the top trailing cell.
+- Hover: the X, on its plate, sits over the top trailing cell.
 - For: the only direction that says "split" and shows which pane has focus; matches the content's layout.
 - Against: the most new drawing (cells, per-cell fills and Increase Contrast edges); 12 pt favicons at 3 panes; 4
   panes drop the orientation; the most visual weight in a row of plain Favorites.
