@@ -9,9 +9,10 @@ import EngineAPI
 /// no longer being the main window, and the app going to the background.
 ///
 /// Every change goes to the engine (`EngineSiteSettings`) at once, from the panel's tab, and the panel shows what the
-/// engine reads back (also on `.pageInfoChanged`, through `pageDidChange`). Closing tells the engine
-/// (`pageInfoDidClose(tab:)`), which raises its reload infobar on the page if a change needs one. In a private window
-/// the panel is read-only (#557).
+/// engine reads back (also on `.pageInfoChanged`, through `pageDidChange`). Opening tells the engine
+/// (`pageInfoDidOpen(tab:)`), which counts the site's data only while a panel is open and announces the count when it
+/// arrives. Closing tells it too (`pageInfoDidClose(tab:)`), which raises its reload infobar on the page if a change
+/// needs one. In a private window the panel is read-only (#557).
 @MainActor
 public final class PageInfoPanelController: NSObject {
   private let siteSettings: @MainActor () -> (any EngineSiteSettings)?
@@ -79,6 +80,7 @@ public final class PageInfoPanelController: NSObject {
     self.tab = tab
     origin = model.origin
     self.anchor = anchor
+    siteSettings()?.pageInfoDidOpen(tab: tab)          // the engine counts site data only while the panel is open
     let window = DialogWindow(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered,
                               defer: false)
     window.isOpaque = false

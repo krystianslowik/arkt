@@ -30,6 +30,7 @@ struct AppSettingsTests {
     #expect(!settings.toolbar.isVisible)
     #expect(settings.toolbar.showsFullURL)
     #expect(!settings.warnsBeforeQuitting)
+    #expect(settings.playsReorderHaptics)
   }
 
   /// Arc's key names: Count Favorites is stored inverted (`excludeFavoritesInSwitchToNthTab`).
@@ -45,6 +46,9 @@ struct AppSettingsTests {
     #expect(suite.defaults.object(forKey: "switchToNinthSidebarItemEnabled") as? Bool == true)
     #expect(suite.defaults.object(forKey: PeekLinkSettings.crossSiteKey) as? Bool == false)
     #expect(suite.defaults.string(forKey: "settingsLastPane") == "shortcuts")
+    settings.playsReorderHaptics = false
+    #expect(suite.defaults.object(forKey: "tabReorderingHapticsDisabled") as? Bool == true)
+    #expect(!AppSettings(defaults: suite.defaults).playsReorderHaptics)
 
     let reread = AppSettings(defaults: suite.defaults)
     #expect(!reread.tabNavigation.countsFavorites)
@@ -143,6 +147,7 @@ struct AppSettingsTests {
     settings.opensLittleArktOnOptionCommandClick = false
     settings.warnsBeforeQuitting = true
     settings.sendsCrashReports = true
+    settings.playsReorderHaptics = false
     settings.downloadLocation = DownloadLocationSetting(
       asksWhereToSave: true, folder: URL(filePath: "/Volumes/Media/", directoryHint: .isDirectory))
     settings.commandBar.setSearchEngine(.duckDuckGo)
@@ -163,6 +168,7 @@ struct AppSettingsTests {
     #expect(settings.opensLittleArktOnOptionCommandClick)
     #expect(!settings.warnsBeforeQuitting)
     #expect(!settings.sendsCrashReports)
+    #expect(settings.playsReorderHaptics)
     #expect(settings.downloadLocation == DownloadLocationSetting())
     #expect(!settings.toolbar.isVisible)
     #expect(settings.toolbar.showsFullURL)
