@@ -127,7 +127,7 @@ public enum SidebarContextMenu {
       guard let id = ids.first else { return [] }
       return row(id, source, context)
     case .favorite(let id):
-      return favorite(id, context)
+      return favorite(id, source, context)
     case .empty(let space):
       return emptyArea(space, source, context)
     }
@@ -165,7 +165,7 @@ public enum SidebarContextMenu {
     case (.tab?, .split(let split)?):
       return pane(id, split: split, source, context)
     case (.tab?, _):
-      if case .favorites? = source.section(containing: id) { return favorite(id, context) }
+      if case .favorites? = source.section(containing: id) { return favorite(id, source, context) }
       if case .pinned? = source.section(containing: id) { return pinnedTab(id, source, context) }
       return todayTab(id, source, context)
     case (.folder?, _):
@@ -223,15 +223,32 @@ public enum SidebarContextMenu {
 
   // MARK: 3.3 Favorite
 
+  /// The Favorite menu of a tile: a tab's, or the split items of a split in the Favorites.
+  @MainActor
+  private static func favorite(_ id: NodeID, _ source: any SidebarSource,
+                               _ context: SidebarMenuContext) -> [SidebarMenuEntry] {
+    if case .split? = source.node(id) { return favoriteSplit(id) }
+    return favoriteTab(id, context)
+  }
+
   /// A tile draws no title, so Rename... opens the Edit Pin popover on Name (#363, design/edit-pin); Edit Pinned
   /// URL... opens it on Pinned URL. Back to Pinned URL for Favorites is PARITY and disabled, as the design's
   /// screenshot shows it.
-  private static func favorite(_ id: NodeID, _ context: SidebarMenuContext) -> [SidebarMenuEntry] {
+  private static func favoriteTab(_ id: NodeID, _ context: SidebarMenuContext) -> [SidebarMenuEntry] {
     [SidebarMenuEntry(title: "Rename\u{2026}", action: .editPin(id, focus: .name)), .unavailable("Change Icon"),
      .separator,
      .unavailable("Back to Pinned URL"), SidebarMenuEntry(title: editPinnedURLTitle, action: .editPin(id, focus: .url)),
      .separator]
       + copyLink([id], plural: false)
+      + [.separator,
+         SidebarMenuEntry(title: "Remove from Favorites", action: .removeFromFavorites(id)),
+         SidebarMenuEntry(title: "Close and Keep Favorite", action: .archive([id]), key: "w")]
+  }
+
+  /// A split in the Favorites (BH-115; its own tile is #788): the Favorite items that act on a split, the pane links
+  /// included. The pin items edit one tab and do nothing on a split (#801).
+  private static func favoriteSplit(_ id: NodeID) -> [SidebarMenuEntry] {
+    copyLink([id], plural: true)
       + [.separator,
          SidebarMenuEntry(title: "Remove from Favorites", action: .removeFromFavorites(id)),
          SidebarMenuEntry(title: "Close and Keep Favorite", action: .archive([id]), key: "w")]
