@@ -66,7 +66,8 @@ final class MainMenuKeyEquivalentTests: XCTestCase {
     XCTAssertNotNil(renamed.first { $0.id == sidebar.id && $0.defaultBinding == sidebar.defaultBinding })
   }
 
-  /// The linked real menu keeps its existing selector and dispatches the persisted binding to the window controller.
+  /// The manually bound menu keeps its selector and dispatches to an explicitly assigned window controller.
+  /// App composition and responder-chain wiring are covered separately by ShortcutWiringTests.
   func testOverridesDriveRealMenuAndCommandAfterReload() throws {
     _ = NSApplication.shared
     let suite = "dev.arkt.tests.shortcutMenu.\(UUID().uuidString)"
