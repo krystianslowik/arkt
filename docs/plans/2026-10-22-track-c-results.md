@@ -3011,3 +3011,10 @@ Settings refresh now restores the row through the existing selection helper, whi
 without keyboard scrolling or selection announcements. The two regression tests are unchanged. Swift 6.2.4 source
 parsing and diff checks passed; no local GUI suite ran. Current-head CI must establish green. The broader issue's
 folder/extension activation, forwarding and presentation and search-engine choice remain incomplete.
+
+
+### #562: retained-selection CI and download retry
+
+At `b4badaa`, the informative GUI job reported **2,050 tests, 54 skipped, zero failures**. Both retained-selection regressions and SettingsSearchSuggestionsTests passed. Pure ShellKit and isolation/lint passed; Core and XCUITest were skipped. The app build failed before compilation downloading XcodeGen with curl 56 / HTTP 504. A failed-jobs-only retry then failed at the same download step with curl 56, connection died; the required aggregate reflected that app failure. Neither attempt established an app compilation failure.
+
+Both existing XcodeGen commands now use the bounded retry flags validated during #113's CI correction: three retries including receive errors, a retry budget and connection/transfer bounds. The URL, pinned version, output file, and strict SHA-256 check remain unchanged; exhausted downloads fail the job. The command lines were compared directly with that validated correction. The earlier controlled loopback probe made one attempt for a failed CONNECT and an interrupted tunnel before the correction, and four attempts afterward, still failing on exhaustion. That is prior shared-command evidence, not a new probe run in this branch. `actionlint` and whitespace checks passed. No app source or product behavior changed; new-head app/GUI CI remains pending, and full #562 remains incomplete.

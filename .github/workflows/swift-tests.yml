@@ -277,7 +277,7 @@ jobs:
         run: |
           dir=$RUNNER_TEMP/xcodegen
           mkdir -p $dir
-          curl -fsSL -o $dir/xcodegen.zip \
+          curl -fsSL --retry 3 --retry-all-errors --retry-delay 2 --retry-max-time 60 --connect-timeout 15 --max-time 60 -o $dir/xcodegen.zip \
             "https://github.com/yonaskolb/XcodeGen/releases/download/$XCODEGEN_VERSION/xcodegen.zip"
           print "$XCODEGEN_SHA256  $dir/xcodegen.zip" | shasum -a 256 -c -
           unzip -q $dir/xcodegen.zip -d $dir
@@ -320,7 +320,7 @@ jobs:
         run: |
           dir=$RUNNER_TEMP/xcodegen
           mkdir -p $dir
-          curl -fsSL -o $dir/xcodegen.zip \
+          curl -fsSL --retry 3 --retry-all-errors --retry-delay 2 --retry-max-time 60 --connect-timeout 15 --max-time 60 -o $dir/xcodegen.zip \
             "https://github.com/yonaskolb/XcodeGen/releases/download/$XCODEGEN_VERSION/xcodegen.zip"
           print "$XCODEGEN_SHA256  $dir/xcodegen.zip" | shasum -a 256 -c -
           unzip -q $dir/xcodegen.zip -d $dir
