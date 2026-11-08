@@ -112,6 +112,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   private func finishTermination(_ sender: NSApplication) -> NSApplication.TerminateReply {
     guard composition.session != nil else { return .terminateNow }
     composition.prepareForTermination()               // stamps visible tabs first (decision 10)
+    composition.finishSessionRecovery(cleanQuit: true)
     guard composition.needsFlush else { return .terminateNow }
     terminationPending = true
     Task { @MainActor [composition] in

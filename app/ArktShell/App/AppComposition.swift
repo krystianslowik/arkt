@@ -47,9 +47,10 @@ final class AppComposition {
       do {
         let location = try await AppEnvironment.databaseLocation()
         let state = try await ArktLaunch.openAndLoad(location, now: .now)
+        let recoveryPages = try await SettingsStore(database: state.database).load(RecoveryPageState.self)
         let favicons = await AppEnvironment.faviconStore(in: location)
-        let session = AppSession(state: state, location: location, engine: engine, faviconStore: favicons,
-                                 hostLookup: hostLookup)
+        let session = AppSession(state: state, recoveryState: recoveryPages, location: location, engine: engine,
+                                 faviconStore: favicons, hostLookup: hostLookup)
         self.session = session
         session.linkRoutingSettings.onDidLoad = { [weak self] in self?.retryPendingExternalOpens() }
         // The first run's record decides whether the launch window opens on it; loaded before the window exists.
@@ -160,6 +161,9 @@ final class AppComposition {
     externalOpens.pauseDelivery()
     session?.prepareForTermination()
   }
+
+  /// Finalize recovery only once quit can no longer be cancelled.
+  func finishSessionRecovery(cleanQuit: Bool) { session?.finishSessionRecovery(cleanQuit: cleanQuit) }
 
   /// The quit was cancelled: auto-archive runs again.
   func terminationCancelled() {

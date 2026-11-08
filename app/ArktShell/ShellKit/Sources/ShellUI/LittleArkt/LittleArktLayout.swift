@@ -17,7 +17,7 @@ public enum LittleArktLayout {
   /// The frame around the card on the left, right and bottom.
   public static let frameInset: CGFloat = 6
   public static let topBarHeight: CGFloat = 40
-  public static let cornerRadius: CGFloat = 12
+  public static let cornerRadius = ShellRadius.popover
 
   /// A new window of `size` (the last size the user set, BH-142): at the top-right of `visible`, or 28 pt left and
   /// down from the frontmost Little Arkt window; back at the first position when that would leave `visible`.
