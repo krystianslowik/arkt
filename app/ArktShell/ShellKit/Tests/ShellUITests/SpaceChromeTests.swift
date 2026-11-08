@@ -201,9 +201,7 @@ struct ThemeCrossfadeTests {
   }
 
   /// #296: the crossfade eases in and out, and the settle onto the new theme is tied to the animation's
-  /// completion, not a wall-clock timer. A view in no window has no render server pacing, so the test takes the
-  /// completion from the view (`crossfadeCompletionDriver`) and runs it by hand: it checks the curve's control points
-  /// and that the settle happens, and it reads no clock (#549).
+  /// completion, driven by hand because a view without a window has no render-server pacing (#549).
   @Test func theCrossfadeEasesInAndOutAndSettlesOnCompletion() throws {
     let view = background()
     var completion: (@MainActor () -> Void)?
@@ -213,14 +211,14 @@ struct ThemeCrossfadeTests {
     #expect(controlPoint(animation.timingFunction, at: 1) == (0.42, 0))
     #expect(controlPoint(animation.timingFunction, at: 2) == (0.58, 1))
     #expect(stops(view.baseColorsForTesting) == stops(SpaceThemeCatalog.paper.baseColors.map(\.cgColor)))
-    let settle = try #require(completion)
-    settle()
+    let finishCrossfade = try #require(completion)
+    finishCrossfade()
     #expect(view.crossfadeAnimationForTesting == nil)
     #expect(stops(view.baseColorsForTesting) == stops(SpaceThemeCatalog.dusk.baseColors.map(\.cgColor)))
   }
 
-  /// The completion of a crossfade that a later one replaced is stale: it must not settle the newer crossfade.
-  @Test func aStaleCompletionDoesNotSettleANewerCrossfade() throws {
+  /// A completion from a replaced or interrupted animation cannot settle a newer transition (#549).
+  @Test func staleCompletionsCannotSettleNewerOrInterruptedCrossfades() throws {
     let view = background()
     var completions: [@MainActor () -> Void] = []
     view.crossfadeCompletionDriver = { completions.append($0) }
@@ -228,8 +226,16 @@ struct ThemeCrossfadeTests {
     view.replaceThemes([SpaceThemeCatalog.paper, SpaceThemeCatalog.paper], crossfade: true)
     #expect(completions.count == 2)
     completions[0]()
-    #expect(view.crossfadeAnimationForTesting != nil, "the first crossfade's completion leaves the second running")
+    #expect(view.crossfadeAnimationForTesting != nil)
     completions[1]()
+    #expect(view.crossfadeAnimationForTesting == nil)
+    view.replaceThemes([SpaceThemeCatalog.dusk, SpaceThemeCatalog.paper], crossfade: true)
+    #expect(completions.count == 3)
+    view.setPosition(0.4)
+    let colors = view.baseColorsForTesting
+    completions[2]()
+    #expect(view.position == 0.4)
+    #expect(view.baseColorsForTesting == colors)
     #expect(view.crossfadeAnimationForTesting == nil)
   }
 

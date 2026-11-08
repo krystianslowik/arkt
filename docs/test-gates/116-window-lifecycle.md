@@ -286,3 +286,10 @@ and resolution-specific whitespace checks passed. No merged-head build or tests 
 check includes four inherited findings in main's extensions directions README and Chromium patch context; both
 files are byte-identical to main and were not rewritten. Recovery-with-multiple-window/crash interaction and native
 cancellation remain verification boundaries for the merged head. Independent review precedes publication.
+
+
+The reviewed recovery integration `6f04425` was followed by current main `859c4ce` (theme composition). Only the
+append-only Track C results history conflicted in that follow-up. The four recovery/session conflict resolutions
+are byte-identical to the reviewed merge; both histories remain. Additional main Swift sources parsed and source/
+lint/header checks passed. Prior native GREEN2 remains attributed to `6c5946b`. The integrated head still needs
+App/GUI/native execution and a representative crashed-recovery/multiple-window/cancellation gate.
