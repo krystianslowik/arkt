@@ -171,7 +171,18 @@ change restoration policy. AX discovery and value refresh are not established wi
 The revised UI test checks the current collection with the identified private window still open, then compares its
 ordered selection pairs with the next launch's initial collection after requiring a different launch ID and the
 completion latch. It checks the exact restored window count and fresh fixture requests; AX enumeration does not
-establish creation order. A focused Foundation executable against a unique defaults suite passed the raw-value,
-immutability, read-only, identity, latch and codec checks. The AppKit adapter type-checked separately. The real store
-fixture tests, collection-save/capture mutation, full App build and native UI test have not run locally; those are not
-proof of App capture or AX forwarding. A representative native observation must precede any restoration change.
+establish creation order. A focused Foundation executable passed the raw-value, immutability, read-only, identity,
+latch and codec checks. The AppKit adapter type-checked separately.
+
+The repeatable [actual-source probe](../../integration/WindowSession/README.md) then passed **34 tests in four
+suites: 32 existing store/compatibility tests plus two observation tests**. It links the production store, observer,
+shared sidebar identity declarations, and the canonical tests. The identity aliases moved unchanged to their own
+production file so this bounded target needs no substitute declarations. Its EngineAPI subset omits the unrelated
+Arc import source and dependency. Swift 6.4.1 emitted missing developer-framework/library search-path warnings.
+
+For the mutation check, an unconditional return was temporarily inserted at the start of the actual
+`WindowSessionStore.saveWindows` method. The observation filter executed two tests and failed exactly the collection
+save test with `missing saved data`. The mutation was removed before the 34-test green run. This establishes that the
+store fixture detects disabled saves; it does not establish that App capture reaches the store. Deliberately broken
+window capture, AX discovery and refresh, full App compilation and native UI execution remain unverified. The probe
+is not currently run by CI. A representative native observation must precede any restoration change.

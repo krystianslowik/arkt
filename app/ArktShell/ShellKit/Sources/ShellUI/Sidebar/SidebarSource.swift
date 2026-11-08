@@ -1,8 +1,5 @@
 import Foundation
 
-public typealias SpaceID = UUID
-public typealias NodeID = UUID
-
 /// Mirrors Track B's `SidebarModel.Location` so the later adapter is mechanical.
 public enum SidebarLocation: Hashable, Sendable {
   case favorites(profile: String)
