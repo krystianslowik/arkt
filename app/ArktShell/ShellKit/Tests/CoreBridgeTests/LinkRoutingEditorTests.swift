@@ -50,6 +50,20 @@ struct LinkRoutingEditorTests {
     }
   }
 
+  @Test func exactDuplicateRoutesSurviveFlushAndReopen() async {
+    let store = EditorStore()
+    let model = LinkRoutingSettingsModel(state: store)
+    await model.load()
+    model.appendRoute(Self.first)
+    model.appendRoute(Self.first)
+    await model.flush()
+    let reopened = LinkRoutingSettingsModel(state: store)
+    await reopened.load()
+    #expect(reopened.settings.routes == [Self.first, Self.first])
+    reopened.replaceRoute(at: 1, with: Self.second)
+    #expect(reopened.settings.routes == [Self.first, Self.second], "duplicate entries remain independently editable")
+  }
+
   @Test func competingRoutesRemainConfigurationWithoutChoosingWinner() async {
     let store = EditorStore()
     let model = LinkRoutingSettingsModel(state: store)

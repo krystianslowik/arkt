@@ -16,25 +16,26 @@ struct LinkRoutingEditorStoreTests {
     let second = LinkRouting.Route(condition: .matches("https://Example.test/Path/?q=One#Top"), destination: .littleArkt)
     do {
       let database = try ArktDatabase.open(at: url)
+      defer { try? database.close() }
       let store: any LinkRoutingSettingsStoring = SettingsStore(database: database)
       #expect(try await store.loadLinkRouting() == LinkRouting(routes: []))
       _ = try await store.updateLinkRouting(at: date) { $0.routes.append(first) }
       _ = try await store.updateLinkRouting(at: date) { $0.routes.append(second); $0.defaultDestination = .mostRecentSpace }
-      try database.close()
+      _ = try await store.updateLinkRouting(at: date) { $0.routes.append(first) }
     }
     do {
       let database = try ArktDatabase.open(at: url)
+      defer { try? database.close() }
       let store: any LinkRoutingSettingsStoring = SettingsStore(database: database)
       let loaded = try await store.loadLinkRouting()
-      #expect(loaded == LinkRouting(routes: [first, second], defaultDestination: .mostRecentSpace))
+      #expect(loaded == LinkRouting(routes: [first, second, first], defaultDestination: .mostRecentSpace))
       #expect(try await SettingsStore(database: database).load(LinkRouting.self) == loaded)
-      #expect(loaded.resolution(for: URL(string: "https://Example.test/Path/?q=One#Top")!) == .ambiguous([first, second]))
+      #expect(loaded.resolution(for: URL(string: "https://Example.test/Path/?q=One#Top")!) == .ambiguous([first, second, first]))
       _ = try await store.updateLinkRouting(at: date) { $0.routes.removeFirst(); $0.defaultDestination = .space(space) }
-      try database.close()
     }
     let database = try ArktDatabase.open(at: url)
     defer { try? database.close() }
     let store: any LinkRoutingSettingsStoring = SettingsStore(database: database)
-    #expect(try await store.loadLinkRouting() == LinkRouting(routes: [second], defaultDestination: .space(space)))
+    #expect(try await store.loadLinkRouting() == LinkRouting(routes: [second, first], defaultDestination: .space(space)))
   }
 }
