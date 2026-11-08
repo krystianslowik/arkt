@@ -2896,3 +2896,18 @@ Written first. Each failed to compile before the code existed.
 - `LittleArktTests` (XCUITest, 4): Opt-Cmd-click opens Little Arkt, Open in, Cmd-W and the chooser's Open in New Window.
   The app and test bundle build (`xcodebuild ... build-for-testing`: TEST BUILD SUCCEEDED). Not run: the suite needs
   the real pointer and keyboard, and the Mac was in use.
+
+### Shortcut editor model slice (#119)
+
+The typed model accepts catalog definitions with stable action IDs, normalizes bindings and stores only overrides,
+including explicit clears. It supports per-action and all reset, recording, cancellation and clear, and resolves all
+conflicting actions when the recorded shortcut is accepted. Unknown IDs are ignored. This slice does not wire the
+catalog to menus or Settings, implement system conflict warnings, or audit remaining shortcut rows; those remain open.
+
+- Red: CI run 42428840901, ShellKit job 128573038493, failed to compile the three initial
+  `ShortcutEditorModelTests` because the model types were missing; no tests executed. The app build passed.
+- Scoped green: an isolated Swift package containing the actual model source and the actual test file, macOS 15
+  deployment target and macOS 15.5 SDK, `swift test`: 6 tests passed (the 3 original scenarios and 3 boundary tests).
+  Swift 6.1.2 was used locally. This is not a full ShellKit run.
+- Full ShellKit tests and app build were not run locally; the baseline and full Xcode are unavailable. CI remains
+  pending for this slice.

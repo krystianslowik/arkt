@@ -85,6 +85,53 @@ struct ShortcutEditorModelTests {
     #expect(reloaded.binding(for: sidebar) == nil)
   }
 
+  @Test func multipleConflictsAreExplicitlyClearedAndPersisted() throws {
+    let suite = try Suite()
+    let third = ShortcutActionID("third")
+    let definitions = catalog() + [ShortcutDefinition(id: third, title: "Third", defaultBinding: commandS)]
+    let store = ShortcutEditorModel(catalog: definitions, defaults: suite.defaults)
+    store.beginRecording(newTab)
+    store.record(event: try event("s", keyCode: 1, modifiers: .command))
+    #expect(store.conflictingActions == [sidebar, third])
+    store.useRecordedShortcut()
+    #expect(store.overrides[sidebar] == .cleared)
+    #expect(store.overrides[third] == .cleared)
+    let reloaded = ShortcutEditorModel(catalog: definitions, defaults: suite.defaults)
+    #expect(reloaded.binding(for: newTab) == commandS)
+    #expect(reloaded.binding(for: sidebar) == nil)
+    #expect(reloaded.binding(for: third) == nil)
+  }
+
+  @Test func cancellationAndUnknownActionsCannotApplyPendingBinding() throws {
+    let suite = try Suite()
+    let store = ShortcutEditorModel(catalog: catalog(), defaults: suite.defaults)
+    store.useRecordedShortcut()
+    store.beginRecording(newTab)
+    store.record(event: try event("s", keyCode: 1, modifiers: .command))
+    store.cancelRecording()
+    store.useRecordedShortcut()
+    #expect(store.conflictingActions.isEmpty)
+    #expect(store.binding(for: newTab) == commandT)
+    let unknown = ShortcutActionID("unknown")
+    store.setBinding(commandS, for: unknown)
+    store.beginRecording(unknown)
+    store.record(event: try event("e", keyCode: 14, modifiers: .command))
+    #expect(store.binding(for: unknown) == nil)
+    #expect(store.overrides.isEmpty)
+  }
+
+  @Test func malformedStorageAndEventFlagsAreHandled() throws {
+    let suite = try Suite()
+    suite.defaults.set(Data("not json".utf8), forKey: "shortcutOverrides")
+    let store = ShortcutEditorModel(catalog: catalog(), defaults: suite.defaults)
+    #expect(store.binding(for: sidebar) == commandS)
+    store.beginRecording(newTab)
+    store.record(event: try event("E", keyCode: 14, modifiers: [.command, .shift, .capsLock, .numericPad]))
+    #expect(store.binding(for: newTab) == ShortcutBinding(key: "e", modifiers: [.command, .shift]))
+    let reloaded = ShortcutEditorModel(catalog: catalog(), defaults: suite.defaults)
+    #expect(reloaded.binding(for: newTab) == store.binding(for: newTab))
+  }
+
   private func event(_ characters: String, keyCode: UInt16,
                      modifiers: NSEvent.ModifierFlags = []) throws -> NSEvent {
     try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: modifiers,
