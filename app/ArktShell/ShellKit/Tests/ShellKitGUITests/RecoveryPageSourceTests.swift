@@ -309,6 +309,84 @@ final class RecoveryPageSourceTests: XCTestCase {
     XCTAssertEqual(second.littleArkts.count, 1)
   }
 
+  // Calls the two WindowSet lifecycle APIs independently; this does not prove App termination ordering.
+  func testRestoredWindowCollectionAndUnansweredRecoverySurviveCancelledQuit() throws {
+    _ = NSApplication.shared
+    let name = "RecoveryWindowCollection.\(UUID())"
+    defer { UserDefaults().removePersistentDomain(forName: name) }
+    let store = WindowSessionStore(defaults: try XCTUnwrap(UserDefaults(suiteName: name)))
+    let sidebar = StubSidebar.sample()
+    let personal = sidebar.spaceOrder[0], work = sidebar.spaceOrder[1]
+    let a = sidebar.children(of: .today(personal))[1]
+    let b = sidebar.children(of: .today(work))[0]
+    let c = sidebar.children(of: .pinned(personal))[0]
+    let d = sidebar.children(of: .pinned(work))[1]
+    let frame = CGRect(x: 100, y: 100, width: 700, height: 500)
+    store.saveWindows([
+      WindowSessionState(frame: frame, space: personal, currentTab: a, selectedTabs: [personal: a, work: b]),
+      WindowSessionState(frame: frame, space: work, currentTab: d, selectedTabs: [personal: c, work: d])
+    ])
+    let old = ShellRecoveryPage(title: "Prior", url: URL(string: "https://example.invalid/prior")!, kind: .littleArkt)
+    let records = RecordingRecoveryPages([old])
+    let engine = InMemoryEngine()
+    engine.crashedSession.simulateCrashedExit()
+    let set = ShellWindowSet(engine: engine, sidebar: sidebar, sessionStore: store, recoveryPageSource: records)
+    set.littleArktReduceMotion = { true }
+    defer {
+      let regular = set.controllers
+      let little = set.littleArkts
+      for id in engine.windowIDs { engine.engineEndWindow(id, reason: .appQuit) }
+      for window in regular { window.close() }
+      for window in little { window.finishMotion(); window.window.close() }
+      XCTAssertTrue(engine.windowIDs.isEmpty)
+      XCTAssertTrue(set.controllers.isEmpty)
+      XCTAssertTrue(set.littleArkts.isEmpty)
+    }
+    let windows = set.openWindowsAtLaunch()
+    XCTAssertEqual(windows.count, 2)
+    let first = try XCTUnwrap(windows.first)
+    let second = try XCTUnwrap(windows.last)
+    XCTAssertFalse(first === second)
+    XCTAssertEqual(windows.map(\.currentNode), [a, d])
+    XCTAssertEqual(first.sidebarController.selectedTabs, [personal: a, work: b])
+    XCTAssertEqual(second.sidebarController.selectedTabs, [personal: c, work: d])
+    set.beginSessionRecovery(engine.crashedSession)
+    let owner = try XCTUnwrap(windows.first { $0.rootView.subviews.contains { $0 is RestorePagesView } })
+    let panel = try XCTUnwrap(owner.rootView.subviews.compactMap { $0 as? RestorePagesView }.first)
+    let privateWindow = set.openWindow(opensFirstTab: false)
+    privateWindow.makeIncognito()
+    privateWindow.openPrivately(URL(string: "https://example.invalid/private")!, inNewPage: true)
+    let live = set.openLittleArkt(url: URL(string: "https://example.invalid/live")!)
+    let liveTab = try XCTUnwrap(live.shownTab)
+    XCTAssertEqual(records.pages, [old])
+    // Ordinary changes can already have saved the same collection; force a distinguishable stale value.
+    store.saveWindows([])
+    set.saveSessionsForTermination()
+    let frozen = try XCTUnwrap(store.loadWindows())
+    XCTAssertEqual(frozen.map(\.currentTab), [a, d])
+    XCTAssertEqual(frozen.first?.selectedTabs, [personal: a, work: b])
+    XCTAssertEqual(frozen.last?.selectedTabs, [personal: c, work: d])
+    records.isSuspended = true
+    set.finishSessionRecovery(cleanQuit: true)
+    first.activate(node: c)
+    let changed = URL(string: "https://example.invalid/changed")!
+    engine.navigate(liveTab, to: changed)
+    XCTAssertEqual(store.loadWindows(), frozen)
+    XCTAssertEqual(records.pages, [old])
+    records.isSuspended = false
+    set.resumeSessions()
+    set.finishSessionRecovery(cleanQuit: false)
+    let resumed = try XCTUnwrap(store.loadWindows())
+    XCTAssertEqual(resumed.map(\.currentTab), [c, d])
+    XCTAssertEqual(resumed.last?.selectedTabs, [personal: c, work: d])
+    XCTAssertEqual(records.pages, [old])
+    XCTAssertEqual(engine.crashedSession.dismissals, 0)
+    panel.dismissPressed()
+    XCTAssertEqual(engine.crashedSession.dismissals, 1)
+    XCTAssertEqual(records.pages.map(\.url), [changed])
+    XCTAssertEqual(store.loadWindows(), resumed)
+  }
+
   func testUnansweredOfferIsNotClearedByCleanQuitWithoutLiveWrites() throws {
     _ = NSApplication.shared
     let engine = InMemoryEngine()
