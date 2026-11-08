@@ -112,6 +112,19 @@ struct LinkRoutingEditorFailureTests {
     #expect(reopened.settings.routes == [route, route, other])
   }
 
+  @Test func failedWriteOfUnchangedSnapshotStillNeedsRetry() async {
+    let store = ControlledEditorStore()
+    let model = LinkRoutingSettingsModel(state: store)
+    await model.load()
+    await store.failNextWrite()
+    #expect(!(await model.flush()))
+    #expect(model.needsFlush)
+    #expect(model.lastError != nil)
+    #expect(await model.flush())
+    #expect(!model.needsFlush)
+    #expect(model.lastError == nil)
+  }
+
   @Test func inFlightEditsAndConcurrentFlushesAreSerialized() async {
     let store = ControlledEditorStore()
     let model = LinkRoutingSettingsModel(state: store)
@@ -131,6 +144,57 @@ struct LinkRoutingEditorFailureTests {
     await reopened.load()
     #expect(reopened.settings.routes == [route, route, other])
     #expect(await store.maximumConcurrentWrites() == 1)
+  }
+
+  @Test func blockingFlushFollowsInFlightOlderSnapshot() async {
+    let store = ControlledEditorStore()
+    let model = LinkRoutingSettingsModel(state: store, flushTimeout: nil)
+    await model.load()
+    model.appendRoute(route)
+    await store.pauseNextWrite()
+    let first = Task { await model.flush() }
+    await store.waitForPausedWrite()
+    model.appendRoute(route)
+    model.appendRoute(other)
+    let release = Task.detached { await store.resumeWrite() }
+    #expect(model.flushBlocking())
+    await release.value
+    #expect(await first.value)
+    #expect(!model.needsFlush)
+    #expect(await store.stored().routes == [route, route, other])
+  }
+
+  @Test func blockingTimeoutKeepsSnapshotDirtyAndReportsError() async {
+    let store = ControlledEditorStore()
+    let model = LinkRoutingSettingsModel(state: store, flushTimeout: .zero)
+    await model.load()
+    model.appendRoute(route)
+    await store.pauseNextWrite()
+    #expect(!model.flushBlocking())
+    #expect(model.needsFlush)
+    #expect(model.lastError != nil)
+    await store.waitForPausedWrite()
+    await store.resumeWrite()
+    #expect(await model.flush())
+    #expect(!model.needsFlush)
+    #expect(model.lastError == nil)
+    #expect(await store.stored().routes == [route])
+  }
+
+  @Test func normalTerminationTimeoutRetainsErrorAndDirtySnapshot() async {
+    let store = ControlledEditorStore()
+    let model = LinkRoutingSettingsModel(state: store, flushTimeout: .zero)
+    await model.load()
+    model.appendRoute(route)
+    await store.pauseNextWrite()
+    #expect(!(await model.flushForTermination()))
+    #expect(model.needsFlush)
+    #expect(model.lastError != nil)
+    await store.waitForPausedWrite()
+    await store.resumeWrite()
+    #expect(await model.flush())
+    #expect(!model.needsFlush)
+    #expect(model.lastError == nil)
   }
 
   @Test func failedLoadCannotFlushDefaultsAndInvalidIndicesAreSafe() async {
@@ -192,4 +256,16 @@ private actor ControlledEditorStore: LinkRoutingSettingsStoring {
     change(&value)
     return value
   }
+}
+
+@MainActor
+struct LinkRoutingTerminationTests {
+  @Test func routingOnlyEditRequiresTerminationFlush() async {
+    let model = LinkRoutingSettingsModel(state: EditorStore())
+    await model.load()
+    #expect(!model.needsFlush)
+    model.setDefaultDestination(.mostRecentSpace)
+    #expect(model.needsFlush)
+  }
+
 }

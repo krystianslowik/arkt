@@ -60,6 +60,23 @@ struct LinkRoutingSettingsRowsTests {
     #expect(second.destination() == .space(firstSpace))
   }
 
+  @Test func failedSaveIsVisibleToReopenedConsumerUntilRetrySucceeds() async {
+    let store = RetryRowsStore(initial: LinkRouting(routes: [route, route]))
+    let model = LinkRoutingSettingsModel(state: store)
+    let first = model.settingsRows
+    await first.load()
+    first.setDestination(.mostRecentSpace)
+    #expect(!(await first.flush()))
+    let reopened = model.settingsRows
+    await reopened.load()
+    #expect(reopened.destination() == .mostRecentSpace)
+    #expect(reopened.hasSaveError())
+    reopened.setDestination(.mostRecentSpace)
+    #expect(await reopened.flush())
+    #expect(!reopened.hasSaveError())
+    #expect(await store.value == LinkRouting(routes: [route, route], defaultDestination: .mostRecentSpace))
+  }
+
   @Test func failedLoadCannotWriteDefaultAndCanRetry() async {
     let stored = LinkRouting(routes: [route, route], defaultDestination: .space(secondSpace))
     let store = RoutingRowsStore(initial: stored, failLoad: true)
@@ -118,5 +135,18 @@ private actor PausedRoutingRowsStore: LinkRoutingSettingsStoring {
     var copy = value
     change(&copy)
     return copy
+  }
+}
+
+private actor RetryRowsStore: LinkRoutingSettingsStoring {
+  enum Failure: Error { case requested }
+  private(set) var value: LinkRouting
+  private var fail = true
+  init(initial: LinkRouting) { value = initial }
+  func loadLinkRouting() async throws -> LinkRouting { value }
+  func updateLinkRouting(at date: Date, _ change: @escaping @Sendable (inout LinkRouting) -> Void) async throws -> LinkRouting {
+    if fail { fail = false; throw Failure.requested }
+    change(&value)
+    return value
   }
 }

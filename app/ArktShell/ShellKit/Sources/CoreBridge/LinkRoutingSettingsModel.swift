@@ -16,20 +16,25 @@ public final class LinkRoutingSettingsModel {
   private let now: @MainActor () -> Date
   private var revision = 0
   private var savedRevision = 0
-  private var pendingWrites = 0
+  private var writePending = false
+  private var saveFailed = false
+  private var submissions = 0
+  private var storeCall: Task<Result<Void, any Error>, Never>?
+  private let flushTimeout: Duration?
   private var loadInProgress = false
   private var loading: Task<Void, Never>?
-  private var saving: Task<Bool, Never>?
 
-  public init(state: any LinkRoutingSettingsStoring, now: @escaping @MainActor () -> Date = { Date() }) {
+  public init(state: any LinkRoutingSettingsStoring, flushTimeout: Duration? = .seconds(1),
+              now: @escaping @MainActor () -> Date = { Date() }) {
     self.state = state
+    self.flushTimeout = flushTimeout
     self.now = now
   }
 
   /// A reload is ignored while edits are unsaved or writes are pending, to avoid discarding them.
   public func load() async {
     if let loading { await loading.value; return }
-    guard pendingWrites == 0, revision == savedRevision else { return }
+    guard !needsFlush else { return }
     loadInProgress = true
     let task = Task { @MainActor in
       defer { self.loadInProgress = false }
@@ -66,29 +71,81 @@ public final class LinkRoutingSettingsModel {
     edit { $0.defaultDestination = destination }
   }
 
-  /// Writes the snapshot at invocation and returns its result. A failed write leaves the snapshot available for retry.
-  /// Cancellation does not guarantee rollback after a store write has begun.
+  /// True for an unsaved edit or the latest submitted write, including a timed-out write.
+  public var needsFlush: Bool { revision != savedRevision || writePending || saveFailed }
+
+  private enum FlushError: Error { case timedOut }
+
+  /// Each detached store call waits for the preceding call without requiring the main actor.
+  private func submit() -> (Task<Result<Void, any Error>, Never>, Int, Int) {
+    let (snapshot, version, state, date, previous) = (settings, revision, state, now(), storeCall)
+    let call = Task.detached { () -> Result<Void, any Error> in
+      _ = await previous?.value
+      do {
+        _ = try await state.updateLinkRouting(at: date) { $0 = snapshot }
+        return .success(())
+      } catch { return .failure(error) }
+    }
+    storeCall = call
+    submissions += 1
+    writePending = true
+    return (call, submissions, version)
+  }
+
+  private func finish(_ result: Result<Void, any Error>, submission: Int, version: Int) -> Bool {
+    guard submission == submissions else { return (try? result.get()) != nil }
+    writePending = false
+    switch result {
+    case .success:
+      savedRevision = version
+      saveFailed = false
+      lastError = nil
+      return true
+    case .failure(let error):
+      saveFailed = true
+      lastError = error
+      return false
+    }
+  }
+
+  /// Writes the snapshot at invocation and keeps failed edits available for retry.
   @discardableResult
   public func flush() async -> Bool {
     guard isLoaded, !loadInProgress else { return false }
-    let (snapshot, version, state, date, previous) = (settings, revision, state, now(), saving)
-    pendingWrites += 1
-    let task = Task { @MainActor in
-      _ = await previous?.value
-      do {
-        _ = try await state.updateLinkRouting(at: date) { value in value = snapshot }
-        self.savedRevision = version
-        self.lastError = nil
-        self.pendingWrites -= 1
-        return true
-      } catch {
-        self.lastError = error
-        self.pendingWrites -= 1
-        return false
-      }
+    let (call, number, version) = submit()
+    return finish(await call.value, submission: number, version: version)
+  }
+
+  /// Normal termination must also give up on a stalled store without marking its snapshot saved.
+  @discardableResult
+  public func flushForTermination() async -> Bool {
+    guard isLoaded, !loadInProgress else { return !needsFlush }
+    guard needsFlush else { return true }
+    let (call, number, version) = submit()
+    let attempt = Task { @MainActor in
+      self.finish(await call.value, submission: number, version: version)
     }
-    saving = task
-    return await task.value
+    guard let flushTimeout else { return await attempt.value }
+    let result = await FlushRace.run(timeout: flushTimeout, sleep: { try await Task.sleep(for: $0) }, attempt: attempt)
+    if !result, number == submissions, writePending {
+      saveFailed = true
+      lastError = FlushError.timedOut
+    }
+    return result
+  }
+
+  /// The SIGTERM caller blocks the main thread, so neither the write nor its ordering can depend on it.
+  @discardableResult
+  public func flushBlocking() -> Bool {
+    guard isLoaded, !loadInProgress else { return !needsFlush }
+    guard needsFlush else { return true }
+    let (call, number, version) = submit()
+    guard let result = BlockingFlush.run(timeout: flushTimeout, { await call.value }) else {
+      saveFailed = true
+      lastError = FlushError.timedOut
+      return false
+    }
+    return finish(result, submission: number, version: version)
   }
 
   private func edit(_ change: (inout LinkRouting) -> Void) {
@@ -115,6 +172,7 @@ public extension LinkRoutingSettingsModel {
         }
       },
       hasLoadError: { [weak self] in self?.isLoaded == false && self?.lastError != nil },
+      hasSaveError: { [weak self] in self?.isLoaded == true && self?.lastError != nil },
       setDestination: { [weak self] destination in
         switch destination {
         case .littleArkt: self?.setDefaultDestination(.littleArkt)

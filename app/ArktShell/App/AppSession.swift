@@ -619,10 +619,10 @@ final class AppSession {
   // MARK: - Termination
 
   /// True while a sidebar change is unsaved or being written, an archived entry is not yet in the archive store, a
-  /// favicon batch is pending, or the onboarding record is being written (#344).
+  /// favicon batch is pending, the onboarding record is being written (#344), or routing needs saving.
   var needsFlush: Bool {
     autosaver.needsFlush || archive.hasPendingWrites || (faviconWriter?.needsFlush ?? false)
-      || onboardingRecords.needsFlush
+      || onboardingRecords.needsFlush || linkRoutingSettings.needsFlush
   }
 
   /// Runs before the termination flush: stops the auto-archive timer, then stamps every window's visible tabs
@@ -652,9 +652,7 @@ final class AppSession {
     let onboarding = Task { [onboardingRecords] in
       await onboardingRecords.flush(atMost: Self.onboardingFlushTimeout)
     }
-    let routingSaved: Bool
-    if linkRoutingSettings.isLoaded { routingSaved = await linkRoutingSettings.flush() }
-    else { routingSaved = true }
+    let routingSaved = await linkRoutingSettings.flushForTermination()
     let archived = await archive.flush()
     let sidebar = archived ? await autosaver.flush() : false
     await Self.wait(for: favicons, atMost: Self.faviconFlushTimeout)
@@ -664,10 +662,12 @@ final class AppSession {
 
   /// `flush()` for a quit whose main thread never runs again (#298: Chromium's SIGTERM path blocks the main thread
   /// right after the quit-start seam, then exits). Archive outbox first (#213), then the sidebar, each bounded by its
-  /// flush timeout while this thread waits; favicons are skipped (the engine fetches them again).
+  /// flush timeout while this thread waits; routing is also flushed and favicons are skipped.
   func flushBlocking() -> Bool {
     let archived = archive.flushBlocking()
-    return archived && autosaver.flushBlocking()
+    let sidebar = archived ? autosaver.flushBlocking() : false
+    let routing = linkRoutingSettings.flushBlocking()
+    return archived && sidebar && routing
   }
 
   static let faviconFlushTimeout: Duration = .seconds(1)

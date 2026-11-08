@@ -70,17 +70,20 @@ public struct SettingsLinkRoutingRows {
   public var load: @MainActor () async -> Void
   public var destination: @MainActor () -> SettingsLinkDestination?
   public var hasLoadError: @MainActor () -> Bool
+  public var hasSaveError: @MainActor () -> Bool
   public var setDestination: @MainActor (SettingsLinkDestination) -> Void
   public var flush: @MainActor () async -> Bool
 
   public init(load: @escaping @MainActor () async -> Void,
               destination: @escaping @MainActor () -> SettingsLinkDestination?,
               hasLoadError: @escaping @MainActor () -> Bool,
+              hasSaveError: @escaping @MainActor () -> Bool = { false },
               setDestination: @escaping @MainActor (SettingsLinkDestination) -> Void,
               flush: @escaping @MainActor () async -> Bool) {
     self.load = load
     self.destination = destination
     self.hasLoadError = hasLoadError
+    self.hasSaveError = hasSaveError
     self.setDestination = setDestination
     self.flush = flush
   }

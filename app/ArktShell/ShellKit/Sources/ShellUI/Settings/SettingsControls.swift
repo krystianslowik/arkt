@@ -199,6 +199,7 @@ public final class SettingsPopUpButton: NSButton {
   public private(set) var selectedTitle: String
   var onChange: (@MainActor (String) -> Void)?
   var onIndexChange: (@MainActor (Int) -> Void)?
+  var reportsRepeatedSelection = false
   private var selectedIndex: Int?
   private let body = CALayer()
   private let label = CATextLayer()
@@ -272,7 +273,7 @@ public final class SettingsPopUpButton: NSButton {
   @objc private func chose(_ sender: NSMenuItem) {
     guard items.indices.contains(sender.tag) else { return }
     if let onIndexChange {
-      guard selectedIndex != sender.tag else { return }
+      guard selectedIndex != sender.tag || reportsRepeatedSelection else { return }
       selectedIndex = sender.tag
       selectedTitle = items[sender.tag]
       restyle()

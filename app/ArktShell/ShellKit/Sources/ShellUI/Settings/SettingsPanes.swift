@@ -256,15 +256,16 @@ extension SettingsWindowController {
     let index = choices.firstIndex(where: { $0.1 == destination }) ?? 0
     let control = popUp(.spaces, "linksFromOtherApps", choices.map(\.0), choices[index].0)
     control.showIndex(index)
+    control.reportsRepeatedSelection = true
     control.onIndexChange = { [weak row] index in
       rows.setDestination(choices[index].1)
       Task {
-        let saved = await rows.flush()
-        row?.setCaption(saved ? nil : "Could not save link routing settings.")
+        _ = await rows.flush()
+        row?.setCaption(rows.hasSaveError() ? "Could not save link routing settings." : nil)
       }
     }
     row.setTrailing([control])
-    row.setCaption(nil)
+    row.setCaption(rows.hasSaveError() ? "Could not save link routing settings." : nil)
     row.setDimmed(false)
   }
 
