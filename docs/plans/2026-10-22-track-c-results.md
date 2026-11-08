@@ -3120,3 +3120,11 @@ barrier, or establish Chromium startup handling/cancellation. A coordinator used
 controlled routing reads and observable queue/readiness/failure/retry transitions is the next deterministic seam.
 The test-only gate changes no production routing. Whole-issue Peek/archive, profile and optional import scope remain
 unfinished; the PR stays draft.
+
+The first focused-dispatch attempt after publishing the app gate returned HTTP 422: this branch lacked the
+`ui_test_filter` workflow input, so no run started. The branch now carries the identical three selector hunks approved
+for #823 ([decision](https://github.com/krystianslowik/arkt/pull/823#issuecomment-6721409159)): optional empty input,
+environment forwarding and a quoted xcodebuild argument array. Empty input runs the full UI suite; a supplied
+selector runs that target/class. XcodeGen retry and checksum handling remain intact. Actionlint and whitespace checks
+passed. One focused run will be dispatched at the corrected head; no runtime red is established by the rejected
+dispatch or static checks.

@@ -15,6 +15,12 @@ on:
     # Nightly on main: every job, including the UI tests and the GUI tests.
     - cron: "23 2 * * *"
   workflow_dispatch:
+    inputs:
+      ui_test_filter:
+        description: Optional xcodebuild UI test selector (for example ArktShellUITests/SplitViewTests)
+        required: false
+        default: ""
+        type: string
 
 # A newer push cancels the run it supersedes, on a pull request and on main. A cancelled main run leaves its areas
 # untested on main until the next push that touches them; the nightly run covers everything. Nightly and manual runs
@@ -339,10 +345,13 @@ jobs:
         # TEST_RUNNER_* values reach the test runner only through the process environment, not as build settings.
         env:
           TEST_RUNNER_ARKT_UITEST_TIMEOUT_SCALE: "3"
+          UI_TEST_FILTER: ${{ inputs.ui_test_filter }}
         run: |
+          test_filter=()
+          [[ -z "$UI_TEST_FILTER" ]] || test_filter=("-only-testing:$UI_TEST_FILTER")
           xcodebuild -project ArktShell.xcodeproj -scheme ArktShellUITests -derivedDataPath build \
             -clonedSourcePackagesDirPath build/SourcePackages -resultBundlePath $RUNNER_TEMP/ui.xcresult \
-            -parallel-testing-enabled NO -collect-test-diagnostics never test
+            -parallel-testing-enabled NO -collect-test-diagnostics never "${test_filter[@]}" test
       # Runs after a failed test step too. Failing rows do not fail the script; malformed input does, including a test
       # name that cites a row id missing from the spec (the report is still written first). The report goes to the
       # job summary, the artifact and the job log.
