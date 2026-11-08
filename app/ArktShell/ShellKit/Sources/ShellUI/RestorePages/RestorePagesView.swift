@@ -28,7 +28,7 @@ final class RestorePagesView: NSView {
     let height: CGFloat = 168 + CGFloat(count) * 40 + (pages.count > 3 ? 22 : 0)
     super.init(frame: NSRect(x: 0, y: 0, width: 340, height: height))
     wantsLayer = true
-    layer?.cornerRadius = 14
+    layer?.cornerRadius = ShellRadius.sheet
     setAccessibilityElement(true)
     setAccessibilityRole(.group)
     setAccessibilitySubrole(.dialog)
@@ -46,7 +46,7 @@ final class RestorePagesView: NSView {
     let list = NSView(frame: NSRect(x: 18, y: 104, width: 304,
                                    height: CGFloat(count) * 40 + (pages.count > 3 ? 22 : 0) + 8))
     list.wantsLayer = true
-    list.layer?.cornerRadius = 10
+    list.layer?.cornerRadius = ShellRadius.field
     addSubview(list)
     for (index, page) in pages.prefix(3).enumerated() {
       let kind = page.kind == .peek ? "Peek" : "Little Arkt window"

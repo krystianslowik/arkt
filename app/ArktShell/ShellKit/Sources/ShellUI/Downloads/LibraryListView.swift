@@ -67,7 +67,7 @@ final class LibraryListView: NSView {
     }
     for section in next where headers[section.title] == nil {
       let header = NSTextField(labelWithString: section.title)
-      header.font = .systemFont(ofSize: 12, weight: .semibold)
+      header.font = ShellType.captionEmphasis.font
       header.setAccessibilityElement(false)
       addSubview(header)
       headers[section.title] = header
