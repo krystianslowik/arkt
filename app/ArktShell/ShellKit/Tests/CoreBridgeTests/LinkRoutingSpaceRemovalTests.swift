@@ -54,7 +54,8 @@ struct LinkRoutingSpaceRemovalTests {
     let route = LinkRouting.Route(condition: .contains("x"), destination: .space(id))
     let store = RemovalStore(LinkRouting(routes: [route]))
     await store.failNextLoad()
-    let model = LinkRoutingSettingsModel(state: store)
+    // This verifies cleanup durability after a read failure, not the real-time quit deadline.
+    let model = LinkRoutingSettingsModel(state: store, flushTimeout: nil)
     model.removeRoutes(to: id)
     await model.load()
     #expect(model.lastError != nil)

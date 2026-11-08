@@ -19,3 +19,9 @@ editor tests. Together they verify case-insensitive contains, exact-string match
 through stored list order without replacing the normal Core and ShellKit CI targets.
 
 The canonical external-open coordinator contract tests are also linked here. The probe source-links the production coordinator and exercises the actual editor and dependencies, not App composition.
+
+
+Successful cleanup after an initial read failure injects a timeout-free model: its contract is persistence and retry,
+not the production one-second quit deadline. Dedicated normal/blocking zero-timeout tests retain deadline error and
+dirty-state coverage. For these canonical suites alone, use `--filter LinkRoutingSpaceRemovalTests` and
+`--filter 'LinkRouting(EditorFailure|Termination)Tests'` with `swift test --package-path integration/LinkRouting -j 2`.

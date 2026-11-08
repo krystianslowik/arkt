@@ -3378,3 +3378,21 @@ all guards/assertions are unchanged. Fresh merged-head CI remains necessary; par
 Parsing of all 12 incoming/resolved Swift files, workflow import/UI-source checks, parity-script tests, actionlint,
 ABI header comparison and staged whitespace checks passed. No local merged-head App/ShellKit/GUI build or native
 launch ran; the previous archive-routing probe and full CI remain parent-head evidence.
+
+
+### #113 cleanup-success test separates durability from the quit deadline
+
+Run `42533455794` at `a101fd3` compiled the target but failed one of 2,617 pure tests / 301 suites:
+`failedLoadRetainsPendingRemovalForRetry` expected a successful termination flush with the production one-second
+real-clock deadline. Its store fails the initial read but has no paused or failing write; this case tests cleanup
+persistence/retry, not deadline expiry. The success fixture now explicitly injects `flushTimeout: nil`, as the
+existing successful termination-ordering and SQLite cases do. Production deadlines, all persistence assertions,
+and the separate zero-timeout error/dirty-state regressions are unchanged. Core, App build and lint passed;
+the informative GUI job was still running when inspected.
+
+The source-linked `integration/LinkRouting` probe passed **7 Space-removal tests in one suite**, then **8 existing
+editor-failure/termination tests in two suites**, including normal and blocking timeout controls. Commands used
+Swift 6.4.1 with the macOS 15.5 SDK and `-j 2`, filtered by `LinkRoutingSpaceRemovalTests` and
+`LinkRouting(EditorFailure|Termination)Tests`. The build emitted missing toolchain/framework/library search-path
+warnings. The canonical source parsed and whitespace checks passed. No full local ShellKit/App/GUI build or native
+launch ran; fresh full CI remains required and this result does not establish a general CI timing diagnosis.
