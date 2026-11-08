@@ -19,9 +19,12 @@ final class CommandBarArchivedTests: XCTestCase {
     bar.barView.widthMotion.drivesFramesItself = false
   }
 
+  // XCTest keeps each test case object until the run ends: release the windows too, not only hide them (#805).
   override func tearDown() async throws {
     bar.invalidate()
     parent.close()
+    bar = nil
+    parent = nil
   }
 
   private func waitForArchived() async {

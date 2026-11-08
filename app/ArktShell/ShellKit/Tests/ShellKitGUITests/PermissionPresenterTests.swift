@@ -45,10 +45,16 @@ final class PermissionPresenterTests: XCTestCase {
     observation = engine.observe { [unowned self] in presenter.handle($0) }
   }
 
+  // XCTest keeps each test case object until the run ends: release the windows too, not only hide them (#805).
   override func tearDown() async throws {
     observation?.cancel()
     presenter.closeAll()
-    window.orderOut(nil)
+    window.isReleasedWhenClosed = false
+    window.close()
+    presenter = nil
+    page = nil
+    window = nil
+    engine = nil
   }
 
   private func panel() throws -> DialogPanel { try XCTUnwrap(presenter.panel(for: tab)) }
@@ -211,6 +217,9 @@ final class PermissionPresenterTests: XCTestCase {
     now += 0.1
     panel.view.primaryButton.performClick(nil)
     XCTAssertEqual(engine.permissionAnswers.count, 1)
+    // The answer fades the panel out over 0.10 s; the fade's completion holds the panel until it ends, so the test
+    // lets it end rather than leave the panel to a later class (#817).
+    waitUntil("the answered panel faded out") { !panel.panel.isVisible && panel.panel.parent == nil }
   }
 
   func testAnOccludedPanelIsProtectedFromTheMomentItBecomesVisible() throws {
