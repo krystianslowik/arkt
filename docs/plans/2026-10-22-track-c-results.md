@@ -2942,3 +2942,16 @@ compiler-broken and full Xcode is unavailable. The earlier 30-test prototype res
 Capturing and reopening regular windows, private exclusion, the General setting, deleted-item fallback, per-window
 screen clamping and quit/cancel lifecycle remain. Compose with #690 when it lands; navigation history is #612. Manual
 relaunch and display checks remain unverified.
+
+### Multi-window lifecycle gate (#116, in progress)
+
+A test-only `ShellWindowSet` gate specifies ordered capture and restoration, independent folder state, quit freeze and
+cancel refresh, private exclusion, deleted-item fallback and deterministic display placement. It uses the real
+model-backed sidebar, in-memory engine and isolated UserDefaults session store. The proposed launch boundary and its
+limits are recorded in `docs/test-gates/116-window-lifecycle.md`. The shared General setting boundary is specified test-first; actual app lifecycle and relaunch are not covered by
+this component gate.
+
+The 32 focused backend passes in the preceding section apply to commit
+`a671d67f4dedc078c09742e1ed3d9539f2794fe0`; they are not lifecycle results. The lifecycle gate has not been compiled
+or executed, so the intended missing-API red and CI status are unobserved. Full local ShellKit, app and GUI builds
+were not run because the local package baseline fails and full Xcode is unavailable. #612 and #690 remain separate.
