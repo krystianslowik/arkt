@@ -1048,6 +1048,65 @@ final class TabActionsTests: XCTestCase {
     XCTAssertEqual(cleared.item(withTitle: "Star")?.state, .off)
   }
 
+  func testNodeEmojiCancelPreservesIconsAndConfirmationWritesOnce() throws {
+    var world = try Self.makeWorld()
+    let favorite = try world.sidebar.addTab(url: Self.url("emoji"), title: "Emoji", in: .favorites(profile: "default"))
+    let folder = try world.sidebar.addFolder(title: "Folder", in: .today(world.work))
+    let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
+    for node in [favorite, folder] {
+      harness.source.setNodeIcon(node, to: .emoji("\u{1F680}"))
+      var changes: [SidebarChange] = []
+      var saves = 0
+      let observation = harness.source.observe { changes.append($0) }
+      harness.source.onDidChange = { _ in saves += 1 }
+      var reply: (@MainActor (String?) -> Void)?
+      var initial: String?
+      harness.controller.nodeEmojiPromptForTesting = { current, answer in initial = current; reply = answer }
+
+      harness.controller.perform(.chooseNodeEmoji(node))
+      XCTAssertEqual(initial, "\u{1F680}")
+      let cancel = try XCTUnwrap(reply)
+      cancel(nil)
+      XCTAssertEqual(harness.source.nodeIcon(node), .emoji("\u{1F680}"))
+      XCTAssertEqual(saves, 0)
+      XCTAssertTrue(changes.isEmpty)
+
+      reply = nil
+      harness.controller.perform(.chooseNodeEmoji(node))
+      let confirm = try XCTUnwrap(reply)
+      confirm("\u{1F338}")
+      XCTAssertEqual(harness.source.nodeIcon(node), .emoji("\u{1F338}"))
+      XCTAssertEqual(saves, 1)
+      XCTAssertEqual(changes, [.node(node)])
+      withExtendedLifetime(observation) {}
+    }
+  }
+
+  func testNodeEmojiCompletionIgnoresFavoriteMovedToTodayWhilePromptIsOpen() throws {
+    var world = try Self.makeWorld()
+    let favorite = try world.sidebar.addTab(url: Self.url("moving-emoji"), title: "Moving",
+                                           in: .favorites(profile: "default"))
+    let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
+    harness.source.setNodeIcon(favorite, to: .symbol("star"))
+    var reply: (@MainActor (String?) -> Void)?
+    harness.controller.nodeEmojiPromptForTesting = { _, answer in reply = answer }
+    harness.controller.perform(.chooseNodeEmoji(favorite))
+    let complete = try XCTUnwrap(reply)
+    // A shared source may change through another window while this window's sheet is outstanding.
+    try harness.source.moveNode(favorite, to: .today(world.work), at: 0)
+    var changes: [SidebarChange] = []
+    var saves = 0
+    let observation = harness.source.observe { changes.append($0) }
+    harness.source.onDidChange = { _ in saves += 1 }
+    complete("\u{1F680}")
+    XCTAssertEqual(harness.source.nodeIcon(favorite), .symbol("star"))
+    XCTAssertEqual(saves, 0)
+    XCTAssertTrue(changes.isEmpty)
+    withExtendedLifetime(observation) {}
+  }
+
   // MARK: Empty area (BH-021, BH-023) and dimming (BH-025)
 
   func testDoubleClickOnEmptySidebarSpaceOpensTheCommandBar() throws {

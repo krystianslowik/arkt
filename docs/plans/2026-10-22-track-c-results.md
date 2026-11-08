@@ -2976,3 +2976,18 @@ Swift 6.1.2 parsed the five changed UI sources and the three existing UI test fi
 ShellUI forbidden-import scan passed. The changed paths have not been compiled or executed locally: the local
 ShellKit baseline is broken and full Xcode is unavailable. New-head CI, GUI and manual light/dark, keyboard,
 accessibility, emoji Cancel and screenshots remain required. No performance or runtime claim is made.
+
+### Node emoji cancellation and stale-target gate (#339)
+
+Review of `e86d85c` found that emoji completion writes without checking whether a Favorite moved out of Favorites
+while its sheet was open in another window. The fix is not applied in this test-first stage. A narrow optional prompt
+completion hook lets the actual window action run without opening the Character Viewer; nil still uses the existing
+sheet and the original completion logic. No production eligibility behavior changes yet.
+
+Two GUI regression methods now require Cancel to preserve both Favorite and folder icons, save counts and node
+notifications; a valid emoji confirmation is the positive control and must write and notify once. The stale-target
+case moves a Favorite to Today while completion is held, then requires the old icon and no extra mutation after
+confirmation. Its expected runtime red is the current completion changing that ineligible node. Red remains
+unobserved. Swift 6.2.4 frontend parsing and diff checks passed; no local build or tests ran. CI must establish the
+correct regression failure before the completion guard is fixed. Earlier UI and menu results apply to their stated
+heads, not this gate; manual rendering, accessibility and screenshots remain unverified.
