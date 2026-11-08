@@ -1385,3 +1385,26 @@ The remaining work is a verified accessibility scope or legitimate real-input se
 The sidebar method now opens the split's native popup with a real right-click, sends its type-selection key and Return, and asserts the actual separation result. It additionally reopens both original pinned pages and checks their URLs and the unchanged Archive count. The working URL-bar popup remains an input/accessibility positive control, while both row-query results remain attached as diagnostics instead of gating selection on the known missing app-tree item. The silent return when no row item was found is removed; a missing or wrong menu action must fail the split, page, or Archive assertions. No controller action, test-only dispatch, coordinate menu selection, skip or timeout increase is used.
 
 This is a candidate real-input path, not established keyboard behavior or an accessibility fix. Screenshots bracket native type-selection; the next focused run must establish whether Separate All Tabs actually executes. The existing row AX/proxy question and native VoiceOver behavior remain unverified. The six scenarios and partial parity deferrals are preserved. Swift 6.2.4 frontend parsing, UI source lint, actionlint, parity-report fixtures and whitespace checks passed. No local Xcode/app/GUI run occurred. A single full-class manual run using the approved selector will be dispatched after integrating main, so #802's merged changes are included. No runtime pass is claimed here.
+
+#### U15 native selection result and duplicated-page fixture repair
+
+The full-class [run 42481815873](https://github.com/krystianslowik/arkt/actions/runs/42481815873/job/128735250889)
+at `b185d75` built and executed all six methods: five passed; the sidebar method failed its post-menu separation
+condition. The workflow aggregate passed because XCUITest is informative; this is not a passing focused UI job.
+
+The [attachments](https://github.com/krystianslowik/arkt/actions/runs/42481815873/artifacts/13620740034) show the native
+popup before selection and Separate All Tabs highlighted after the `s` key. The final accessibility tree and window
+capture show no split, two plain rows titled `Fixture /docs/left` and one `Fixture /docs/right`. Source tracing
+confirms the fixture error: Option-click on the current plain tab invokes `duplicateIntoSplit`, creating a second
+copy of that page, rather than rejoining the original left and right tabs. The postcondition incorrectly demanded
+one of each title. The failure log repeatedly reaches the left-title count after the no-split, pinned-count and
+Today-count conditions; it does not show a failure to select the menu item.
+
+The repaired fixture records which original page is duplicated, verifies the two-pane and expected title counts
+before opening the menu, and requires those exact counts after separation. It then opens every resulting left/right
+row and checks its URL, retaining the unchanged Archive assertion. The menu is still selected through native keyboard
+input; the AX probes and URL-bar positive control stay intact. No production change, direct controller action,
+coordinate menu selection, skip or timeout increase is added. The row-popup accessibility scope and VoiceOver remain
+unverified. Swift 6.2.4 parsing, actionlint, UI source checks, parity-report fixtures and whitespace checks passed;
+the repaired class has not run locally and needs one new focused CI run. Existing five-of-six evidence stays tied
+to `b185d75`; no repaired-head runtime pass is claimed.

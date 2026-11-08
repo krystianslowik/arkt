@@ -189,10 +189,20 @@ final class SplitViewTests: ArktUITestCase {
     XCTAssertTrue(toolbarOpened.contains(true), "sidebar URL bar menu missing; inspect the paired probes")
     XCTAssertTrue(dismissed.allSatisfy { $0 }, "a context menu did not dismiss")
 
-    // Re-create the split from its focused pinned page to exercise the menu action independently of its probes.
+    // Opt-clicking the current plain tab duplicates that page into a split (GS-032); the other original page stays
+    // outside it. Account for both copies rather than expecting this to rejoin the original left/right pages.
     let current = try XCTUnwrap(pinned.allElementsBoundByIndex.first { $0.isSelected })
+    let duplicateTitle = current.label
+    XCTAssertTrue(["Fixture /docs/left", "Fixture /docs/right"].contains(duplicateTitle))
     XCUIElement.perform(withKeyModifiers: .option) { current.click() }
     XCTAssertTrue(waitFor(splitRow(app)))
+    let leftCount = duplicateTitle == "Fixture /docs/left" ? 2 : 1
+    let rightCount = duplicateTitle == "Fixture /docs/right" ? 2 : 1
+    XCTAssertTrue(Waits.until("the recreated split contains both copies of the current page") {
+      self.panes(app).count == 2
+        && pinned.matching(NSPredicate(format: "label == %@", "Fixture /docs/left")).count == leftCount
+        && pinned.matching(NSPredicate(format: "label == %@", "Fixture /docs/right")).count == rightCount
+    })
     let count = pinned.count
     splitRow(app).rightClick()
     screenshot("keyboard", "split-row-action", "before-selection")
@@ -203,18 +213,20 @@ final class SplitViewTests: ArktUITestCase {
     app.typeKey(.return, modifierFlags: [])
     XCTAssertTrue(Waits.until("context menu separates the pinned split") {
       !self.splitRow(app).exists && pinned.count == count && Shell.todayRows(app).count == todayBefore
-        && pinned.matching(NSPredicate(format: "label == %@", "Fixture /docs/left")).count == 1
-        && pinned.matching(NSPredicate(format: "label == %@", "Fixture /docs/right")).count == 1
+        && pinned.matching(NSPredicate(format: "label == %@", "Fixture /docs/left")).count == leftCount
+        && pinned.matching(NSPredicate(format: "label == %@", "Fixture /docs/right")).count == rightCount
     })
     app.typeKey("d", modifierFlags: [.command, .shift])
     let url = Shell.element(app, AXID.Toolbar.urlBar)
     for name in ["left", "right"] {
-      let page = pinned.element(matching: NSPredicate(format: "label == %@", "Fixture /docs/\(name)"))
-      XCTAssertTrue(waitFor(page))
-      page.click()
-      XCTAssertTrue(Waits.until("original \(name) page URL survives separation") {
-        (url.value as? String)?.contains("/docs/\(name)") == true
-      })
+      let pages = pinned.matching(NSPredicate(format: "label == %@", "Fixture /docs/\(name)"))
+      XCTAssertEqual(pages.count, name == "left" ? leftCount : rightCount)
+      for page in pages.allElementsBoundByIndex {
+        page.click()
+        XCTAssertTrue(Waits.until("each \(name) page URL survives separation") {
+          (url.value as? String)?.contains("/docs/\(name)") == true
+        })
+      }
     }
     app.menuBars.menuBarItems["Window"].click()
     app.menuBars.menuItems["Show Archive"].click()
