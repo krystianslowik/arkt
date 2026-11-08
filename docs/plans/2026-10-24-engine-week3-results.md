@@ -6039,3 +6039,88 @@ In sync; nothing exported. Facade header copies `cmp` identical.
 
 Chromium and the loopback server were stopped by exact PID; `ps -p` prints nothing for either. The profile
 `profiles/782-20261107/` and the build log were deleted. Nothing else on the Chromium volume was touched.
+
+## #754: a history batch sent again after "no answer" is stored once
+
+Date 2026-11-07. Branch `engine/754-history-import-dedupe` from `origin/main` (`e8380ee`). Overlay and Swift only: no
+Chromium patch, `.patches` unchanged, facade header unchanged.
+
+### Cause
+
+#565 found that a batch the history store never confirmed ("no answer from the history store", for example when the
+history service goes away mid-import) can already be on disk. The coordinator freezes the watermark at such a batch,
+so the next import sends it again with every batch after it, and `HistoryBackend::AddPageVisit` checks the URL row but
+not the visit time, so `AddPage` stored each visit a second time. The same resend happens after a visit the engine
+refused (an invalid URL), so confirmed batches behind a refused one were duplicated too. Only the engine can tell what
+is already stored, so the fix is there and the coordinator keeps resending.
+
+### What landed
+
+- `arkt_import_writer.cc`: `HistoryImport` first runs a `HistoryLookup` (a `HistoryDBTask`) that reads, per URL,
+  `GetRowForURL` and `GetVisitsForURL` and marks each visit whose URL and visit time the history already holds (or
+  that came earlier in the same batch). Back on the main thread, held visits are counted skipped and count toward
+  `latest_visit`; the rest go through `HistoryService::AddPage` as before (visited links and `CanAddURL` unchanged),
+  followed by the barrier from #531. A lookup destroyed without answering, or the service going away first, counts
+  every unconfirmed visit failed, as before, so the import still always answers.
+- `latest_visit` (Swift `latestVisit`) is the newest visit written or already held, so a batch that turns out fully
+  held still moves the watermark past it. The facade header still says "newest visit written"; it was left alone
+  because #803 and #811 edit that header.
+- `ImportRecording` (the stub behind `InMemoryEngine` and `FakeEngine`) applies the same rule and takes an injectable
+  clock. `EngineImportContract.runHistory` gains the step "the same batch without a watermark writes nothing".
+- Runner phase `--arkt-import-check=history-retry`: sends the synthetic `history-shutdown` batch (4000 URLs, 10 visits
+  each) with no watermark and waits for the answer. Both phases now count the visit times back from the start of the
+  day, so runs on the same day send the same visits.
+
+### Tests (ShellKit, `nice -n 20 swift test -j 2 --filter ...`)
+
+| Step | Result |
+|---|---|
+| Before the fix: `InMemoryEngineImportTests`, `FakeEngineImportTests`, `ProfileImportCoordinatorTests` | failed: `keepsTheHistoryAndBookmarkContract` in both engines (`same batch again: written: 4`), `aBatchThatGotNoAnswerIsStoredOnceWhenALaterImportSendsItAgain` (10 visits stored, not 5) |
+| After the fix, same filter plus `ChromiumImportTests` | passed: 5, 7, 31 (30 before) and 16 tests |
+| Deliberate break: the held-visit skip in `ImportRecording` disabled | the same three tests fail again; restored |
+| `EngineAPITests`, `FakeEngineKitTests`, `CoreBridgeTests`, `ChromiumEngineKitTests` | passed: four test runs of 29, 285, 343 and 170 tests |
+| Scripted facade: `aBatchTheHistoryAlreadyHoldsComesBackSkippedWithItsNewestVisit` (`ChromiumImportTests`) | passed: 17 tests (16 before); pins that a `written 0, skipped N` answer keeps its `lastVisitTime`. It passes without the engine change too: the facade only carries the answer, the dedupe itself runs in the engine (smoke below) |
+| `IsolationTests` | passed: 60 tests in 7 suites |
+
+### Build
+
+| Step | Result | Numbers |
+|---|---|---|
+| `nice -n 15 autoninja -C out/Spike chrome -j 4` | `The build has finished successfully.`, `FAILED:` 0 | 68 s; `libchrome_dll.dylib` relinked |
+| Engine app, `xcodebuild -scheme ArktShell -configuration Engine PRODUCT_BUNDLE_IDENTIFIER=dev.arkt.Arkt.try754 -jobs 2` (`nice -n 20`, `CONFIGURATION_BUILD_DIR=$CHROMIUM_ROOT/embed-754`) | `BUILD SUCCEEDED`, `Engine framework copied: Chromium Framework.framework 156.0.8078.48` | 226 s; 522 component dylibs cloned next to the bundle (`cp -c`) |
+
+Load average 7 to 13 while building and running (other lanes' work; nothing added).
+
+### Real engine (`dev.arkt.Arkt.try754`, embed folder on `out/Spike`, throwaway profiles under `profiles/754-20261107/`, `ARKT_DATA_DIR`, `ARKT_ARC_DIR` and `ARKT_DEFAULTS_SUITE` per run, `--use-mock-keychain`, `--arkt-engine-test-api`)
+
+Counts are read-only `sqlite3` on the profile's `History` after the process exited: `urls`, `visits`, `visit_source`
+rows with source 7, and (url, visit_time) pairs stored more than once.
+
+| Run | Result | Evidence |
+|---|---|---|
+| Before the fix (`out/Spike` as built for the previous engine task): `history-retry` twice on one profile | FAIL, reproduced | both runs `written=40000 skipped=0`; `urls` 4000, `visits` 80000, source 7 80000, 40000 pairs twice |
+| Fixed: `history-retry` twice on a fresh profile | PASS | run 1 `written=40000`; run 2 `written=0 skipped=40000 failed=0`, `latest` set; `visits` 40000, 0 pairs twice |
+| Fixed: `history-shutdown`, then `history-retry` on a fresh profile | PASS | run 1: `history import: 40000 visits got no answer from the history store`, exit 0 after 6 s, `visits` 40000 already on disk; run 2: `written=0 skipped=40000 failed=0`; `visits` 40000, 0 pairs twice |
+| Deliberate break: the held check in `HistoryImport::Write` disabled, rebuilt (35 s), `history-retry` on the shutdown profile | FAIL as expected | `written=40000 skipped=0`; `visits` 80000 |
+| Fix restored, rebuilt (33 s), `history-retry` again | PASS | `written=0 skipped=40000`; `visits` stays 80000 (the break's copies remain, nothing new) |
+| Stderr | PASS | 0 `FATAL`, `NOTREACHED`, `Check failed` lines in every run; every run exited by itself (exit 0) |
+
+Not run: the fixture `import` phase (unchanged path; the synthetic batch covers the write), and a batch that mixes
+held and new visits on the real engine (covered by the stub contract only).
+
+### Patch budget
+
+| Source | Count |
+|---|---|
+| `.patches` lines | 14 |
+| `arkt` commits above `156.0.8078.48` | 14 |
+
+In sync. Facade header copies `cmp` identical.
+
+### Cleanup
+
+Every app run exited by itself (exit 0; no process left under the embed folder). `lsregister -u` on the app and its 8
+helpers: 0 records for `dev.arkt.Arkt.try754` and 0 paths under the embed folder after. Deleted: the embed folder with
+its dylib clones, derived data, the three throwaway profiles, the three defaults suites and the bundle's preferences
+file, the build logs. No clipboard use. Nothing under `~/Applications/ArktTest` or `/Applications/Arkt.app` was
+touched. `out/Spike` now holds this branch's overlay (built from `origin/main` plus this change).
