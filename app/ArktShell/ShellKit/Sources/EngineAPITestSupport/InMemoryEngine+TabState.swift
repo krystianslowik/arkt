@@ -69,7 +69,6 @@ extension InMemoryEngine {
 public final class InMemorySessionRecovery: EngineSessionRecovery {
   public private(set) var lastSessionCrashed = false
   public private(set) var dismissals = 0
-
   public init() {}
 
   /// Test hook: the previous run ended without a clean quit.

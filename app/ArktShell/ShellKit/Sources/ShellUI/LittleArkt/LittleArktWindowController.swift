@@ -98,6 +98,7 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
   var onResize: @MainActor (CGSize) -> Void = { _ in }
   /// The window closed; the set forgets it.
   var onClosed: @MainActor (LittleArktWindowController) -> Void = { _ in }
+  var onRecoveryPageChanged: (@MainActor () -> Void)?
   /// A close the user or the idle timer asked for ended: the page goes to the Archive and the window can be reopened.
   /// Runs before `onClosed`.
   var onArchiveClose: @MainActor (LittleArktClosedWindow) -> Void = { _ in }
@@ -200,10 +201,12 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
       mount(tab)
     case .urlChanged(let tab, _) where tab == shownTab:
       refreshTopBar()
+      onRecoveryPageChanged?()
     case .closeCancelled(let tab) where tab == shownTab:
       requestedClose = nil                                    // the user stayed at the leave-site prompt
     case .titleChanged(let tab, let title) where tab == shownTab:
       window.title = title
+      onRecoveryPageChanged?()
     case .dialogRequested(let dialog) where isCarrying && dialog.tab == shownTab:
       carriedDialog = dialog                                  // raised in the air: it goes with the page
     case .dialogEnded(_, let id) where isCarrying && carriedDialog?.id == id:
@@ -219,6 +222,7 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
       refreshCrashedTab()
     case .tabClosed(let tab, _) where tab == shownTab:
       shownTab = nil
+      onRecoveryPageChanged?()
       if card.contentView?.isDescendant(of: rootView) == true { card.setContent(nil) }
       refreshCrashedTab()
       flight?.abort(.pageClosed)                              // nothing left to land; the engine closes the window
@@ -229,16 +233,17 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
 
   private var isCarrying: Bool { phase == .handingOff || phase == .flying }
 
-  /// The anchor of a dialog's panel: the page of the tab this window shows, while the window is open.
+  /// The anchor of a dialog's panel: the page of the tab this window shows, while the window is open. The anchor holds
+  /// the controller weakly: the controller keeps the presenter, so a method reference here would keep both (#817).
   private func makeJavaScriptDialogPresenter() -> JavaScriptDialogPresenter {
-    let presenter = JavaScriptDialogPresenter(engine: engine, anchor: pageAnchor)
+    let presenter = JavaScriptDialogPresenter(engine: engine) { [weak self] tab in self?.pageAnchor(tab) }
     presenter.host.topInset = { [weak self] tab in self?.infobarStrips.height(of: tab) ?? 0 }
     return presenter
   }
 
-  /// The infobars of the page this window shows, while the window is open.
+  /// The infobars of the page this window shows, while the window is open. The anchor holds the controller weakly.
   private func makeInfobarPresenter() -> InfobarPresenter {
-    InfobarPresenter(engine: engine, anchor: pageAnchor)
+    InfobarPresenter(engine: engine) { [weak self] tab in self?.pageAnchor(tab) }
   }
 
   private func pageAnchor(_ tab: TabID) -> NSView? {
@@ -269,6 +274,7 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
     refreshTopBar()
     refreshCrashedTab()
     if window.isKeyWindow { engine.focusPage(of: tab) }
+    onRecoveryPageChanged?()
   }
 
   /// Its tabs closed already (contract rule 11). A window the user closed or handed off is already moving out; a
@@ -455,6 +461,7 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
 
   private func handedOff(spaceName: String?) {
     phase = .handedOff
+    onRecoveryPageChanged?()
     NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested, userInfo: [
       .announcement: LittleArktCopy.announcement(spaceName: isPopup ? nil : spaceName),
       .priority: NSAccessibilityPriorityLevel.high.rawValue,
@@ -504,22 +511,24 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
     self.flight = flight
     carriedDialog = javaScriptDialogs.release(tab)          // the panel goes at once; the main window shows it
     phase = .flying
+    // The task holds the controller only once the snapshot is back: a window closed while the engine is still
+    // drawing goes away at once (#817).
+    let snapshotSource = snapshotSource
+    let engine = engine
     snapshotTask = Task { [weak self] in
-      guard let self else { return }
-      let snapshot: LittleArktSnapshot?
-      if let source = self.snapshotSource {
-        snapshot = await source(tab)
+      let snapshot: LittleArktSnapshot? = if let snapshotSource {
+        await snapshotSource(tab)
       } else {
-        snapshot = await self.snapshot(of: tab)
+        await Self.snapshot(of: tab, in: engine)
       }
-      self.flight?.snapshotArrived(snapshot)
+      self?.flight?.snapshotArrived(snapshot)
     }
     flight.start(on: mainWindow.contentView)
     return true
   }
 
   /// The page's current frame from the engine, uncapped (`.fullFrame`), decoded off the main actor.
-  private func snapshot(of tab: TabID) async -> LittleArktSnapshot? {
+  private static func snapshot(of tab: TabID, in engine: any EngineClient) async -> LittleArktSnapshot? {
     guard let page = await engine.pageImage(of: tab, .fullFrame) else { return nil }
     return await LittleArktSnapshot.decode(page)
   }

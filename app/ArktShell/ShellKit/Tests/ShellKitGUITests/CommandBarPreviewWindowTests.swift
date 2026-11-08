@@ -39,9 +39,13 @@ final class CommandBarPreviewWindowTests: XCTestCase {
     announcements = []
   }
 
+  // XCTest keeps each test case object until the run ends: release the windows too, not only hide them (#805).
   override func tearDown() async throws {
     bar.invalidate()
     shell.close()
+    bar = nil
+    window = nil
+    shell = nil
   }
 
   private func tab(_ title: String, space: String = "Work") -> CommandBarResults.OpenTab {
