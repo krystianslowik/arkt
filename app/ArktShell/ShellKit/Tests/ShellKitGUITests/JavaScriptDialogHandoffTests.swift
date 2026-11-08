@@ -17,8 +17,10 @@ final class JavaScriptDialogHandoffTests: XCTestCase {
     NSApp.setActivationPolicy(.accessory)
   }
 
+  // XCTest keeps each test case object until the run ends: release the windows too, not only hide them (#805).
   override func tearDown() async throws {
-    for set in sets { for controller in set.controllers { controller.window?.orderOut(nil) } }
+    for set in sets { for controller in set.controllers { controller.close() } }
+    for set in sets { set.closeAllForTesting() }
     sets = []
   }
 

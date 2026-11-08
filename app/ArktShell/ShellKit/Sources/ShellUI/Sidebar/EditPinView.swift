@@ -5,7 +5,7 @@ import Motion
 enum EditPinMetrics {
   static let width: CGFloat = 320
   static let padding: CGFloat = 16
-  static let cornerRadius: CGFloat = 12
+  static let cornerRadius = ShellRadius.popover
   /// The arrow: how far its tip stands out, and half its base.
   static let arrowDepth: CGFloat = 7
   static let arrowHalfBase: CGFloat = 8
@@ -88,7 +88,7 @@ final class EditPinFieldView: NSView {
     field.isBezeled = false
     field.drawsBackground = false
     field.focusRingType = .none
-    field.font = .systemFont(ofSize: 13)
+    field.font = ShellType.body.font
     field.lineBreakMode = .byClipping
     field.cell?.isScrollable = true
     field.cell?.wraps = false
@@ -205,13 +205,13 @@ final class EditPinView: NSView {
     }
     surface.lineWidth = 0.5
     titleLabel.stringValue = title
-    titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+    titleLabel.font = ShellType.bodyEmphasis.font
     titleLabel.lineBreakMode = .byTruncatingTail
     for label in [nameLabel, urlLabel] {
-      label.font = .systemFont(ofSize: 11, weight: .semibold)
+      label.font = ShellType.sectionHeader.font
       label.setAccessibilityElement(false)          // the fields carry the same names
     }
-    errorLabel.font = .systemFont(ofSize: 11)
+    errorLabel.font = ShellType.footnote.font
     errorLabel.lineBreakMode = .byTruncatingTail
     errorGlyph.image = NSImage(systemSymbolName: "exclamationmark.circle", accessibilityDescription: nil)?
       .withSymbolConfiguration(.init(pointSize: 11, weight: .medium))
