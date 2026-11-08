@@ -19,8 +19,29 @@ final class CommandBarTableView: NSTableView {
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+  /// Every result cell the table was given. NSTableView's reuse queue comes back empty here: after `reloadData` the old
+  /// row views leave the table with their cells still inside, and `makeView(withIdentifier:owner:)` returns nil, so
+  /// each keystroke built every visible cell again (#606). A cell whose row view left the table is free.
+  private var cells: [CommandBarCellView] = []
+
+  /// A cell for a row: a free one taken out of its old row view, else a new one.
+  func reusableCell() -> CommandBarCellView {
+    if let free = cells.first(where: { $0.superview?.superview !== self }) {
+      free.removeFromSuperview()
+      return free
+    }
+    let cell = CommandBarCellView(frame: .zero)
+    cells.append(cell)
+    return cell
+  }
+
   override func reloadData() {
     super.reloadData()
+    rowsDidChange()
+  }
+
+  /// The rows' contents changed, by a reload or in place: accessibility and the selection indicator follow.
+  func rowsDidChange() {
     axProxyRows.invalidate()
     onSelectionOrDataChange?()
   }

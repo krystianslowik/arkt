@@ -107,8 +107,6 @@ public enum CommandBarResults {
     /// An empty query lists the open tabs plainly, without the empty state's groups (Little Arkt's lookup, which has
     /// no clipboard, recent tabs or actions).
     public var listsOpenTabsForAnEmptyQuery = false
-    /// Counting every match for the pills lifts the caps on the rows shown.
-    public var isCountingAllMatches = false
     public init() {}
   }
 
@@ -221,23 +219,45 @@ public enum CommandBarResults {
   public static let pasteAndGoTitle = "Paste and Go"
 
   public static func make(query raw: String, input: Input) -> [Result] {
+    makeWithCounts(query: raw, input: input).results
+  }
+
+  /// The pills' counts: every match for `query`, not just the rows the list shows (its caps lifted). Hidden for an
+  /// empty query, so zeros there.
+  public static func counts(query: String, input: Input) -> [CommandBarFilter: Int] {
+    makeWithCounts(query: query, input: input).counts
+  }
+
+  /// The rows and the pills' counts from one matching pass (#606). A row is built only for a match the list shows;
+  /// the rest are counted. With 2,000 open tabs a second pass that built a row for every match cost 27 ms a keystroke.
+  public static func makeWithCounts(query raw: String,
+                                    input: Input) -> (results: [Result], counts: [CommandBarFilter: Int]) {
     let query = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    let rows: [Result]
     switch input.scope {
     case .actions:
       // BH-106: action search lists the shell's actions only.
-      return CommandBarActions.filter(input.actions, query: query).map { actionRow($0, group: nil) }
+      rows = CommandBarActions.filter(input.actions, query: query).map { actionRow($0, group: nil) }
     case .siteSearch(let engine):
       // BH-107: one row per query, to the scoped engine.
-      guard !query.isEmpty, let url = engine.url(for: query) else { return [] }
-      return [Result(kind: .siteSearch(url), title: "Search \(engine.name) for \(query)", subtitle: "Search \(engine.name)",
-                     trailingHint: nil,
-                     removalID: "sitesearch:\(url.absoluteString)")]
+      if !query.isEmpty, let url = engine.url(for: query) {
+        rows = [Result(kind: .siteSearch(url), title: "Search \(engine.name) for \(query)",
+                       subtitle: "Search \(engine.name)", trailingHint: nil,
+                       removalID: "sitesearch:\(url.absoluteString)")]
+      } else {
+        rows = []
+      }
     case .normal:
-      break
+      if query.isEmpty { return (emptyState(input), CommandBarFilter.counts(of: [])) }
+      return typed(query: query, input: input)
     }
+    return (rows, CommandBarFilter.showsCounts(forQuery: query) ? CommandBarFilter.counts(of: rows)
+                                                                 : CommandBarFilter.counts(of: []))
+  }
 
-    if query.isEmpty { return emptyState(input) }
-
+  /// A typed query in the normal scope: the rows, capped per kind, and the count of every match of each kind.
+  private static func typed(query: String, input: Input) -> (results: [Result], counts: [CommandBarFilter: Int]) {
+    let isKept = { (removalID: String?) in removalID.map { !input.excluded.contains($0) } ?? true }
     var results: [Result] = []
 
     let url = URLInputParser.url(from: query)
@@ -247,33 +267,37 @@ public enum CommandBarResults {
       results.append(Result(kind: .open(url), title: query, subtitle: subtitle, trailingHint: nil, removalID: nil))
     }
 
-    let matching = openTabsAll(input).filter { tab in
-      tab.title.localizedStandardContains(query) || (tab.url.host() ?? "").localizedStandardContains(query) // not shown
+    let match = StandardMatch(query)
+    let matching = input.openTabs.filter { tab in
+      match.found(in: tab.title) || match.found(in: tab.url.host() ?? "") // not shown
         || shownHost(of: tab.url, contains: query)
     }
-    for tab in matching.prefix(input.isCountingAllMatches ? .max : maxSwitchResults) {
+    for tab in matching.prefix(maxSwitchResults) {
       results.append(tabRow(tab, group: nil, now: input.now))
     }
 
     let history = input.history.filter { visit in
-      visit.title.localizedStandardContains(query) || visit.url.absoluteString.localizedStandardContains(query)
+      match.found(in: visit.title) || match.found(in: visit.url.absoluteString)
         || shownHost(of: visit.url, contains: query)
     }
-    for visit in history.prefix(input.isCountingAllMatches ? .max : maxHistoryResults) {
+    for visit in history.prefix(maxHistoryResults) {
       results.append(historyRow(visit, now: input.now))
     }
 
     // Spaces (BH-104): after the tabs, capped.
-    for space in input.spaces.filter({ $0.title.localizedStandardContains(query) })
-      .prefix(input.isCountingAllMatches ? .max : maxSpaceResults) {
+    let spaces = input.spaces.filter { match.found(in: $0.title) }
+    for space in spaces.prefix(maxSpaceResults) {
       results.append(Result(kind: .switchSpace(space.id), title: space.title, subtitle: "Space",
                             trailingHint: switchToSpaceHint, removalID: nil))
     }
 
-    for match in input.archived.prefix(input.isCountingAllMatches ? .max : maxArchivedResults) {
+    for match in input.archived.prefix(maxArchivedResults) {
       results.append(Result(kind: .restore(match.id), title: match.title, subtitle: match.subtitle,
                             trailingHint: restoreHint, removalID: nil))
     }
+
+    // Rows that are never capped and count under All only: the address, the search row and a site alias.
+    var uncappedRows = url == nil ? 0 : 1
 
     // #96: an explicit http(s) scheme makes the input a URL for certain (Cmd-L prefills one), so a search row
     // would only repeat it. Chromium keeps a demoted search-what-you-typed row there; Arc unverified [I] (RT-08).
@@ -281,9 +305,11 @@ public enum CommandBarResults {
     // BH-113: `searchSuggestEnabled` off drops the row and the engine round trip it stands for.
     let isExplicitURL = url != nil && URLInputParser.hasExplicitScheme(query)
     if !isExplicitURL, input.searchSuggestionsEnabled {
+      let removalID = "search:\(query)"
       results.append(Result(kind: .search(URLInputParser.searchURL(for: query)), title: query,
                             subtitle: "Search \(CommandBarSettings.searchEngineName)", trailingHint: nil,
-                            removalID: "search:\(query)"))
+                            removalID: removalID))
+      if isKept(removalID) { uncappedRows += 1 }
     }
 
     // BH-107: a typed alias or site name offers a row for that site, with a Tab key cap: Tab scopes to it.
@@ -296,28 +322,41 @@ public enum CommandBarResults {
       // An alias typed whole is the shortcut: its row leads, so Tab scopes at once (#322) and Return, with nothing yet
       // to search for, scopes too (`CommandBarController.commit`).
       results.insert(row, at: exact ? 0 : results.count)
+      uncappedRows += 1
     }
 
     // Actions whose title matches the query, so the Actions pill counts them.
-    for action in CommandBarActions.filter(input.actions, query: query)
-      .prefix(input.isCountingAllMatches ? .max : maxMatchingActions) {
+    let actions = CommandBarActions.filter(input.actions, query: query)
+    for action in actions.prefix(maxMatchingActions) {
       results.append(actionRow(action, group: nil))
     }
-    return results.filter { result in
-      result.removalID.map { !input.excluded.contains($0) } ?? true
+
+    // Counted without building rows: the removal ids are formed only when something was removed.
+    let tabCount = input.excluded.isEmpty ? matching.count
+      : matching.count { isKept("tab:\($0.node.uuidString)") }
+    let historyCount = input.excluded.isEmpty ? history.count
+      : history.count { isKept("history:\($0.url.absoluteString)") }
+    var counts: [CommandBarFilter: Int] = [:]
+    counts[.tabs] = tabCount + input.archived.count
+    counts[.history] = historyCount
+    counts[.actions] = actions.count
+    counts[.all] = uncappedRows + tabCount + historyCount + spaces.count + input.archived.count + actions.count
+    return (results.filter { isKept($0.removalID) }, counts)
+  }
+
+  /// `localizedStandardContains` with the current locale fetched once per pass: that call bridges `Locale.current`
+  /// for every string, which was most of the cost of matching 2,000 titles (#606). The same search (case- and
+  /// diacritic-insensitive, in the current locale) through the CoreFoundation call NSString makes, so the same answers.
+  struct StandardMatch {
+    private let query: CFString
+    private let locale = CFLocaleCopyCurrent()
+    init(_ query: String) { self.query = query as CFString }
+    func found(in text: String) -> Bool {
+      let text = text as CFString
+      return CFStringFindWithOptionsAndLocale(text, query, CFRange(location: 0, length: CFStringGetLength(text)),
+                                              [.compareCaseInsensitive, .compareDiacriticInsensitive], locale, nil)
     }
   }
-
-  /// The pills' counts: every match for `query`, not just the rows the list shows (its caps lifted). Hidden for an
-  /// empty query, so zeros there.
-  public static func counts(query: String, input: Input) -> [CommandBarFilter: Int] {
-    guard CommandBarFilter.showsCounts(forQuery: query) else { return CommandBarFilter.counts(of: []) }
-    var all = input
-    all.isCountingAllMatches = true
-    return CommandBarFilter.counts(of: make(query: query, input: all))
-  }
-
-  private static func openTabsAll(_ input: Input) -> [OpenTab] { input.openTabs }
 
   /// Whether the host the rows show for `url` (`HostDisplay`, #732) holds `query`, so a host typed in Unicode finds it
   /// as well as the encoded form the URL itself is matched by. Case is folded, diacritics are not: "paypal" must not
