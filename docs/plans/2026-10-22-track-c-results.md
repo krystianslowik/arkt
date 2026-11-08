@@ -3017,3 +3017,10 @@ The fixture now activates the symbol Favorite before capture, outside the folder
 open/closed state and the child's corresponding row presence, so a peek cannot silently masquerade as a closed-state
 capture. Production code is unchanged. Swift 6.2.4 source parsing and diff checks passed; no local GUI ran. Updated
 CI must regenerate the PNGs, and their visual audit remains pending. Native sheet and VoiceOver checks are unverified.
+
+
+### #339: merge current main after Favorite split menu changes
+
+Merged main at `3a0263c`, including #802's Favorite split behavior and #804's shared pacing rule. The single content conflict was in SidebarContextMenu: the merged builder keeps main's split-versus-tab dispatch and split-specific copy/remove/close menu, and retains the custom Change Icon and Reset Icon controls on tab Favorites and folders. The Favorite-tab helper still receives the source and runs on the main actor. The FavoritesGridView merge retains custom-icon-first rendering together with main's split labels, loaded/current state, close and drag updates. Existing icon tests and FavoriteSplitTileTests remain present.
+
+Swift 6.2.4 frontend parsing passed for all ten Swift files changed by the merge; whitespace and source-layer inspection passed. No full local build, GUI or runtime tests ran because the local baseline/toolchain limitation remains. Earlier icon test and screenshot evidence belongs to `e8e807f`; the merge head requires fresh CI, including Favorite split and icon coverage. No new icon behavior, fixture capture, accessibility or performance claim is made.
