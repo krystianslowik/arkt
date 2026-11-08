@@ -3004,3 +3004,16 @@ Completion now reads the current node and section before writing: folders remain
 be Favorites. Missing nodes, splits and tabs moved elsewhere are ignored. The regression tests are unchanged.
 Swift 6.2.4 source parsing, the ShellUI import-boundary inspection and diff checks passed. No local full build or GUI
 test ran; new-head CI must establish green. Manual light/dark rendering, accessibility and screenshots remain unverified.
+
+
+### Custom icon capture selection correction (#339)
+
+The eight PNGs from `dad920f`, run 42442702244, are nonblank and show the intended light/dark icons and fallbacks,
+but their closed states retain the folder child. The custom open/closed pairs are identical. Source tracing shows
+why: launch activates the first pinned tab, which is the fixture's sole folder child; closing a folder deliberately
+keeps its current tab visible through BH-105. This is not evidence of a product rendering defect or a timing race.
+
+The fixture now activates the symbol Favorite before capture, outside the folder. Each save asserts the requested
+open/closed state and the child's corresponding row presence, so a peek cannot silently masquerade as a closed-state
+capture. Production code is unchanged. Swift 6.2.4 source parsing and diff checks passed; no local GUI ran. Updated
+CI must regenerate the PNGs, and their visual audit remains pending. Native sheet and VoiceOver checks are unverified.
