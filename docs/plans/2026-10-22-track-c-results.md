@@ -3234,3 +3234,21 @@ identity reporting are not claimed. Native metadata, handshake, Settings/profile
 association and routing results remain unobserved. One focused disposable-CI run is the next observation; any
 identity/profile setup failure must remain separate from a routing failure. The known cold onboarding failures at
 `0f2f480` are not upgraded to routing evidence by this source change.
+
+
+### Warm external-open App gate green; cold identity still fails (#113)
+
+At `d1c845528a9d69a352fe1ae27552d414401e9b32`, [focused native run 42503418016](https://github.com/krystianslowik/arkt/actions/runs/42503418016)
+executed six cases. The three warm cases passed through real Settings, persisted model composition and OS delivery:
+explicit Space, Little Arkt and a non-fresh default Space. The three cold cases failed immediately at the OS-returned
+application identity guard, before handshake/profile/destination checks. They establish no cold routing result.
+The diagnostic now records PID, process state, bundle paths and identity request/acceptance state without weakening
+the guard or disclosing environment values. One focused cold diagnostic is the next runtime boundary.
+
+The normal PR [GUI run 42503385805](https://github.com/krystianslowik/arkt/actions/runs/42503385805) reported 2111 tests,
+61 skipped and one lifetime failure: routed-open fixtures retained three hidden regular and three Little Arkt
+windows. Teardown only hid them. It now ends controlled engine windows, closes/settles both window types and
+asserts both set collections are empty. The existing lifetime gate is unchanged. Required checks and App build
+passed at `d1c8455`; those results do not establish the repaired teardown. Parsing, exact workflow import/UI-source
+checks, focused SDK typechecking of process diagnostic properties and whitespace checks passed. No local GUI/App
+launch or full build ran, and no new native or GUI result is claimed for the repair.

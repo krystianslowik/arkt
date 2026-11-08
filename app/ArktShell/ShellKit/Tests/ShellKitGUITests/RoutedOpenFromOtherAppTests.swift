@@ -17,8 +17,22 @@ final class RoutedOpenFromOtherAppTests: XCTestCase {
 
   override func tearDown() async throws {
     for set in sets {
-      for window in set.controllers { window.window?.orderOut(nil) }
-      for little in set.littleArkts { little.window.orderOut(nil) }
+      let regular = set.controllers
+      let little = set.littleArkts
+      // Hiding a window does not end its engine host, display links or close animation.
+      if let engine = set.engine as? InMemoryEngine {
+        for id in engine.windowIDs { engine.engineEndWindow(id, reason: .appQuit) }
+        XCTAssertTrue(engine.windowIDs.isEmpty, "the fixture must release every engine window")
+      } else {
+        XCTFail("routed-open fixtures require their controlled InMemoryEngine")
+      }
+      for controller in regular { controller.window?.close() }
+      for controller in little {
+        controller.finishMotion()
+        controller.window.close()
+      }
+      XCTAssertTrue(set.controllers.isEmpty, "regular fixture windows must close")
+      XCTAssertTrue(set.littleArkts.isEmpty, "Little Arkt fixture windows must finish closing")
     }
     sets = []
   }

@@ -85,7 +85,13 @@ final class LinkRoutingAppTests: ArktUITestCase {
                                                    configuration: configuration)
     guard opened.bundleURL?.standardizedFileURL.resolvingSymlinksInPath() == applicationURL,
           opened.processIdentifier > 0 else {
-      throw HarnessError("OS open returned an unexpected application identity")
+      let returnedBundle = opened.bundleURL?.standardizedFileURL.resolvingSymlinksInPath().path ?? "nil"
+      let acceptedPID = server.acceptedIdentity.map { String($0.pid) } ?? "none"
+      let reports = server.requestedPaths.filter { $0.hasPrefix("/identity/") }.count
+      throw HarnessError("OS open returned an unexpected application identity: "
+        + "pid=\(opened.processIdentifier), terminated=\(opened.isTerminated), "
+        + "finishedLaunching=\(opened.isFinishedLaunching), bundle=\(returnedBundle), "
+        + "expectedBundle=\(applicationURL.path), acceptedPID=\(acceptedPID), identityRequests=\(reports)")
     }
     if cold {
       guard Waits.until("cold process identity report", { server.acceptedIdentity != nil }),

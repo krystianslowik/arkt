@@ -275,3 +275,24 @@ Profile/Release UI-test target closure and a Chromium identity handshake are not
 Profile/Release/Distribution app behavior is unchanged. Redirect refusal has source and response-policy coverage;
 no actual redirecting-server test was run. Generated Info metadata, native handshake, Settings accessibility,
 persisted profile and the public process-to-proxy association require the next native observation.
+
+
+## First mandatory-identity native result
+
+[Run 42503418016](https://github.com/krystianslowik/arkt/actions/runs/42503418016) executed six native cases at
+`d1c8455`: all three warm cases passed (explicit Space, Little Arkt and a non-fresh default Space). All three cold
+cases stopped at the immediate OS-returned application identity check, before ACK correlation, persisted-profile
+inspection or destination checks. Their failure artifacts contain only sandbox listings because the observed app
+was no longer running at teardown; that does not identify which identity field failed or why the process exited.
+Cold routing and effective environment identity remain unverified. The guard is retained without a bypass or fallback.
+
+The next diagnostic records the returned PID, terminated/finished-launching state, returned and expected bundle
+paths, accepted report PID and number of identity requests. It exposes no environment values or sandbox contents.
+One focused cold case can distinguish missing/dead metadata from a bundle mismatch or a reached identity endpoint;
+it does not by itself explain every startup failure. No product startup or routing behavior changed.
+
+Normal PR GUI run 42503385805 reported 2111 tests, 61 skipped and one failure: the lifetime checker attributed six
+hidden windows to `RoutedOpenFromOtherAppTests` (three regular and three Little Arkt). The fixture had only ordered
+windows out. Teardown now ends its controlled engine windows, closes regular windows, settles Little Arkt close
+motion, closes them and asserts that both window-set collections are empty. The lifetime gate remains unchanged.
+The revised teardown and diagnostic have not run locally; CI must verify them.
