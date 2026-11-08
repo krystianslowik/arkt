@@ -2998,3 +2998,26 @@ settling. It retains all four distinct per-window selection assertions. The empt
 Swift 6.2.4 frontend parsing and `git diff --check` passed. No local full package, GUI or App build ran; green at the
 new head remains unobserved. The separate unpublished App/General gate is not included here, and app launch, actual
 termination/cancellation composition, full relaunch and #690 recovery remain unfinished.
+
+
+### #116 lifecycle green and app integration gate
+
+At `fc87d5123b406ad7e5c66a65c465d60f3f39e2a9`, [run 42490834029](https://github.com/krystianslowik/arkt/actions/runs/42490834029)
+passed pure ShellKit 2535 tests in 285 suites and GUI 2083 reported tests with 60 skipped and zero failures.
+All 12 MultiWindowLifecycleGateTests passed, including immediate empty-Space capture and distinct per-window
+remembered selections. The app build, lint and required aggregate passed; Core and XCUITest were skipped.
+This validates the window-set component, not App launch/termination forwarding or native relaunch.
+
+The next test-only gate exercises the actual General popup with the supplied shared preference, persistence,
+observer updates and Reset All. Its isolated app test creates two distinct regular-window selections while an
+identified Incognito window remains open, asserts exactly two raw saved entries before projection and after quit,
+and checks selected pages and new HTTP requests after relaunch. Independent source review's private-entry false
+pass was corrected before publication; final restored count/order still need a launch-completion observation.
+No new production integration is included. Disabled restore, native quit cancellation, folder restoration in the
+app and recovery composition remain unverified.
+
+The branch also receives the identical optional UI-selector changes approved for #823 (input, environment and
+quoted argument array), retaining its existing workflow and XcodeGen retry/checksum behavior. Source parsing,
+import/UI-source lint, parity-report fixtures, actionlint and whitespace checks are the local validation; no new
+gate was typechecked or executed locally. Expected runtime failures at the planned General popup and app
+restoration remain unobserved until CI runs.

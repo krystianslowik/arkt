@@ -102,3 +102,12 @@ be verified through both actual composition paths before any further change is i
 Local source validation for this gate: Swift 6.2.4 frontend parsing of both edited Swift files, the workflow's
 import-layering and UI-test-source checks, `scripts/ui-tests/parity-report-test.sh`, `actionlint`, and
 `git diff --check` passed. No full build, typecheck, test execution, app launch or GUI run was performed here.
+
+
+## Component green before app-gate publication
+
+Run 42490834029 at `fc87d5123b406ad7e5c66a65c465d60f3f39e2a9` passed all twelve lifecycle methods,
+with GUI 2083 reported/60 skipped/zero failures and pure ShellKit 2535 tests/285 suites. The app build, lint and
+required gate passed; XCUITest and Core were skipped. The new General and app gates have not run and do not inherit
+that green result. The optional focused UI workflow selector is copied unchanged from the maintainer-approved
+#823 input so this branch can dispatch its actual app gate once; empty selection preserves full-suite behavior.
