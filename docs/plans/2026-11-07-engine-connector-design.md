@@ -1,9 +1,9 @@
 # Engine connector design
 
-Status: proposal, 2026-11-07, revised after review. Lane: `lane:engine`. Inputs: the engine options research
-(section 9.7, "Chromium built as a framework with an ObjC/Swift API"), `docs/plans/2026-10-24-engine-week3-results.md`
-(#575, #577, #583, #768), and a read-only audit of Chromium 156.0.8078.48 with patches 0001-0012 applied (summarised in
-section 1.3).
+Status: proposal, 2026-11-07, revised after review; open questions answered 2026-11-08 (section 1.2). Lane:
+`lane:engine`. Inputs: the engine options research (section 9.7, "Chromium built as a framework with an ObjC/Swift
+API"), `docs/plans/2026-10-24-engine-week3-results.md` (#575, #577, #583, #768), and a read-only audit of Chromium
+156.0.8078.48 with patches 0001-0012 applied (summarised in section 1.3).
 
 Paths below are relative to `$CR/chrome/browser/` unless they start with `components/`, `engine/` or another top-level
 directory. Line numbers are from the pinned checkout. Overlay files are under `engine/arkt/browser/` unless they start
@@ -39,14 +39,16 @@ the crashed bubble needs a `BrowserView` and replaced it with a facade event.
    as a Views widget floating unparented next to an Arkt window.
 4. **No hidden Chrome window.** No hidden `BrowserView` per Arkt window. CEF and content-only embedding stay rejected.
 
-Two questions follow from these decisions and are with the maintainer:
+Two questions followed from these decisions. The maintainer answered both on 2026-11-08:
 
-- **Hooks under decision 2. PENDING: maintainer answer.** Several items below are neither a guard nor a
-  generalization: they are named hooks that hand a Chromium request to the overlay (section 2.4 lists each one). If
-  hooks are not allowed, each hook row falls back to the "without a hook" column of that table.
-- **Views tab-modal dialogs under decision 3. PENDING: maintainer answer.** Tab-modal Views dialogs are parented as
-  sheets on the Arkt window through `GetWebContentsModalDialogHost`, so they are not unparented, but they are Views.
-  The question is whether they get a carve-out for the preview (section 3, E3, tab-modal inventory).
+5. **Hooks: allowed, capped.** Small hook or seam patches are allowed for the native prompts that have no seam:
+   leave-site (beforeunload), the device pickers, the permission prompt factory and low disk. The cap is about 12 hook
+   and seam patch files in total, and under 30 upstream files. Decision 2 still holds for everything else: a patch
+   only guards or generalizes a window lookup, or is one of these capped hooks. Section 2.4 lists each hook.
+6. **In-tab sheets: native from day one, no carve-out.** The roughly 39 Chromium-drawn in-tab sheets (HTTP login,
+   open-app, certificate picker, FedCM and the rest) go native. A Chromium-drawn sheet is not accepted for the
+   preview, even when it is parented on the Arkt window. As with decision 3, a sheet with no native UI yet is switched
+   off, never shown as Views. Section 3 (E3b) carries the inventory and the plan.
 
 ### 1.3 What the audit found
 
@@ -103,8 +105,8 @@ AsBrowserView() | GetBrowserViewForNativeWindow | static_cast<BrowserView | AsVi
    real key equivalents before that hunk lands. The remaining `ARKT_STUB("BrowserWindow")` entries are classified in
    E2 (from #589).
 2. **Per-window feature objects that `BrowserWindowFeatures` would have built for a `BrowserView`** (section 2.2).
-3. **Facade events for UI the shell draws** (E3). The engine side raises the event and holds Chromium's callback; the
-   shell draws and answers. This is the shape #400, #577 and #583 already use.
+3. **Facade events for UI the shell draws** (E3a, E3b). The engine side raises the event and holds Chromium's
+   callback; the shell draws and answers. This is the shape #400, #577 and #583 already use.
 
 No third `else if (arkt)` leg goes into `browser_window_features.cc`. It is a 1281-line file under active Bedrock
 refactoring, and it is one of the two hot files in the patch budget gate (`engine/REBASE.md`, section 6).
@@ -188,35 +190,37 @@ reach row T on an Arkt window, not only `CloseTab`. Non-test callers in 156, 33 
   `default_browser/default_browser_controller.cc`, `ui/startup/startup_browser_creator_impl.cc`,
   `ui/webui/settings/settings_clear_browsing_data_handler.cc`, `ui/webui/feedback/feedback_ui.cc`,
   `ui/tabs/vertical_tab_strip_state_controller_impl.cc`, `ui/browser_commands.cc` (15 files);
-- gated (sign-in, enterprise, Google AI, sharing): `actor/`, `glic/` (3), `dictation/`, `indigo/`, `skills/`,
-  `record_replay/`, `enterprise/connectors/analysis/`, `enterprise/data_protection/`, `ui/autofill/email_verifier/`,
+- gated (sign-in, enterprise, Google-only features, sharing): `actor/`, `glic/` (3), `dictation/`, `indigo/`,
+  `skills/`, `record_replay/`, `enterprise/connectors/analysis/`, `enterprise/data_protection/`, `ui/autofill/email_verifier/`,
   `ui/send_tab_to_self/` (2), `ui/signin/dice_migration_service.cc`, `ui/tabs/saved_tab_groups/`,
   `ui/tabs/shared_tab_group_version_upgrade_modal.cc`, `ui/views/scheduled_restart/`, `ui/webui/watermark/` (18 files).
 
 Whether the reachable ones crash today depends on `BrowserElementsViews::From` on an Arkt window; E1 checks it first.
-Toasts are dropped by the guard, or routed to the shell by a hook in `ToastController` if hooks are allowed.
+Toasts are dropped by the guard. A hook in `ToastController` that routes them to the shell is not one of the four
+named hooks (decision 5); it is taken only if a batch shows a need, and it counts against the cap.
 
 **The 15 gated dereferences** get no patch by default. Each feature is switched off in the Arkt build by feature flag,
 policy or build flag: glic, Lens region search, iOS promos, relaunch notification, idle timeout, media remoting, DICE
-web sign-in interception, batch upload, web app update review and WebAuthn ambient sign-in (the last until E3 draws it
+web sign-in interception, batch upload, web app update review and WebAuthn ambient sign-in (the last until E3a draws it
 natively). HaTS needs nothing: Arkt overrides `ShowHatsDialog`. A guard of about 5 lines is added only for a site that
 cannot be switched off.
 
 ### 2.4 Hooks, and the `EmbedderBrowserWindowFeatures` hook
 
-**PENDING: maintainer answer on whether named hooks are allowed under decision 2.** Every item that is not a guard or
-a generalization, classified:
+Hooks are allowed for the native prompts that have no seam, within the cap (decision 5). A seam that needs no patch
+still comes first. Every item that is not a guard or a generalization, classified:
 
-| Item | Class | Batch | Without a hook |
+| Item | Class | Batch | Status |
 |---|---|---|---|
-| Storage pressure notice | guard + overlay | E1 | row 1 only stops the crash. The overlay watches free disk itself and raises the facade event; Chromium's per-origin trigger is not used. Needs no hook either way |
-| Toast routing to the shell | hook | E1 | row T drops toasts on Arkt windows |
-| `SetResizableFromWebAPI` | hook | E2 | accept the gap (row 8) |
-| Page context menu on Arkt windows (#588) | hook, only if no delegate seam works | E2 | no page context menu |
-| beforeunload to the shell (#585) | hook, only if no overlay seam works | E3 | Chrome's app-modal dialog |
-| Named permission prompt factory, replacing `set_view_factory_for_testing` (section 6) | hook | E3 | keep the test setter, with a rebase check |
-| Device chooser (`ui/views/permissions/chooser_bubble_ui.cc:303`), embedded permission element | hook, only if the E3 gate finds no factory seam | E3 | switched off |
-| `EmbedderBrowserWindowFeatures` | hook | reserved | the `ArktBrowserWindow` constructor |
+| Low-disk notice | hook (named) | E3a | E1 landed the guard only (0013, row 1). The hook goes in `storage_pressure_bubble_view.cc`, the file 0013 already patches: instead of returning early, it hands the notice to the overlay. No new upstream file. The overlay's own disk watcher is the fallback |
+| beforeunload ("Leave site?", #585) | hook (named), only if no overlay seam works | E3a | allowed |
+| Named permission prompt factory, replacing `set_view_factory_for_testing` (section 6) | hook (named) | E3a | allowed |
+| Device pickers (`ui/views/permissions/chooser_bubble_ui.cc:303`), embedded permission element | hook (named), only if the E3a gate finds no factory seam | E3a | allowed |
+| In-tab sheets: one guard where Views sheets are shown, plus hooks in sheet factories | guard + hook | E3b | follows from decision 6; within the same cap (E3b) |
+| Toast routing to the shell | hook | none planned | not named. Row T drops toasts; taken only if a batch shows a need, and counted against the cap |
+| `SetResizableFromWebAPI` | hook | E2 | not named. Accept the gap (row 8) |
+| Page context menu on Arkt windows (#588) | hook, only if no delegate seam works | E2 | not named. Taken only if the E2 gate shows a need, and counted against the cap |
+| `EmbedderBrowserWindowFeatures` | hook | reserved | not wired (below) |
 
 `EmbedderBrowserWindowFeatures` (`ui/browser_window/public/embedder_browser_window_features.h`) is documented as "should
 only be used by Chromium embedders". Its `Init` and `InitPostWindowConstruction` run for every window
@@ -243,38 +247,52 @@ definition. It counts **seam patch files** (the tolerate-a-non-BrowserView theme
 
 | Step | Patch files | Upstream files outside 0001-0004 | Seam and hook patch files | Status |
 |---|---|---|---|---|
-| today (0001-0012) | 12 | 15 | 4 | exist |
-| E1: guard theme (rows 1, 3-5, T) and generalization theme (row 2) | 14 | 19 | 6 | proposed |
-| E2: rows 6-7 added to the generalization theme | 14 | 20-21 | 6 | proposed |
-| E2: page context menu hook (#588), if needed | 15 | 21-23 | 7 | pending hooks answer |
-| E3: permission factory, beforeunload, chooser and permission element hooks | 17-18 | 24-27 | 9-10 | pending hooks answer |
-| toast routing and `SetResizable` hooks (files already counted) | 17-20 | 24-27 | 9-12 | pending hooks answer |
-| gated sites that cannot be switched off | 17-21 | 24-31 | 9-13 | only if needed |
-| `EmbedderBrowserWindowFeatures`, if ever wired | 17-22 | 24-33 | 9-14 | reserved |
-| **likely total** (no gated guards, hook not wired) | **about 17-20, under 30** | **about 24-27** | **about 9-12** | |
+| before E1 (0001-0012) | 12 | 15 | 4 | exist |
+| E1: guard theme (rows 1, 3-5, T) and generalization theme (row 2) | 14 | 19 | 6 | landed (#800, 0013 and 0014) |
+| E2: rows 6-7 added to the generalization theme | 14 | 20-21 | 6 | planned |
+| E2: page context menu hook (#588), only if needed | 14-15 | 20-23 | 6-7 | only if needed |
+| E3a: named hooks: permission prompt factory, device pickers and permission element, beforeunload, low disk (low disk adds no file) | 15-17 | 22-26 | 7-9 | allowed (decision 5) |
+| E3b: in-tab sheet guard and sheet hooks | 16-19 | 26-29 | 8-11 | allowed (decision 6), capped below |
+| toast routing and `SetResizable` hooks | | | | not planned; only within the cap |
+| gated sites that cannot be switched off | | | | only if needed, within the cap |
+| `EmbedderBrowserWindowFeatures`, if ever wired | | | | reserved, within the cap |
+| **likely total** | **about 16-19, under 30** | **about 26-29, under 30** | **about 8-11, at most 12** | |
 
-Under today's limits, the seam-file limit (more than 8) trips with the E3 hooks, and the upstream-file limit (more than
-25) can trip at the upper end of E3. Proposed new limits, keeping the mixed definition:
+Limits, set by the maintainer's answer (decision 5) and kept in the gate's mixed definition:
 
-- under 30 patch files in total;
-- about 30 upstream files outside 0001-0004 (so the gated sites are switched off, not guarded);
-- at most 12 seam and hook patch files;
-- at most 4 hunks in total in `browser_actions.cc` and `browser_commands.cc` (today 0; E1 adds 4);
-- hot-file hunks unchanged at 6 (no batch adds one), and no change to a widely included header.
+- at most about 12 seam and hook patch files;
+- under 30 upstream files outside 0001-0004;
+- under 30 patch files in total.
 
-The gate's own fallback, a widget-backed `ArktBrowserWindow` (variant W in the week-2 plan), does not apply: decision 3
-draws prompts natively, so Views bubbles anchored on a widget are not wanted.
+Also proposed, still to confirm: at most 4 hunks in total in `browser_actions.cc` and `browser_commands.cc` (E1 used
+4: Cut, Copy, Paste and `CloseTab`); hot-file hunks unchanged at 6 (no batch adds one); no change to a widely included
+header.
+
+The upstream-file cap is the tight one. After E1, 19 of the 30 are used. E2 and E3a take about 3-7 more, which leaves
+E3b about 3-7 upstream files for all in-tab sheets. That is why E3b draws sheets through one choke point and existing
+seams first, and puts a hook in a sheet's own file only for a few sheets (E3b).
+
+`engine/REBASE.md` section 6 still states the week-2 limits (at most 8 seam patch files, 25 upstream files). E3a, the
+first batch that can pass them, updates it to these limits.
+
+The gate's own fallback, a widget-backed `ArktBrowserWindow` (variant W in the week-2 plan), does not apply: decisions
+3 and 6 draw prompts and sheets natively, so Views bubbles and sheets anchored on a widget are not wanted.
 
 ## 3. Batches
 
-Four `lane:engine` work packages, each one issue and one engine branch, with a results section per batch. Order:
-**E1, E2, E3, E4**, following the lane rule that #122's engine work comes before #121's. Composition: (a) overlay work
+Five `lane:engine` work packages, each one issue and one engine branch, with a results section per batch. Order:
+**E1, E2, E3a, E3b, E4**, following the lane rule that #122's engine work comes before #121's. E3 is split in two
+because decision 6 adds the in-tab sheets to it. E1 has landed (#800). Composition: (a) overlay work
 with no patch, (b) a patch hunk, (c) native UI the shell builds against a facade event.
 
 Before E2 starts, the audit grep is extended to `BrowserElementsViews::From`, `GetView(` and `CHECK_IS_TEST`, with the
 same Mac-build and reachability checks; new reachable crash sites join E1 or E2.
 
 ### E1. Crash guards (first)
+
+Landed in #800 (0013 and 0014): guards and one generalization, no hook. Results:
+`docs/plans/2026-10-24-engine-week3-results.md`, "E1: crash guards". The native low-disk notice (the second half of
+step 1 and its acceptance row) moves to E3a, where the low-disk hook is one of the named hooks.
 
 Composition: (b) rows 1-5 and T; (a) a real `GetAcceleratorProvider`, the overlay disk watcher, the comment follow-ups
 of section 2.1; (c) one low-disk notice (design first, `arkt-design-first`); feature switches for the gated sites.
@@ -290,7 +308,7 @@ Acceptance:
 
 - Low disk (simulated through the storage notification service or a test switch) on an Arkt window: no crash, one
   facade event, the shell's notice appears once.
-- A toast triggered on an Arkt window: no crash; dropped, or shown by the shell if hooks are allowed.
+- A toast triggered on an Arkt window: no crash; dropped.
 - `IDC_CLOSE_TAB` with every selected tab pinned, with and without an `IDC_CLOSE_TAB` accelerator in Arkt's provider,
   and `IDC_CUT`, `IDC_COPY`, `IDC_PASTE` sent through `executeCommand`: no crash; the clipboard commands act on the
   focused page.
@@ -301,7 +319,7 @@ Acceptance:
 ### E2. Per-window features Arkt lacks, and the silent lookups
 
 Composition: (a) `FindBarOwner`, a real `ArktSidePanelUI`, the Cast controller, the #586 overlay items, the #589 stub
-sweep; (b) rows 6-7 (and the row 8 hook if allowed); (c) side panel host, fullscreen exit control, Cast device list,
+sweep; (b) rows 6-7 (row 8 stays an accepted gap); (c) side panel host, fullscreen exit control, Cast device list,
 page context menu.
 
 Shell design dependencies: Cast (#653, waiting on a design pick), the fullscreen exit control (#613) and the page
@@ -331,11 +349,35 @@ Acceptance:
 - Cast lists devices natively, starts and stops casting; no crash when no device exists.
 - The acceptance criteria of #586 (without its docked DevTools item, which moves to E4), #588 and #589.
 
-### E3. Prompt seams for native UI
+### E3. Native prompts and in-tab sheets (split: E3a, E3b)
 
-Composition: mostly (c), with an engine seam per prompt; hooks only where no factory seam exists (section 2.4). Each
-surface needs a design pick first (`arkt-design-first`). The engine seam can land before the shell draws it, but the
-prompt stays switched off until the shell answers it.
+Decision 6 adds the in-tab sheets to E3. Before, E3 was about 12 bubble and prompt surfaces. With the sheets it is about
+12 prompt surfaces, about 20 page-facing sheet files, a new census and a new guard. Each native surface needs a design
+pick first (`arkt-design-first`). That is about twice the old E3 and too big for one pull request, so it splits:
+
+- **E3a: prompts and the named hooks.** The bubble and prompt table below, and the four named hooks of decision 5.
+- **E3b: in-tab sheets.** The choke-point guard, the sheet routes and the sheet inventory below.
+
+Rough size, as a guide only: E3a is close to the old E3 (12 surfaces, 2-4 hook sites, 1-2 hook patch files). E3b is
+larger in shell work (about 8-12 native sheets) but smaller in patches (1 guard and a few sheet hooks, 1-2 patch files).
+E3b starts once E3a's hooks have landed, so it knows how much of the cap is left. Either may split again into two pull
+requests if review asks (section 5).
+
+The rule for both: the engine seam can land before the shell draws the surface, but the prompt or sheet stays switched
+off until the shell answers it. Nothing Chromium-drawn is shown in the meantime.
+
+#### E3a. Prompts and the named hooks
+
+Composition: mostly (c), with an engine seam per prompt; (b) the four named hooks of decision 5 (section 2.4), each only
+where no seam exists.
+
+1. Permission prompt factory: a named hook in place of `set_view_factory_for_testing` (section 6).
+2. Device pickers (WebUSB, HID, Serial, Bluetooth) and the embedded permission element: a factory seam if the gate
+   finds one; otherwise a named hook at `chooser_bubble_ui.cc:303`.
+3. beforeunload ("Leave site?", #585): an overlay seam if one works; otherwise a named hook.
+4. Low disk: the hook in `storage_pressure_bubble_view.cc` (already patched by 0013) hands the notice to the overlay;
+   the shell draws it.
+5. The rest of the table below, each through a facade event.
 
 Bubbles and prompts the shell must build:
 
@@ -346,47 +388,99 @@ Bubbles and prompts the shell must build:
 | File System Access usage | `ui/views/file_system_access/file_system_access_usage_bubble_view.cc:457`, `:548` | only from a page action; dereferences |
 | Pointer and keyboard lock prompts, quiet permission indicator | #265 | Views, or the full prompt |
 | beforeunload ("Leave site?") | `TabModalDialogManager::RunBeforeUnloadDialog` (#585) | app-modal |
+| Low-disk notice | `ui/views/storage/storage_pressure_bubble_view.cc` | dropped by 0013's guard |
 | Password save and update, passkeys | #632 | not checked |
 | Card and address save | `AutofillBubbleHandler`; `ArktAutofillBubbleHandler` is a no-op (#575) | nothing shown |
 | WebAuthn ambient sign-in | `webauthn/ambient/ambient_signin_controller.cc:120` | switched off (E1) |
-| FedCM account chooser | `ui/views/webid/fedcm_account_selection_view_desktop.cc:1165` (bubble), `ui/views/webid/account_selection_modal_view.cc` | not checked |
+| FedCM account chooser (bubble; ships in E3b with the modal) | `ui/views/webid/fedcm_account_selection_view_desktop.cc:1165` | not checked |
 | Default browser prompt | `ui/startup/default_browser_prompt/default_browser_bubble_dialog_manager.cc:33` | skipped; Arkt draws its own |
 | Memory saver | `ui/performance_controls/memory_saver_bubble_controller.cc:46` | only if surfaced |
 | Touch Bar for text fields | `ui/cocoa/touchbar/web_textfield_touch_bar_controller.mm:22` | none |
 
-**Tab-modal inventory. PENDING: maintainer answer on a preview carve-out.** `ShowWebModalDialogViews` appears in 39
-non-test files under `chrome/browser` (`grep -rl ShowWebModalDialogViews`, `*.cc` and `*.mm`, tests excluded). Arkt
-parents these as sheets on the Arkt window through `GetWebContentsModalDialogHost`, but they are Views. Grouped:
-
-- page-facing, reachable: HTTP auth (`ui/views/login_handler_views.cc`), external protocol
-  (`ui/views/external_protocol_dialog.cc`), client certificate (`ui/views/certificate_selector.cc`), generic tab-modal
-  confirm (`ui/views/tab_modal_confirm_dialog_views.cc`), constrained web dialogs
-  (`ui/views/constrained_web_dialog_delegate_views.cc`), share this tab
-  (`ui/views/desktop_capture/share_this_tab_dialog_views.cc`), media picker (`ui/views/media_picker_utils.cc`),
-  Bluetooth credentials and pairing (`ui/views/bluetooth_device_credentials_view.cc`,
-  `ui/views/bluetooth_device_pair_confirm_view.cc`), WebAuthn
-  (`ui/views/webauthn/authenticator_request_dialog_view_controller_views.cc`), digital credentials
-  (`ui/views/digital_credentials/digital_identity_multi_step_dialog.cc`), extension chooser and media galleries
-  (`ui/views/extensions/chooser_dialog_view.cc`, `ui/views/extensions/media_galleries_dialog_views.cc`);
-- payments and passwords: card unmask and OTP (`ui/views/autofill/payments/`, 3 files), Payment Request and secure
-  payment confirmation (`ui/views/payments/`, 2 files), account chooser, auto sign-in first run and combined selector
-  (`ui/views/passwords/`, 3 files);
-- already native in Arkt: JavaScript dialogs (`ui/views/javascript_tab_modal_dialog_view_views.cc`, #400);
-- off or unreachable in Arkt: web apps (`ui/views/web_apps/`, 10 files, plus `ui/views/shortcuts/create_desktop_shortcut.cc`
-  and `ui/views/apps/app_info_dialog/`), enterprise (`enterprise/connectors/analysis/`, `enterprise/data_controls/`),
-  Google AI (`actor/`, `skills/`), Safe Browsing tailored security (`ui/views/safe_browsing/tailored_security_unconsented_modal.cc`).
-
-Without a carve-out, every reachable row above needs native UI or a switch before the preview.
+FedCM has a bubble here and a modal in E3b. Both are drawn by the same native surface, so they ship together in E3b.
 
 Acceptance:
 
-- Each prompt in the tables: a facade event and a response path, a contract rule on `InMemoryEngine`, and a real-engine
-  check with a loopback page; or a recorded switch that keeps it off, with a no-crash check. Tab-modal rows follow the
-  carve-out answer.
-- No Views widget appears next to an Arkt window during the check matrix. The existing census (`ARKT: browsers normal=
-  arkt= views=`, `arkt_browser_main_extra_parts.mm:199-238`) counts Views browser windows only, not bubbles or sheets,
-  so E3 adds a widget census (open `views::Widget`s per Arkt window) and uses that.
-- The permission prompt no longer depends on `set_view_factory_for_testing`, or a rebase check guards it (section 6).
+- Each prompt in the table: a facade event and a response path, a contract rule on `InMemoryEngine`, and a real-engine
+  check with a loopback page; or a recorded switch that keeps it off, with a no-crash check.
+- Low disk (simulated through `chrome://quota-internals`, as in E1) on an Arkt window: no crash, one facade event, the
+  shell's notice appears once.
+- The permission prompt no longer depends on `set_view_factory_for_testing` (section 6).
+- A widget census: the existing census (`ARKT: browsers normal= arkt= views=`, `arkt_browser_main_extra_parts.mm:199-238`)
+  counts Views browser windows only, not bubbles or sheets. E3a adds a count of open `views::Widget`s per Arkt window,
+  and E3a and E3b use it. No Views widget appears next to an Arkt window during the check matrix.
+- Budget after E3a recorded in its results section: patch files, upstream files, seam and hook patch files.
+
+#### E3b. In-tab sheets
+
+Composition: (b) one guard at the choke point and a few sheet hooks; (a) overlay sheet handlers; (c) the native sheets.
+
+`ShowWebModalDialogViews` appears in 39 non-test files under `chrome/browser` (`grep -rl ShowWebModalDialogViews`,
+`*.cc` and `*.mm`, tests excluded). Every one of them reaches
+`constrained_window::ShowWebModalDialogViews` (`components/constrained_window/constrained_window_views.cc:257`), which
+creates the Views widget and shows it as a sheet through `GetWebContentsModalDialogHost`.
+
+How a sheet goes native, in order of preference:
+
+1. **The guard at the choke point (one patch site, one upstream file).** In `ShowWebModalDialogViews`, when the
+   WebContents is in an Arkt window, no Views widget is created. The sheet is offered to the overlay. If no handler
+   takes it, it is cancelled and logged with its delegate's class name. So no Chromium-drawn sheet ever appears on an
+   Arkt window, and a sheet that is not handled yet shows up in the logs and the widget census, not on screen. This
+   is a guard in the 0006 shape, and it is what makes decision 6 hold while the native sheets are built one by one.
+2. **An existing seam, no patch.** A model or controller the overlay can already reach. Examples already in place:
+   JavaScript dialogs (#400) and the extension dialogs of 0007.
+3. **A generic `ui::DialogModel` sheet.** Some sheets are built from a `ui::DialogModel` (title, text, fields,
+   buttons). The shell draws those with one native sheet renderer, as 0007 does for extension dialogs. A grep finds
+   `DialogModel` in 7 of the page-facing files below; the gate checks which of them build the whole sheet that way.
+4. **A hook in the sheet's own factory.** One hook site in the file that creates the sheet, in the shape of 0007's
+   hook (ask the overlay first). All sheet hooks go into one theme patch file. Each one costs an upstream file, so
+   this route is limited by the cap: about 3-7 upstream files are left for E3b (section 2.5).
+5. **Switched off for the preview.** For a feature that is gated, unreachable, or not worth a native sheet yet. The
+   switch is recorded with a no-crash check. The guard covers it too.
+
+Inventory, with the proposed route per row. The E3b gate confirms each route against the pinned source before any
+work:
+
+| Group | Sheet (file under `ui/views/` unless stated) | Proposed route |
+|---|---|---|
+| page-facing, must be native | HTTP login (`login_handler_views.cc`) | 4: hook in `LoginHandler::Create` |
+| | Open-app, external protocol (`external_protocol_dialog.cc`) | 4: hook in `RunExternalProtocolDialog` |
+| | Client certificate picker (`certificate_selector.cc`) | 4, or 2 if `ChromeContentBrowserClient::SelectClientCertificate` can be reached without a patch |
+| | WebAuthn and passkeys (`webauthn/authenticator_request_dialog_view_controller_views.cc`) | 2 or 4: the sheet is drawn from `AuthenticatorRequestDialogModel` |
+| | FedCM modal (`webid/account_selection_modal_view.cc`) and the FedCM bubble (E3a) | 4: one hook at the account selection view factory covers both |
+| | Generic tab-modal confirm (`tab_modal_confirm_dialog_views.cc`) | 2: drawn from its `TabModalConfirmDialogDelegate`, if its callers are reachable; otherwise 5 |
+| | Bluetooth credentials and pairing (`bluetooth_device_credentials_view.cc`, `bluetooth_device_pair_confirm_view.cc`) | 3 for credentials if the gate confirms; native with the device pickers (E3a), or 5 with Web Bluetooth |
+| | Share this tab, media picker (`desktop_capture/share_this_tab_dialog_views.cc`, `media_picker_utils.cc`) | 2 or 4, together with E2 row 7 (the screen-share picker) |
+| | Constrained web dialogs (`constrained_web_dialog_delegate_views.cc`) | to check: which callers are reachable on Mac; a WebUI page in a native sheet, or 5 |
+| passwords and payments | Account chooser, auto sign-in first run, combined selector (`passwords/`, 3 files) | native with password save (#632, E3a); 5 until then |
+| | Card unmask and OTP, payments consent (`autofill/payments/`, 3 files) | 5: server cards need a Google Payments account |
+| | Payment Request and secure payment confirmation (`payments/`, 2 files) | 5 for the preview, unless the maintainer wants them native |
+| gated or off | Digital credentials (`digital_credentials/digital_identity_multi_step_dialog.cc`), extension chooser and media galleries (`extensions/chooser_dialog_view.cc`, `extensions/media_galleries_dialog_views.cc`) | 5: behind a flag or reachable only from Chrome Apps |
+| | Web apps (`web_apps/`, 10 files, plus `shortcuts/create_desktop_shortcut.cc` and `apps/app_info_dialog/`), enterprise (`enterprise/connectors/analysis/`, `enterprise/data_controls/`), Google-only features (`actor/`, `skills/`), Safe Browsing tailored security (`safe_browsing/tailored_security_unconsented_modal.cc`) | 5: off or unreachable in Arkt |
+| already native | JavaScript dialogs (`javascript_tab_modal_dialog_view_views.cc`) | 2: #400 |
+
+Proposed counts: about 4-6 route 4 hooks (HTTP login, open-app, FedCM, and maybe the certificate picker, WebAuthn and
+share this tab), about 8-12 native sheets in the shell, and the rest switched off. Route 4 hooks plus the guard must fit
+in the 3-7 upstream files left. If the gate finds more route 4 sheets than that, E3b stops and asks the maintainer:
+raise the cap for sheets, or switch more features off for the preview. A Chromium-drawn sheet is never the fallback.
+
+Order inside E3b:
+
+1. Gate: confirm each route against the source; record the budget after E3a.
+2. The choke-point guard. From here on, no Views sheet shows on an Arkt window.
+3. HTTP login, open-app and the certificate picker: the sheets a normal browsing session hits first.
+4. FedCM, WebAuthn and passkeys.
+5. The rest of the native rows, then the switches.
+
+Acceptance:
+
+- Each sheet row: a facade event and a response path, a contract rule on `InMemoryEngine`, and a real-engine check with
+  a loopback page (HTTP 401 for login, a custom scheme link for open-app, a test client certificate, a FedCM test
+  provider, a virtual WebAuthn authenticator); or a recorded switch with a no-crash check.
+- With the guard reverted, each checked page shows a Views sheet again (the break check), and with it in place the
+  widget census stays at zero during the check matrix.
+- An unhandled sheet is cancelled, not left pending: the page gets the same result as when the user dismisses it.
+- Budget after E3b recorded: seam and hook patch files at most about 12; upstream files outside 0001-0004 under 30.
 
 ### E4. Extensions
 
@@ -443,13 +537,13 @@ Absorbed patches cost nothing at rebase.
 ## 5. Rebase cost and process
 
 **Batch instead of one seam per issue.** Each engine pull request today costs an Export, a `.patches` sync, an
-`out/Spike` build and a smoke run with a fresh profile. Four batches put related hunks into theme patches and one
+`out/Spike` build and a smoke run with a fresh profile. Five batches put related hunks into theme patches and one
 build-and-smoke cycle each. Each batch still lands as reviewable commits inside one pull request; a batch may be split
 into two pull requests if review asks.
 
 **Rebase.** The overlay and the Swift side cost nothing at rebase. Patch hunks do: weight 1 per hunk in small files and
 2 in `browser_actions.cc` and `browser_commands.cc` (the audit's weighting). The two themes of section 2.3 are about 48
-lines in 9 hunks, about 68 weighted (lines times weight); the hooks of section 2.4 add to that only if allowed. #222
+lines in 9 hunks, about 68 weighted (lines times weight); the hooks of section 2.4 (E3a, E3b) add to that, within the cap of section 2.5. #222
 (dry-run rebase) runs right after E1, so the first measured number includes the new themes.
 
 **One engine worktree.** `arkt-engine-lane` (checklist item 1) stays as it is: one engine worktree with the `$CR/arkt`
@@ -460,7 +554,7 @@ that do not need a build, and docs use a plain repo worktree without the `$CR` l
 
 | Risk | Where | Mitigation |
 |---|---|---|
-| A `*_for_testing` setter in production | `arkt_permission_prompt.mm:480`, `PermissionRequestManager::set_view_factory_for_testing`, installed on tab insert | a named factory hook in E3 if hooks are allowed; otherwise a rebase check that the setter still exists. Tracked by #265's first item, which moves to E3 |
+| A `*_for_testing` setter in production | `arkt_permission_prompt.mm:480`, `PermissionRequestManager::set_view_factory_for_testing`, installed on tab insert | a named factory hook in E3a (decision 5). Tracked by #265's first item, which moves to E3a |
 | Test-only user-data factory | `GetUserDataFactoryForTesting()` (`browser_window_features.h:304-305`) | do not use it; register from the constructor (section 2.2) |
 | Toasts on Arkt windows | `ui/toasts/toast_controller.cc:323-329`, `:442-452`; 15 probably reachable caller files | E1 checks and guards first |
 | Non-absorbable hunks | the `GetPageInfoAnchorRect` hunk of 0006, and any non-widget fallback in Views code | re-applied every rebase; keep them few, prefer facade events |
@@ -468,5 +562,6 @@ that do not need a build, and docs use a plain repo worktree without the `$CR` l
 | Second lookup layer | `ToolbarButtonProvider::From` (34 sites), `BrowserElementsViews::From` (41), `GetWidgetForNativeWindow` (86), `ExtensionsToolbarDesktop` (13): also null on Arkt windows, not audited site by site | the extended grep before E2 |
 | Patched files edited often upstream | `browser_actions.cc` (5369 lines), `browser_commands.cc` (3118); `browser_web_contents_delegate.cc` (1537, two Arkt hunks already) if the row 8 hook is added | the hunk cap in section 2.5; measured in #222 |
 | Gate numbers | the week-2 limits in `engine/REBASE.md`, section 6 | new limits proposed (section 2.5) |
-| Native prompts from day one widen the preview scope | E3 tables | prompts without native UI are switched off, never shown as Views |
+| Native prompts and sheets from day one widen the preview scope | E3a and E3b tables | E3 split in two; prompts and sheets without native UI are switched off, never shown as Views; the E3b choke-point guard cancels any sheet not handled yet |
+| Sheet hooks outgrow the cap | E3b route 4, about 3-7 upstream files left after E3a | the choke point and existing seams first; E3b stops for a maintainer call if more route 4 sheets are needed |
 | Shallow checkout | upstream churn not measured from history | #222 |
