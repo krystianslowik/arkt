@@ -86,6 +86,18 @@ public final class AppSettings {
     }
   }
 
+  /// Settings > Appearance > "Haptic feedback when reordering tabs" (BH-024). On by default. Stored inverted as
+  /// `tabReorderingHapticsDisabled`.
+  public var playsReorderHaptics: Bool {
+    get { !bool(Key.tabReorderingHapticsDisabled, default: false) }
+    set {
+      let disabled = !newValue
+      guard disabled != bool(Key.tabReorderingHapticsDisabled, default: false) else { return }
+      set(disabled, Key.tabReorderingHapticsDisabled)
+      notifyObservers()
+    }
+  }
+
   /// Settings > General > Links: the two Peek switches (BH-144, BH-145).
   public var peekLinks: PeekLinkSettings {
     get {
@@ -200,18 +212,6 @@ public final class AppSettings {
   }
 
   // MARK: Reset
-
-  /// Settings > Appearance > "Haptic feedback when reordering tabs" (BH-024). On by default. Stored inverted as
-  /// `tabReorderingHapticsDisabled`.
-  public var playsReorderHaptics: Bool {
-    get { !bool(Key.tabReorderingHapticsDisabled, default: false) }
-    set {
-      let disabled = !newValue
-      guard disabled != bool(Key.tabReorderingHapticsDisabled, default: false) else { return }
-      set(disabled, Key.tabReorderingHapticsDisabled)
-      notifyObservers()
-    }
-  }
 
   /// Reset all settings (#617): every key in `Key.preferences` is removed, so each value reads its default again, and
   /// observers hear one change. Only those keys: the rest of the suite (window sessions, sidebar state, notices) and

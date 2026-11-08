@@ -36,6 +36,7 @@ struct ReorderHapticTests {
     defer { UserDefaults().removePersistentDomain(forName: name) }
     let settings = AppSettings(defaults: defaults)
     ReorderHapticGate.bind(settings)
+    defer { ReorderHapticGate.enabled = { true } }
     #expect(ReorderHapticGate.enabled())
     settings.playsReorderHaptics = false
     #expect(!ReorderHapticGate.enabled())
