@@ -2969,3 +2969,17 @@ is not included in these CI counts. Real AppSession/Chromium termination remains
 The GUI log also exposed a new explicit-selector construction warning in the test helper. Its private Objective-C
 action is now resolved with `NSSelectorFromString`, without changing the dispatched action or assertions. Source
 parsing and diff checks passed; new-head CI is required. The existing Add/Edit route UI and runtime dispatch remain incomplete.
+
+### Link routing Settings form (#113, bounded slice)
+
+The Spaces pane now lists ordered routes and provides Add and per-row Edit sheets over the shared editor. The sheet
+preserves literal text and Space IDs, including unavailable destinations and duplicate Space names. Cancel and Escape
+leave the editor untouched; failed saves retain the desired snapshot and display an accessible error for retry. The
+existing default destination and termination flush paths remain in place. Dispatch and the rest of #113 remain open.
+
+At the prior head `bb3474f`, CI run 42461929580 executed 2,049 GUI tests with 54 skipped and five assertions failing
+across all three new form tests; the other reported jobs passed or were skipped. A focused adapter test first failed to
+compile against the old boundary, then the actual-source SQLite integration probe passed 3 tests in 2 suites with
+Swift 6.4.1, macOS 15 target and SDK 15.5. The toolchain emitted missing developer framework search-path linker
+warnings. Source parsing, changed-source import checks and diff whitespace checks passed. GUI, app build and XCUITest
+were not run locally; CI must validate the form.

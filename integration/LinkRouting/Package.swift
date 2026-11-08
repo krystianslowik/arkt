@@ -11,7 +11,7 @@ let package = Package(
     .target(name: "ShellUI", dependencies: ["Motion"]),
     .target(name: "CoreBridge", dependencies: ["ShellUI", .product(name: "SidebarModel", package: "ArktCore")]),
     .testTarget(name: "LinkRoutingIntegrationTests", dependencies: [
-      "CoreBridge", .product(name: "Persistence", package: "ArktCore"),
+      "CoreBridge", "ShellUI", .product(name: "Persistence", package: "ArktCore"),
       .product(name: "SidebarModel", package: "ArktCore"),
     ]),
   ]

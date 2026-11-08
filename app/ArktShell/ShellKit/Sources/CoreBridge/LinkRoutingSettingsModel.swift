@@ -171,6 +171,9 @@ public extension LinkRoutingSettingsModel {
         case .space(let id): return .space(id)
         }
       },
+      routes: { [weak self] in self?.settings.routes.map(SettingsLinkRoute.init) ?? [] },
+      appendRoute: { [weak self] in self?.appendRoute($0.coreRoute) },
+      replaceRoute: { [weak self] index, route in self?.replaceRoute(at: index, with: route.coreRoute) },
       hasLoadError: { [weak self] in self?.isLoaded == false && self?.lastError != nil },
       hasSaveError: { [weak self] in self?.isLoaded == true && self?.lastError != nil },
       setDestination: { [weak self] destination in
@@ -181,5 +184,41 @@ public extension LinkRoutingSettingsModel {
         }
       },
       flush: { [weak self] in await self?.flush() ?? false })
+  }
+}
+
+private extension SettingsLinkDestination {
+  init(_ destination: LinkRouting.Destination) {
+    switch destination {
+    case .littleArkt: self = .littleArkt
+    case .mostRecentSpace: self = .mostRecentSpace
+    case .space(let id): self = .space(id)
+    }
+  }
+  var coreDestination: LinkRouting.Destination {
+    switch self {
+    case .littleArkt: .littleArkt
+    case .mostRecentSpace: .mostRecentSpace
+    case .space(let id): .space(id)
+    }
+  }
+}
+
+private extension SettingsLinkRoute {
+  init(_ route: LinkRouting.Route) {
+    let condition: Condition
+    switch route.condition {
+    case .contains(let literal): condition = .contains(literal)
+    case .matches(let literal): condition = .matches(literal)
+    }
+    self.init(condition: condition, destination: SettingsLinkDestination(route.destination))
+  }
+  var coreRoute: LinkRouting.Route {
+    let coreCondition: LinkRouting.Condition
+    switch condition {
+    case .contains(let literal): coreCondition = .contains(literal)
+    case .matches(let literal): coreCondition = .matches(literal)
+    }
+    return .init(condition: coreCondition, destination: destination.coreDestination)
   }
 }

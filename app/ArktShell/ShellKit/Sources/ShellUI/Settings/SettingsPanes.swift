@@ -203,8 +203,6 @@ extension SettingsWindowController {
     }
     let newProfile = SettingsAddRowView(title: "New Profile...", planned: true)
     identify(newProfile.button, .spaces, "newProfile")
-    let addRoute = SettingsAddRowView(title: "Add Route...", planned: true)
-    identify(addRoute.button, .spaces, "addRoute")
     var blocks: [SettingsBlockView] = []
     if !spaceRows.isEmpty {
       blocks.append(section("Spaces", spaceRows,
@@ -215,12 +213,90 @@ extension SettingsWindowController {
       section("Archive", archiveRows()),
       section("Profiles", profiles + [newProfile],
               note: "Each profile keeps its own Favorites, history, cookies, passwords and extensions."),
-      section("Link routing", [
-        linkRoutingRow(spaces: spaces),
-        addRoute,
-      ]),
+      linkRoutingSection(spaces: spaces),
     ]
     return blocks
+  }
+
+  private func linkRoutingSection(spaces: [SettingsSpaceSummary]) -> SettingsBlockView {
+    let container = SettingsRouteSection()
+    let rows = services.linkRoutingRows
+    let refresh: @MainActor () -> Void = { [weak self, weak container] in
+      guard let self, let container else { return }
+      var blocks: [SettingsBlockView] = [self.linkRoutingRow(spaces: spaces)]
+      if let rows, rows.destination() != nil {
+        for (index, route) in rows.routes().enumerated() {
+          let literal: String
+          let condition: String
+          switch route.condition {
+          case .contains(let text): literal = text; condition = "Contains"
+          case .matches(let text): literal = text; condition = "Matches"
+          }
+          let destination: String
+          switch route.destination {
+          case .littleArkt: destination = "Little Arkt"
+          case .mostRecentSpace: destination = "Most Recent Space"
+          case .space(let id): destination = spaces.first { $0.id == id }?.title ?? "Unavailable Space"
+          }
+          let edit = self.pill(.spaces, "route.\(index).edit", "Edit") { [weak self, weak container] in
+            guard let self, let container else { return }
+            self.showRouteSheet(route: route, index: index, rows: rows, spaces: spaces) {
+              container.refresh?()
+            }
+          }
+          blocks.append(self.row("\(condition) \(literal)", destination, [edit]))
+        }
+      }
+      if rows?.hasSaveError() == true {
+        let error = self.row("Could not save link routing settings. Edit and save again to retry.")
+        error.setAccessibilityElement(true)
+        error.setAccessibilityRole(.staticText)
+        error.setAccessibilityLabel("Could not save link routing settings. Edit and save again to retry.")
+        error.setAccessibilityIdentifier("settings.route.saveError")
+        blocks.append(error)
+      }
+      let add = SettingsAddRowView(title: "Add Route...", planned: rows?.destination() == nil)
+      self.identify(add.button, .spaces, "addRoute")
+      if let rows, rows.destination() != nil {
+        let target = SettingsActionTarget { [weak self, weak container] in
+          guard let self, let container else { return }
+          self.showRouteSheet(route: nil, index: nil, rows: rows, spaces: spaces) { container.refresh?() }
+        }
+        self.actionTargets.append(target)
+        add.button.target = target
+        add.button.action = #selector(SettingsActionTarget.fire(_:))
+      }
+      blocks.append(add)
+      container.replace(self.section("Link routing", blocks))
+      if self.selectedPane == .spaces { self.layoutPane(); self.updateKeyViewLoop() }
+    }
+    container.refresh = refresh
+    refresh()
+    if let rows {
+      Task { [weak container] in
+        await rows.load()
+        container?.refresh?()
+      }
+    }
+    return container
+  }
+
+  private func showRouteSheet(route: SettingsLinkRoute?, index: Int?, rows: SettingsLinkRoutingRows,
+                              spaces: [SettingsSpaceSummary], refresh: @escaping @MainActor () -> Void) {
+    guard let window, window.attachedSheet == nil else { return }
+    let sheet = SettingsRouteSheet(route: route, spaces: spaces)
+    routeSheet = sheet
+    sheet.onFinish = { [weak self] result in
+      self?.routeSheet = nil
+      guard let result else { return }
+      if let index { rows.replaceRoute(index, result) } else { rows.appendRoute(result) }
+      refresh()
+      Task {
+        _ = await rows.flush()
+        refresh()
+      }
+    }
+    sheet.begin(on: window)
   }
 
   private func linkRoutingRow(spaces: [SettingsSpaceSummary]) -> SettingsBlockView {
@@ -558,4 +634,18 @@ extension NSView {
     }
     return nil
   }
+}
+
+@MainActor
+private final class SettingsRouteSection: SettingsBlockView {
+  var refresh: (@MainActor () -> Void)?
+  private var content: SettingsBlockView?
+  func replace(_ view: SettingsBlockView) {
+    content?.removeFromSuperview()
+    content = view
+    addSubview(view)
+    needsLayout = true
+  }
+  override func fittingHeight(width: CGFloat) -> CGFloat { content?.fittingHeight(width: width) ?? 0 }
+  override func layout() { super.layout(); content?.frame = bounds }
 }

@@ -33,3 +33,9 @@ failure leave the control disabled; changing the default retains the route array
 interaction is approved. The adapter tests exercise two consumers of the same editor, but do not verify AppSession's
 forwarding, the SQLite-backed app composition, or the popup in a window. The existing XCUITest expectation that Add
 Route is enabled remains a whole-feature gate and may fail until the editor form exists.
+
+
+The bounded form now provides Add and per-index Edit sheets. Its draft is local until Save; Cancel and Escape do not
+edit or write. It preserves literal strings and unavailable Space IDs, chooses Spaces by ID, and keeps a failed
+snapshot available for a same-edit retry with an accessible error. The GUI gate and whole-feature XCUITest remain
+unchanged and require CI execution; the form does not implement dispatch or the other remaining routing scope.

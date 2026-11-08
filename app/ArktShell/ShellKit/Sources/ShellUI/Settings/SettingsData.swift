@@ -65,10 +65,23 @@ public enum SettingsLinkDestination: Equatable, Sendable {
   case littleArkt, mostRecentSpace, space(UUID)
 }
 
+public struct SettingsLinkRoute: Equatable, Sendable {
+  public enum Condition: Equatable, Sendable { case contains(String), matches(String) }
+  public var condition: Condition
+  public var destination: SettingsLinkDestination
+  public init(condition: Condition, destination: SettingsLinkDestination) {
+    self.condition = condition
+    self.destination = destination
+  }
+}
+
 @MainActor
 public struct SettingsLinkRoutingRows {
   public var load: @MainActor () async -> Void
   public var destination: @MainActor () -> SettingsLinkDestination?
+  public var routes: @MainActor () -> [SettingsLinkRoute]
+  public var appendRoute: @MainActor (SettingsLinkRoute) -> Void
+  public var replaceRoute: @MainActor (Int, SettingsLinkRoute) -> Void
   public var hasLoadError: @MainActor () -> Bool
   public var hasSaveError: @MainActor () -> Bool
   public var setDestination: @MainActor (SettingsLinkDestination) -> Void
@@ -76,12 +89,18 @@ public struct SettingsLinkRoutingRows {
 
   public init(load: @escaping @MainActor () async -> Void,
               destination: @escaping @MainActor () -> SettingsLinkDestination?,
+              routes: @escaping @MainActor () -> [SettingsLinkRoute] = { [] },
+              appendRoute: @escaping @MainActor (SettingsLinkRoute) -> Void = { _ in },
+              replaceRoute: @escaping @MainActor (Int, SettingsLinkRoute) -> Void = { _, _ in },
               hasLoadError: @escaping @MainActor () -> Bool,
               hasSaveError: @escaping @MainActor () -> Bool = { false },
               setDestination: @escaping @MainActor (SettingsLinkDestination) -> Void,
               flush: @escaping @MainActor () async -> Bool) {
     self.load = load
     self.destination = destination
+    self.routes = routes
+    self.appendRoute = appendRoute
+    self.replaceRoute = replaceRoute
     self.hasLoadError = hasLoadError
     self.hasSaveError = hasSaveError
     self.setDestination = setDestination

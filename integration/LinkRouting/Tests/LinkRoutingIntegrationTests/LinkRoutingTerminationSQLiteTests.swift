@@ -1,3 +1,5 @@
+import ShellUI
+
 import CoreBridge
 import Foundation
 import Persistence
@@ -43,4 +45,27 @@ struct LinkRoutingTerminationSQLiteTests {
     #expect(model.lastError != nil)
   }
 
+}
+
+@MainActor
+struct LinkRoutingSettingsAdapterTests {
+  @Test func routesPreserveIdentityAndLiteralThroughAdapter() async throws {
+    let database = try ArktDatabase.inMemory()
+    defer { try? database.close() }
+    let model = LinkRoutingSettingsModel(state: SettingsStore(database: database))
+    await model.load()
+    let rows = model.settingsRows
+    let missing = UUID()
+    let original = SettingsLinkRoute(condition: .contains("  Mixed/路径  "), destination: .space(missing))
+    rows.appendRoute(original)
+    rows.appendRoute(original)
+    let edited = SettingsLinkRoute(condition: .matches("  Long/路径  "), destination: .space(missing))
+    rows.replaceRoute(1, edited)
+    #expect(rows.routes() == [original, edited])
+    let saved = await rows.flush()
+    #expect(saved)
+    let stored = try await SettingsStore(database: database).loadLinkRouting()
+    #expect(stored.routes == [.init(condition: .contains("  Mixed/路径  "), destination: .space(missing)),
+                              .init(condition: .matches("  Long/路径  "), destination: .space(missing))])
+  }
 }
