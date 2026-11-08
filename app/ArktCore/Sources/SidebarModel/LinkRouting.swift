@@ -61,3 +61,11 @@ public struct LinkRouting: Codable, Hashable, Sendable {
     return destination
   }
 }
+
+/// Value-only boundary for loading and atomically changing routing settings.
+public protocol LinkRoutingSettingsStoring: Sendable {
+  func loadLinkRouting() async throws -> LinkRouting
+  func updateLinkRouting(
+    at date: Date, _ change: @escaping @Sendable (inout LinkRouting) -> Void
+  ) async throws -> LinkRouting
+}

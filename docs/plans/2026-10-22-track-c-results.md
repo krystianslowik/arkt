@@ -2928,3 +2928,10 @@ Written first. Each failed to compile before the code existed.
 - Swift 6.2.4, macOS 15.5 SDK, macOS 15 deployment target: the same focused package passed 4 storage tests in 1 suite. Including the existing routing test file passed 16 tests in 2 suites (12 existing + 4 storage). Tests cover ordered competing matches, literal text, destinations and defaults, replacement and removal across reopen, unreadable data and independent settings.
 - Full CI for this persistence head is pending. No local full Core or ShellKit baseline was run. The previously recorded full CI at `8c0085a` remains evidence for that earlier head only.
 - App dispatch, Settings UI, profile destinations (#611), deleted-Space cleanup, external links, Peek, archive, Meet and optional import remain. No precedence or fallback for competing destinations is chosen.
+
+### #113 link-routing store boundary (bounded slice)
+
+- Added a value-only `LinkRoutingSettingsStoring` protocol and real `SettingsStore` conformance. Updates read, change and write the existing typed group in one SQLite transaction; loads retain the typed-store default behavior.
+- Test-first red: a macOS 15 focused package using the actual local ArktCore products compiled Persistence and SidebarModel, then the actual `LinkRoutingEditorStoreTests` failed to compile on the missing protocol and dependent inference errors. No tests ran.
+- Swift 6.2.4, macOS 15.5 SDK: the focused package passed 18 tests in 3 suites: 12 routing model, 4 typed persistence and 2 store boundary tests. The boundary tests cover literal ordered duplicates across database reopen and 40 concurrent appends without assuming order.
+- Full Core and ShellKit CI for this head is pending. The CoreBridge editor and real app entry-point tests are future gates, not locally observed passing tests. Editor controls and app integration remain incomplete; normalization and competing-route precedence remain undecided.

@@ -38,4 +38,28 @@ struct LinkRoutingEditorStoreTests {
     let store: any LinkRoutingSettingsStoring = SettingsStore(database: database)
     #expect(try await store.loadLinkRouting() == LinkRouting(routes: [second, first], defaultDestination: .space(space)))
   }
+
+  @Test func concurrentUpdatesPreserveEveryAppend() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let database = try ArktDatabase.open(at: directory.appendingPathComponent("settings.sqlite"))
+    defer { try? database.close() }
+    let store: any LinkRoutingSettingsStoring = SettingsStore(database: database)
+    let routes = (0..<40).map { LinkRouting.Route(condition: .contains("rule-\($0)"), destination: .littleArkt) }
+    try await withThrowingTaskGroup(of: Void.self) { group in
+      for route in routes {
+        group.addTask {
+          _ = try await store.updateLinkRouting(at: Date(timeIntervalSinceReferenceDate: 800_000_000)) {
+            $0.routes.append(route)
+          }
+        }
+      }
+      try await group.waitForAll()
+    }
+    let loaded = try await store.loadLinkRouting()
+    #expect(loaded.routes.count == routes.count)
+    #expect(Set(loaded.routes) == Set(routes))
+  }
+
 }
