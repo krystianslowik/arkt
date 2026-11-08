@@ -2897,6 +2897,145 @@ Written first. Each failed to compile before the code existed.
   The app and test bundle build (`xcodebuild ... build-for-testing`: TEST BUILD SUCCEEDED). Not run: the suite needs
   the real pointer and keyboard, and the Mac was in use.
 
+## Command bar folder and extension result tests (#562, draft)
+
+- Added two test-first cases against `CommandBarResults.make`: nested synthetic sidebar folders and synthetic engine
+  extension actions, with an existing open-tab match retained. The proposed folder collection and extension-action
+  inputs do not exist yet; this is a test-only draft, not a shipped provider or UI feature.
+- Local red: not observed. The ShellKit baseline cannot compile with the available Swift 6.1.2 toolchain because of
+  `isolated deinit`; the known Swift 6.2 / SDK 15.5 baseline also has unrelated IR and actor failures. No full baseline
+  retry was run. CI must establish that the missing result APIs are the actual compilation failure before production
+  work starts. Parse: `swiftc -frontend -parse` on the new test file passed; `git diff --check` passed.
+- Green: not run; production implementation has not started. CI and full suites are pending. GUI, accessibility and
+  worst-case visual checks were not run.
+- Remaining: connect eligible production folder and extension data, result presentation and activation; closed-folder
+  peek; search engine and suggestions Settings; tests and integration checks for the complete issue. Search engine
+  defaults and URL routing are unchanged. No sidebar model storage format changed.
+
+### Command-bar folder and extension provider gate review (#562)
+
+The tests now retain folder IDs, collect matching folders from pinned, nested and Today locations, and require
+folder result kinds with the corresponding IDs. Extension rows must retain the synthetic action ID; an existing
+open tab must remain a switch to its original node. A third mixed-source case checks the existing relative ordering
+of tabs, history, Spaces, archive, search and shell actions while adding folder and extension results. It does not
+choose placement of the new kinds among existing categories or decide selection/activation behavior.
+
+`Folder.node`, the `.folder` result kind and `.extensionAction` result kind are proposed identity contracts alongside
+the already-proposed inputs and collector. The new revision passed Swift 6.2.4 frontend parsing and diff checks,
+not compilation or execution. The intended missing-API red remains unobserved, with production implementation and
+forwarding absent. These three tests are a bounded action-list/provider gate; they do not establish all installed
+extensions, real data refresh, activation, closed-folder peek or Settings acceptance for #562.
+
+### Command-bar folder and extension provider stage (#562)
+
+- CI established the test-first red at `ce842c57423c196084211a7f0017eae155a964a8`:
+  [ShellKit job](https://github.com/krystianslowik/arkt/actions/runs/42437914963/job/128600743297) reported
+  18 distinct source errors in the new tests for the missing folder and extension APIs and dependent key-path
+  inference. Zero tests ran; no unrelated error was observed in that job.
+- Added typed folder metadata and a main-actor sidebar collector for requested Spaces, pinned and Today trees,
+  with a depth limit and visited IDs. The result builder matches folder titles and enabled engine action names,
+  retaining IDs. Engine actions are an action list, not an installed-extension catalog. New kinds are
+  non-actionable and are not forwarded by production windows. Their appended order is provisional provider-only
+  behavior, not a ranking decision. Existing sources keep their relative order and behavior.
+- Added a boundary case for disabled actions and the non-actionable contract. The three existing identity and
+  mixed-order tests remain intact. With Swift 6.2.4 and the macOS 15.5 SDK, `swift build --target EngineAPI -j 2`
+  passed against actual sources. Frontend parsing passed for the five changed source files and the test file;
+  `git diff --check` passed. A focused builder typecheck against an existing unrelated module could not import
+  EngineAPI before the separate target build; it is not a valid builder test. No builder tests were run locally.
+  The known full ShellKit baseline was not retried; CI on this revision is pending. GUI, accessibility and
+  worst-case visual checks were not run.
+- Remaining for the full issue: production data forwarding and refresh, folder selection and extension action
+  activation with working presentation, closed-folder peek, search-engine choice and suggestions Settings, and
+  complete integration and UI checks. No production UI entry point is enabled by this stage.
+
+### Command-bar closed-folder integration gate (#562)
+
+- Provider CI at `5c75c8c2193f739421bce646c7ad2a164674998d`: [run 42439504550, pure ShellKit job](https://github.com/krystianslowik/arkt/actions/runs/42439504550/job/128605615252) passed 2509 tests in 280 suites, including `CommandBarFolderExtensionResultsTests`. App build, isolation/lint and the required Swift gate passed; Core and UI tests were skipped. The informative GUI job was still running when checked.
+- The existing command-bar switch callback calls window activation, which updates the sidebar's current tab; the outline already recalculates its transient peek on that change. A GUI regression now selects an actual open-tab result and commits it through the bar, checking a long-titled tab in nested closed folders, hidden siblings, both closed states, switching away and an archived target. The test uses the existing main-actor window/model harness; it adds no production API or behavior.
+- `swiftc -frontend -parse app/ArktShell/ShellKit/Tests/ShellKitGUITests/FolderTests.swift` and `git diff --check` passed. Parsing is not a test run or an observed red. The GUI test and full suites were not run locally: the local ShellKit baseline is compiler-broken and full Xcode is unavailable. CI must execute the gate before any production change or BH-105 completion claim. Missing-source and private-node stale-result cases remain unverified, as do accessibility and visual layout for the long title.
+- This is a test-only gate; it does not establish a new folder or extension selection policy. The provider remains non-actionable and unforwarded. Keep #562 open for its remaining integration and Settings work.
+
+
+### Closed-folder integration test SPI import repair (#562)
+
+At `fbfcb02`, run 42441040095 failed compilation before executing any tests: the three new query calls in
+`FolderTests` could not access `setQueryForTesting` through its existing Smoke SPI. The aggregate Swift job
+reported the required ShellKit failure. This is a harness access error, not the intended BH-105 behavior red.
+
+The test now uses the same `@_spi(Smoke) @testable import ShellUI` as the existing command-bar tests. The test body
+and production code are unchanged. Swift 6.2.4 parsing and diff checks passed; no local suite ran. CI must compile
+and execute the new gate before BH-105 can be considered verified.
+
+### #562: search suggestions Settings gate
+
+A test-only ShellKit GUI gate exercises a real Settings window, the existing persisted `CommandBarSettings`, and
+queries in two command bars sharing that setting. It covers a stored off value, enabling and disabling while bars are
+open, subsequent queries, and persistence in a newly constructed setting and Settings window. The fixture composes
+Settings services itself; it does not test `AppSession` composition. The service closures and Settings row do not yet
+exist. The existing flag controls the locally generated search row; this path has no network suggestions provider or
+in-flight suggestion response to test. The existing `AppSettings.resetToDefaults` does not include this flag, so the
+gate does not change or assert reset semantics.
+
+The GUI gate was not compiled or run locally: the known ShellKit baseline compiler failure and unavailable full Xcode
+prevent a valid local result, and local GUI runs were excluded. CI must establish the intended red before production
+work. No passing or failing test count is claimed for this gate.
+
+### #562: shared search suggestions Settings
+
+- The test-first [GUI job 128673929031](https://github.com/krystianslowik/arkt/actions/runs/42462259000/job/128673929031) failed compilation at the two missing `SettingsServices` members in `SettingsSearchSuggestionsTests` lines 32–33. Zero tests ran; no unrelated source error was observed.
+- Settings now edits the existing `CommandBarSettings` through the app's shared instance. Open bars refresh the retained query and notice when it changes; observers are detached on replacement, invalidation and deallocation. The control is unavailable without both services. This gates the local Search Google row, with no network provider. The storage key, default, notice dismissal and reset policy remain unchanged.
+- A focused actual-source package using Swift 6.2.4 and the macOS 15.5 SDK passed 5 settings tests in 2 suites, including observer removal. Swift 6.2.4 frontend parsing passed for the five changed production files and three settings test files; `git diff --check` passed. These do not establish a GUI or app build. The existing GUI gate and the new replacement/invalidation GUI case were not run locally; CI is needed. No full ShellKit baseline retry, GUI launch or XCUITest was performed.
+- Folder/extension production forwarding, activation and presentation, search-engine selection and issue-wide checks remain open. Provider order is provisional and no new product policy is chosen.
+
+
+### Suggestions setting retained-selection review gate (#562)
+
+Review of `9cf91ca` found that a setting notification reloads results, previews the first actionable result, then
+restores a retained selection without refreshing its preview or hints. The shared-setting ownership and observer
+cleanup had no other identified P1/P2 finding. The production correction is not applied in this test-first stage.
+
+Two GUI regressions drive keyboard selection through the existing preview harness. They retain a non-first tab
+through notice dismissal and suggestions changes, and retain a site-search row with its Search site hint through
+notice dismissal. Source parsing and diff checks passed; no GUI test ran locally. The expected stale-preview/hint
+runtime failure remains unobserved and must be established in CI before the small production correction.
+
+
+### Retained command-bar preview and hint correction (#562)
+
+The review gate at `1574bac` produced the intended runtime red in run 42463489777, GUI job 128677738621:
+2050 tests, 54 skipped, three failed assertions, all in the two new selection tests. Notice dismissal and a
+suggestions change retained the second tab but displayed the first tab's preview; the site-search selection
+retained the first tab's hint instead of Search site. No unrelated GUI failure was observed.
+
+Settings refresh now restores the row through the existing selection helper, which refreshes hints and preview
+without keyboard scrolling or selection announcements. The two regression tests are unchanged. Swift 6.2.4 source
+parsing and diff checks passed; no local GUI suite ran. Current-head CI must establish green. The broader issue's
+folder/extension activation, forwarding and presentation and search-engine choice remain incomplete.
+
+
+### #562: retained-selection CI and download retry
+
+At `b4badaa`, the informative GUI job reported **2,050 tests, 54 skipped, zero failures**. Both retained-selection regressions and SettingsSearchSuggestionsTests passed. Pure ShellKit and isolation/lint passed; Core and XCUITest were skipped. The app build failed before compilation downloading XcodeGen with curl 56 / HTTP 504. A failed-jobs-only retry then failed at the same download step with curl 56, connection died; the required aggregate reflected that app failure. Neither attempt established an app compilation failure.
+
+Both existing XcodeGen commands now use the bounded retry flags validated during #113's CI correction: three retries including receive errors, a retry budget and connection/transfer bounds. The URL, pinned version, output file, and strict SHA-256 check remain unchanged; exhausted downloads fail the job. The command lines were compared directly with that validated correction. The earlier controlled loopback probe made one attempt for a failed CONNECT and an interrupted tunnel before the correction, and four attempts afterward, still failing on exhaustion. That is prior shared-command evidence, not a new probe run in this branch. `actionlint` and whitespace checks passed. No app source or product behavior changed; new-head app/GUI CI remains pending, and full #562 remains incomplete.
+
+### #562 search engine choice (local implementation gate)
+
+Google remains the default; Settings offers Google and DuckDuckGo. The shared command-bar setting persists the
+choice, Reset all settings returns it to Google, and result URLs preserve literal query characters. The existing
+suggestions switch and notice retain their prior defaults and reset treatment. The folder/extension provider and
+count work above is unchanged; this slice does not wire their production providers or activation.
+
+Test-first: a Swift 6 type-check probe against the actual `CommandBarSettings.swift` and `URLInputParser.swift`
+failed on the missing `searchEngine`, `setSearchEngine` and `searchURL(for:engine:)` APIs before implementation.
+A direct attempt to type-check the Swift Testing files failed earlier because this standalone toolchain did not
+find the `Testing` module; that harness failure is not counted as the behavior red. After implementation, the
+Foundation-only `Probes/SearchEngineProbe.swift` ran 26 checks against those two real sources with a synthetic
+UserDefaults suite; no network or app launch. The new Swift Testing and GUI component cases are unrun locally.
+They cover Settings reset/composition, both open bars, selection, preview and hints, and intercepted activation.
+AppSession composition, real app Settings, native UI and full package/GUI suites remain unverified locally; no
+full Xcode or app build was used. Disk available before the probe was 1.8 GiB.
+
 ## Composite Space theme overlays (#534)
 
 The drawn base and opacity-scaled overlay are expanded in OKLab and source-over composited at the union of their
@@ -2930,3 +3069,65 @@ maintainer hardware after landing. No frame-time improvement is claimed. Merged 
 the deterministic completion and asynchronous download cancellation fixes. The existing 50% contrast fallback may
 remain below target, contrast samples do not cover every point or texture, and the pre-existing empty-base
 opacity-scaling limitation remains unchanged.
+
+### #562 search-engine choice main integration
+
+The reviewed Google/DuckDuckGo change is integrated with main `1188868`; Google remains the default and Bing is not offered. The sole new merge conflict was this append-only history. The prior CommandBarResults conflict retains provider identities/counts and main's optimized builder. Folder and extension results remain non-actionable in this bounded stage.
+
+The focused settings/parser executable passed 26 checks before this merge. New Swift Testing/GUI tests, actual AppSession forwarding and native activation remain unexecuted locally. Source parsing, workflow import/UI checks, actionlint and header parity are checked for this merge; merged-head CI is pending.
+
+### #562 GUI fixture lifetime repair
+
+At `cd908de`, run `42519307867` GUI job `128849124672` reported 2,171 tests, 64 skipped and one failure. The search-setting behavior tests passed; the subsequent class's window guard identified `SettingsSearchSuggestionsTests` retaining 15 hidden windows (eight CommandBarPanel, three SettingsWindow and four ShellWindow). Teardown closed/invalidated them but retained its controller arrays on the XCTest case objects. The test-only fix empties all three arrays after the existing teardown calls, following the established fixture lifetime pattern. The guard and production code are unchanged.
+
+The changed test source parsed and whitespace checks passed. No local GUI/App/full package build ran; fresh CI must demonstrate that the window guard now passes. The earlier required gate, Core, pure ShellKit, app build and lint passed at `cd908de`; those results do not validate this follow-up head.
+
+
+### #562 folder and extension activation after observed red
+
+At `d88ed06`, run `42528726868` reached the intended behavior failures: pure ShellKit 2,567 tests / 294 suites /
+eight issues in the provider actionability test; GUI 2,181 reported / 64 skipped / four new activation failures and
+one separate AddressBarNavigationTests lifetime-guard failure. Core, app build and lint passed. The earlier missing
+Smoke import was already corrected; this is the activation red.
+
+The real window now forwards profile-scoped cached folder rows and its current engine-window extension actions.
+Folder activation reveals and expands the existing folder and its ancestors in its Space; extension activation
+rechecks the enabled action and invokes the existing engine API. Open queries refresh on source/action changes and
+retain selection by identity. Rows have distinct symbols, action hints and accessible positions; folder rows include
+Space context. Existing ordering and All-only filter classification remain. Tests add stale/deleted/disabled targets,
+profile/private-folder exclusion, unrelated collapsed folders, selection retention, Space labels and filter counts.
+
+Main `cfc4e69` is merged with the haptics and search-engine reset keys both preserved, including the haptics row and
+AppSession bind. The inherited AddressBarNavigationTests fixture now closes its sets through the existing helper
+before releasing them; its guard is unchanged. Google/DuckDuckGo and Google default remain unchanged.
+
+Local checks passed: parsing of all 47 changed Swift files relative to `d88ed06`, workflow import-layer and UI-source
+checks, actionlint, UI parity-script tests, ABI header comparison and whitespace checks. No current-head ShellKit, App or GUI
+compile/run is claimed; approximately 1 GiB available disk prevents a full local build. Fresh CI and independent review
+are required. Native keyboard/VoiceOver, real installed-extension popup behavior, visual review and worst-case hot-path
+performance remain unverified. See `docs/test-gates/562-folder-extension-activation.md` for the bounded contract.
+
+
+### #562 activation fixture selects its setup Space
+
+Run `42532419492` at `8c549f9` passed pure ShellKit 2,573 tests / 295 suites, Core, App build, lint and required gate.
+GUI reported 2,184 tests / 64 skipped / four failures, all unrelated-folder state checks in the Pinned/Today cases;
+extension invocation/live updates and profile/private-folder exclusion passed, and the address-bar window guard passed.
+The fixture displayed Work's tab via internal `show` without selecting Work in the sidebar, so it collapsed folders on
+Personal's separate outline. It now uses real `activate`, asserts the target Space and closed state before the action,
+and verifies the same outline after reveal. All existing reveal and stale-target assertions remain. Production is
+unchanged. Parsing and whitespace passed; no local GUI/App run occurred and corrected-head runtime CI is pending.
+
+
+### #562 corrected activation green and visual review gate
+
+At `fb5810a`, run `42533916376` passed Core, pure ShellKit, App build, lint and required aggregate. GUI executed
+2,184 reported tests / 64 skipped / zero failures, including all four folder/extension activation methods, both
+Settings methods and closed-folder tab peek. The stronger fixture setup passed without production changes.
+
+An opt-in review-only fixture now exports eight synthetic light/dark PNGs through the existing GUI CI job:
+minimum-window folder/extension rows with long/non-Latin names and Space context, plus Google/on and DuckDuckGo/off
+Settings. It uses real providers and controls, asserts state before capture and writes nonblank view-cache PNGs.
+Production is unchanged. Local parsing, static checks and actionlint pass; no local App/GUI build ran. Capture-stage
+CI and actual artifact inspection remain pending before review readiness; native keyboard/VoiceOver, installed
+extension popup behavior and worst-case timing remain unverified.

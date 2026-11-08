@@ -91,3 +91,13 @@ struct URLInputParserTests {
       == "https://www.google.com/search?q=c%2B%2B%20x%3D1%3F%23")
   }
 }
+
+extension URLInputParserTests {
+  @Test(arguments: [SearchEngine.google, .duckDuckGo])
+  func searchPreservesLiteralQuery(engine: SearchEngine) throws {
+    let query = "  café 雪 &+=?#% /\n"
+    let url = URLInputParser.searchURL(for: query, engine: engine)
+    #expect(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first?.value == query)
+    #expect(url.host() == (engine == .google ? "www.google.com" : "duckduckgo.com"))
+  }
+}

@@ -150,6 +150,7 @@ struct AppSettingsTests {
     settings.playsReorderHaptics = false
     settings.downloadLocation = DownloadLocationSetting(
       asksWhereToSave: true, folder: URL(filePath: "/Volumes/Media/", directoryHint: .isDirectory))
+    settings.commandBar.setSearchEngine(.duckDuckGo)
     settings.toolbar.isVisible = true
     settings.toolbar.showsFullURL = false
   }
@@ -171,6 +172,7 @@ struct AppSettingsTests {
     #expect(settings.downloadLocation == DownloadLocationSetting())
     #expect(!settings.toolbar.isVisible)
     #expect(settings.toolbar.showsFullURL)
+    #expect(settings.commandBar.searchEngine == .google)
     for key in AppSettings.Key.preferences {
       #expect(suite.defaults.object(forKey: key) == nil, "\(key) is removed, so a later default applies")
     }
@@ -178,6 +180,7 @@ struct AppSettingsTests {
     #expect(reread.tabNavigation == TabNavigationSettings())
     #expect(!reread.toolbar.isVisible)
     #expect(reread.toolbar.showsFullURL)
+    #expect(reread.commandBar.searchEngine == .google)
   }
 
   /// The list names exactly the preference keys the store writes, the Toolbar's and the Peek switches' included.

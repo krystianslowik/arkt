@@ -38,13 +38,24 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   /// Enter on an archived match: restore it (BH-086).
   public var onRestoreArchived: ((UUID) -> Void)?
   /// Settings: search suggestions and the BH-113 notice dismissal.
-  public var settings: CommandBarSettings = .ephemeral()
+  public var settings: CommandBarSettings = .ephemeral() {
+    didSet {
+      if let settingsObserver { oldValue.removeObserver(settingsObserver) }
+      settingsObserver = nil
+      if !invalidated { observeSettings(); refreshCurrentResults() }
+    }
+  }
+  private var settingsObserver: UUID?
   /// BH-108: the URL on the clipboard when the bar is open with an empty query (nil: no Paste and Go). The
   /// default reads nothing, so tests stay deterministic; the window wires the general pasteboard.
   public var clipboardURLProvider: () -> URL? = { nil }
   /// BH-104: the Spaces a query can switch to; the handler switches.
   public var spacesProvider: () -> [CommandBarResults.Space] = { [] }
   public var onSwitchSpace: ((SpaceID) -> Void)?
+  public var foldersProvider: () -> [CommandBarResults.Folder] = { [] }
+  public var onRevealFolder: ((NodeID) -> Void)?
+  public var extensionActionsProvider: () -> [ExtensionAction] = { [] }
+  public var onExtensionAction: ((String) -> Void)?
   /// BH-106 / KB-081: the actions the action search lists; the handler runs a chosen one.
   public var actionsProvider: () -> [CommandBarAction] = { [] }
   public var onAction: ((String) -> Void)?
@@ -145,6 +156,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   public init(parent: NSWindow) {
     self.parent = parent
     super.init()
+    observeSettings()
     panel.contentView = barView
     panel.delegate = self
     barView.field.delegate = self
@@ -208,12 +220,36 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   /// the controller does not show again afterwards.
   public func invalidate() {
     invalidated = true
+    if let settingsObserver { settings.removeObserver(settingsObserver) }
+    settingsObserver = nil
     NotificationCenter.default.removeObserver(self)
     firstFrameLink?.invalidate()
     firstFrameLink = nil
     hide(restoreFocus: false)
     scrim.removeFromSuperview()
     panel.orderOut(nil)
+  }
+
+  isolated deinit {
+    if let settingsObserver { settings.removeObserver(settingsObserver) }
+  }
+
+  private func observeSettings() {
+    settingsObserver = settings.observe { [weak self] in self?.refreshCurrentResults() }
+  }
+
+  private func refreshCurrentResults() {
+    guard isVisible else { return }
+    let selected = results.indices.contains(barView.table.selectedRow) ? results[barView.table.selectedRow] : nil
+    reloadResults()
+    if let selected {
+      let index = results.firstIndex { $0.kind == selected.kind } ?? results.firstIndex {
+        if case .search = selected.kind, case .search = $0.kind { return true }
+        return false
+      }
+      if let index { select(index, byKeyboard: false) }
+    }
+    relayout()
   }
 
   var hasOpenSignpost: Bool { signpostState != nil }
@@ -657,6 +693,8 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     case .restore(let id): onRestoreArchived?(id)
     case .action(let id): onAction?(id)
     case .switchSpace(let space): onSwitchSpace?(space)
+    case .folder(let node): onRevealFolder?(node)
+    case .extensionAction(let id): onExtensionAction?(id)
     case .noMatch: break
     }
   }
@@ -832,12 +870,17 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     input.openTabs = openTabsProvider()
     input.spaces = spacesProvider()
     input.actions = actionsProvider()
+    if scope == .normal, !trimmed.isEmpty {
+      input.folders = foldersProvider()
+      input.extensionActions = extensionActionsProvider()
+    }
     // BH-108: Paste and Go is a new-tab surface; Cmd-L's prefill and the split pane bar never offer it. The row
     // shows only on an empty query, so a typed keystroke never pays for a pasteboard read.
     let queryIsEmpty = barView.field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     input.clipboardURL = scope == .normal && mode == .newTab && queryIsEmpty ? clipboardURLForThisShow() : nil
     input.excluded = removedSuggestionIDs
     input.searchSuggestionsEnabled = settings.searchSuggestionsEnabled
+    input.searchEngine = settings.searchEngine
     input.scope = scope
     input.archived = current
     input.recentTabs = scope == .normal && trimmed.isEmpty ? recentTabsProvider() : []
@@ -913,11 +956,19 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     relayout()
   }
 
-  /// BH-111: the open bar's suggestions follow the current Space; the window calls this on a Space switch.
-  public func refreshSuggestions() {
-    guard isVisible else { return }
-    reloadResults()
-    relayout()
+  /// BH-111: the open bar follows current providers, retaining the selected identity when it still exists.
+  public func refreshSuggestions() { refreshCurrentResults() }
+
+  private var suggestionsRefreshScheduled = false
+  /// A sidebar mutation can emit many changes; collect and redraw its final state once, off the event fanout.
+  func scheduleSuggestionsRefresh() {
+    guard isVisible, !suggestionsRefreshScheduled else { return }
+    suggestionsRefreshScheduled = true
+    DispatchQueue.main.async { [weak self] in
+      guard let self else { return }
+      self.suggestionsRefreshScheduled = false
+      self.refreshSuggestions()
+    }
   }
 
   // MARK: Removal (BH-109, KB-083)

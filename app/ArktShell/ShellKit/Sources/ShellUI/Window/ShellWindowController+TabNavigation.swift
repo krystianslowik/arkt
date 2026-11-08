@@ -71,6 +71,18 @@ extension ShellWindowController {
     return row
   }
 
+  /// A command-bar folder result reveals its existing row and opens that folder and its ancestors in this window.
+  func revealCommandBarFolder(_ node: NodeID) {
+    guard !isPrivateWindow, case .folder? = sidebar.node(node),
+          let space = sidebar.spaceID(containing: node), sidebarController.spaces.contains(space) else { return }
+    rootView.sidebarVisible = true
+    sidebarController.showSpace(space)
+    guard sidebarController.currentSpace == space, let page = sidebarController.currentPage,
+          page.outlineController.expandAncestors(of: node) != nil else { return }
+    if !page.outlineController.isFolderOpen(node) { page.outlineController.toggleFolder(node, animated: false) }
+    if let row = revealInSidebar(node) { focusOutlineKeyboard(on: row, page: page) }
+  }
+
   /// The sidebar items the keyboard steps through, for this window's profile and current Space.
   func sidebarTabOrder(countingFavorites: Bool) -> SidebarTabOrder {
     SidebarTabOrder(source: sidebar, profile: sidebarController.profile, space: currentSpace,

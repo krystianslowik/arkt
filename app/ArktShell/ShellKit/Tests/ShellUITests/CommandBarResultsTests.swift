@@ -67,3 +67,19 @@ struct CommandBarResultsTests {
     #expect(CommandBarResults.make(query: "ftp://example.com", openTabs: []).map(\.kind.name) == ["search"])
   }
 }
+
+@MainActor
+struct CommandBarSearchEngineResultsTests {
+  @Test func chosenEngineBuildsLiteralSearchRow() throws {
+    var input = CommandBarResults.Input()
+    input.searchEngine = .duckDuckGo
+    let query = "  café &+%  "
+    let row = try #require(CommandBarResults.make(query: query, input: input).first {
+      if case .search = $0.kind { return true }; return false
+    })
+    #expect(row.subtitle == "Search DuckDuckGo")
+    guard case .search(let url) = row.kind else { Issue.record("Expected search row"); return }
+    #expect(url.host() == "duckduckgo.com")
+    #expect(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first?.value == query)
+  }
+}

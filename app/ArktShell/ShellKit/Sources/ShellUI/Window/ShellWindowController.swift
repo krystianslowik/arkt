@@ -44,6 +44,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// The command bar's open tabs for a Space order, kept between keystrokes (#606): with 2,000 tabs the walk cost
   /// 3 ms of every keystroke. Any sidebar change and any newly viewed tab drop it.
   private var openTabsCache: (spaces: [SpaceID], tabs: [CommandBarResults.OpenTab])?
+  private var commandBarFolderCache: (spaces: [SpaceID], folders: [CommandBarResults.Folder])?
   /// The focused tab: the shown plain tab, or the focused pane of a shown split (decision 7). The engine's active tab
   /// of this window follows it (week-3 Decision 6: extension `active` flags stay true).
   public internal(set) var currentTab: TabID? {
@@ -93,6 +94,8 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   public internal(set) var extensionsButton: ExtensionsButton?
   /// The Extensions panel the button opens (#595); nil with the button.
   public internal(set) var extensionsPanel: ExtensionsPanelController?
+  /// Refreshed on engine-window/action changes, rather than querying the engine on each keystroke.
+  var commandBarExtensionActions: [ExtensionAction] = []
   /// Manage Extensions... in the Extensions panel: the app opens Settings, Extensions.
   public var onManageExtensions: (@MainActor () -> Void)?
   /// Window > Downloads (Cmd-Shift-J) and Show All History (Cmd-Y) open the Library on a section (#132); set by
@@ -346,6 +349,10 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       }
     }
     commandBar.onSwitchSpace = { [weak self] id in self?.sidebarController.showSpace(id) }
+    commandBar.foldersProvider = { [weak self] in self?.foldersForCommandBar() ?? [] }
+    commandBar.onRevealFolder = { [weak self] in self?.revealCommandBarFolder($0) }
+    commandBar.extensionActionsProvider = { [weak self] in self?.commandBarExtensionActions ?? [] }
+    commandBar.onExtensionAction = { [weak self] in self?.runCommandBarExtensionAction($0) }
     commandBar.actionsProvider = { [weak self] in self?.commandBarActions() ?? [] }
     commandBar.onAction = { [weak self] id in self?.runCommandBarAction(id) }
     sidebarController.onCurrentSpaceChanged = { [weak self] _ in self?.commandBar.refreshSuggestions() }
@@ -359,6 +366,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     // A removed Space's nodes emit no structure change, so `.spaceRemoved` checks too.
     sidebarObservation = sidebar.observe { [weak self] change in
       self?.openTabsCache = nil                     // a title, an order or a Space changed what the bar lists
+      self?.commandBarFolderCache = nil
       switch change {
       case .structure, .spaceRemoved:
         self?.closeEngineTabsOfRemovedNodes()
@@ -367,6 +375,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       case .node, .spaceAdded, .spaceMoved, .spaceChanged: break
       }
       self?.splitSourceDidChange(change)
+      self?.commandBar.scheduleSuggestionsRefresh()
     }
     // Space theme: the pager's continuous position drives the crossfade (design section 2).
     sidebarController.onSpacePosition = { [weak self, weak root] position in
@@ -773,6 +782,16 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     let viewed = candidates.filter { $0.lastViewed != nil }
       .sorted { ($0.lastViewed ?? .distantPast) > ($1.lastViewed ?? .distantPast) }
     return viewed + candidates.filter { $0.lastViewed == nil }
+  }
+
+  /// Walk each profile's folders once between source changes. Empty/scoped queries never request this list.
+  private func foldersForCommandBar() -> [CommandBarResults.Folder] {
+    guard !isPrivateWindow else { return [] }
+    let spaces = sidebarController.spaces
+    if let cache = commandBarFolderCache, cache.spaces == spaces { return cache.folders }
+    let folders = CommandBarResults.folders(in: sidebar, spaces: spaces)
+    commandBarFolderCache = (spaces, folders)
+    return folders
   }
 
   /// BH-104: open tabs of every Space of this profile, the current Space first (so the BH-111 refresh reorders).

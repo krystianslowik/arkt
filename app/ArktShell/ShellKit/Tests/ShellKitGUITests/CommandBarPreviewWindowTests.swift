@@ -197,6 +197,56 @@ final class CommandBarPreviewWindowTests: XCTestCase {
     XCTAssertTrue(bar.barView.previewColumn.isHidden)
   }
 
+  func testSettingsNotificationsKeepTheRetainedTabsPreview() throws {
+    bar.settings = .ephemeral()
+    let first = tab("First example")
+    let second = tab("Second example")
+    bar.openTabsProvider = { [first, second] }
+    bar.toggle(.newTab)
+    bar.setQueryForTesting("example")
+    moveDown()
+    XCTAssertEqual(bar.results[bar.barView.table.selectedRow].kind, .switchTo(second.node))
+    XCTAssertEqual(bar.barView.previewColumn.content?.title, second.title)
+
+    bar.settings.dismissSearchSuggestionNotice()
+    XCTAssertEqual(bar.results[bar.barView.table.selectedRow].kind, .switchTo(second.node))
+    XCTAssertEqual(bar.barView.previewColumn.content?.title, second.title,
+                   "notice refresh must not leave the first result's preview on the retained selection")
+
+    bar.settings.setSearchEngine(.duckDuckGo)
+    XCTAssertEqual(bar.results[bar.barView.table.selectedRow].kind, .switchTo(second.node))
+    XCTAssertEqual(bar.barView.previewColumn.content?.title, second.title)
+
+    bar.settings.setSearchSuggestionsEnabled(false)
+    XCTAssertEqual(bar.results[bar.barView.table.selectedRow].kind, .switchTo(second.node))
+    XCTAssertEqual(bar.barView.previewColumn.content?.title, second.title,
+                   "changing search suggestions must refresh the retained selection's preview")
+  }
+
+  func testSettingsNotificationKeepsTheRetainedSiteSearchHint() throws {
+    bar.settings = .ephemeral()
+    let first = tab("Example page")
+    let engine = SiteSearchEngine(alias: "ex", name: "Example search",
+                                  searchURLTemplate: "https://example.test/search?q=%s")
+    bar.openTabsProvider = { [first] }
+    bar.siteSearchProvider = { [engine] }
+    bar.toggle(.newTab)
+    bar.setQueryForTesting("Exam")
+    let index = try XCTUnwrap(bar.results.firstIndex { $0.siteSearchEngine == engine })
+    XCTAssertGreaterThan(index, 0, "the retained site search must differ from the initially selected tab")
+    for _ in 0..<index { moveDown() }
+    XCTAssertEqual(bar.results[bar.barView.table.selectedRow].siteSearchEngine, engine)
+    XCTAssertTrue(bar.barView.hintStrip.hints.items.contains { $0.caption == "Search site" })
+
+    bar.settings.setSearchEngine(.duckDuckGo)
+    XCTAssertEqual(bar.results[bar.barView.table.selectedRow].siteSearchEngine, engine)
+    XCTAssertTrue(bar.barView.hintStrip.hints.items.contains { $0.caption == "Search site" })
+    bar.settings.dismissSearchSuggestionNotice()
+    XCTAssertEqual(bar.results[bar.barView.table.selectedRow].siteSearchEngine, engine)
+    XCTAssertTrue(bar.barView.hintStrip.hints.items.contains { $0.caption == "Search site" },
+                  "the hint must describe the restored site-search selection rather than the first tab")
+  }
+
   // MARK: Column
 
   func testTheColumnMatchesThePreviewMetrics() throws {

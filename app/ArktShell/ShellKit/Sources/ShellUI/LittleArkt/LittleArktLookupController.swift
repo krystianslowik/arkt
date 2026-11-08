@@ -133,7 +133,7 @@ public final class LittleArktLookupController: NSObject, NSTextFieldDelegate, NS
     case .history(let url):
       hide(returningActivation: false)
       onOpen?(url)
-    case .restore, .action, .switchSpace, .noMatch:
+    case .restore, .action, .switchSpace, .noMatch, .folder, .extensionAction:
       hide()
     }
   }

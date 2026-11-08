@@ -38,7 +38,7 @@ struct CommandBarPreviewTests {
     #expect(CommandBarPreview.content(for: tab, queryIsEmpty: true) == nil, "an empty query stays the narrow bar")
     #expect(CommandBarPreview.content(for: history, queryIsEmpty: true) == nil)
     for kind in [CommandBarRowKind.searchSuggestion, .siteSearch, .action, .pasteAndGo, .archived, .address, .space,
-                 .noMatch] {
+                 .folder, .extensionAction, .noMatch] {
       #expect(CommandBarPreview.content(for: facts(kind), queryIsEmpty: false) == nil, "\(kind)")
     }
   }

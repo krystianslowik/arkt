@@ -43,26 +43,34 @@ public final class AppSettings {
       optionCommandClickLittleArcEntryPointEnabled, sendsCrashReports, shouldWarnBeforeQuitting,
       downloadsAskWhereToSave, downloadsFolder, tabReorderingHapticsDisabled,
       PeekLinkSettings.crossSiteKey, PeekLinkSettings.shiftClickKey,
-      ToolbarSetting.defaultsKey, ToolbarSetting.showsFullURLDefaultsKey,
+      ToolbarSetting.defaultsKey, ToolbarSetting.showsFullURLDefaultsKey, CommandBarSettings.searchEngineDefaultsKey,
     ]
   }
 
   /// Show Toolbar and Show the full URL: the instance every window observes.
   public let toolbar: ToolbarSetting
+  public let commandBar: CommandBarSettings
   private let defaults: UserDefaults?
   /// The values of an ephemeral store (no defaults).
   private var memory: [String: Any] = [:]
   private var observers: [WeakObserver] = []
+  private var commandBarObserver: UUID?
+  private var resetting = false
+  private var lastSearchEngine: SearchEngine = .google
 
   /// Reads and writes `defaults`. `toolbar` is the app's shared Toolbar setting; a new one over `defaults` when nil.
-  public init(defaults: UserDefaults, toolbar: ToolbarSetting? = nil) {
+  public init(defaults: UserDefaults, toolbar: ToolbarSetting? = nil, commandBar: CommandBarSettings? = nil) {
     self.defaults = defaults
     self.toolbar = toolbar ?? ToolbarSetting(defaults: defaults)
+    self.commandBar = commandBar ?? CommandBarSettings(defaults: defaults)
+    observeCommandBar()
   }
 
   private init(ephemeralToolbar: ToolbarSetting) {
     defaults = nil
     toolbar = ephemeralToolbar
+    commandBar = .ephemeral()
+    observeCommandBar()
   }
 
   /// Keeps every value in memory; never touches user defaults (tests, the scripted smoke).
@@ -220,6 +228,9 @@ public final class AppSettings {
     for key in Key.preferences {
       if let defaults { defaults.removeObject(forKey: key) } else { memory[key] = nil }
     }
+    resetting = true
+    commandBar.resetSearchEngine()
+    resetting = false
     toolbar.isVisible = false
     toolbar.showsFullURL = true
     // The Toolbar's setters wrote its defaults back; remove them so a later default applies, as for the others.
@@ -229,6 +240,19 @@ public final class AppSettings {
   }
 
   // MARK: Observers
+
+  private func observeCommandBar() {
+    lastSearchEngine = commandBar.searchEngine
+    commandBarObserver = commandBar.observe { [weak self] in
+      guard let self, lastSearchEngine != commandBar.searchEngine else { return }
+      lastSearchEngine = commandBar.searchEngine
+      if !resetting { notifyObservers() }
+    }
+  }
+
+  isolated deinit {
+    if let commandBarObserver { commandBar.removeObserver(commandBarObserver) }
+  }
 
   /// `observer` hears every change of a setting the browser windows apply until it is deallocated.
   public func addObserver(_ observer: any AppSettingsObserver) {

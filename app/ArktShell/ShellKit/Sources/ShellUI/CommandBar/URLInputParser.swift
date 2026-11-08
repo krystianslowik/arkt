@@ -23,12 +23,11 @@ import Foundation
 /// - IPv4 parts with a leading zero (`010.0.0.1`) are rejected, so the input is a query: Chromium reads them as
 ///   octal, which a user typing a dotted quad rarely means. With an explicit scheme the engine decides.
 public enum URLInputParser {
-  /// TODO: the default search engine is a product decision; Arc defaulted to Google.
   public static let searchBase = "https://www.google.com/search?q="
 
   private static let queryAllowed: CharacterSet = {
     var set = CharacterSet.urlQueryAllowed
-    set.remove(charactersIn: "&+=?#")
+    set.remove(charactersIn: "&+=?#%")
     return set
   }()
 
@@ -66,7 +65,8 @@ public enum URLInputParser {
   }
 
   /// Search URL for a query; `& + = ? #` are escaped so they stay inside the `q` value.
-  public static func searchURL(for query: String) -> URL {
+  public static func searchURL(for query: String, engine: SearchEngine = .google) -> URL {
+    let searchBase = engine.searchBase
     let encoded = query.addingPercentEncoding(withAllowedCharacters: queryAllowed) ?? ""
     return URL(string: searchBase + encoded) ?? URL(string: searchBase)!
   }

@@ -1,9 +1,8 @@
 import Foundation
+import EngineAPI
 
-/// Placeholder suggestion provider: URL, matching open tabs and Spaces, Paste and Go, search. Real providers
-/// (Chromium autocomplete, history, archived tabs, extensions) replace parts of `make` later behind the same
-/// `Result` type; the BH-104 sources with no store yet (archived tabs, history, extensions, folders) are
-/// deferred in #112.
+/// Builds command-bar results from caller-supplied sources. Folder and extension-action inputs are provider-only
+/// until their production data and activation handlers are connected (#562).
 public enum CommandBarResults {
   /// An open tab the bar can switch to; `node` is its sidebar node. `isSplitPane`: it is a pane of a split, so its
   /// result says "Switch to Split View" (BH-104).
@@ -48,6 +47,16 @@ public enum CommandBarResults {
     }
   }
 
+  /// Sidebar folder identity and title for provider matching.
+  public struct Folder: Sendable, Equatable {
+    public let node: NodeID
+    public let title: String
+    public let spaceTitle: String?
+    public init(node: NodeID, title: String, spaceTitle: String? = nil) {
+      self.node = node; self.title = title; self.spaceTitle = spaceTitle
+    }
+  }
+
   /// A Space the bar can switch to (BH-104).
   public struct Space: Sendable, Equatable {
     public let id: SpaceID
@@ -84,6 +93,9 @@ public enum CommandBarResults {
   public struct Input: Sendable, Equatable {
     public var openTabs: [OpenTab] = []
     public var spaces: [Space] = []
+    public var folders: [Folder] = []
+    /// Actions supplied by the engine, not a catalog of installed extensions.
+    public var extensionActions: [ExtensionAction] = []
     public var actions: [CommandBarAction] = []
     /// BH-108: a URL read from the clipboard when the bar opened; nil adds no "Paste and Go".
     public var clipboardURL: URL?
@@ -91,6 +103,7 @@ public enum CommandBarResults {
     public var excluded: Set<String> = []
     /// BH-113 (`searchSuggestEnabled`): off means no "Search <engine>" row and no engine round trip.
     public var searchSuggestionsEnabled = true
+    public var searchEngine: SearchEngine = .google
     public var scope: Scope = .normal
     /// Matches the archive store found for the query, newest first; listed after open tabs (switching to an open
     /// tab beats restoring a closed one) and before the search row (which restoring beats).
@@ -128,6 +141,9 @@ public enum CommandBarResults {
     case history(URL)
     /// A filter that matches nothing: one row that says so (design/command-bar/README.md, Filters). Not actionable.
     case noMatch
+    /// Provider-only identities; activation is not implemented.
+    case folder(NodeID)
+    case extensionAction(String)
 
     public var name: String {
       switch self {
@@ -141,6 +157,8 @@ public enum CommandBarResults {
       case .switchSpace: "switchSpace"
       case .history: "history"
       case .noMatch: "noMatch"
+      case .folder: "folder"
+      case .extensionAction: "extensionAction"
       }
     }
   }
@@ -177,13 +195,17 @@ public enum CommandBarResults {
       case .switchSpace: "Switch to Space"
       case .history: previewFacts?.isAlsoOpen == true ? CommandBarResults.switchHint : "Open"
       case .noMatch: title
+      case .folder: "Reveal Folder"
+      case .extensionAction: "Run Extension"
       }
     }
 
-    /// Whether Return does anything on the row; the empty row is the only one that does not.
+    /// Whether Return does anything on the row.
     public var isActionable: Bool {
-      if case .noMatch = kind { return false }
-      return true
+      switch kind {
+      case .noMatch: false
+      default: true
+      }
     }
   }
 
@@ -249,14 +271,14 @@ public enum CommandBarResults {
       }
     case .normal:
       if query.isEmpty { return (emptyState(input), CommandBarFilter.counts(of: [])) }
-      return typed(query: query, input: input)
+      return typed(query: query, searchQuery: raw, input: input)
     }
     return (rows, CommandBarFilter.showsCounts(forQuery: query) ? CommandBarFilter.counts(of: rows)
                                                                  : CommandBarFilter.counts(of: []))
   }
 
   /// A typed query in the normal scope: the rows, capped per kind, and the count of every match of each kind.
-  private static func typed(query: String, input: Input) -> (results: [Result], counts: [CommandBarFilter: Int]) {
+  private static func typed(query: String, searchQuery: String, input: Input) -> (results: [Result], counts: [CommandBarFilter: Int]) {
     let isKept = { (removalID: String?) in removalID.map { !input.excluded.contains($0) } ?? true }
     var results: [Result] = []
 
@@ -306,8 +328,8 @@ public enum CommandBarResults {
     let isExplicitURL = url != nil && URLInputParser.hasExplicitScheme(query)
     if !isExplicitURL, input.searchSuggestionsEnabled {
       let removalID = "search:\(query)"
-      results.append(Result(kind: .search(URLInputParser.searchURL(for: query)), title: query,
-                            subtitle: "Search \(CommandBarSettings.searchEngineName)", trailingHint: nil,
+      results.append(Result(kind: .search(URLInputParser.searchURL(for: searchQuery, engine: input.searchEngine)), title: query,
+                            subtitle: "Search \(input.searchEngine.rawValue)", trailingHint: nil,
                             removalID: removalID))
       if isKept(removalID) { uncappedRows += 1 }
     }
@@ -330,6 +352,17 @@ public enum CommandBarResults {
     for action in actions.prefix(maxMatchingActions) {
       results.append(actionRow(action, group: nil))
     }
+    // Provisional provider-only placement; this does not establish a ranking policy.
+    let folders = input.folders.filter { match.found(in: $0.title) }
+    let extensionActions = input.extensionActions.filter { $0.isEnabled && match.found(in: $0.name) }
+    for folder in folders {
+      results.append(Result(kind: .folder(folder.node), title: folder.title, subtitle: folder.spaceTitle ?? "",
+                            trailingHint: nil, removalID: nil))
+    }
+    for action in extensionActions {
+      results.append(Result(kind: .extensionAction(action.id), title: action.name, subtitle: "Extension action",
+                            trailingHint: nil, removalID: nil))
+    }
 
     // Counted without building rows: the removal ids are formed only when something was removed.
     let tabCount = input.excluded.isEmpty ? matching.count
@@ -341,13 +374,11 @@ public enum CommandBarResults {
     counts[.history] = historyCount
     counts[.actions] = actions.count
     counts[.all] = uncappedRows + tabCount + historyCount + spaces.count + input.archived.count + actions.count
+      + folders.count + extensionActions.count
     return (results.filter { isKept($0.removalID) }, counts)
   }
 
-  /// `localizedStandardContains` with the current locale fetched once per pass: that call bridges `Locale.current`
-  /// for every string, which was most of the cost of matching 2,000 titles (#606). The same search (case- and
-  /// diacritic-insensitive and nonliteral, so decomposed text such as Hangul jamo finds its precomposed form, in the
-  /// current locale) through the CoreFoundation call NSString makes, so the same answers.
+  /// Match using the current locale fetched once per pass (#606).
   struct StandardMatch {
     private let query: CFString
     private let locale = CFLocaleCopyCurrent()
@@ -447,6 +478,27 @@ public enum CommandBarResults {
 }
 
 extension CommandBarResults {
+  /// Collect each folder once, in caller Space and sidebar order, including closed nested folders.
+  @MainActor
+  public static func folders(in source: any SidebarSource, spaces: [SpaceID]) -> [Folder] {
+    var folders: [Folder] = []
+    var visited: Set<NodeID> = []
+    func visit(_ id: NodeID, depth: Int, spaceTitle: String?) {
+      guard depth < 64, visited.insert(id).inserted, let info = source.node(id) else { return }
+      if case .folder(let node, let title) = info {
+        folders.append(Folder(node: node, title: title, spaceTitle: spaceTitle))
+        for child in source.children(of: .folder(node)) { visit(child, depth: depth + 1, spaceTitle: spaceTitle) }
+      }
+    }
+    for space in spaces {
+      let spaceTitle = source.space(space)?.title
+      for id in source.children(of: .pinned(space)) + source.children(of: .today(space)) {
+        visit(id, depth: 0, spaceTitle: spaceTitle)
+      }
+    }
+    return folders
+  }
+
   /// Every open tab of a Space for "Switch to Tab": pinned, then Today, depth-first through folders.
   /// A split contributes its first pane, marked as a split pane (activating it shows the split).
   @MainActor

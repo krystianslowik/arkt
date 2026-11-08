@@ -205,6 +205,17 @@ extension SettingsWindowController {
     identify(newProfile.button, .spaces, "newProfile")
     let addRoute = SettingsAddRowView(title: "Add Route...", planned: true)
     identify(addRoute.button, .spaces, "addRoute")
+    let engineAvailable = services.searchEngine != nil && services.setSearchEngine != nil
+    let engine = popUp(.spaces, "searchEngine", SearchEngine.allCases.map(\.rawValue),
+                       (services.searchEngine?() ?? .google).rawValue)
+    engine.onChange = { [services] title in
+      if let value = SearchEngine(rawValue: title) { services.setSearchEngine?(value) }
+    }
+    searchEnginePopUp = engine
+    let suggestionsAvailable = services.searchSuggestionsEnabled != nil && services.setSearchSuggestionsEnabled != nil
+    let suggestions = toggle(.spaces, "searchSuggestions", on: services.searchSuggestionsEnabled?() ?? true,
+                             change: services.setSearchSuggestionsEnabled)
+    suggestions.setAccessibilityLabel("Include search engine suggestions")
     var blocks: [SettingsBlockView] = []
     if !spaceRows.isEmpty {
       blocks.append(section("Spaces", spaceRows,
@@ -212,6 +223,9 @@ extension SettingsWindowController {
                               + "Choosing a profile for each Space is not available yet."))
     }
     blocks += [
+      section("Search", [row("Search engine", nil, [engine], planned: !engineAvailable),
+                         row("Include search engine suggestions", nil, [suggestions],
+                             planned: !suggestionsAvailable)]),
       section("Archive", archiveRows()),
       section("Profiles", profiles + [newProfile],
               note: "Each profile keeps its own Favorites, history, cookies, passwords and extensions."),

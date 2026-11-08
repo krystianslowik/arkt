@@ -21,7 +21,7 @@ public enum CommandBarTrailing: Equatable, Sendable {
 
 /// The kinds of row the bar shows (design/command-bar/README.md, Row anatomy).
 public enum CommandBarRowKind: Equatable, Sendable {
-  case openTab, searchSuggestion, history, siteSearch, action, pasteAndGo, archived, address, space, noMatch
+  case openTab, searchSuggestion, history, siteSearch, action, pasteAndGo, archived, address, space, folder, extensionAction, noMatch
 }
 
 extension CommandBarResults.Result {
@@ -36,6 +36,8 @@ extension CommandBarResults.Result {
     case .open: .address
     case .switchSpace: .space
     case .history: .history
+    case .folder: .folder
+    case .extensionAction: .extensionAction
     case .noMatch: .noMatch
     }
   }
@@ -51,6 +53,8 @@ extension CommandBarResults.Result {
     case .archived: "archivebox"
     case .address: "globe"
     case .space: "square.grid.2x2"
+    case .folder: "folder"
+    case .extensionAction: "puzzlepiece.extension"
     case .noMatch: ""
     }
   }
@@ -59,9 +63,9 @@ extension CommandBarResults.Result {
   /// is said by the trailing caption and the symbol.
   public var secondaryText: String {
     switch rowKind {
-    case .openTab, .history, .archived: subtitle
+    case .openTab, .history, .archived, .folder: subtitle
     case .pasteAndGo, .address: CommandBarTitleMatch.displayURL(subtitle)
-    case .searchSuggestion, .siteSearch, .action, .space, .noMatch: ""
+    case .searchSuggestion, .siteSearch, .action, .space, .extensionAction, .noMatch: ""
     }
   }
 
@@ -81,6 +85,8 @@ extension CommandBarResults.Result {
       return isSelected ? [returnCap] : []
     case .pasteAndGo:
       return isSelected ? [returnCap] : []
+    case .folder, .extensionAction:
+      return isSelected ? [.text(accessibilityCaption), returnCap] : [.text(accessibilityCaption)]
     case .noMatch:
       return []
     case .action:
@@ -110,6 +116,8 @@ extension CommandBarResults.Result {
     case .archived: "archived"
     case .address: "address"
     case .space: "space"
+    case .folder: "folder"
+    case .extensionAction: "extension action"
     case .noMatch: ""
     }
   }
