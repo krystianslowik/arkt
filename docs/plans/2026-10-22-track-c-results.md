@@ -3187,3 +3187,14 @@ window guard in the next class. Its teardown now closes each set with the existi
 before clearing its array; production lifecycle and all behavior assertions are unchanged. The changed source parsed
 and whitespace checks passed; no local GUI run was performed and the follow-up head awaits CI. Normal XCUITest was
 skipped. These component passes do not establish actual Chromium queued startup delivery or native quit cancellation.
+
+
+### #116 landed haptics integration
+
+Merged main `cfc4e69` after the queued-startup follow-up. The two conflicts were the AppSettings Reset All key list
+and the fresh-default assertions: both restore-windows and reorder-haptics keys/defaults are retained. The merge
+preserves main's real Appearance haptics switch, observer, tests and AppSession gate binding alongside the shared
+restore preference. Session launch/termination behavior and the address-bar fixture cleanup remain unchanged.
+Parsing of 11 incoming/resolved Swift files, workflow import/UI-source checks, parity-script tests, actionlint,
+ABI header parity and staged whitespace checks passed. Merged-head compilation and GUI/native behavior await CI;
+the six queued-startup passes remain attributed to `0036e82`, before this integration.

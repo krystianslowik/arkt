@@ -41,10 +41,10 @@ public final class SidebarOutlineDrop {
     get { preview.now }
     set { preview.now = newValue }
   }
-  /// BH-024: a light tick when the drop point moves to a new place.
-  var haptic: @MainActor () -> Void = {
-    NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
-  }
+  /// BH-024. On until a caller says otherwise. The app binds this to `AppSettings.playsReorderHaptics`.
+  var playsReorderHaptics: @MainActor () -> Bool = { ReorderHapticGate.enabled() }
+  /// What plays the tick. Tests inject a performer and count its calls.
+  var hapticPerformer: NSHapticFeedbackPerformer = NSHapticFeedbackManager.defaultPerformer
   /// Whether the drag that just ended was cancelled with Escape (AppKit reports a cancel and a miss alike).
   var endedByEscape: @MainActor () -> Bool = {
     guard let event = NSApp.currentEvent, event.type == .keyDown else { return false }
@@ -80,8 +80,10 @@ public final class SidebarOutlineDrop {
     let t = now()
     let target = resolve(at: point, payload: payload)
     if target != lastTarget {
+      let previous = lastTarget
       lastTarget = target
-      if target != nil { haptic() }
+      ReorderHaptic.play(enabled: playsReorderHaptics(), slotChanged: target != previous, hasSlot: target != nil,
+                         performer: hapticPerformer)
     }
     preview.show(target, at: t)
     springLoadFolder(under: target, at: t)

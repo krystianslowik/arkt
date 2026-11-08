@@ -279,6 +279,10 @@ extension SettingsWindowController {
     }
     countFavoritesSwitch = favorites
     ninthTabSwitch = ninth
+    let reorderHaptics = toggle(.appearance, "reorderHaptics", on: settings.playsReorderHaptics) { [weak self] on in
+      self?.settings.playsReorderHaptics = on
+    }
+    reorderHapticsSwitch = reorderHaptics
     let websites = SettingsSegmentedControl(segments: ["Light", "Dark", "Automatic"], selected: 2)
     identify(websites, .appearance, "websitesUse")
     applyToolbarSetting(animated: false)
@@ -291,8 +295,7 @@ extension SettingsWindowController {
       section("Sidebar", [
         row("Count Favorites in Command-1 to Command-8", nil, [favorites]),
         row("Command-9 opens the ninth tab", "When off, Command-9 opens the last tab.", [ninth]),
-        row("Haptic feedback when reordering tabs", nil, [toggle(.appearance, "reorderHaptics", on: true)],
-            planned: true),
+        row("Haptic feedback when reordering tabs", nil, [reorderHaptics]),
         row("Play sound effects", nil, [toggle(.appearance, "soundEffects", on: true)], planned: true),
       ]),
     ]
