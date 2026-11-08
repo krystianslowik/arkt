@@ -2936,3 +2936,23 @@ unobserved. The earlier eight isolated model passes do not establish UI behavior
 before implementation, then validate the completed wiring. The full action catalog, actual system-warning source,
 keyboard delivery and focus still need verification. Initial conflict focus and Return's default remain explicitly
 held for the maintainer's answer in PR #828 comment 6715272110. Per-action page priority remains #441.
+
+## Shortcut catalog and menu binding stage (#119)
+
+CI run 42436049928, ShellKit job 128595052878, failed compilation before any tests ran: the new gate required
+`ShortcutCatalog.definitions(from:)`, `ShortcutCatalog.bind(model:to:)`, and Settings services for the editor and
+system warnings. Aggregate job 128599173201 failed on required ShellKit. The other diagnostics included contextual
+cascades; the line 66 solver diagnostic was in an expression containing missing definitions.
+
+The catalog now supports only New Tab and Toggle Sidebar Visibility, identified by selectors, with live menu
+binding and replacement of an earlier model. Other actions, including dynamic Space and tagged dispatcher items,
+remain unaudited and read-only. The Settings services, controls, app composition, system warning source, full
+catalog audit, and page priority follow-up #441 remain open. The maintainer's conflict focus and Return decision
+remains pending.
+
+The new replacement regression first failed to compile against the actual sources because the two catalog APIs
+were missing. An isolated package using the actual catalog and model sources, the existing model tests, the
+read-only catalog test suite and the new synthetic menu tests passed 15 tests in 3 suites (the search test has
+10 cases), Swift 6.4.1 in Swift 6 mode, macOS 15 target and macOS 15.5 SDK. The isolated catalog test suite was
+copied without the unrelated Space summary suite. This is not the full ShellKit or app build, and does not exercise
+real application dispatch. Full CI, GUI and UI tests remain pending.

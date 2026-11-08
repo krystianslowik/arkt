@@ -57,6 +57,15 @@ public final class ShortcutEditorModel {
   public private(set) var conflictingActions: [ShortcutActionID] = []
   private var pendingBinding: ShortcutBinding?
   private let defaults: UserDefaults
+  private var observers: [UUID: @MainActor () -> Void] = [:]
+
+  func observe(_ callback: @escaping @MainActor () -> Void) -> UUID {
+    let id = UUID()
+    observers[id] = callback
+    return id
+  }
+
+  func removeObserver(_ id: UUID) { observers.removeValue(forKey: id) }
 
   public init(catalog: [ShortcutDefinition], defaults: UserDefaults) {
     // The first definition owns an ID; duplicate definitions cannot alter lookup or conflict behavior.
@@ -174,5 +183,6 @@ public final class ShortcutEditorModel {
     }
     if stored.isEmpty { defaults.removeObject(forKey: Self.defaultsKey) }
     else if let data = try? JSONEncoder().encode(stored) { defaults.set(data, forKey: Self.defaultsKey) }
+    for callback in Array(observers.values) { callback() }
   }
 }

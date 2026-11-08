@@ -22,3 +22,11 @@ while recording, then the normal pane/close behavior after recording. The confli
 identified message field itself, including the occupied action and binding, rather than matching a shortcut row.
 These test-only revisions have been parsed but not compiled or executed; the first missing integration API failure
 and the subsequent supported-environment GUI runs are still required.
+
+The editable catalog currently recognizes only `newTab:` and `toggleSidebarVisibility:`. IDs come from those
+selectors, not mutable menu titles; the first visible non-alternate occurrence defines each default. Hidden aliases
+of a supported selector receive the same binding and are cleared with it. Dynamic Space items, tagged dispatcher
+commands and all other menu actions remain read-only until their identities and defaults are audited. The existing
+read-only listing and search continue to cover visible keyed menu items independently of this bounded catalog.
+Binding a menu applies the model immediately and on subsequent changes; rebinding disconnects the old model. This
+component does not install itself into the app or provide Settings controls.
