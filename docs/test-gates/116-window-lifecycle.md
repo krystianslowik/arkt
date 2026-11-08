@@ -186,3 +186,18 @@ save test with `missing saved data`. The mutation was removed before the 34-test
 store fixture detects disabled saves; it does not establish that App capture reaches the store. Deliberately broken
 window capture, AX discovery and refresh, full App compilation and native UI execution remain unverified. The probe
 is not currently run by CI. A representative native observation must precede any restoration change.
+
+
+### Review boundary before native publication
+
+Source review of `7351f9f` supports publication for one focused disposable native observation, with no claim that
+AX transport or restoration passes. It identified a quit-capture coverage gap: comparing an already-correct
+pre-quit collection with the next launch can pass even if termination capture is omitted. The native scenario is
+therefore explicitly a restore round trip; it does not establish capture timing. A future quit-capture gate must
+create distinguishable pending state and demonstrate failure when termination capture is disabled. The existing
+window-set capture tests are a separate component boundary, not native App coverage. The store-save mutation above
+is not that termination mutation.
+
+The current raw count also does not map each stored ID to a live AX row. The later restored Space/tab labels and
+fresh page requests are the behavior checks; a failure before that point must be interpreted at the observation
+boundary first. No production restoration call is added by this publication.

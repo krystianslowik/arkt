@@ -3041,3 +3041,23 @@ with Swift 6.4.1/SDK 15.5; the toolchain emitted a libSwiftScan fallback warning
 Changed-source frontend parsing and whitespace checks passed. No local full build, GUI, app launch or native
 relaunch ran. The app-restoration behavior still has no observed runtime red; a new focused run must reach it
 before production launch composition is changed. The earlier component green remains attributed to `fc87d51`.
+
+
+### Native session-store observation repair (#116)
+
+The previously green head `b2d2efc` did not establish native restoration: the focused UI test stopped before quit
+on its unsupported runner-side defaults read. The repaired gate observes the actual store injected into the window
+set, with an immutable initial snapshot before any window-set writes, per-launch identity and a completion latch.
+The AX adapter is read-only, noninteractive and restricted to Debug UI-test sessions. AX discovery and refreshed
+values remain unverified. App restoration remains unchanged.
+
+The bounded actual-source [WindowSession probe](../../integration/WindowSession/README.md) passed **34 tests in
+four suites: 32 existing store/compatibility tests plus two new observation tests**. Temporarily ignoring actual
+collection saves made the observation filter execute two tests and fail the save test with `missing saved data`.
+The mutation was removed before the full green run. Missing developer-framework/library search-path warnings were
+reported. This is store evidence, not App capture or native AX evidence.
+
+Independent source review supports a focused native observation experiment, but identified that the round trip
+cannot prove quit-time capture if ordinary writes already saved the correct value. The test and notes now state
+that boundary explicitly. A separate distinguishable-state capture mutation remains required before claiming
+native quit-capture coverage. No local App build, full ShellKit/GUI build, launch, XCUITest or capture mutation ran.

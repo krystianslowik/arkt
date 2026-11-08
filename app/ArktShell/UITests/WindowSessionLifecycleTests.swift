@@ -1,10 +1,11 @@
 import Foundation
 import XCTest
 
-/// Uses the actual app, isolated defaults and Cmd-Q; the loopback pages identify the selected tab in each window.
+/// A bounded restore round trip through the actual app and isolated defaults. Loopback pages identify selected tabs.
+/// This does not prove the timing of quit capture: ordinary state changes may already have saved the same value.
 @MainActor
 final class WindowSessionLifecycleTests: ArktUITestCase {
-  func test_E_cleanQuitRestoresDistinctRegularWindowsWithPrivateWindowOpen() async throws {
+  func test_E_relaunchRestoresDistinctRegularWindowsWithPrivateWindowOpen() async throws {
     let server = try await fixtureServer()
     let sandbox = try Sandbox()
     let app = try launch(sandbox)
