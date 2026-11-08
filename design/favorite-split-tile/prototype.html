@@ -1,0 +1,327 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Favorite Split Tile</title>
+<!--
+  A Split View as a Favorites tile (#788): the stack, the direction picked. Single file, no network, ASCII-only
+  source. The directions compared are in directions/prototype.html.
+  States are addressable by hash: #<state>[&dark][&shot][&2x]
+    state: resting | hover | selected | loading | menu | menu-rename | rename-popover
+    dark: dark appearance   shot: hide the prototype controls   2x: zoom the page (used for the screenshots)
+  No hash: an overview of every state.
+  1 CSS px = 1 pt. Tile geometry is FavoritesLayout / SidebarMetrics on main (52 x 46 tile at the default 190 pt
+  sidebar, 3 columns, 9 pt gap, radius 10, 20 pt favicon, 16 pt X at inset 3). Colors are ShellTokens values.
+  Favicons are synthetic colored squares; no real sites.
+-->
+<style>
+:root {
+  /* ShellTokens, light */
+  --text: color(display-p3 0.0549 0.0588 0.0627 / 0.90);          /* primaryText */
+  --text-2: rgba(0,0,0,0.66);                                     /* secondaryText */
+  --sb-fg: rgba(0,0,0,0.49);                                      /* sidebarForeground */
+  --fill: color(display-p3 0.0549 0.0588 0.0627 / 0.05);          /* sidebarItemBackground */
+  --fill-hover: color(display-p3 0.0549 0.0588 0.0627 / 0.10);    /* sidebarItemHovered */
+  --cur: rgba(255,255,255,0.85);                                  /* tabCurrent */
+  --visible: rgba(255,255,255,0.70);                              /* tabContentVisible */
+  --cur-shadow: 0 1px 2px rgba(0,0,0,0.20);                       /* rowLiftShadow: tabCurrentShadow r2 y1 */
+  --letter-fill: color(display-p3 0.0549 0.0588 0.0627 / 0.10);   /* letterTileFill */
+  --divider: color(display-p3 0.0549 0.0588 0.0627 / 0.10);       /* sidebarDivider */
+  /* Solid stand-ins for a tile's fill over the theme, for the stack's cut-out ring (direction B) */
+  --ring-rest: #E1DFDC; --ring-hover: #D6D4D1; --ring-cur: #FCFBFB;
+  /* Prototype context: a neutral Space theme and the desktop */
+  --theme-a: #F2F0EE; --theme-b: #E8E5E1;
+  --desktop: #D5D8DC; --panel: #FAF9F5; --panel-edge: rgba(0,0,0,0.08);
+  --page: #FFFFFF; --page-ink: rgba(0,0,0,0.08);
+  /* Native NSMenu imitation (as design/tab-context-menus) */
+  --menu: rgba(247,247,249,0.97);
+  --menu-shadow: 0 0 0 0.5px rgba(0,0,0,0.12), 0 10px 32px rgba(0,0,0,0.22), 0 2px 8px rgba(0,0,0,0.08);
+  --menu-hi: #0A64E1; --menu-sep: rgba(0,0,0,0.10);
+  /* Edit Pin popover (design/edit-pin) */
+  --surface: #FAF9F5; --accent: #E9B520; --on-accent: #202321; --focus: rgba(0,103,244,0.50); --text-sel: rgba(0,103,244,0.22);
+  --overlay-shadow: 0 0 0 0.5px rgba(0,0,0,0.12), 0 18px 48px rgba(0,0,0,0.22), 0 3px 10px rgba(0,0,0,0.10);
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --text: rgba(255,255,255,0.84); --text-2: rgba(255,255,255,0.76); --sb-fg: rgba(255,255,255,0.57);
+  --fill: color(display-p3 0.98 0.984 1 / 0.10); --fill-hover: color(display-p3 0.98 0.984 1 / 0.15);
+  --cur: color(display-p3 0.98 0.984 1 / 0.20); --visible: color(display-p3 0.98 0.984 1 / 0.15);
+  --cur-shadow: none;                                             /* tabCurrentShadow is clear in dark */
+  --letter-fill: color(display-p3 0.0549 0.0588 0.0627 / 0.15);
+  --divider: rgba(255,255,255,0.075);
+  --ring-rest: #3C3D43; --ring-hover: #46474C; --ring-cur: #525357;
+  --theme-a: #2F3036; --theme-b: #26272C;
+  --desktop: #1C1D20; --panel: #202321; --panel-edge: rgba(255,255,255,0.08);
+  --page: #1E1F22; --page-ink: rgba(255,255,255,0.08);
+  --menu: rgba(45,45,48,0.97);
+  --menu-shadow: 0 0 0 0.5px rgba(255,255,255,0.16), 0 10px 32px rgba(0,0,0,0.50), 0 2px 8px rgba(0,0,0,0.30);
+  --menu-sep: rgba(255,255,255,0.12);
+  --surface: #202321; --focus: rgba(26,145,255,0.55); --text-sel: rgba(26,145,255,0.40);
+  --overlay-shadow: 0 0 0 0.5px rgba(255,255,255,0.20), 0 18px 48px rgba(0,0,0,0.55), 0 3px 10px rgba(0,0,0,0.30);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--desktop); color: var(--text);
+  font: 13px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  -webkit-font-smoothing: antialiased; }
+a { color: inherit; }
+
+/* ---------- Controls (hidden with &shot) ---------- */
+.controls { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; padding: 10px 16px; font-size: 12px; color: var(--text-2); }
+.controls a { text-decoration: none; padding: 2px 8px; border-radius: 6px; background: var(--fill); }
+.controls a.on { background: var(--cur); color: var(--text); }
+.shot .controls { display: none; }
+/* Screenshots: the headless renderer ignores the device scale for layout, so a shot zooms the page to 2x */
+html.shot2x { zoom: 2; }
+
+/* ---------- Stage: a sidebar at 1x, and the split tile at 2x in every pane count ---------- */
+.stage { position: relative; width: 760px; height: 330px; overflow: hidden; background: var(--desktop); }
+.sidebar { position: absolute; left: 16px; top: 16px; width: 190px; height: 298px; border-radius: 12px; overflow: hidden;
+  background: linear-gradient(170deg, var(--theme-a), var(--theme-b));
+  box-shadow: 0 0 0 0.5px var(--panel-edge), 0 8px 24px rgba(0,0,0,0.12); }
+.lights { position: absolute; left: 12px; top: 14px; display: flex; gap: 8px; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; display: block; box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.14); }
+.lights i:nth-child(1) { background: #FF5F57; } .lights i:nth-child(2) { background: #FEBC2E; } .lights i:nth-child(3) { background: #28C840; }
+.grid { position: absolute; left: 8px; top: 40px; width: 174px; display: grid; grid-template-columns: repeat(3, 52px); gap: 9px; }
+.stitle { position: absolute; left: 16px; top: 155px; font-size: 12px; font-weight: 600; color: var(--text-2); }
+.rows { position: absolute; left: 8px; right: 8px; top: 178px; }
+.row { height: 34px; margin-bottom: 7px; border-radius: 9px; display: flex; align-items: center; gap: 8px; padding: 0 10px;
+  font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; }
+.row b { flex: none; }
+.row span { overflow: hidden; text-overflow: ellipsis; }
+.content { position: absolute; left: 214px; top: 16px; right: 16px; height: 298px; border-radius: 10px; background: var(--page);
+  box-shadow: 0 0 0 0.5px var(--panel-edge), 0 1px 4px rgba(0,0,0,0.08); overflow: hidden; }
+.content.split { display: grid; gap: 6px; padding: 0; background: transparent; box-shadow: none; grid-template-columns: 1fr 1fr; }
+.pane { background: var(--page); border-radius: 10px; padding: 26px 22px; box-shadow: 0 0 0 0.5px var(--panel-edge), 0 1px 4px rgba(0,0,0,0.08); }
+.pane.focus { box-shadow: 0 0 0 2px rgba(32,35,33,0.50), 0 1px 4px rgba(0,0,0,0.08); }   /* splitPaneFocusRing */
+:root[data-theme="dark"] .pane.focus { box-shadow: 0 0 0 2px rgba(250,249,245,0.50); }
+.pane i { display: block; height: 9px; border-radius: 5px; background: var(--page-ink); margin-bottom: 12px; }
+.pane i.h { height: 20px; width: 60%; margin-bottom: 20px; }
+
+.zoom { position: absolute; left: 214px; top: 16px; right: 16px; height: 298px; border-radius: 10px;
+  background: linear-gradient(170deg, var(--theme-a), var(--theme-b)); box-shadow: 0 0 0 0.5px var(--panel-edge); }
+.zoom h2 { margin: 0; position: absolute; left: 18px; top: 14px; font-size: 12px; font-weight: 600; color: var(--text-2); letter-spacing: 0; }
+.zoom .cells { position: absolute; left: 18px; right: 18px; top: 66px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.zoom .cell { display: flex; flex-direction: column; align-items: center; gap: 58px; }
+.zoom .cell .mag { width: 52px; height: 46px; transform: scale(2); transform-origin: top center; }
+.zoom .cell .cap { font-size: 11px; color: var(--sb-fg); text-align: center; line-height: 1.3; }
+
+/* ---------- Tile (FavoriteTileView) ---------- */
+.tile { position: relative; width: 52px; height: 46px; border-radius: 10px; background: var(--fill); }
+.tile.hover { background: var(--fill-hover); }
+.tile.cur { background: var(--cur); box-shadow: var(--cur-shadow); }
+.tile > .fav { position: absolute; left: 16px; top: 13px; }
+.x { position: absolute; right: 3px; top: 3px; width: 16px; height: 16px; display: grid; place-items: center; z-index: 3;
+  border-radius: 50%; background: var(--ring-hover); }   /* a split tile's X sits on a plate: it can cover a pane's favicon */
+.x svg { width: 10px; height: 10px; display: block; }
+.x path { stroke: var(--sb-fg); stroke-width: 1.6; stroke-linecap: round; }
+
+/* Favicons: synthetic squares; the letter tile is SidebarGlyphs.letter (25 % radius, letterTileFill, semibold 0.62) */
+.fav { display: grid; place-items: center; border-radius: 25%; color: #fff; font-weight: 700; line-height: 1; }
+.fav.letter { background: var(--letter-fill); color: var(--text); font-weight: 600; }
+
+/* ---------- The stack ---------- */
+.b-box { position: absolute; inset: 0; }
+.b-box .fav { position: absolute; }
+.b-box .back1 { left: 25px; top: 21px; }
+.b-box .back2 { left: 32px; top: 28px; }
+.b-box .front { left: 9px; top: 7px; box-shadow: 0 0 0 2px var(--ring); }
+.b-box .back1.ringed { box-shadow: 0 0 0 2px var(--ring); }
+/* The letter tile is translucent; in a stack it sits on the tile's solid color so the pane behind does not show through */
+.b-box .fav.letter { background-color: var(--ring); background-image: linear-gradient(var(--letter-fill), var(--letter-fill)); }
+.tile { --ring: var(--ring-rest); }
+.tile.hover { --ring: var(--ring-hover); }
+.tile.cur { --ring: var(--ring-cur); }
+
+/* ---------- Context menu ---------- */
+.menu { position: absolute; min-width: 248px; padding: 5px; border-radius: 8px; background: var(--menu); box-shadow: var(--menu-shadow); z-index: 10; }
+.mi { height: 22px; display: flex; align-items: center; gap: 12px; padding: 0 12px; border-radius: 5px; font-size: 14px; white-space: nowrap; }
+.mi .k { margin-left: auto; opacity: 0.5; font-size: 13px; letter-spacing: 1px; }
+.mi.hov { background: var(--menu-hi); color: #fff; }
+.mi.hov .k { opacity: 0.85; }
+.msep { height: 1px; margin: 5px 10px; background: var(--menu-sep); }
+
+/* ---------- Rename popover: design/edit-pin's popover with only its Name field ---------- */
+.pop { position: absolute; z-index: 10; width: 320px; padding: 16px; border-radius: 12px; background: var(--surface); box-shadow: var(--overlay-shadow); }
+.pnotch { position: absolute; top: -6px; width: 12px; height: 12px; background: inherit; transform: rotate(45deg); border-radius: 2px; }
+.pop h3 { margin: 0 0 10px; font-size: 13px; font-weight: 600; }
+.pop label { display: block; font-size: 11px; font-weight: 600; color: var(--text-2); margin: 10px 0 4px; }
+.field { height: 28px; border-radius: 8px; background: var(--fill); display: flex; align-items: center; padding: 0 9px; white-space: nowrap; overflow: hidden; }
+.field.focus { box-shadow: 0 0 0 3.5px var(--focus); }
+.field .sel { background: var(--text-sel); overflow: hidden; white-space: nowrap; }
+.acts { display: flex; gap: 8px; justify-content: flex-end; align-items: center; margin-top: 16px; }
+.btn { box-sizing: border-box; height: 28px; min-width: 76px; padding: 0 16px; border-radius: 14px; text-align: center;
+  font-size: 13px; font-weight: 600; line-height: 28px; background: var(--fill-hover); color: var(--text); }
+.btn.primary { background: var(--accent); color: var(--on-accent); }
+
+/* ---------- Overview ---------- */
+.overview { padding: 8px 16px 32px; }
+.overview h1 { font-size: 15px; margin: 14px 0 4px; }
+.overview p { margin: 0 0 10px; color: var(--text-2); max-width: 760px; }
+.strip { display: flex; flex-wrap: wrap; gap: 18px; margin-bottom: 18px; }
+.strip figure { margin: 0; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.strip figcaption { font-size: 11px; color: var(--sb-fg); }
+.strip .well { padding: 14px; border-radius: 10px; background: linear-gradient(170deg, var(--theme-a), var(--theme-b)); }
+@media (max-width: 800px) { .stage { transform: scale(0.5); transform-origin: top left; } }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+(function () {
+  // Synthetic sites. Colors and letters only; nothing resembles a real brand.
+  var SITES = {
+    docs:    { c: '#3C6FD8', g: 'D', t: 'Quarterly planning notes for the north region, draft 3' },
+    tracker: { c: '#2E9C6A', g: 'T', t: 'Tracker - Sprint board' },
+    sheet:   { c: '#C2572B', g: 'S', t: 'Budget sheet' },
+    chat:    { c: '#7A4CC4', g: 'C', t: 'Team chat' },
+    mail:    { c: '#D2414B', g: 'M', t: 'Inbox (2,481)' },
+    cal:     { c: '#1E8FA8', g: 'K', t: 'Calendar' },
+    notes:   { c: '#8A6D1F', g: 'N', t: 'Notes' },
+    music:   { c: '#3F4A5C', g: 'R', t: 'Radio' }
+  };
+  var X = '<span class="x" aria-hidden="true"><svg viewBox="0 0 10 10"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7" fill="none"/></svg></span>';
+
+  function fav(key, size, cls) {
+    var s = SITES[key];
+    var fs = Math.round(size * 0.62 * 10) / 10;
+    if (s.none) {
+      return '<b class="fav letter ' + (cls || '') + '" style="width:' + size + 'px;height:' + size + 'px;font-size:' + fs + 'px">' + s.letter + '</b>';
+    }
+    return '<b class="fav ' + (cls || '') + '" style="width:' + size + 'px;height:' + size + 'px;font-size:' + fs + 'px;background:' + s.c + '">' + s.g + '</b>';
+  }
+
+  // Panes for each variant. In the loading state the second pane has no favicon yet (a page still loading shows the
+  // letter tile, as any tab without a favicon does; design/page-loading: no spinner in the sidebar).
+  function panes(count, loading) {
+    var keys = ['docs', 'tracker', 'sheet', 'chat'].slice(0, count);
+    if (!loading) return keys;
+    SITES.loading1 = { none: true, letter: 'P' };   // page still loading: host "portal.example"
+    SITES.loading2 = { none: true, letter: 'W' };   // a site with no favicon: host "wiki.example"
+    return keys.map(function (k, i) { return i === 1 ? 'loading1' : (i === 3 ? 'loading2' : k); });
+  }
+
+  // tile({count, orient: 'h'|'v', state: resting|hover|selected|loading|menu, focus: pane index})
+  function tile(o) {
+    var p = panes(o.count, o.state === 'loading');
+    var cls = 'tile' + (o.state === 'hover' ? ' hover' : '') + (o.state === 'selected' ? ' cur' : '');
+    var x = o.state === 'hover' ? X : '';
+    // The front favicon is the focused pane while the split is shown, else the first pane.
+    var f = o.state === 'selected' ? (o.focus || 0) : 0;
+    var order = [p[f]].concat(p.filter(function (_, i) { return i !== f; }));
+    var back = order.slice(1, 3);
+    var body = '<div class="b-box">' +
+      (back[1] ? fav(back[1], 14, 'back2') : '') +
+      (back[0] ? fav(back[0], 16, 'back1' + (back[1] ? ' ringed' : '')) : '') +
+      fav(order[0], 20, 'front') + '</div>';
+    return '<div class="' + cls + '" role="button" aria-label="' + p.map(function (k) { return SITES[k].t || 'Loading'; }).join(' | ') + '">' + body + x + '</div>';
+  }
+
+  function plainTile(key) { return '<div class="tile">' + fav(key, 20) + '</div>'; }
+
+  var MENU = [
+    ['Separate All Tabs'],
+    ['Convert to Vertical Split View'],
+    '-',
+    ['Copy Links'],
+    '-',
+    ['Remove from Favorites'],
+    ['Close and Keep Favorite', '&#8984;W']
+  ];
+  // After #847 (rename a split): Rename... first, as on a Favorite tab's menu.
+  var MENU_RENAME = [['Rename&#8230;'], '-'].concat(MENU);
+  function menuHtml(items, left, top) {
+    return '<div class="menu" role="menu" style="left:' + left + 'px;top:' + top + 'px">' + items.map(function (it, i) {
+      if (it === '-') return '<div class="msep"></div>';
+      return '<div class="mi' + (i === 0 ? ' hov' : '') + '" role="menuitem"><span>' + it[0] + '</span>' + (it[1] ? '<span class="k">' + it[1] + '</span>' : '') + '</div>';
+    }).join('') + '</div>';
+  }
+
+  var STATES = ['resting', 'hover', 'selected', 'loading', 'menu', 'menu-rename', 'rename-popover'];
+  var CAPTION = {
+    resting: 'Resting: the split is not shown',
+    hover: 'Hover: the X closes every pane and keeps the Favorite',
+    selected: 'Selected: the split is shown, the first pane has focus',
+    loading: 'Second pane loading (no favicon yet), fourth pane has none',
+    menu: 'Context menu of a Favorite split',
+    'menu-rename': 'Context menu after #847',
+    'rename-popover': 'Rename... after #847'
+  };
+
+  function stage(state) {
+    var isMenu = state === 'menu' || state === 'menu-rename' || state === 'rename-popover';
+    var tileState = isMenu ? 'resting' : state;
+    var main = tile({ count: 2, orient: 'h', state: tileState, focus: 0 });
+    var grid = [plainTile('mail'), main, plainTile('cal'), plainTile('notes'), plainTile('music'), plainTile('chat')].join('');
+    var rows = '<div class="row">' + fav('sheet', 16) + '<span>Budget sheet</span></div>' +
+               '<div class="row">' + fav('chat', 16) + '<span>Team chat</span></div>' +
+               '<div class="row">' + fav('mail', 16) + '<span>Release checklist for the spring update, final</span></div>';
+    var right;
+    if (isMenu) {
+      var page = '<div class="content"><div class="pane" style="height:100%;box-shadow:none"><i class="h"></i><i></i><i style="width:80%"></i><i></i><i style="width:64%"></i></div></div>';
+      // The popover hangs below the tile, its arrow centered on it (tile center x = 16 + 8 + 52 + 9 + 26 = 111).
+      if (state === 'rename-popover') right = page +
+        '<div class="pop" role="dialog" aria-label="Edit Favorite" style="left:60px;top:112px"><span class="pnotch" style="left:45px"></span>' +
+        '<h3>Edit Favorite</h3><label>Name</label><div class="field focus"><span class="sel">' + SITES.docs.t + ' | ' + SITES.tracker.t + '</span></div>' +
+        '<div class="acts"><span class="btn">Cancel</span><span class="btn primary">Save</span></div></div>';
+      else right = page +
+              menuHtml(state === 'menu' ? MENU : MENU_RENAME, 16 + 8 + 52 + 9 + 30, 16 + 40 + 30);
+    } else {
+      var v = [
+        { count: 2, orient: 'h', cap: '2 panes, side by side' },
+        { count: 2, orient: 'v', cap: '2 panes, stacked' },
+        { count: 3, orient: 'h', cap: '3 panes' },
+        { count: 4, orient: 'h', cap: '4 panes (the most)' }
+      ];
+      right = '<div class="zoom"><h2>' + CAPTION[state] + ' - tile at 2x</h2><div class="cells">' +
+        v.map(function (o) {
+          o.state = tileState; o.focus = 0;
+          return '<div class="cell"><div class="mag">' + tile(o) + '</div><div class="cap">' + o.cap + '</div></div>';
+        }).join('') + '</div></div>';
+    }
+    return '<div class="stage"><div class="sidebar"><div class="lights"><i></i><i></i><i></i></div>' +
+      '<div class="grid">' + grid + '</div><div class="stitle">Work</div><div class="rows">' + rows + '</div></div>' + right + '</div>';
+  }
+
+  function overview() {
+    var h = '<div class="overview"><h1>A Split View as a Favorites tile (#788)</h1>' +
+      '<p>The stack. The tile at its real size (52 x 46 pt) in every state, for a split of 2 panes side by side, 2 stacked, 3 and 4. Open a state for the full screen.</p><div class="strip">';
+    ['resting', 'hover', 'selected', 'loading'].forEach(function (s) {
+      h += '<figure><a class="well" href="#' + s + '" style="display:flex;gap:9px">' +
+        [{ count: 2, orient: 'h' }, { count: 2, orient: 'v' }, { count: 3, orient: 'h' }, { count: 4, orient: 'h' }].map(function (o) {
+          o.state = s; o.focus = 0; return tile(o);
+        }).join('') + '</a><figcaption>' + s + '</figcaption></figure>';
+    });
+    return h + '</div></div>';
+  }
+
+  function controls(state, dark) {
+    var h = '<div class="controls"><a href="#' + (dark ? 'dark' : '') + '"' + (!state ? ' class="on"' : '') + '>Overview</a>';
+    STATES.forEach(function (s) {
+      h += '<a href="#' + s + (dark ? '&dark' : '') + '"' + (s === state ? ' class="on"' : '') + '>' + s + '</a>';
+    });
+    var self = state || '';
+    h += '<a href="#' + self + (dark ? '' : (self ? '&dark' : 'dark')) + '">' + (dark ? 'Light' : 'Dark') + '</a></div>';
+    return h;
+  }
+
+  function render() {
+    var parts = location.hash.replace(/^#/, '').split('&');
+    var dark = parts.indexOf('dark') >= 0;
+    var shot = parts.indexOf('shot') >= 0;
+    document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+    document.body.className = shot ? 'shot' : '';
+    document.documentElement.classList.toggle('shot2x', parts.indexOf('2x') >= 0);
+    var m = /^(?:b-)?(resting|hover|selected|loading|menu|menu-rename|rename-popover)$/.exec(parts[0] || '');
+    var root = document.getElementById('root');
+    if (!m) { root.innerHTML = controls(null, dark) + overview(); return; }
+    root.innerHTML = controls(m[1], dark) + stage(m[1]);
+  }
+  window.addEventListener('hashchange', render);
+  render();
+})();
+</script>
+</body>
+</html>

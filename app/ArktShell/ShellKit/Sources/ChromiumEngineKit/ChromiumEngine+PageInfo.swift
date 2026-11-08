@@ -28,6 +28,11 @@ extension ChromiumEngine: EngineSiteSettings {
     tabs[tab]?.handle.resetPermissions(forOrigin: origin)
   }
 
+  /// The facade counts site data (`BrowsingDataModel::BuildFromDisk`, the whole profile) only while a panel is open.
+  public func pageInfoDidOpen(tab: TabID) {
+    tabs[tab]?.handle.pageInfoDidOpen()
+  }
+
   public func pageInfoDidClose(tab: TabID) {
     tabs[tab]?.handle.pageInfoDidClose()
   }

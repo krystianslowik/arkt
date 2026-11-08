@@ -369,6 +369,40 @@ struct ProfileImportCoordinatorTests {
     #expect(await harness.records.stored.historyWatermark == times[1])
   }
 
+  @Test func aBatchThatGotNoAnswerIsStoredOnceWhenALaterImportSendsItAgain() async throws {
+    // #754: the store kept the first batch, but its answer never came ("no answer from the history store"), so the
+    // watermark froze before it and the next import sends every visit again.
+    let folder = try ArcUserDataFolder()
+    let clock = Self.clock
+    let engine = StoringImportEngine(now: { clock })
+    engine.unansweredHistoryCalls = [1]
+    let records = FakeArcImportRecordStore(ArcImportRecord())
+    func importHistory() async throws -> ProfileImportSummary {
+      let coordinator = ProfileImportCoordinator(
+        engine: engine, importRecord: records, keyProvider: Self.good,
+        configuration: ProfileImportConfiguration(batchSize: 500, historyVisitsPerBatch: 2, scratchParent: folder.scratch),
+        now: { clock })
+      var events: [ProfileImportEvent] = []
+      for await event in try coordinator.run(root: folder.root, consent: { _ in ImportSelection([.history]) }) {
+        events.append(event)
+      }
+      return try Harness.summary(of: events)
+    }
+    let manifest = folder.manifest
+    let times = manifest.history.flatMap(\.visits).map(\.date).sorted()
+
+    let first = try await importHistory()
+    #expect(first.outcomes[.history] == Self.counts(3, failed: 2))
+    #expect(await records.stored.historyWatermark == nil)
+    #expect(engine.recording.visits.count == manifest.visitCount)
+
+    let second = try await importHistory()
+    #expect(engine.historyWatermarks == [nil, nil, nil, nil, nil, nil])
+    #expect(engine.recording.visits.count == manifest.visitCount)
+    #expect(second.outcomes[.history] == Self.counts(0, skipped: manifest.visitCount))
+    #expect(await records.stored.historyWatermark == times[4])
+  }
+
   // MARK: Failures
 
   @Test func aBatchTheEngineRefusedIsNotRecordedSoARetryCoversIt() async throws {
