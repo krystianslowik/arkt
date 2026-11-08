@@ -9,15 +9,15 @@ public typealias ImportedHistoryEntry = ArcImport.HistoryEntry
 public struct ImportWriteResult: Equatable, Sendable {
   /// Stored.
   public var written: Int
-  /// Not stored on purpose: a duplicate inside the batch, an expired cookie, or a cookie the profile already holds that is
-  /// as new or newer.
+  /// Not stored on purpose: a duplicate inside the batch, an expired cookie, a cookie the profile already holds that is
+  /// as new or newer, or a visit the history already holds.
   public var skipped: Int
   /// Refused by the cookie store or the password store.
   public var failed: Int
   /// The failure reasons with their counts, one `reason: count` line each; nil when nothing failed.
   public var failureReason: String?
-  /// History only: the newest visit time written, the next call's watermark; nil when no visit was written, and for every
-  /// other kind of batch.
+  /// History only: the newest visit time written or already held, the next call's watermark; nil when there is none, and
+  /// for every other kind of batch.
   public var latestVisit: Date?
 
   public init(
@@ -47,8 +47,10 @@ public protocol EngineImporting: AnyObject {
   /// the visit and typed counts of a URL follow from the visits written. Counts are in visits. A visit at or before
   /// `watermark` (the newest visit the coordinator imported before; nil for none), one older than the 90 days Chromium's
   /// history keeps, and one of a URL the history refuses (not http, https, ftp or file) is skipped; a URL that is not
-  /// valid fails its visits. `latestVisit` of the result is the newest visit written: the coordinator keeps the larger of
-  /// it and its watermark, and a second call with that watermark writes nothing.
+  /// valid fails its visits. A visit the history already holds (same URL and time) is skipped, so a batch sent again
+  /// after it got no answer from the history store is not written twice (#754). `latestVisit` of the result is the
+  /// newest visit written or already held: the coordinator keeps the larger of it and its watermark, and a second call
+  /// with that watermark writes nothing.
   func importHistory(_ batch: [ImportedHistoryEntry], after watermark: Date?) async -> ImportWriteResult
   /// Writes bookmarks under "Other bookmarks" in a folder named "Imported", their folders kept (#511). The record's root
   /// (bar, other, synced) is not kept: everything lands under the one folder. A bookmark whose guid the profile holds,
@@ -170,8 +172,16 @@ public struct ImportRecording: Sendable {
   /// Last-access stamps of the cookies kept, parallel to `cookies`.
   private var stamps: [Date] = []
   private var loginStamps: [Date] = []
+  private struct HeldVisit: Hashable, Sendable {
+    var url: String
+    var time: Date
+  }
+  /// The URL and time of every visit in `visits`.
+  private var heldVisits: Set<HeldVisit> = []
+  /// The clock for cookie expiry and the history retention window; a test with fixed dates passes its own.
+  private let now: @Sendable () -> Date
 
-  public init() {}
+  public init(now: @escaping @Sendable () -> Date = { Date() }) { self.now = now }
 
   public mutating func record(_ batch: [ArcCookie]) -> ImportWriteResult {
     defer { for cookie in batch { cookie.value.wipe() } }
@@ -184,7 +194,7 @@ public struct ImportRecording: Sendable {
     }
     var result = ImportWriteResult()
     for (index, cookie) in batch.enumerated() {
-      guard winners[key(cookie)] == index, cookie.expires > Date(), cookie.partitionKey.isEmpty else { result.skipped += 1; continue }
+      guard winners[key(cookie)] == index, cookie.expires > now(), cookie.partitionKey.isEmpty else { result.skipped += 1; continue }
       let record = ImportedCookieRecord(
         hostKey: cookie.hostKey, name: cookie.name, value: cookie.value.utf8String(), path: cookie.path)
       let existing = cookies.firstIndex { ($0.name, $0.hostKey, $0.path) == (record.name, record.hostKey, record.path) }
@@ -234,7 +244,7 @@ public struct ImportRecording: Sendable {
 
   public mutating func record(_ batch: [ImportedHistoryEntry], after watermark: Date?) -> ImportWriteResult {
     var result = ImportWriteResult()
-    let oldest = Date().addingTimeInterval(-Self.historyRetention)
+    let oldest = now().addingTimeInterval(-Self.historyRetention)
     for entry in batch {
       guard let url = URL(string: entry.url), let scheme = url.scheme?.lowercased(), url.host != nil || scheme == "file"
       else {
@@ -249,10 +259,15 @@ public struct ImportRecording: Sendable {
           result.skipped += 1
           continue
         }
+        result.latestVisit = max(result.latestVisit ?? visit.time, visit.time)
+        // Already held (same URL and time): a batch sent again after it got no answer (#754).
+        guard heldVisits.insert(HeldVisit(url: entry.url, time: visit.time)).inserted else {
+          result.skipped += 1
+          continue
+        }
         visits.append(ImportedVisitRecord(
           url: entry.url, title: entry.title, time: visit.time, transition: visit.transition.coreValue))
         result.written += 1
-        result.latestVisit = max(result.latestVisit ?? visit.time, visit.time)
       }
     }
     return result
