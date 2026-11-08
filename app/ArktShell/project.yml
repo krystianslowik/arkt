@@ -206,6 +206,8 @@ targets:
     sources:
       - UITests
       - path: App/TestIdentity.swift
+      - path: App/EnvironmentOverrides.swift
+      - path: App/LaunchArgumentCarrier.swift
       - path: ShellKit/Sources/ShellUI/Accessibility/AXID.swift
       - path: ShellKit/Sources/ShellUI/Accessibility/AXID+Peek.swift
       - path: ShellKit/Sources/ShellUI/Accessibility/AXID+LittleArkt.swift

@@ -63,12 +63,15 @@ final class LinkRoutingAppTests: ArktUITestCase {
   private func open(_ address: String, sandbox: Sandbox, server: FixtureServer, cold: Bool) async throws -> NSRunningApplication {
     let url = try XCTUnwrap(URL(string: address))
     let applicationURL = Self.appURL().standardizedFileURL.resolvingSymlinksInPath()
+    var bundleIdentifier: String?
     if cold {
       _ = try Self.makeApplication() // Repeat bundle validation and the no-running-instance preflight.
       guard let bundle = Bundle(url: applicationURL),
-            bundle.object(forInfoDictionaryKey: "ArktRequireUITestOverrides") as? String == "YES" else {
+            bundle.object(forInfoDictionaryKey: "ArktRequireUITestOverrides") as? String == "YES",
+            let identifier = bundle.bundleIdentifier, !identifier.isEmpty else {
         throw HarnessError("cold OS open requires the mandatory UI-test startup guard")
       }
+      bundleIdentifier = identifier
     }
     let configuration = NSWorkspace.OpenConfiguration()
     configuration.allowsRunningApplicationSubstitution = false
@@ -83,6 +86,11 @@ final class LinkRoutingAppTests: ArktUITestCase {
     }
     configuration.environment = environment
     configuration.arguments = Self.launchArguments
+    if cold {
+      let keys = Set(TestIdentity.keys + [TestIdentity.endpointKey])
+      let carrierValues = environment.filter { keys.contains($0.key) }
+      configuration.arguments.append(try LaunchArgumentCarrier.encode(carrierValues, bundleIdentifier: bundleIdentifier))
+    }
     let opened = try await NSWorkspace.shared.open([url], withApplicationAt: applicationURL,
                                                    configuration: configuration)
     guard opened.bundleURL?.standardizedFileURL.resolvingSymlinksInPath() == applicationURL,
@@ -98,7 +106,7 @@ final class LinkRoutingAppTests: ArktUITestCase {
     if cold {
       guard Waits.until("cold process identity report", { server.acceptedIdentity != nil }),
             let report = server.acceptedIdentity, report.pid == opened.processIdentifier,
-            let bundleID = opened.bundleIdentifier else {
+            let bundleID = opened.bundleIdentifier, bundleID == bundleIdentifier else {
         throw HarnessError("cold process identity was not established")
       }
       let instances = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)

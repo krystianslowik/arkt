@@ -41,7 +41,7 @@ enum DefaultBrowser {
 
   #if DEBUG
   private static var override: EnvironmentOverrides.DefaultBrowser? {
-    EnvironmentOverrides(environment: ProcessInfo.processInfo.environment).defaultBrowser
+    EnvironmentOverrides(environment: AppEnvironment.effectiveEnvironment).defaultBrowser
   }
   #endif
 }
@@ -126,7 +126,7 @@ extension AppSession {
   /// was left mid-flow. Later windows with no Space keep the empty state; only one window runs it.
   func presentOnboardingIfNeeded(on window: ShellWindowController) {
     #if DEBUG
-    if EnvironmentOverrides(environment: ProcessInfo.processInfo.environment).skipsOnboarding { return }
+    if EnvironmentOverrides(environment: AppEnvironment.effectiveEnvironment).skipsOnboarding { return }
     if AppEnvironment.smokePhase != nil { return }
     #endif
     // The profile's Spaces, read from the shared source: a blank or incognito window draws none of them.

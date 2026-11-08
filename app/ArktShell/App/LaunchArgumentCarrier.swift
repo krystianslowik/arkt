@@ -55,4 +55,17 @@ enum LaunchArgumentCarrier {
     _ = try TestIdentity.digest(values)
   }
 }
+/// Immutable process snapshot; a carrier may only replace the validated keys it owns.
+struct StartupConfiguration: Sendable {
+  let environment: [String: String]
+
+  static func resolve(arguments: [String], environment: [String: String], required: Bool,
+                      bundleIdentifier: String?) throws -> Self {
+    guard let values = try LaunchArgumentCarrier.decode(arguments: arguments, environment: environment,
+                                                         required: required, bundleIdentifier: bundleIdentifier) else {
+      return Self(environment: environment)
+    }
+    return Self(environment: environment.merging(values) { _, carrier in carrier })
+  }
+}
 #endif

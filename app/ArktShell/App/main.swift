@@ -5,8 +5,17 @@ import OSLog
 
 let startupLog = Logger(subsystem: "dev.arkt.ui-test-startup", category: "startup")
 // Bundle metadata is independent of the launch environment. Refuse before migration or constructing the app.
-let startupOverrides = EnvironmentOverrides(environment: ProcessInfo.processInfo.environment)
 let uiTestRequired = Bundle.main.object(forInfoDictionaryKey: "ArktRequireUITestOverrides") as? String == "YES"
+let startupConfiguration: StartupConfiguration
+do {
+  startupConfiguration = try StartupConfiguration.resolve(
+    arguments: ProcessInfo.processInfo.arguments, environment: ProcessInfo.processInfo.environment,
+    required: uiTestRequired, bundleIdentifier: Bundle.main.bundleIdentifier)
+} catch {
+  startupLog.error("stage=carrier-rejected")
+  exit(64)
+}
+let startupOverrides = EnvironmentOverrides(environment: startupConfiguration.environment)
 let startupViolations = startupOverrides.uiTestStartupViolations(
   required: uiTestRequired, bundleIdentifier: Bundle.main.bundleIdentifier
 )
@@ -20,7 +29,7 @@ if !startupViolations.isEmpty {
 // Capture the effective environment before app settings can be composed.
 let startupIdentity: TestIdentity.Request?
 do {
-  startupIdentity = try TestIdentity.request(environment: ProcessInfo.processInfo.environment,
+  startupIdentity = try TestIdentity.request(environment: startupConfiguration.environment,
                                              required: uiTestRequired, pid: ProcessInfo.processInfo.processIdentifier)
   #if ARKT_CHROMIUM_ENGINE
   // This barrier is implemented for the FakeEngine UI-test app only.
