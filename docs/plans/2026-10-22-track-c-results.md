@@ -3091,3 +3091,18 @@ snapshot plus a fresh launch-completion report, then check exactly one regular w
 The enabled test retains all behavior assertions through shared setup. The new preservation case has not run;
 source parsing, workflow import/UI-source checks and whitespace validation are preliminary evidence only. The
 production disabled-launch path is unchanged until an intended runtime red is observed.
+
+
+### Disabled App launch preservation runtime red (#116)
+
+At `7a377dd`, native run 42510853793 passed the enabled case in 56.126 seconds. The disabled case reached its exact
+preservation assertion and failed: 327 current collection bytes versus 707 frozen initial bytes, after launch
+completion and the one-window check. This is a behavior red for the real fallback path, not a harness failure.
+Normal required/Core/pure/App/lint checks passed; GUI was still running when inspected.
+
+The local fix centralizes restore plus fallback in the window set's `openWindowsAtLaunch`, invoked by AppSession.
+It suppresses collection capture during disabled fallback construction and restores normal capture on return.
+A component gate uses that complete entry point with seeded collection and legacy state, requires preservation,
+no duplicate forwarding and a later ordinary selection saved normally. Existing native assertions remain intact.
+Parsing and whitespace checks passed; no component/GUI/App or native fixed-head execution is claimed. Independent
+review and supported CI remain outstanding. Other native lifecycle/cancellation and #690 recovery boundaries remain.

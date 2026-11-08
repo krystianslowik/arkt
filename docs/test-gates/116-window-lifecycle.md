@@ -243,3 +243,24 @@ preservation at this launch boundary, not a promise to retain that snapshot afte
 
 The new case has only parsed and passed source/whitespace checks; its intended preservation failure is unobserved.
 No production behavior changed for this gate. CI must establish that failure before the preservation fix.
+
+
+## Disabled-launch overwrite runtime red and bounded fix
+
+[Run 42510853793](https://github.com/krystianslowik/arkt/actions/runs/42510853793) at `7a377dd` passed the enabled
+case in 56.126 seconds. The disabled case completed its General preference, capture, quit, fresh launch ID/latch,
+initial collection and one-window checks, then failed exactly the current-versus-initial comparison: 327 current
+bytes versus 707 initial bytes at line 121. This establishes the fallback overwrite at the actual App boundary.
+Normal required, Core, pure ShellKit, App and lint checks passed at this head; GUI remained in progress at the read.
+
+The bounded fix adds `ShellWindowSet.openWindowsAtLaunch` for the complete restore-or-fallback decision and uses
+it from AppSession. It reuses the once-only restore helper and an existing primary window, if present. Disabled
+restoration suppresses collection capture only while constructing the fresh fallback, restoring the prior
+suppression state on return. Later ordinary window changes still save. Enabled, absent, empty and unreadable
+collection handling otherwise follows the existing helper and fallback behavior.
+
+A component test calls this same complete entry point, not only the restore helper. It seeds both collection and
+legacy state in another Space, requires one fresh window and preserved collection, checks repeated forwarding
+creates no duplicate, then changes the selected tab and requires the collection to update. Native tests retain
+their assertions. The new production/component sources parsed and passed whitespace checks only; the component
+test, complete App build and native fix have not run locally. Source review and new-head CI remain required.

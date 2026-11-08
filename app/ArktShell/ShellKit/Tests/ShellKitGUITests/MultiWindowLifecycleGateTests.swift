@@ -268,6 +268,36 @@ final class MultiWindowLifecycleGateTests: XCTestCase {
                    "repeated launch forwarding must not create another window")
   }
 
+  func testCompleteDisabledLaunchPreservesCollectionThenResumesOrdinaryWrites() throws {
+    let (set, engine, store, sidebar) = try fixture()
+    defer {
+      for id in engine.windowIDs { engine.engineEndWindow(id, reason: .appQuit) }
+      for controller in set.controllers { controller.close() }
+    }
+    let settings = AppSettings.ephemeral()
+    settings.restoreWindowsOnLaunch = false
+    let personal = sidebar.spaceOrder[0], work = sidebar.spaceOrder[1]
+    let savedTab = sidebar.children(of: .today(work))[0]
+    let saved = WindowSessionState(frame: CGRect(x: 100, y: 100, width: 700, height: 500),
+                                   space: work, currentTab: savedTab)
+    store.save(saved)
+    store.saveWindows([saved])
+    let windows = set.openWindowsAtLaunch(settings: settings)
+    XCTAssertEqual(windows.count, 1)
+    let fresh = try XCTUnwrap(windows.first)
+    XCTAssertEqual(fresh.currentSpace, personal, "disabled restore must not apply the legacy session either")
+    XCTAssertEqual(store.loadWindows(), [saved], "the complete launch includes the default-window fallback")
+    let identities = set.controllers.map(ObjectIdentifier.init)
+    _ = set.openWindowsAtLaunch(settings: settings)
+    XCTAssertEqual(set.controllers.map(ObjectIdentifier.init), identities)
+    XCTAssertEqual(store.loadWindows(), [saved])
+
+    let next = sidebar.children(of: .today(personal))[1]
+    fresh.activate(node: next)
+    XCTAssertEqual(try XCTUnwrap(store.loadWindows()).map(\.currentTab), [next],
+                   "startup suppression must end before ordinary window changes")
+  }
+
   func testDeletedSpaceAndTabFallBackPerRestoredWindow() throws {
     let (set, _, store, sidebar) = try fixture()
     let personal = sidebar.spaceOrder[0], work = sidebar.spaceOrder[1]

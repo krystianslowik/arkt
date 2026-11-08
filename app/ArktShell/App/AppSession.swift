@@ -199,8 +199,8 @@ final class AppSession {
   func finishLaunch(opensWindow: Bool) {
     let window: ShellWindowController?
     if opensWindow {
-      windows.restoreWindowsAtLaunch(settings: settings)
-      window = windows.primary ?? windows.openWindow()
+      windows.openWindowsAtLaunch(settings: settings)
+      window = windows.primary
     } else {
       window = windows.primary
     }

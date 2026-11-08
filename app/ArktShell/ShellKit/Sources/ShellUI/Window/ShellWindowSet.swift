@@ -274,6 +274,19 @@ public final class ShellWindowSet {
 
   // MARK: Session (#116)
 
+  /// The complete launch decision: restore the collection or open one default window if none exists.
+  /// Disabled restoration preserves the stored collection while that fallback is built; later state changes save normally.
+  @discardableResult
+  public func openWindowsAtLaunch(settings: AppSettings = .ephemeral()) -> [ShellWindowController] {
+    let restored = restoreWindowsAtLaunch(settings: settings)
+    if !restored.isEmpty { return restored }
+    if let primary { return [primary] }
+    let wasRestoring = collectionRestoring
+    collectionRestoring = wasRestoring || !settings.restoreWindowsOnLaunch
+    defer { collectionRestoring = wasRestoring }
+    return [openWindow()]
+  }
+
   /// Restores the saved collection once. An empty or unavailable collection creates no window.
   @discardableResult
   public func restoreWindowsAtLaunch(settings: AppSettings = .ephemeral()) -> [ShellWindowController] {
