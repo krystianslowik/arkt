@@ -117,6 +117,11 @@ public final class WindowSessionStore {
     return collection.windows
   }
 
+  /// An existing collection we cannot decode must not be replaced by automatic lifecycle writes.
+  var hasUnreadableCollection: Bool {
+    defaults?.object(forKey: Self.windowsDefaultsKey) != nil && loadWindows() == nil
+  }
+
   public func saveWindows(_ windows: [WindowSessionState]) {
     guard let data = try? JSONEncoder().encode(Collection(version: Self.collectionVersion, windows: windows))
     else { return }

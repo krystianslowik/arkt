@@ -91,6 +91,13 @@ public final class SidebarController {
   public var onSpacesChanged: (@MainActor ([SpaceID]) -> Void)?
 
   private var pages: [SpaceID: SpacePageView] = [:]
+  var onFolderCollapseChanged: (@MainActor () -> Void)?
+  var collapsedFolderIDs: Set<NodeID> {
+    pages.values.reduce(into: []) { $0.formUnion($1.outlineController.collapsedFolderIDs) }
+  }
+  func restoreCollapsedFolders(_ ids: Set<NodeID>) {
+    for page in pages.values { page.outlineController.restoreCollapsedFolders(ids) }
+  }
   private var pagedSpaces: [SpaceID] = []
   /// Theme last shown per Space. A change of the current Space's theme asks the window to crossfade; the first
   /// time a Space is seen does not.
@@ -539,7 +546,10 @@ public final class SidebarController {
       guard let self, page === self.currentPage else { return }
       self.folderPreview.folderHoverChanged(folder, hovered: hovered)
     }
-    page.outlineController.onFoldersChanged = { [weak self] in self?.folderPreview.folderStatesChanged() }
+    page.outlineController.onFoldersChanged = { [weak self] in
+      self?.folderPreview.folderStatesChanged()
+      self?.onFolderCollapseChanged?()
+    }
     page.onEditTheme = { [weak self] page in self?.openThemeCreator(for: page.spaceID) }
     page.outlineController.setRowStates(resolver)
     if let info = drawnSpace(id) { page.refresh(from: info) }

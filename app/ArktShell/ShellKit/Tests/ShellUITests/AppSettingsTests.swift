@@ -30,6 +30,7 @@ struct AppSettingsTests {
     #expect(!settings.toolbar.isVisible)
     #expect(settings.toolbar.showsFullURL)
     #expect(!settings.warnsBeforeQuitting)
+    #expect(settings.restoreWindowsOnLaunch)
   }
 
   /// Arc's key names: Count Favorites is stored inverted (`excludeFavoritesInSwitchToNthTab`).
@@ -142,6 +143,7 @@ struct AppSettingsTests {
     settings.opensLittleArktWithHotKey = true
     settings.opensLittleArktOnOptionCommandClick = false
     settings.warnsBeforeQuitting = true
+    settings.restoreWindowsOnLaunch = false
     settings.sendsCrashReports = true
     settings.downloadLocation = DownloadLocationSetting(
       asksWhereToSave: true, folder: URL(filePath: "/Volumes/Media/", directoryHint: .isDirectory))

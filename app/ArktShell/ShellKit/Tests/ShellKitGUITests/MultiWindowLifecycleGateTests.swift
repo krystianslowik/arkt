@@ -286,4 +286,24 @@ final class MultiWindowLifecycleGateTests: XCTestCase {
     XCTAssertFalse(restoredSecond.collapsedFolderIDs.contains(folder))
   }
 
+  func testUnreadableCollectionSurvivesLaunchAndAutomaticWrites() throws {
+    let (original, _, _, sidebar) = try fixture()
+    let name = "MultiWindowLifecycleGateTests.Unreadable.\(UUID())"
+    addTeardownBlock { UserDefaults().removePersistentDomain(forName: name) }
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+    let unreadable = Data("{\"version\":999,\"windows\":[]}".utf8)
+    defaults.set(unreadable, forKey: WindowSessionStore.windowsDefaultsKey)
+    let set = ShellWindowSet(engine: InMemoryEngine(), sidebar: sidebar,
+                             sessionStore: WindowSessionStore(defaults: defaults))
+    addTeardownBlock { @MainActor in
+      for controller in set.controllers { controller.window?.orderOut(nil) }
+    }
+    XCTAssertTrue(set.restoreWindowsAtLaunch().isEmpty)
+    _ = set.openWindow()
+    set.saveSessionsForTermination()
+    set.resumeSessions()
+    XCTAssertEqual(defaults.data(forKey: WindowSessionStore.windowsDefaultsKey), unreadable)
+    _ = original
+  }
+
 }

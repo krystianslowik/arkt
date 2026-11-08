@@ -23,6 +23,7 @@ extension ShellWindowController {
   /// of their own instead, one without a row. A tab the engine opens here (`engineDidCreateTab`) is one too (#559).
   private func keepVisitsOutOfTheSharedSidebar() {
     isPrivateWindow = true
+    onSessionChanged?()
     commandBar.onOpen = { [weak self] url, _ in self?.openPrivately(url) }
     sidebarController.onPasteAndGo = { [weak self] url in self?.openPrivately(url) }
     let pages = sidebarController.view.privatePages

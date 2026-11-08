@@ -48,6 +48,11 @@ public final class ShellWindowSet {
   private weak var sessionWindow: ShellWindowController?
   /// The saved session was applied (or looked for) once; a window that takes over later only saves.
   private var restoredSession = false
+  private var didRestoreWindowsAtLaunch = false
+  private var launchWindows: [ShellWindowController] = []
+  private var collectionFrozen = false
+  private var collectionRestoring = false
+  private var protectsUnreadableCollection = false
   /// The session window when a saved frame was applied to it: `place` leaves it where it is.
   private weak var restoredFrameWindow: ShellWindowController?
   /// Built for an engine request, waiting for their window's `.windowOpened`.
@@ -100,6 +105,7 @@ public final class ShellWindowSet {
     self.sessionStore = sessionStore
     self.commandBarSettings = commandBarSettings
     self.hostLookup = hostLookup
+    self.protectsUnreadableCollection = sessionStore.hasUnreadableCollection
     windowObservation = engine.observeWindows { [weak self] event in
       guard case .windowOpened(let id) = event else { return }
       self?.windowOpened(id)
@@ -145,6 +151,7 @@ public final class ShellWindowSet {
     if !opensFirstTab, let space = opener?.currentSpace { controller.sidebarController.showSpace(space) }
     place(controller, near: anchor)
     controller.showWindow(nil)
+    captureWindowCollection()
     return controller
   }
 
@@ -167,6 +174,7 @@ public final class ShellWindowSet {
     controller.showWindow(nil)
     controller.window?.setFrameTopLeftPoint(point)   // after showing: the first show places a window itself
     controller.activate(node: node)
+    captureWindowCollection()
     return controller
   }
 
@@ -261,23 +269,50 @@ public final class ShellWindowSet {
     let controller = awaitingAdoption.remove(at: index)
     controller.adopt(engineWindow: id)
     controller.showWindow(nil)
+    captureWindowCollection()
   }
 
   // MARK: Session (#116)
 
-  /// A quit started: writes every restored window's final state, then freezes saving, so the tabs the engine closes
-  /// while shutting down cannot overwrite it.
+  /// Restores the saved collection once. An empty or unavailable collection creates no window.
+  @discardableResult
+  public func restoreWindowsAtLaunch(settings: AppSettings = .ephemeral()) -> [ShellWindowController] {
+    if didRestoreWindowsAtLaunch { return launchWindows.filter { !$0.isClosed } }
+    didRestoreWindowsAtLaunch = true
+    protectsUnreadableCollection = protectsUnreadableCollection || sessionStore.hasUnreadableCollection
+    restoredSession = true
+    guard settings.restoreWindowsOnLaunch, let states = sessionStore.loadWindows() else { return [] }
+    collectionRestoring = true
+    for state in states {
+      let controller = make(opensFirstTab: true, origin: .shell, restoring: state)
+      controller.showWindow(nil)
+      launchWindows.append(controller)
+    }
+    collectionRestoring = false
+    return launchWindows
+  }
+
+  private func captureWindowCollection() {
+    guard !collectionFrozen, !collectionRestoring, !protectsUnreadableCollection else { return }
+    sessionStore.saveWindows(controllers.filter { !$0.isPrivateWindow }.compactMap { $0.currentSessionState() })
+  }
+
+  /// Capture before the engine tears down tabs and freeze the complete collection during quit.
   public func saveSessionsForTermination() {
+    for controller in controllers { controller.settlePendingClear() }
+    captureWindowCollection()
+    collectionFrozen = true
     for controller in controllers {
-      controller.settlePendingClear()                // #413: a Clear mid-exit is saved archived
       controller.saveSession()
       controller.savesSession = false
     }
   }
 
-  /// The quit was cancelled: saving continues.
+  /// A cancelled quit immediately replaces the snapshot with surviving windows and resumes writes.
   public func resumeSessions() {
+    collectionFrozen = false
     sessionWindow?.savesSession = true
+    captureWindowCollection()
   }
 
   // MARK: Little Arkt (#314)
@@ -499,11 +534,11 @@ public final class ShellWindowSet {
 
   // MARK: Building
 
-  private func make(opensFirstTab: Bool, origin: SessionWindowOrigin) -> ShellWindowController {
+  private func make(opensFirstTab: Bool, origin: SessionWindowOrigin, restoring explicitSession: WindowSessionState? = nil) -> ShellWindowController {
     // #116: the first main window the shell opens restores the saved frame, Space and tabs and keeps them saved;
     // when it closes, the next one takes over saving (without restoring again).
     let isRestored = SessionWindowPolicy.takesSession(origin, ownerIsAlive: sessionWindow.map { !$0.isClosed } ?? false)
-    let session = isRestored && !restoredSession ? sessionStore.load() : nil
+    let session = explicitSession ?? (isRestored && !restoredSession ? sessionStore.load() : nil)
     if isRestored { restoredSession = true }
     let controller = ShellWindowController(engine: engine, sidebar: sidebar, toolbarSetting: toolbarSetting,
                                            sidebarStateStore: sidebarStateStore, sessionStore: sessionStore,
@@ -535,6 +570,7 @@ public final class ShellWindowSet {
       (self?.controllers ?? []).filter { $0 !== controller }.reduce(into: []) { $0.formUnion($1.visibleNodes) }
     }
     windows.append(controller)
+    controller.onSessionChanged = { [weak self] in self?.captureWindowCollection() }
     trackMain(controller)
     configure?(controller)
     downloads?.attach(to: controller)
