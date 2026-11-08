@@ -72,7 +72,9 @@ final class LinkRoutingAppTests: ArktUITestCase {
     }
     let configuration = NSWorkspace.OpenConfiguration()
     configuration.allowsRunningApplicationSubstitution = false
-    configuration.createsNewApplicationInstance = cold
+    // Use the normal cold URL-open path after the no-running-instance preflight, without forcing another instance.
+    // Exact bundle, PID, ACK and sole-instance checks below still reject unintended reuse or environment loss.
+    configuration.createsNewApplicationInstance = false
     var environment = try Self.mergedEnvironment(sandbox: sandbox, extraEnv: [:])
     if cold {
       let nonce = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()

@@ -318,3 +318,25 @@ The unchanged codec/fixture policy probe passed 26 tests in three suites. The ac
 (with its real policy and codec dependencies) type-checked with Debug enabled against the macOS 15.5 SDK; this is
 not a full App build or delegate typecheck. Parsing, exact import/UI-source checks, actionlint and whitespace
 checks passed. No local app or GUI was launched.
+
+
+## Lost cold environment observed; normal LaunchServices mode experiment
+
+[Startup artifact 13629805156](https://github.com/krystianslowik/arkt/actions/runs/42508318180/artifacts/13629805156)
+at `536fadb` records the warm setup validating its strict environment, followed by a different cold PID with
+`testFlag=false` and rejection for all four missing required overrides. It never sent an identity request. The
+pre-migration guard therefore rejected the cold launch. This establishes environment loss on the tested path,
+not why LaunchServices discarded it or whether its forced-new-instance option caused it.
+
+The next single-case experiment uses normal `createsNewApplicationInstance=false` after the existing no-instance
+preflight, rather than forcing another application instance. Substitution remains false, the mandatory guard and
+exact effective-environment ACK remain, and the returned PID/bundle/sole instance plus persisted profile must all
+match before routing is evaluated. There is no XCUIApplication prelaunch, environment fallback, or bypass of the
+real OS URL-open entry. This is an unverified harness change, not a confirmed repair; no native green is claimed.
+
+The normal `536fadb` GUI job reported 2120 tests, 63 skipped and two lifetime failures: three hidden Little Arkt
+windows after the routed-open fixture and one hidden DialogWindow after the existing extension-remove sheet
+fixture. The regular-window leak is gone and all seven routing methods passed their behavioral assertions. The
+Little Arkt residue is consistent with the external-retention symptoms tracked in existing #817, but identical
+ownership has not been proven. No class was added to the lifetime allowlist and no guard was weakened. Resolving
+#817 itself is outside this work's owned issue scope.

@@ -3267,3 +3267,19 @@ codec/fixture probe passed 26 tests in three suites. The real pre-migration pref
 against the SDK; parsing, import/UI-source checks, actionlint and whitespace checks passed. These checks do not
 compile the entire App delegate or establish native behavior. No local App/GUI launch ran; a single focused cold
 probe after publication remains necessary.
+
+
+### Cold environment loss established; normal URL-open mode probe (#113)
+
+At `536fadb`, startup artifact 13629805156 from run 42508318180 shows a cold PID rejected before migration with
+all four required overrides missing and no identity request. Warm setup had validated its own environment. The
+cause within LaunchServices remains unconfirmed. A single cold probe now uses its normal new-process path after
+no-instance preflight, with forced-new-instance false; substitution remains disabled and every mandatory guard,
+ACK, returned bundle/PID, sole-instance and persisted-profile requirement remains. This test-only change has no
+runtime result yet and is not evidence of a fix.
+
+Normal GUI job128815775358 reported 2120 tests, 63 skipped and two lifetime failures. The owned routed-open fixture
+no longer leaked regular windows, but three Little Arkt windows remained despite engine/close cleanup. Another
+existing class left a DialogWindow. Existing #817 documents similar Little Arkt external retention; this does not
+prove the same retainer. The lifetime guard/allowlist is unchanged, and no new issue was taken. No GUI green is
+claimed. Parser, source and whitespace checks cover the harness edit only; no local App/GUI launch ran.
