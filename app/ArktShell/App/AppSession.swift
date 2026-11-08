@@ -47,6 +47,7 @@ final class AppSession {
   let archiveSettings: ArchiveSettingsModel
   /// One editor shared by every Settings consumer for the session.
   let linkRoutingSettings: LinkRoutingSettingsModel
+  private var routingObservation: SidebarObservation?
   /// Archived matches in every window's command bar (#111).
   let archiveSearch: ArchiveCommandBarSearch
   /// The command bar preview's page thumbnails (#370): live tabs through the engine, history items from the cache.
@@ -133,6 +134,14 @@ final class AppSession {
       autosaver.scheduleSave(sidebar)                 // every model change
       crashCapture.updateRedactions(from: sidebar)    // #129: the names reports must not carry
       changedSinceBackup = true
+    }
+    routingObservation = source.observe { [weak linkRoutingSettings] change in
+      guard case .spaceRemoved(let id) = change, let editor = linkRoutingSettings else { return }
+      editor.removeRoutes(to: id)
+      Task {
+        await editor.load()
+        if editor.needsFlush { _ = await editor.flush() }
+      }
     }
     windows.configure = { [weak self] controller in self?.wire(controller) }
     // #355, BH-138, KB-080: a Little Arkt window the user or the idle timer closed goes to the Archive under the
