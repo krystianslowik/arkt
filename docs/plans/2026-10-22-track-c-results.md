@@ -2911,3 +2911,17 @@ Written first. Each failed to compile before the code existed.
 - Remaining: connect eligible production folder and extension data, result presentation and activation; closed-folder
   peek; search engine and suggestions Settings; tests and integration checks for the complete issue. Search engine
   defaults and URL routing are unchanged. No sidebar model storage format changed.
+
+### Command-bar folder and extension provider gate review (#562)
+
+The tests now retain folder IDs, collect matching folders from pinned, nested and Today locations, and require
+folder result kinds with the corresponding IDs. Extension rows must retain the synthetic action ID; an existing
+open tab must remain a switch to its original node. A third mixed-source case checks the existing relative ordering
+of tabs, history, Spaces, archive, search and shell actions while adding folder and extension results. It does not
+choose placement of the new kinds among existing categories or decide selection/activation behavior.
+
+`Folder.node`, the `.folder` result kind and `.extensionAction` result kind are proposed identity contracts alongside
+the already-proposed inputs and collector. The new revision passed Swift 6.2.4 frontend parsing and diff checks,
+not compilation or execution. The intended missing-API red remains unobserved, with production implementation and
+forwarding absent. These three tests are a bounded action-list/provider gate; they do not establish all installed
+extensions, real data refresh, activation, closed-folder peek or Settings acceptance for #562.
