@@ -206,12 +206,18 @@ final class DialogLabelColorTests: XCTestCase {
     let offset = label.frame.minX - checkbox.frame.minX
     let labelStart = try XCTUnwrap(labelShot.inkOrigin(after: 0)).x + offset
     let labelEnd = try XCTUnwrap(labelShot.inkEnd()) + offset
-    // The box is on the trailing (right) side: only ink left of it is the title.
-    let box = checkbox.frame.height
-    let plainStart = try XCTUnwrap(plain.inkOrigin(after: 0)).x
-    let plainEnd = try XCTUnwrap(plain.inkEnd(before: checkbox.frame.width - box))
-    XCTAssertEqual(labelStart, plainStart, accuracy: 1, "the title's left edge")
-    XCTAssertEqual(labelEnd, plainEnd, accuracy: 1, "the title's right edge, beside the box")
+    // The title is the ink on the other side of the box from the cell's image rect. macOS 27 draws a right-to-left
+    // checkbox's box on the right; macOS 26 keeps it on the left. Either way the label follows the cell's title rect.
+    let cell = try XCTUnwrap(checkbox.cell)
+    let boxRect = cell.imageRect(forBounds: checkbox.bounds)
+    let boxOnRight = boxRect.midX > checkbox.bounds.midX
+    let plainStart = try XCTUnwrap(plain.inkOrigin(after: boxOnRight ? 0 : boxRect.maxX)).x
+    let plainEnd = try XCTUnwrap(plain.inkEnd(before: boxOnRight ? boxRect.minX : nil))
+    let geometry = "label \(label.frame), checkbox \(checkbox.frame), title rect "
+      + "\(cell.titleRect(forBounds: checkbox.bounds)), box rect \(cell.imageRect(forBounds: checkbox.bounds)), "
+      + "label ink \(labelStart)...\(labelEnd), plain ink \(plainStart)...\(plainEnd)"
+    XCTAssertEqual(labelStart, plainStart, accuracy: 1, "the title's left edge; \(geometry)")
+    XCTAssertEqual(labelEnd, plainEnd, accuracy: 1, "the title's right edge, beside the box; \(geometry)")
   }
 
   private func title(_ alert: DialogAlert) throws -> TokenLabel {
