@@ -1408,3 +1408,27 @@ coordinate menu selection, skip or timeout increase is added. The row-popup acce
 unverified. Swift 6.2.4 parsing, actionlint, UI source checks, parity-report fixtures and whitespace checks passed;
 the repaired class has not run locally and needs one new focused CI run. Existing five-of-six evidence stays tied
 to `b185d75`; no repaired-head runtime pass is claimed.
+
+#### U15 completed focused class at `eaae6e8`
+
+The repaired class passed in [manual run 42488694680, UI job 128756163364](https://github.com/krystianslowik/arkt/actions/runs/42488694680/job/128756163364)
+at `eaae6e80a333fef971af6ac83e6d1189d16672e4`: **six methods executed, zero failures**. All six named methods
+passed, including the sidebar's native Separate All Tabs selection, exact duplicate/original title counts, every
+resulting page URL and unchanged Archive count. The divider assertion remains value-only. This is one focused
+class run, not a full UI suite, repeated stress run or deliberate-break result.
+
+The diagnosis is now bounded by observed input and outcomes: both click methods display the native row popup,
+the app-wide accessibility query omits its items, native type-selection highlights Separate All Tabs, and the
+resulting-state checks pass after Return. The earlier assertion queried an unavailable app-tree item; it did not
+establish a failure to present the menu. The proxy/scope explanation and native VoiceOver behavior remain
+unverified. No product accessibility defect or production menu change is claimed.
+
+[Normal PR run 42488688602](https://github.com/krystianslowik/arkt/actions/runs/42488688602) at that same head passed
+Core **576 tests / 45 suites**, pure ShellKit **2524 / 283 suites**, and GUI **2071 reported, 60 skipped, zero
+failures**, plus app build, lint and the required aggregate. Its XCUITest job was skipped; the six-method result
+comes from the separately selected manual job above. Both runs include #802 via the earlier main merge.
+
+The six scenarios have real tests; partial parity deferrals retain their reasons, Archive search links to open
+follow-up #827, and the maintainer approved keeping the workflow selector. The PR can proceed to review with the
+above evidence and limits. This final update changes documentation only; any new-head CI result must be attributed
+separately from the tested `eaae6e8` head.
