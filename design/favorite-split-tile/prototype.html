@@ -8,7 +8,7 @@
   A Split View as a Favorites tile (#788): the stack, the direction picked. Single file, no network, ASCII-only
   source. The directions compared are in directions/prototype.html.
   States are addressable by hash: #<state>[&dark][&shot][&2x]
-    state: resting | hover | selected | loading | menu | menu-rename
+    state: resting | hover | selected | loading | menu | menu-rename | rename-popover
     dark: dark appearance   shot: hide the prototype controls   2x: zoom the page (used for the screenshots)
   No hash: an overview of every state.
   1 CSS px = 1 pt. Tile geometry is FavoritesLayout / SidebarMetrics on main (52 x 46 tile at the default 190 pt
@@ -38,6 +38,9 @@
   --menu: rgba(247,247,249,0.97);
   --menu-shadow: 0 0 0 0.5px rgba(0,0,0,0.12), 0 10px 32px rgba(0,0,0,0.22), 0 2px 8px rgba(0,0,0,0.08);
   --menu-hi: #0A64E1; --menu-sep: rgba(0,0,0,0.10);
+  /* Edit Pin popover (design/edit-pin) */
+  --surface: #FAF9F5; --accent: #E9B520; --on-accent: #202321; --focus: rgba(0,103,244,0.50); --text-sel: rgba(0,103,244,0.22);
+  --overlay-shadow: 0 0 0 0.5px rgba(0,0,0,0.12), 0 18px 48px rgba(0,0,0,0.22), 0 3px 10px rgba(0,0,0,0.10);
   color-scheme: light;
 }
 :root[data-theme="dark"] {
@@ -54,6 +57,8 @@
   --menu: rgba(45,45,48,0.97);
   --menu-shadow: 0 0 0 0.5px rgba(255,255,255,0.16), 0 10px 32px rgba(0,0,0,0.50), 0 2px 8px rgba(0,0,0,0.30);
   --menu-sep: rgba(255,255,255,0.12);
+  --surface: #202321; --focus: rgba(26,145,255,0.55); --text-sel: rgba(26,145,255,0.40);
+  --overlay-shadow: 0 0 0 0.5px rgba(255,255,255,0.20), 0 18px 48px rgba(0,0,0,0.55), 0 3px 10px rgba(0,0,0,0.30);
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
@@ -138,6 +143,19 @@ html.shot2x { zoom: 2; }
 .mi.hov .k { opacity: 0.85; }
 .msep { height: 1px; margin: 5px 10px; background: var(--menu-sep); }
 
+/* ---------- Rename popover: design/edit-pin's popover with only its Name field ---------- */
+.pop { position: absolute; z-index: 10; width: 320px; padding: 16px; border-radius: 12px; background: var(--surface); box-shadow: var(--overlay-shadow); }
+.pnotch { position: absolute; top: -6px; width: 12px; height: 12px; background: inherit; transform: rotate(45deg); border-radius: 2px; }
+.pop h3 { margin: 0 0 10px; font-size: 13px; font-weight: 600; }
+.pop label { display: block; font-size: 11px; font-weight: 600; color: var(--text-2); margin: 10px 0 4px; }
+.field { height: 28px; border-radius: 8px; background: var(--fill); display: flex; align-items: center; padding: 0 9px; white-space: nowrap; overflow: hidden; }
+.field.focus { box-shadow: 0 0 0 3.5px var(--focus); }
+.field .sel { background: var(--text-sel); overflow: hidden; white-space: nowrap; }
+.acts { display: flex; gap: 8px; justify-content: flex-end; align-items: center; margin-top: 16px; }
+.btn { box-sizing: border-box; height: 28px; min-width: 76px; padding: 0 16px; border-radius: 14px; text-align: center;
+  font-size: 13px; font-weight: 600; line-height: 28px; background: var(--fill-hover); color: var(--text); }
+.btn.primary { background: var(--accent); color: var(--on-accent); }
+
 /* ---------- Overview ---------- */
 .overview { padding: 8px 16px 32px; }
 .overview h1 { font-size: 15px; margin: 14px 0 4px; }
@@ -221,18 +239,19 @@ html.shot2x { zoom: 2; }
     }).join('') + '</div>';
   }
 
-  var STATES = ['resting', 'hover', 'selected', 'loading', 'menu', 'menu-rename'];
+  var STATES = ['resting', 'hover', 'selected', 'loading', 'menu', 'menu-rename', 'rename-popover'];
   var CAPTION = {
     resting: 'Resting: the split is not shown',
     hover: 'Hover: the X closes every pane and keeps the Favorite',
     selected: 'Selected: the split is shown, the first pane has focus',
     loading: 'Second pane loading (no favicon yet), fourth pane has none',
     menu: 'Context menu of a Favorite split',
-    'menu-rename': 'Context menu after #847'
+    'menu-rename': 'Context menu after #847',
+    'rename-popover': 'Rename... after #847'
   };
 
   function stage(state) {
-    var isMenu = state === 'menu' || state === 'menu-rename';
+    var isMenu = state === 'menu' || state === 'menu-rename' || state === 'rename-popover';
     var tileState = isMenu ? 'resting' : state;
     var main = tile({ count: 2, orient: 'h', state: tileState, focus: 0 });
     var grid = [plainTile('mail'), main, plainTile('cal'), plainTile('notes'), plainTile('music'), plainTile('chat')].join('');
@@ -241,7 +260,13 @@ html.shot2x { zoom: 2; }
                '<div class="row">' + fav('mail', 16) + '<span>Release checklist for the spring update, final</span></div>';
     var right;
     if (isMenu) {
-      right = '<div class="content"><div class="pane" style="height:100%;box-shadow:none"><i class="h"></i><i></i><i style="width:80%"></i><i></i><i style="width:64%"></i></div></div>' +
+      var page = '<div class="content"><div class="pane" style="height:100%;box-shadow:none"><i class="h"></i><i></i><i style="width:80%"></i><i></i><i style="width:64%"></i></div></div>';
+      // The popover hangs below the tile, its arrow centered on it (tile center x = 16 + 8 + 52 + 9 + 26 = 111).
+      if (state === 'rename-popover') right = page +
+        '<div class="pop" role="dialog" aria-label="Edit Favorite" style="left:60px;top:112px"><span class="pnotch" style="left:45px"></span>' +
+        '<h3>Edit Favorite</h3><label>Name</label><div class="field focus"><span class="sel">' + SITES.docs.t + ' | ' + SITES.tracker.t + '</span></div>' +
+        '<div class="acts"><span class="btn">Cancel</span><span class="btn primary">Save</span></div></div>';
+      else right = page +
               menuHtml(state === 'menu' ? MENU : MENU_RENAME, 16 + 8 + 52 + 9 + 30, 16 + 40 + 30);
     } else {
       var v = [
@@ -289,7 +314,7 @@ html.shot2x { zoom: 2; }
     document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
     document.body.className = shot ? 'shot' : '';
     document.documentElement.classList.toggle('shot2x', parts.indexOf('2x') >= 0);
-    var m = /^(?:b-)?(resting|hover|selected|loading|menu|menu-rename)$/.exec(parts[0] || '');
+    var m = /^(?:b-)?(resting|hover|selected|loading|menu|menu-rename|rename-popover)$/.exec(parts[0] || '');
     var root = document.getElementById('root');
     if (!m) { root.innerHTML = controls(null, dark) + overview(); return; }
     root.innerHTML = controls(m[1], dark) + stage(m[1]);

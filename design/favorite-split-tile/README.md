@@ -7,7 +7,7 @@ tile. #802 made that tile work (X, drag out, menu, labels); this design gives it
 it after #847.
 
 - Prototype: [`prototype.html`](prototype.html). No hash: an overview of every state. One state per hash:
-  `#<resting|hover|selected|loading|menu|menu-rename>[&dark][&shot]`.
+  `#<resting|hover|selected|loading|menu|menu-rename|rename-popover>[&dark][&shot]`.
 - Screens: [`screens/`](screens/), `<state>-<light|dark>.png`, at 2x. Each shows the sidebar at its real size on the
   left and the split tile at 2x on the right for a split of 2 panes side by side, 2 stacked, 3 and 4.
 - The directions compared: [Considered](#considered), with their prototype and screens in
@@ -33,6 +33,10 @@ The tile is a Favorite tile like any other; only its content differs. These valu
 | X: 16 pt hit box, inset 3 from the top trailing corner, 10 pt glyph, fades with the hover (120 ms) | `SidebarMetrics.favoriteCloseButtonSize`, `favoriteCloseButtonInset`, `closeButtonGlyphSize`, `closeButtonFadeDuration` |
 | No favicon: the letter tile (25 % radius, `letterTileFill`, semibold at 0.62 of its size, `primaryText`) | `SidebarGlyphs.letter` |
 | Increase Contrast: the 1 pt `increasedContrastEdge` on the tile | `IncreasedContrast.setEdge` |
+
+Increase Contrast and Space themes add nothing new for this tile, so they have no screens here: the tile's fill and
+1 pt edge are `design/increase-contrast` ("Favorites tiles" row), and themed fills are `design/theme-creator`. The
+one themed detail is the cut-out ring, which the build checks on a theme (acceptance criteria).
 
 `ShellRadius` (#810) and the type roles (#812) are open pull requests, not on main yet. The Favorites tile keeps its
 own `tileCornerRadius`; #810 does not change it.
@@ -63,15 +67,18 @@ box is centered in the tile, as a plain Favorite's favicon is.
 | Resting | `sidebarItemBackground`; the first pane in front |
 | Hover | `sidebarItemHovered`; the X fades in on a round 16 pt plate in the hovered fill, which covers any favicon under it |
 | Selected (the split is shown) | `tabCurrent` with `rowLiftShadow`; the focused pane's favicon is in front |
-| Focus moves to another pane | its favicon comes to the front, the others follow in pane order: a 150 ms ease-out cross-fade of the layers |
+| Focus moves to another pane | its favicon comes to the front, the others follow in pane order: a cross-fade of the layers (`FavoritesLayout.focusCrossFadeDuration`, below) |
 | A pane loading, or with no favicon | that layer is the letter tile (the host's first letter) until a favicon arrives. No spinner: the sidebar shows nothing while a page loads (`design/page-loading`, decision 3) |
 | No pane loaded in this window | as resting; no X (#802) |
 
 ### Motion
 
 The hover fill, the X fade and the selection fill are the tile's existing motion. The only new motion is the front
-layer changing when focus moves between panes: a 150 ms ease-out cross-fade. With Reduce Motion, the layers switch at
-once.
+layer changing when focus moves between panes: a cross-fade, ease-out, with Reduce Motion the layers switch at once.
+
+The shell has no shared motion token; durations are named per surface (`SidebarMetrics.closeButtonFadeDuration`
+0.12, `SettingsMotion.crossFade` 0.15, `StatusPillView.crossFadeDuration` 0.18). The build adds
+`FavoritesLayout.focusCrossFadeDuration = 0.15`, the same value as `SettingsMotion.crossFade`.
 
 ## Context menu
 
@@ -91,6 +98,18 @@ Accepted by the maintainer. In order:
 
 Until #847 lands, the menu starts at Separate All Tabs (screens `menu-*`); Rename... is not shown, not even disabled.
 With #847: screens `menu-rename-*`.
+
+### Rename popover (after #847)
+
+`design/edit-pin`'s popover, unchanged in size, type, colors and behavior (320 pt, padding 16, radius 12, the arrow on
+its top edge centered on the tile, Esc and a click outside cancel), with three differences, shown in
+`screens/rename-popover-<light|dark>.png`:
+
+- Title "Edit Favorite" (as for a Favorite tab).
+- Only the Name field: no Pinned URL field and no Use Current Page link.
+- Name is prefilled with what the tile's tooltip shows (the split's name, else the pane titles joined with " | "),
+  focused, with the text selected. Cancel and **Save** (the one mustard pill, Return). An empty name on Save clears
+  the split's name, so the tooltip and label go back to the pane titles.
 
 Left out, and why:
 
@@ -115,12 +134,21 @@ Left out, and why:
 ## Build acceptance criteria
 
 - [ ] A split tile draws the stack: front 20 pt, second 16 pt, third 14 pt at the offsets above; 4 panes draw 3 layers
+- [ ] The tile is selected (`tabCurrent`), and its accessibility value is "current", while any of its panes is
+      current. Main resolves a split tile's state through its panes since #802 (`FavoritesGridView.state(for:)`);
+      a test pins it for a split tile in the Favorites
 - [ ] The front layer is the focused pane while the split is shown, else the first pane; a focus change cross-fades in
-      150 ms, and switches at once with Reduce Motion
+      `FavoritesLayout.focusCrossFadeDuration` (0.15 s), and switches at once with Reduce Motion
 - [ ] The cut-out ring matches the tile's fill resting, hovered and selected, light and dark, on a theme
 - [ ] A pane without a favicon draws the letter tile in its layer; nothing behind shows through
 - [ ] The X sits on its plate while hovered; a tile with no loaded pane has no X
 - [ ] The menu is the table above; Rename... only once #847 has landed
+- [ ] Separate All Tabs on a Favorite split turns each pane into its own Favorite, in pane order, at the split's place;
+      the pages stay open
+- [ ] Convert to Vertical / Horizontal Split View works on a Favorite split and does not change the tile
+- [ ] After #847, Rename... opens the Edit Pin popover titled "Edit Favorite" with only the Name field; an empty name
+      goes back to the pane titles; the name becomes the tile's tooltip and accessibility label
+- [ ] The tile's VoiceOver custom action is Separate All Tabs (next to the X's Close and Keep Favorite)
 - [ ] Increase Contrast draws the tile's edge
 - [ ] Screenshot tests for each state in this README, light and dark
 
@@ -141,6 +169,6 @@ B keeps the front favicon at the size of every other Favorite, and the tile calm
 
 ```zsh
 find design/favorite-split-tile -name '*.png' -size +400k    # prints nothing
-ls design/favorite-split-tile/screens | grep -c light        # 6
-ls design/favorite-split-tile/screens | grep -c dark         # 6
+ls design/favorite-split-tile/screens | grep -c light        # 7
+ls design/favorite-split-tile/screens | grep -c dark         # 7
 ```
