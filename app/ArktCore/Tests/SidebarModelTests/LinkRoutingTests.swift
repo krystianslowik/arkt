@@ -32,10 +32,16 @@ struct LinkRoutingTests {
     }
   }
 
-  @Test func containsIsCaseSensitive() {
-    let route = LinkRouting.Route(condition: .contains("example.com"), destination: .littleArkt)
+  @Test func containsIsCaseInsensitiveAcrossURLText() {
+    let url = URL(string: "https://EXAMPLE.com/Docs?Token=One#Top")!
+    for text in ["example.COM", "/dOCS", "?TOKEN=oNE", "#tOP"] {
+      #expect(LinkRouting.Condition.contains(text).applies(to: url))
+    }
+    #expect(!LinkRouting.Condition.contains("/other").applies(to: url))
+  }
 
-    #expect(!route.applies(to: URL(string: "https://EXAMPLE.com/docs")!))
+  @Test func containsPreservesEmptyLiteralMatching() {
+    #expect(LinkRouting.Condition.contains("").applies(to: url))
   }
 
   @Test func unmatchedLinkCanDefaultToMostRecentSpace() {
@@ -81,15 +87,16 @@ struct LinkRoutingTests {
 }
 
 extension LinkRoutingTests {
-  @Test func competingDestinationsRemainUnresolved() {
+  @Test func firstMatchingRouteWinsOverLaterMoreSpecificRoute() {
     let first = LinkRouting.Route(condition: .contains("example"), destination: .space(space))
-    let second = LinkRouting.Route(condition: .contains("example.com"), destination: .mostRecentSpace)
-    let routing = LinkRouting(routes: [first, second])
+    let second = LinkRouting.Route(condition: .matches(url.absoluteString), destination: .mostRecentSpace)
+    let nonmatch = LinkRouting.Route(condition: .contains("elsewhere"), destination: .littleArkt)
+    let routing = LinkRouting(routes: [nonmatch, first, second])
 
     #expect(routing.matchingRoutes(for: url) == [first, second])
-    #expect(routing.resolution(for: url) == .ambiguous([first, second]))
-    #expect(routing.destination(for: url) == nil)
-    #expect(LinkRouting(routes: [second, first]).destination(for: url) == nil)
+    #expect(routing.resolution(for: url) == .destination(first.destination))
+    #expect(routing.destination(for: url) == first.destination)
+    #expect(LinkRouting(routes: [second, first]).destination(for: url) == second.destination)
   }
 
   @Test func multipleMatchesWithSameDestinationResolveUniquely() {

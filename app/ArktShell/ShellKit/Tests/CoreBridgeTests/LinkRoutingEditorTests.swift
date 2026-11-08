@@ -64,7 +64,7 @@ struct LinkRoutingEditorTests {
     #expect(reopened.settings.routes == [Self.first, Self.second], "duplicate entries remain independently editable")
   }
 
-  @Test func competingRoutesRemainConfigurationWithoutChoosingWinner() async {
+  @Test func competingRoutesUsePersistedListOrder() async {
     let store = EditorStore()
     let model = LinkRoutingSettingsModel(state: store)
     await model.load()
@@ -75,7 +75,7 @@ struct LinkRoutingEditorTests {
     await reopened.load()
     let routing = reopened.settings
     #expect(routing.routes == [Self.first, Self.second])
-    #expect(routing.resolution(for: URL(string: Self.exact)!) == .ambiguous([Self.first, Self.second]))
+    #expect(routing.resolution(for: URL(string: Self.exact)!) == .destination(Self.first.destination))
   }
 }
 

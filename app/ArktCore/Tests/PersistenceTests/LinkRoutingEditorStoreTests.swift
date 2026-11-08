@@ -30,13 +30,14 @@ struct LinkRoutingEditorStoreTests {
       let loaded = try await store.loadLinkRouting()
       #expect(loaded == LinkRouting(routes: [first, second, first], defaultDestination: .mostRecentSpace))
       #expect(try await SettingsStore(database: database).load(LinkRouting.self) == loaded)
-      #expect(loaded.resolution(for: URL(string: "https://Example.test/Path/?q=One#Top")!) == .ambiguous([first, second, first]))
+      #expect(loaded.resolution(for: URL(string: "https://Example.test/Path/?q=One#Top")!) == .destination(first.destination))
       _ = try await store.updateLinkRouting(at: date) { $0.routes.removeFirst(); $0.defaultDestination = .space(space) }
     }
     let database = try ArktDatabase.open(at: url)
     defer { try? database.close() }
     let store: any LinkRoutingSettingsStoring = SettingsStore(database: database)
     #expect(try await store.loadLinkRouting() == LinkRouting(routes: [second, first], defaultDestination: .space(space)))
+    #expect(try await store.loadLinkRouting().destination(for: URL(string: "https://Example.test/Path/?q=One#Top")!) == second.destination)
   }
 
   @Test func concurrentUpdatesPreserveEveryAppend() async throws {

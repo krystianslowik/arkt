@@ -23,7 +23,7 @@ struct LinkRoutingSettingsTests {
     #expect(try await store.load(ArchiveState.self) == other)
   }
 
-  @Test func roundTripPreservesTextOrderDestinationsAndAmbiguity() async throws {
+  @Test func roundTripPreservesTextOrderAndFirstMatchingDestination() async throws {
     let store = SettingsStore(database: try ArktDatabase.inMemory())
     for destination in [LinkRouting.Destination.littleArkt, .mostRecentSpace, .space(Self.space)] {
       let routing = LinkRouting(routes: Self.routes, defaultDestination: destination)
@@ -31,9 +31,9 @@ struct LinkRoutingSettingsTests {
       let loaded = try await store.load(LinkRouting.self)
       #expect(loaded == routing)
       #expect(loaded.matchingRoutes(for: Self.url) == Self.routes)
-      #expect(loaded.resolution(for: Self.url) == .ambiguous(Self.routes))
-      #expect(loaded.destination(for: Self.url) == nil)
-      #expect(loaded.matchingRoutes(for: URL(string: "https://example.com/path?q=one#top")!).isEmpty)
+      #expect(loaded.resolution(for: Self.url) == .destination(Self.routes[0].destination))
+      #expect(loaded.destination(for: Self.url) == Self.routes[0].destination)
+      #expect(loaded.matchingRoutes(for: URL(string: "https://example.com/path?q=one#top")!) == [Self.routes[0], Self.routes[2]])
     }
   }
 

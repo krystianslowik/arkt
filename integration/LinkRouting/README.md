@@ -13,3 +13,7 @@ The probe also includes the canonical CoreBridge Settings-readiness tests by sou
 The Space-removal cases also run the canonical pure editor tests through a source link. The SQLite probe checks pruning across close and reopen. It does not compile or exercise AppSession, the source observer composition, or the Settings sheet; those remain separate CI coverage.
 
 The termination cases also hold or fail the initial read and reopen the typed database after normal and blocking cleanup. They exercise the production editor and store, but do not exercise the AppSession observer/termination composition or a live Settings window.
+
+The probe also source-links the canonical Core matching, typed routing persistence, atomic store, and CoreBridge
+editor tests. Together they verify case-insensitive contains, exact-string matches, and first-match precedence
+through stored list order without replacing the normal Core and ShellKit CI targets.

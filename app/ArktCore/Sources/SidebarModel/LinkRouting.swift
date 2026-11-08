@@ -1,15 +1,15 @@
 import Foundation
 
-/// The settled, value-only part of link routing. Competing destinations require a policy decision.
+/// Value-only link routing. The first matching route in list order supplies the destination.
 public struct LinkRouting: Codable, Hashable, Sendable {
   public enum Condition: Codable, Hashable, Sendable {
     case contains(String)
     case matches(String)
 
-    /// Compares the URL's absolute string without normalization or case folding.
+    /// Contains ignores case; matches compares the exact absolute string without URL normalization.
     public func applies(to url: URL) -> Bool {
       switch self {
-      case .contains(let text): url.absoluteString.contains(text)
+      case .contains(let text): text.isEmpty || url.absoluteString.range(of: text, options: .caseInsensitive) != nil
       case .matches(let text): url.absoluteString == text
       }
     }
@@ -51,11 +51,10 @@ public struct LinkRouting: Codable, Hashable, Sendable {
   public func resolution(for url: URL) -> Resolution {
     let matches = matchingRoutes(for: url)
     guard let first = matches.first else { return .destination(defaultDestination) }
-    guard matches.allSatisfy({ $0.destination == first.destination }) else { return .ambiguous(matches) }
     return .destination(first.destination)
   }
 
-  /// Returns nil for competing destinations, never the default for an ambiguous match.
+  /// Returns the first matching route's destination, or the configured default when no routes match.
   public func destination(for url: URL) -> Destination? {
     guard case .destination(let destination) = resolution(for: url) else { return nil }
     return destination
