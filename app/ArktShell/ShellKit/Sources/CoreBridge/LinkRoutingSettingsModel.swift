@@ -34,10 +34,11 @@ public final class LinkRoutingSettingsModel {
     self.now = now
   }
 
-  /// A reload is ignored while edits are unsaved or writes are pending, to avoid discarding them.
+  /// A loaded snapshot is not replaced while edits or writes are pending. An initial read can be retried
+  /// after cleanup fails; explicit removals are reapplied to that read before editing is enabled.
   public func load() async {
     if let loading { await loading.value; return }
-    guard revision == savedRevision, !writePending, !saveFailed else { return }
+    guard !isLoaded || (revision == savedRevision && !writePending && !saveFailed) else { return }
     loadInProgress = true
     let readGeneration = removalGeneration
     let pendingAtRead = pendingRemovedSpaces
@@ -182,6 +183,10 @@ public final class LinkRoutingSettingsModel {
     guard let result = BlockingFlush.run(timeout: flushTimeout, { await call.value }) else {
       saveFailed = true
       lastError = FlushError.timedOut
+      // If quit is cancelled, reconcile the late result on the main actor. The write itself never needs it.
+      Task { @MainActor in
+        self.finish(await call.value, submission: number, version: version, removals: removals, generation: generation)
+      }
       return false
     }
     return finish(result, submission: number, version: version, removals: removals, generation: generation)
