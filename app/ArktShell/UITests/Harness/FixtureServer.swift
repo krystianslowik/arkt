@@ -132,6 +132,21 @@ final class FixtureServer: Sendable {
     if path == "/favicon.ico" {
       return Response(status: 404, mime: "text/plain", body: Data("not found".utf8))
     }
+    if path == "/shortcut-key-barrier" {
+      // A later ordinary key reaching the page confirms ordered delivery without hiding a stray command bar.
+      return Response(body: Data("""
+        <!doctype html><meta charset="utf-8"><title>Shortcut key barrier</title>
+        <body tabindex="0">Shortcut key barrier<script>
+        let sequence = 0;
+        document.addEventListener('keydown', event => {
+          if (event.key === 'z' && !event.metaKey && !event.ctrlKey && !event.altKey) {
+            fetch('/events/shortcut-key-barrier/' + (++sequence), {cache: 'no-store'});
+          }
+        });
+        fetch('/events/shortcut-key-ready', {cache: 'no-store'});
+        </script></body>
+        """.utf8))
+    }
     if path.hasPrefix("/x/"), path.count > 3 {
       let name = String(path.dropFirst(3))
       return Response(body: html(title: title(ofPage: name), link: "\(crossSiteBase)/p/\(name)-next"))

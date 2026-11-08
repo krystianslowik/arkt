@@ -2,11 +2,40 @@ import XCTest
 
 /// Exercises the actual app composition root and regular window through Settings and keyboard dispatch.
 final class ShortcutWiringTests: ArktUITestCase {
-  func testSettingsOverrideClearResetAndReloadDriveNewTabCommand() throws {
+  func testSettingsOverrideClearResetAndReloadDriveNewTabCommand() async throws {
     let sandbox = try Sandbox()
     addTeardownBlock { sandbox.remove() }
+    let server = try await FixtureServer.start()
+    addTeardownBlock { server.stop() }
     var app = try launch(sandbox)
     try createFirstSpace(in: app)
+
+    func loadBarrierPage(_ app: XCUIApplication) -> Bool {
+      let readyCount = server.requestedPaths.filter { $0 == "/events/shortcut-key-ready" }.count
+      guard Shell.openCommandBar(app, key: "l") else { return false }
+      Shell.submit(server.base + "/shortcut-key-barrier", in: app)
+      guard Shell.waitForCommandBar(app, open: false) else { return false }
+      return Waits.until("the keyboard barrier page installed its handler") {
+        server.requestedPaths.filter { $0 == "/events/shortcut-key-ready" }.count > readyCount
+      }
+    }
+
+    func expectNoNewTab(_ app: XCUIApplication, key: String,
+                        modifiers: XCUIElement.KeyModifierFlags, message: String) -> Bool {
+      XCTAssertTrue(Shell.isCommandBarClosed(app))
+      // Establish page focus before the key under test; do not click or dismiss anything afterward.
+      guard waitFor(app.webViews.firstMatch) else { return false }
+      app.webViews.firstMatch.click()
+      let delivered = server.requestedPaths.filter { $0.hasPrefix("/events/shortcut-key-barrier/") }.count
+      app.typeKey(key, modifierFlags: modifiers)
+      app.typeKey("z", modifierFlags: [])
+      guard Waits.until("a later key reaches the page: " + message, {
+        server.requestedPaths.filter { $0.hasPrefix("/events/shortcut-key-barrier/") }.count > delivered
+      }) else { return false }
+      let closed = Shell.isCommandBarClosed(app)
+      XCTAssertTrue(closed, message)
+      return closed
+    }
 
     func openRecorder(_ app: XCUIApplication) {
       app.typeKey(",", modifierFlags: .command)
@@ -30,8 +59,9 @@ final class ShortcutWiringTests: ArktUITestCase {
     openRecorder(app)
     app.typeKey("k", modifierFlags: [.control, .option])
     closeSettings(app)
-    app.typeKey("t", modifierFlags: .command)
-    XCTAssertTrue(Shell.isCommandBarClosed(app), "the old binding no longer dispatches")
+    guard loadBarrierPage(app),
+          expectNoNewTab(app, key: "t", modifiers: .command,
+                         message: "the old binding no longer dispatches") else { return }
     expectNewTab(app, key: "k", modifiers: [.control, .option])
     quit(app)
 
@@ -40,13 +70,15 @@ final class ShortcutWiringTests: ArktUITestCase {
     openRecorder(app)
     app.typeKey(.delete, modifierFlags: [])
     closeSettings(app)
-    app.typeKey("k", modifierFlags: [.control, .option])
-    XCTAssertTrue(Shell.isCommandBarClosed(app), "clearing disables the changed binding")
+    guard loadBarrierPage(app),
+          expectNoNewTab(app, key: "k", modifiers: [.control, .option],
+                         message: "clearing disables the changed binding") else { return }
     quit(app)
 
     app = try launch(sandbox)
-    app.typeKey("k", modifierFlags: [.control, .option])
-    XCTAssertTrue(Shell.isCommandBarClosed(app), "the clear survives relaunch")
+    guard loadBarrierPage(app),
+          expectNoNewTab(app, key: "k", modifiers: [.control, .option],
+                         message: "the clear survives relaunch") else { return }
     openRecorder(app)
     // Escape exits recording so Reset All can be activated through the Settings UI.
     app.typeKey(.escape, modifierFlags: [])

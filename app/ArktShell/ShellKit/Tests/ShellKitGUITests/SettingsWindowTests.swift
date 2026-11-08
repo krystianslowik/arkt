@@ -459,7 +459,11 @@ final class SettingsWindowTests: XCTestCase {
     recorder.performClick(nil)
     window.sendEvent(try shortcutEvent("t", .command, code: 17, in: window))
     XCTAssertEqual(model.binding(for: sidebar), ShortcutBinding(key: "s", modifiers: .command))
-    XCTAssertTrue(controller.visibleTexts().contains { $0.contains("New Tab") })
+    let explanation = try find("settings.shortcuts.conflict.message", in: controller, as: NSTextField.self)
+    XCTAssertTrue(explanation.stringValue.contains("New Tab"), "the conflict notice names the occupied action")
+    let spokenBinding = explanation.accessibilityLabel() ?? explanation.stringValue
+    XCTAssertTrue(spokenBinding.contains("Command T") || spokenBinding.contains("⌘T"),
+                  "the conflict notice identifies the occupied binding")
     let use = try find("settings.shortcuts.conflict.use", in: controller, as: NSButton.self)
     let keep = try find("settings.shortcuts.conflict.keep", in: controller, as: NSButton.self)
     XCTAssertTrue((use.accessibilityLabel() ?? use.title).localizedCaseInsensitiveContains("Use"))
@@ -548,10 +552,15 @@ final class SettingsWindowTests: XCTestCase {
     controller.show(pane: .shortcuts)
     let window = try XCTUnwrap(controller.window)
     let id = ShortcutActionID("toggleSidebarVisibility")
+    let savedMenu = NSApp.mainMenu
+    defer { NSApp.mainMenu = savedMenu }
+    NSApp.mainMenu = menu
+    window.makeKeyAndOrderFront(nil)
+    XCTAssertTrue(window.isKeyWindow)
     for (key, code) in [("w", UInt16(13)), ("1", 18), ("2", 19), ("3", 20), ("4", 21),
                         ("5", 23), ("6", 22), ("7", 26)] {
       try find("settings.shortcuts.record.toggleSidebarVisibility", in: controller, as: NSButton.self).performClick(nil)
-      window.sendEvent(try shortcutEvent(key, .command, code: code, in: window))
+      NSApp.sendEvent(try shortcutEvent(key, .command, code: code, in: window))
       XCTAssertTrue(window.isVisible, key)
       XCTAssertEqual(controller.selectedPane, .shortcuts, key)
       // A conflict is also capture: it must refer to the attempted binding, not route to Settings.
@@ -560,9 +569,9 @@ final class SettingsWindowTests: XCTestCase {
       }
       XCTAssertEqual(model.binding(for: id), ShortcutBinding(key: key, modifiers: .command), key)
     }
-    XCTAssertTrue(window.performKeyEquivalent(with: try keyDown("1", .command, in: window)))
+    NSApp.sendEvent(try shortcutEvent("1", .command, code: 18, in: window))
     XCTAssertEqual(controller.selectedPane, .general)
-    XCTAssertTrue(window.performKeyEquivalent(with: try keyDown("w", .command, in: window)))
+    NSApp.sendEvent(try shortcutEvent("w", .command, code: 13, in: window))
     XCTAssertFalse(window.isVisible)
   }
 

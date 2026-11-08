@@ -2916,3 +2916,23 @@ catalog to menus or Settings, implement system conflict warnings, or audit remai
   unknown entry cannot discard a valid override. Two added actual-source isolated tests failed before the fix
   (6 tests passed, 2 failed with 8 assertion issues); after the fix `swift test --jobs 2` passed all 8 tests.
   Swift 6.1.2 and the same macOS 15 isolated package were used. Full package and UI checks still require CI.
+
+### Shortcut Settings and app wiring test gate (#119)
+
+The next test-only stage covers stable IDs for New Tab and the sidebar action, Settings recorder keys, explicit
+conflict choices, conflict-aware reset, Reset All persistence, and an injected system-warning source. A real-app
+scenario edits New Tab through Settings and exercises changed, cleared, reset and reloaded bindings through the
+app's menu and regular window target. The separately bound in-process menu test is component coverage.
+
+The competing-key test now installs its menu temporarily and routes Cmd-W and Cmd-1–7 through the application,
+asserting capture while recording and normal Settings behavior afterward. The conflict check identifies the
+explanation field and requires both the conflicting action and binding. Negative old/cleared-binding checks wait
+for a later ordinary key to reach a synthetic loopback page before checking that the command bar stayed closed;
+they do not dismiss a panel or issue the next positive command in between.
+
+Swift 6.2.4 frontend parsing and diff checks passed for this test gate. No test suite or app ran locally. The intended
+initial failure is compilation on the missing catalog and Settings integration APIs; that failure remains
+unobserved. The earlier eight isolated model passes do not establish UI behavior. CI must establish the correct red
+before implementation, then validate the completed wiring. The full action catalog, actual system-warning source,
+keyboard delivery and focus still need verification. Initial conflict focus and Return's default remain explicitly
+held for the maintainer's answer in PR #828 comment 6715272110. Per-action page priority remains #441.
