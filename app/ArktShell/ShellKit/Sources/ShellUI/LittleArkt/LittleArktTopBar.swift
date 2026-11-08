@@ -47,7 +47,7 @@ final class LittleArktTopBar: WindowDragView {
     chooserButton.toolTip = LittleArktCopy.chooseSpace
     chooserButton.setAccessibilityIdentifier(AXID.LittleArkt.chooser)
     split.wantsLayer = true
-    split.layer?.cornerRadius = 8
+    split.layer?.cornerRadius = LittleArktSegmentButton.cornerRadius
     split.layer?.cornerCurve = .continuous
     split.layer?.masksToBounds = true
     split.layer?.addSublayer(divider)
@@ -163,9 +163,11 @@ final class LittleArktTopBar: WindowDragView {
 /// (#687).
 @MainActor
 final class LittleArktSegmentButton: NSButton {
+  /// The split button's radius; the segment's focus ring follows it.
+  static let cornerRadius = ShellRadius.control
   var textColor: NSColor = .labelColor { didSet { applyTitleColor() } }
   /// Shown while the segment has keyboard focus, on its edge; the bar sets its tone.
-  private(set) lazy var keyboardFocusRing = KeyboardFocusRingView.attach(inside: self, radius: 8)
+  private(set) lazy var keyboardFocusRing = KeyboardFocusRingView.attach(inside: self, radius: Self.cornerRadius)
   var hoverFill: RGBA?
   var pressedFill: RGBA?
   private var hovering = false { didSet { refreshFill() } }
@@ -261,16 +263,17 @@ final class LittleArktSegmentButton: NSButton {
 /// it (#687).
 @MainActor
 final class LittleArktIconButton: NSButton {
+  static let cornerRadius: CGFloat = 7
   var hoverFill: RGBA?
   /// Shown while the button has keyboard focus.
-  private(set) lazy var keyboardFocusRing = KeyboardFocusRingView.attach(outside: self, radius: 7)
+  private(set) lazy var keyboardFocusRing = KeyboardFocusRingView.attach(outside: self, radius: Self.cornerRadius)
   private var tracking: NSTrackingArea?
 
   init(symbol: String, label: String) {
     super.init(frame: .zero)
     isBordered = false
     wantsLayer = true
-    layer?.cornerRadius = 7
+    layer?.cornerRadius = Self.cornerRadius
     layer?.cornerCurve = .continuous
     image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)?
       .withSymbolConfiguration(.init(pointSize: 13, weight: .medium))

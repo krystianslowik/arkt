@@ -375,7 +375,7 @@ final class DialogInputView: NSView {
   init(input: DialogContent.Input) {
     super.init(frame: .zero)
     wantsLayer = true
-    layer?.cornerRadius = 8
+    layer?.cornerRadius = DialogMetrics.inputRadius
     layer?.cornerCurve = .continuous
     field.stringValue = input.text
     field.isBordered = false
@@ -416,9 +416,10 @@ final class DialogInputView: NSView {
 
 enum DialogMetrics {
   static let buttonHeight: CGFloat = 28
-  static let sheetCornerRadius: CGFloat = 14
-  static let panelCornerRadius: CGFloat = 12
-  static let alertCornerRadius: CGFloat = 14
+  static let sheetCornerRadius = ShellRadius.sheet
+  static let panelCornerRadius = ShellRadius.popover
+  static let alertCornerRadius = ShellRadius.sheet
+  static let inputRadius = ShellRadius.control
 }
 
 // MARK: - Icon
@@ -510,7 +511,7 @@ final class DialogListView: NSView {
     itemFields = items.map { NSTextField(wrappingLabelWithString: $0) }
     super.init(frame: .zero)
     wantsLayer = true
-    layer?.cornerRadius = 10
+    layer?.cornerRadius = ShellRadius.field
     layer?.cornerCurve = .continuous
     headingField?.font = .systemFont(ofSize: 12, weight: .semibold)
     for field in itemFields { field.font = .systemFont(ofSize: 13) }

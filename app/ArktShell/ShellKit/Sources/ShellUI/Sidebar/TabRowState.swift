@@ -7,7 +7,7 @@ public enum SidebarMetrics {
   public static let rowPitch: CGFloat = 41               // measured row pitch
   public static let rowBackgroundHeight: CGFloat = 34    // measured row
   public static var rowBackgroundInsetY: CGFloat { (rowPitch - rowBackgroundHeight) / 2 }
-  public static let rowCornerRadius: CGFloat = 9         // TODO(measure)
+  public static let rowCornerRadius = ShellRadius.row
   public static let horizontalPadding: CGFloat = 8
   public static let faviconSize: CGFloat = 16
   public static let faviconLeading: CGFloat = 10

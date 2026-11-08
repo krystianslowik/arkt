@@ -28,7 +28,7 @@ public final class TabSwitcherView: NSView {
   public static let width: CGFloat = 480
   public static let padding: CGFloat = 6
   public static let rowHeight: CGFloat = 40
-  static let cornerRadius: CGFloat = 12
+  static let cornerRadius = ShellRadius.popover
   static let rowCornerRadius: CGFloat = 8
   static let fadeDuration: CFTimeInterval = FadeDuration.quick
   static let fadeKey = "tabSwitcher.fade"
