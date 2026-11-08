@@ -111,8 +111,11 @@ Transform and opacity only.
 
 ## VoiceOver and accessibility
 
+- The Extensions entry point is a button labelled "Extensions".
 - Move Left and Move Right in the menu are the keyboard route for ordering; dragging is never the only way.
 - The panel is a dialog "Extensions": a list; each row's pin button is a toggle ("Pin <name>", pressed when pinned).
+- An action row reads its name and status line together, for example "<name>, 12 clips on this page"; without a status
+  line, it reads the name.
 - The install sheet and the page dialogs are alert dialogs: title, then description, then the default button. Permission
   rows read as a list. Focus starts on the default button (a prompt's field takes focus first).
 - The sad-tab view is an alert; Reload takes focus.
