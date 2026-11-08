@@ -179,7 +179,8 @@ struct ArchiveStoreTests {
   }
 
   /// Archive rows carry the snapshot's own format version, not the sidebar document's: sidebar format 2 (Space icons)
-  /// did not change `NodeSnapshot`; format 2 of the snapshot adds a split's title (#787).
+  /// did not change `NodeSnapshot`. Snapshot format 2 adds a split's title (#787), and only a row that holds one is
+  /// stamped 2, so builds that read only version 1 keep reading every other row.
   @Test func archivedRowsAreStampedWithTheSnapshotFormatVersion() async throws {
     let database = try ArktDatabase.inMemory()
     let store = ArchiveStore(database: database)
@@ -189,7 +190,7 @@ struct ArchiveStoreTests {
       try Int.fetchOne(
         db, sql: "SELECT format_version FROM archived_item WHERE id = ?", arguments: [item.id.uuidString])
     }
-    #expect(stamped == 2)
+    #expect(stamped == 1, "a row without a split title stays readable by version 1 builds")
     #expect(ArchiveStore.snapshotFormatVersion == 2)
     #expect(try await store.items().items == [item])
   }
@@ -230,6 +231,31 @@ struct ArchiveStoreTests {
     let item = ArchivedItem(reason: .manual, archivedAt: Self.at(1), source: .unknown, snapshot: split)
     _ = try await store.add([item], onConflict: .replace)
     #expect(try await store.items().items == [item])
+  }
+
+  /// A row is stamped 2 only when a split somewhere in its snapshot has a title; an unnamed split, and a named split
+  /// inside a folder, are told apart.
+  @Test func onlyARowHoldingASplitTitleIsStampedVersion2() async throws {
+    let database = try ArktDatabase.inMemory()
+    let store = ArchiveStore(database: database)
+    let pane = NodeSnapshot(kind: .tab(TabItem(url: URL(string: "https://example.com/p")!, title: "P")),
+                            createdAt: Self.at(0))
+    func split(_ title: String?) -> NodeSnapshot {
+      NodeSnapshot(kind: .split(SplitItem(orientation: .horizontal, widthFactors: [0.5, 0.5], title: title)),
+                   createdAt: Self.at(0), children: [pane.withFreshIDs(), pane.withFreshIDs()])
+    }
+    let unnamed = ArchivedItem(reason: .manual, archivedAt: Self.at(1), source: .unknown, snapshot: split(nil))
+    let named = ArchivedItem(reason: .manual, archivedAt: Self.at(2), source: .unknown, snapshot: split("Research"))
+    let folder = NodeSnapshot(kind: .folder(FolderItem(title: "F")), createdAt: Self.at(0),
+                              children: [pane.withFreshIDs(), split("Inner")])
+    let nested = ArchivedItem(reason: .manual, archivedAt: Self.at(3), source: .unknown, snapshot: folder)
+    _ = try await store.add([unnamed, named, nested], onConflict: .replace)
+    let stamps = try await database.writer.read { db in
+      try Dictionary(uniqueKeysWithValues: Row.fetchAll(db, sql: "SELECT id, format_version FROM archived_item")
+        .map { (row: Row) -> (String, Int) in (row["id"], row["format_version"]) })
+    }
+    #expect(stamps == [unnamed.id.uuidString: 1, named.id.uuidString: 2, nested.id.uuidString: 2])
+    #expect(try await store.items().items == [nested, named, unnamed])
   }
 
   /// A split `title` key is not part of snapshot format 1: a version 1 row that holds one is read without it.
