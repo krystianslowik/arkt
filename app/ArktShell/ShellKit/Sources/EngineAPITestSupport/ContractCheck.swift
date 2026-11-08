@@ -1,6 +1,6 @@
 import EngineAPI
 
-/// Every check of the shared engine contract (rules 1-26), so the XCTest and Swift Testing suites and the in-app
+/// Every check of the shared engine contract (rules 1-27), so the XCTest and Swift Testing suites and the in-app
 /// runner (W3-9) run the same list. `ChromiumEngineContractTests.everyContractCheckIsListed` keeps it complete.
 public enum ContractCheck: String, CaseIterable, Sendable {
   // Rules 1-10
@@ -39,12 +39,21 @@ public enum ContractCheck: String, CaseIterable, Sendable {
   // Rule 26 (#582)
   case pageInfoNamesTheSiteItShows, permissionChangeIsReadBackAndResetRestoresTheDefault
   case permissionChangeRaisesTheReloadInfobarOnce
+  // Rule 27 (#721)
+  case uninstallRemovesTheExtensionFromEveryWindow
 
-  /// The checks the Chromium engine runs: rule 25 waits for the facade's tab state seams (#577) and rule 26 for its
-  /// page info seam (#583), which add them here.
-  public static var chromiumChecks: [ContractCheck] { allCases.filter { $0.rule < 25 } }
+  /// The rules the Chromium engine does not run yet, each with the issue that adds it here.
+  public static let chromiumDeferredRules: [Int: Int] = [:]
 
-  /// The contract rule (1-26) the check belongs to, as numbered in `EngineContract`'s documentation.
+  /// The checks the Chromium engine runs: every rule not in `chromiumDeferredRules`.
+  public static var chromiumChecks: [ContractCheck] { allCases.filter { chromiumDeferredRules[$0.rule] == nil } }
+
+  /// The checks the Chromium engine does not run yet, and the issue each waits for.
+  public static var chromiumDeferred: [(check: ContractCheck, issue: Int)] {
+    allCases.compactMap { check in chromiumDeferredRules[check.rule].map { (check, $0) } }
+  }
+
+  /// The contract rule (1-27) the check belongs to, as numbered in `EngineContract`'s documentation.
   public var rule: Int {
     switch self {
     case .createdTabIsListedAndAnnounced, .tabIDsKeepCreationOrder: 1
@@ -82,6 +91,7 @@ public enum ContractCheck: String, CaseIterable, Sendable {
     case .zoomStepIsReportedOnceAndNothingAtTheEnds, .crashedTabStaysListed, .reloadRecoversACrashedTabOnce: 25
     case .pageInfoNamesTheSiteItShows, .permissionChangeIsReadBackAndResetRestoresTheDefault,
          .permissionChangeRaisesTheReloadInfobarOnce: 26
+    case .uninstallRemovesTheExtensionFromEveryWindow: 27
     }
   }
 
@@ -153,6 +163,8 @@ public enum ContractCheck: String, CaseIterable, Sendable {
       try await EngineContract.permissionChangeIsReadBackAndResetRestoresTheDefault(h)
     case .permissionChangeRaisesTheReloadInfobarOnce:
       try await EngineContract.permissionChangeRaisesTheReloadInfobarOnce(h)
+    case .uninstallRemovesTheExtensionFromEveryWindow:
+      try await EngineContract.uninstallRemovesTheExtensionFromEveryWindow(h)
     }
   }
 }

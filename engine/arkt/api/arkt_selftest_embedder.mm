@@ -274,7 +274,8 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
 }
 
 - (void)ready {
-  LOG(WARNING) << "ARKT selftest embedderReady";
+  LOG(WARNING) << "ARKT selftest embedderReady lastSessionCrashed="
+               << (_engine.lastSessionCrashed ? "yes" : "no");
   [_engine embedderReady];
   // The shell's own window, as ShellUI does at launch and on Cmd-N: build the
   // window, then ask for a Browser in it.
@@ -630,6 +631,49 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
       case ArktEngineEventKindDownloadRemoved:
         // The self-test shows no downloads.
         break;
+      case ArktEngineEventKindTabCrashed:
+        LOG(WARNING) << "ARKT selftest tabCrashed tab=" << tab
+                     << " status=" << event.terminationStatus
+                     << " live=" << event.tab.terminationStatus
+                     << " loading=" << (event.tab.isLoading ? "yes" : "no")
+                     << " listed=" << ([event.browser.tabs
+                                           containsObject:event.tab]
+                                           ? "yes"
+                                           : "no");
+        break;
+      case ArktEngineEventKindTabRecovered:
+        LOG(WARNING) << "ARKT selftest tabRecovered tab=" << tab
+                     << " live=" << event.tab.terminationStatus
+                     << " loading=" << (event.tab.isLoading ? "yes" : "no");
+        break;
+      case ArktEngineEventKindZoomChanged:
+        LOG(WARNING) << "ARKT selftest zoomChanged tab=" << tab
+                     << " percent=" << event.zoomPercent
+                     << " default=" << (event.zoomIsDefault ? "yes" : "no")
+                     << " user=" << (event.zoomIsUserInitiated ? "yes" : "no")
+                     << " live=" << event.tab.zoomPercent;
+        break;
+      case ArktEngineEventKindTabFullscreenChanged: {
+        NSView* container = event.tab.containerView;
+        LOG(WARNING) << "ARKT selftest tabFullscreenChanged tab=" << tab
+                     << " fullscreen=" << (event.isTabFullscreen ? "yes" : "no")
+                     << " live=" << (event.tab.isTabFullscreen ? "yes" : "no")
+                     << " container subviews=" << container.subviews.count;
+        break;
+      }
+      case ArktEngineEventKindPageInfoChanged: {
+        id<ArktPageInfo> info = event.tab.pageInfo;
+        LOG(WARNING) << "ARKT selftest pageInfoChanged tab=" << tab
+                     << " connection=" << (info ? info.connection : -1)
+                     << " siteData="
+                     << (info && info.hasSiteData
+                             ? base::NumberToString(info.siteDataCookies) +
+                                   " cookies " +
+                                   base::NumberToString(info.siteDataBytes) +
+                                   " bytes"
+                             : std::string("none"));
+        break;
+      }
     }
   }
   if (windows_changed) {
@@ -638,6 +682,44 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
       ids += (ids.empty() ? "" : ",") + std::to_string(browser.windowId);
     }
     LOG(WARNING) << "ARKT selftest windows ids=" << (ids.empty() ? "none" : ids);
+  }
+}
+
+// #583: the page info as the shell would read it.
+- (void)logPageInfoOf:(id<ArktTabHandle>)tab {
+  id<ArktPageInfo> info = tab.pageInfo;
+  if (!info) {
+    LOG(WARNING) << "ARKT selftest pageinfo tab=" << tab.sessionId << " none";
+    return;
+  }
+  LOG(WARNING) << "ARKT selftest pageinfo tab=" << tab.sessionId
+               << " origin=" << base::SysNSStringToUTF8(info.origin)
+               << " host=" << base::SysNSStringToUTF8(info.host)
+               << " connection=" << info.connection << " cert="
+               << (info.certificateIssuedTo
+                       ? base::SysNSStringToUTF8(info.certificateIssuedTo) +
+                             " by " +
+                             base::SysNSStringToUTF8(info.certificateIssuedBy)
+                       : std::string("none"))
+               << " siteData="
+               << (info.hasSiteData
+                       ? base::NumberToString(info.siteDataCookies) +
+                             " cookies " +
+                             base::NumberToString(info.siteDataBytes) +
+                             " bytes"
+                       : std::string("counting"))
+               << " permissions=" << info.permissions.count;
+  for (id<ArktSitePermission> permission in info.permissions) {
+    std::string options;
+    for (NSNumber* option in permission.options) {
+      options += (options.empty() ? "" : ",") +
+                 base::NumberToString(option.integerValue);
+    }
+    LOG(WARNING) << "ARKT selftest permission kind=" << permission.kind
+                 << " title=" << base::SysNSStringToUTF8(permission.title)
+                 << " setting=" << permission.setting
+                 << " default=" << (permission.isDefault ? "yes" : "no")
+                 << " options=" << options;
   }
 }
 
@@ -657,6 +739,10 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
                << (tab.faviconPNG ? base::NumberToString(tab.faviconPNG.length)
                                   : std::string("none"))
                << " opener=" << (tab.opener ? tab.opener.sessionId : -1)
+               << " crash=" << tab.terminationStatus
+               << " zoom=" << tab.zoomPercent
+               << (tab.zoomIsDefault ? "(default)" : "")
+               << " fullscreen=" << (tab.isTabFullscreen ? "yes" : "no")
                << " container=" << (__bridge void*)container
                << " subviews=" << container.subviews.count
                << " inWindow=" << (container.window ? "yes" : "no");
@@ -675,7 +761,9 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
                  << (action.iconPNG
                          ? base::NumberToString(action.iconPNG.length) + " bytes"
                          : std::string("none"))
-                 << " png=" << (__bridge void*)action.iconPNG;
+                 << " png=" << (__bridge void*)action.iconPNG
+                 << " canUninstall=" << (action.canUninstall ? "1" : "0")
+                 << " canReportAbuse=" << (action.canReportAbuse ? "1" : "0");
   }
 }
 
@@ -719,6 +807,66 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
                               << base::SysNSStringToUTF8(
                                      error.localizedDescription ?: @"none");
                }];
+}
+
+// #846: Chromium's New Incognito Window command, sent through the host as a
+// menu item would send it, makes a window on the off-the-record profile (the
+// facade's createBrowser(host:) always uses the profile the engine started
+// with, #705). Its tab then loads `url`; the tab's state, its page title and
+// the HTTPS-First interstitial's primary button are logged after `delayMs`.
+- (void)openPrivateWindowFrom:(id<ArktTabHandle>)tab
+                          url:(const std::string&)url
+                      delayMs:(int)delayMs {
+  NSMutableSet<NSNumber*>* before = [NSMutableSet set];
+  for (id<ArktBrowserHandle> browser in _engine.browsers) {
+    [before addObject:@(browser.windowId)];
+  }
+  id<ArktWindowHost> host = tab.browser.host;
+  BOOL enabled =
+      host.validateCommand && host.validateCommand(IDC_NEW_INCOGNITO_WINDOW);
+  LOG(WARNING) << "ARKT selftest private-window enabled="
+               << (enabled ? "yes" : "no")
+               << " from window=" << (tab.browser ? tab.browser.windowId : -1);
+  if (!enabled || !host.executeCommand) {
+    return;
+  }
+  host.executeCommand(
+      IDC_NEW_INCOGNITO_WINDOW,
+      static_cast<NSInteger>(WindowOpenDisposition::CURRENT_TAB));
+  id<ArktBrowserHandle> privateBrowser = nil;
+  for (id<ArktBrowserHandle> browser in _engine.browsers) {
+    if (![before containsObject:@(browser.windowId)]) {
+      privateBrowser = browser;
+    }
+  }
+  id<ArktTabHandle> privateTab =
+      privateBrowser.activeTab ?: privateBrowser.tabs.firstObject;
+  LOG(WARNING) << "ARKT selftest private-window window="
+               << (privateBrowser ? privateBrowser.windowId : -1)
+               << " tabs=" << privateBrowser.tabs.count
+               << " tab=" << (privateTab ? privateTab.sessionId : -1);
+  if (!privateTab) {
+    return;
+  }
+  [privateTab navigateToURL:[NSURL URLWithString:base::SysUTF8ToNSString(url)]];
+  const int32_t sessionId = privateTab.sessionId;
+  dispatch_after(
+      dispatch_time(DISPATCH_TIME_NOW, int64_t{delayMs} * NSEC_PER_MSEC),
+      dispatch_get_main_queue(), ^{
+        id<ArktTabHandle> target = [self tabWithSessionId:sessionId];
+        if (!target) {
+          LOG(WARNING) << "ARKT selftest private-window tab=" << sessionId
+                       << " gone";
+          return;
+        }
+        [self logStateOf:target];
+        [self evaluate:@"document.title + ' | ' + "
+                       @"(document.getElementById('primary-button')"
+                       @"?.innerText ?? 'no interstitial button')"
+                  inTab:target
+            userGesture:NO
+                  label:"private-window page"];
+      });
 }
 
 - (id<ArktTabHandle>)tabWithSessionId:(int32_t)sessionId {
@@ -980,12 +1128,166 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
     LOG(WARNING) << "ARKT selftest answer tab=" << sessionId
                  << " accept=" << (accept ? "yes" : "no")
                  << " answered=" << (answered ? "yes" : "no");
+  } else if (command == "zoom") {
+    // #577: zoom in|out|reset on this tab, or on the tab with session id
+    // `@<id>` (a crashed page cannot set its own title).
+    ArktZoomCommand zoom = argument == "in"    ? ArktZoomCommandZoomIn
+                           : argument == "out" ? ArktZoomCommandZoomOut
+                                               : ArktZoomCommandReset;
+    [tab zoomWithCommand:zoom];
+    LOG(WARNING) << "ARKT selftest zoom " << argument
+                 << " tab=" << tab.sessionId << " now=" << tab.zoomPercent
+                 << (tab.zoomIsDefault ? "(default)" : "");
+  } else if (command == "zoom-command") {
+    // #577: Chromium's own zoom commands, as the main menu's Zoom In (Cmd-+),
+    // Zoom Out (Cmd--) and Actual Size (Cmd-0) send them to the host:
+    // plus|minus|normal.
+    int command_id = argument == "plus"    ? IDC_ZOOM_PLUS
+                     : argument == "minus" ? IDC_ZOOM_MINUS
+                                           : IDC_ZOOM_NORMAL;
+    id<ArktWindowHost> host = tab.browser.host;
+    BOOL enabled = host.validateCommand && host.validateCommand(command_id);
+    if (enabled && host.executeCommand) {
+      host.executeCommand(command_id,
+                          static_cast<NSInteger>(
+                              WindowOpenDisposition::CURRENT_TAB));
+    }
+    LOG(WARNING) << "ARKT selftest zoom-command " << argument
+                 << " id=" << command_id
+                 << " enabled=" << (enabled ? "yes" : "no")
+                 << " tab=" << tab.sessionId << " now=" << tab.zoomPercent;
+  } else if (command == "chrome-command") {
+    // E1 crash guards: Chromium commands the shell does not send today, sent
+    // through the host as a menu item would send them:
+    // copy-url|close-tab|cut|copy|paste|pin.
+    const int command_id = argument == "copy-url"    ? IDC_COPY_URL
+                           : argument == "close-tab" ? IDC_CLOSE_TAB
+                           : argument == "cut"       ? IDC_CUT
+                           : argument == "copy"      ? IDC_COPY
+                           : argument == "paste"     ? IDC_PASTE
+                           : argument == "pin"       ? IDC_WINDOW_PIN_TAB
+                                                     : 0;
+    id<ArktWindowHost> host = tab.browser.host;
+    BOOL enabled = command_id && host.validateCommand &&
+                   host.validateCommand(command_id);
+    LOG(WARNING) << "ARKT selftest chrome-command " << argument
+                 << " id=" << command_id
+                 << " enabled=" << (enabled ? "yes" : "no")
+                 << " tab=" << tab.sessionId;
+    if (enabled && host.executeCommand) {
+      host.executeCommand(command_id,
+                          static_cast<NSInteger>(
+                              WindowOpenDisposition::CURRENT_TAB));
+    }
+    LOG(WARNING) << "ARKT selftest chrome-command " << argument << " done";
+  } else if (command == "fullscreen") {
+    // #577: HTML fullscreen of the page's body, with a user gesture as a
+    // click gives it; "exit" leaves it from script.
+    [self evaluate:argument == "exit"
+                       ? @"document.exitFullscreen().then(() => 'left', "
+                         @"e => 'error: ' + e.message)"
+                       : @"document.documentElement.requestFullscreen()"
+                         @".then(() => 'entered', e => 'error: ' + e.message)"
+             inTab:tab
+       userGesture:YES
+             label:"fullscreen"];
+  } else if (command == "session") {
+    // #577: the crashed-session prompt's state; "dismiss" answers it.
+    if (argument == "dismiss") {
+      [_engine dismissLastSession];
+    }
+    LOG(WARNING) << "ARKT selftest session lastSessionCrashed="
+                 << (_engine.lastSessionCrashed ? "yes" : "no");
+  } else if (command == "pageinfo") {
+    // #583: the tab's page info, one line per permission.
+    [self logPageInfoOf:tab];
+  } else if (command == "setperm") {
+    // #583: setperm <kind number> allow|ask|block, for this tab's origin.
+    int kind = 0;
+    NSString* origin = tab.pageInfo.origin;
+    if (origin && base::StringToInt(argument, &kind) && words.size() > 2) {
+      ArktPermissionSetting setting = words[2] == "allow"
+                                          ? ArktPermissionSettingAllow
+                                      : words[2] == "block"
+                                          ? ArktPermissionSettingBlock
+                                          : ArktPermissionSettingAsk;
+      [tab setPermission:static_cast<ArktSitePermissionKind>(kind)
+               toSetting:setting
+               forOrigin:origin];
+      LOG(WARNING) << "ARKT selftest setperm kind=" << kind << " to "
+                   << words[2] << " origin="
+                   << base::SysNSStringToUTF8(origin);
+      [self logPageInfoOf:tab];
+    }
+  } else if (command == "resetperm") {
+    if (NSString* origin = tab.pageInfo.origin) {
+      [tab resetPermissionsForOrigin:origin];
+      LOG(WARNING) << "ARKT selftest resetperm origin="
+                   << base::SysNSStringToUTF8(origin);
+      [self logPageInfoOf:tab];
+    }
+  } else if (command == "pageinfo-close") {
+    [tab pageInfoDidClose];
+    LOG(WARNING) << "ARKT selftest pageinfo-close tab=" << tab.sessionId;
+  } else if (command == "sitesettings") {
+    if (NSString* origin = tab.pageInfo.origin) {
+      [tab openSiteSettingsForOrigin:origin];
+      LOG(WARNING) << "ARKT selftest sitesettings origin="
+                   << base::SysNSStringToUTF8(origin);
+    }
+  } else if (command == "sites") {
+    NSArray<id<ArktSitePermissions>>* sites = _engine.sitesWithPermissions;
+    LOG(WARNING) << "ARKT selftest sites count=" << sites.count;
+    for (id<ArktSitePermissions> site in sites) {
+      for (id<ArktSitePermission> permission in site.permissions) {
+        LOG(WARNING) << "ARKT selftest site "
+                     << base::SysNSStringToUTF8(site.origin)
+                     << " host=" << base::SysNSStringToUTF8(site.host)
+                     << " kind=" << permission.kind
+                     << " setting=" << permission.setting;
+      }
+    }
+  } else if (command == "uninstall") {
+    // #721: "uninstall <extension id> [abuse] [nowin] [@<session id>]", as
+    // the shell's remove sheet: the report page goes to the window of the
+    // tab that runs the command (or of the "@" tab); "nowin" names none.
+    const bool report_abuse =
+        std::find(words.begin(), words.end(), "abuse") != words.end();
+    const bool no_window =
+        std::find(words.begin(), words.end(), "nowin") != words.end();
+    id<ArktBrowserHandle> window = no_window ? nil : tab.browser;
+    LOG(WARNING) << "ARKT selftest uninstall " << argument
+                 << " reportAbuse=" << (report_abuse ? "yes" : "no")
+                 << " window=" << (window ? window.windowId : -1);
+    __block bool returned = false;
+    [_engine uninstallExtension:base::SysUTF8ToNSString(argument)
+                    reportAbuse:report_abuse
+                      inBrowser:window
+                     completion:^(BOOL uninstalled, NSString* reason) {
+                       LOG(WARNING)
+                           << "ARKT selftest uninstall answered "
+                           << (uninstalled ? "uninstalled" : "failed")
+                           << " reason="
+                           << (reason ? base::SysNSStringToUTF8(reason)
+                                      : std::string("none"))
+                           << " insideCall=" << (returned ? "no" : "yes");
+                     }];
+    returned = true;
   } else if (command == "devtools") {
     id<ArktWindowHost> host = tab.browser.host;
     if (host.executeCommand) {
       host.executeCommand(IDC_DEV_TOOLS, static_cast<NSInteger>(
                                              WindowOpenDisposition::CURRENT_TAB));
     }
+  } else if (command == "private-window") {
+    // #846: "private-window <url> [ms]" opens a window on the off-the-record
+    // profile, loads `url` in its tab and logs that tab after `ms` (3000 by
+    // default).
+    int delay_ms = 3000;
+    if (words.size() > 2 && !base::StringToInt(words[2], &delay_ms)) {
+      delay_ms = 3000;
+    }
+    [self openPrivateWindowFrom:tab url:argument delayMs:delay_ms];
   } else {
     LOG(WARNING) << "ARKT selftest unknown command " << command;
   }

@@ -112,7 +112,26 @@ enum ScriptedHarness {
         tab.hover(nil)
         try await delivered(chromium)
       },
-      downloads: .scripted()
+      downloads: .scripted(),
+      crashTab: { engine, id in
+        // A scripted RenderProcessGone (#577); the app runner navigates the tab to chrome://crash instead.
+        let (chromium, tab) = try parts(engine, id)
+        tab.crash(status: .crashed)
+        try await delivered(chromium)
+      },
+      removableExtension: { engine, windows in
+        // The facade lists actions per browser; an action id is its extension id (#721).
+        let chromium = try chromium(engine)
+        let facade = scripted(chromium)
+        for window in windows {
+          let browser = try scriptedBrowser(chromium, window)
+          let listed = facade.extensionActions(in: browser).compactMap { $0 as? ScriptedAction }
+          facade.setActions(listed + [ScriptedAction(actionId: "contract-removable", name: "Contract removable")],
+                            in: browser)
+        }
+        try await delivered(chromium)
+        return "contract-removable"
+      }
     )
   }
 

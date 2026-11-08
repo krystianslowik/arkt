@@ -69,6 +69,7 @@ for the rows. A page enters the open-order list once, when it becomes a private 
 | Engine tab the engine makes active (`window.open`, `chrome.tabs.create`) | appended (bottom row) | appended, shown |
 | Background engine tab: one adopted from a `target=_blank` link (or `window.open`) that the engine did not make active | **appended (bottom row)**, not next to its opener | inserted just behind the shown page |
 | A row clicked, or the engine activates a page | no change | moved to the end, shown |
+| Reopened page (#789) | its old row, clamped to the list | shown |
 
 The 21st page of any kind is refused before it enters either list.
 

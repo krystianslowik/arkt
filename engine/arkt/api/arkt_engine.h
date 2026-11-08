@@ -41,7 +41,10 @@ NS_ASSUME_NONNULL_BEGIN
 @protocol ArktInfobar;
 @protocol ArktJavaScriptDialog;
 @protocol ArktLinkActivation;
+@protocol ArktPageInfo;
 @protocol ArktPermissionRequest;
+@protocol ArktSitePermission;
+@protocol ArktSitePermissions;
 @protocol ArktTabHandle;
 @protocol ArktWindowHost;
 @protocol ArktWindowRequest;
@@ -190,6 +193,114 @@ typedef NS_ENUM(NSInteger, ArktEngineEventKind) {
   // The download left the list (#132); its file stays unless it was deleted.
   // Values: download, as it was last. Nothing follows for that guid.
   ArktEngineEventKindDownloadRemoved = 25,
+  // The page's process went away (#577), from
+  // WebContentsObserver::PrimaryMainFrameRenderProcessGone. Values:
+  // terminationStatus. The tab stays listed with its URL and history. A load
+  // in progress is reported ended (LoadingChanged NO) and HTML fullscreen left
+  // (TabFullscreenChanged NO) before it. Reported once until TabRecovered.
+  ArktEngineEventKindTabCrashed = 26,
+  // A crashed tab has a live page process again (#577): its primary main
+  // frame was created or swapped in, at the latest when the reload or the new
+  // navigation commits. Reported once per TabCrashed.
+  ArktEngineEventKindTabRecovered = 27,
+  // The tab's page zoom changed (#577), from the tab's zoom::ZoomController.
+  // Values: zoomPercent, zoomIsDefault and zoomIsUserInitiated, as recorded;
+  // the handle has the live zoom. User initiated means the change was made
+  // through this tab's zoom controller (zoomIn, zoomOut and resetZoom here,
+  // Chromium's zoom commands, an extension's chrome.tabs.setZoom). A site's
+  // saved zoom applied on navigation, another tab of the same host zoomed, or
+  // a new default zoom are not. Exception: in an isolated or manual zoom mode
+  // (an extension's chrome.tabs.setZoomSettings) the controller sets the
+  // tab's own level on navigation, so that change can report user initiated.
+  // Only changes of percent or default are reported.
+  ArktEngineEventKindZoomChanged = 28,
+  // An element of the page entered or left HTML fullscreen (#577), from
+  // WebContentsObserver::DidToggleFullscreenModeForTab. Values:
+  // isTabFullscreen. Not sent for the window's own full screen. The engine
+  // reserves no infobar height while the tab is fullscreen.
+  ArktEngineEventKindTabFullscreenChanged = 29,
+  // The tab's page info changed (#583): a content setting of its site
+  // changed in its profile (from this facade, Chromium's settings pages or an
+  // extension), its connection's security state changed, or the site data
+  // count it waits for arrived. No values: the handle's pageInfo has the new
+  // state. Sent only for tabs whose last committed origin the change matches;
+  // one call of this facade that changes settings reports once per tab.
+  ArktEngineEventKindPageInfoChanged = 30,
+};
+
+// Why a tab's page process went away (#577), folded from
+// base::TerminationStatus: PROCESS_CRASHED and ABNORMAL_TERMINATION are
+// Crashed, PROCESS_WAS_KILLED is Killed, OOM and EVICTED_FOR_MEMORY are
+// OutOfMemory, LAUNCH_FAILED is LaunchFailed. None while the page is alive,
+// and on every event other than TabCrashed.
+typedef NS_ENUM(NSInteger, ArktTerminationStatus) {
+  ArktTerminationStatusNone = 0,
+  ArktTerminationStatusCrashed = 1,
+  ArktTerminationStatusKilled = 2,
+  ArktTerminationStatusOutOfMemory = 3,
+  ArktTerminationStatusLaunchFailed = 4,
+};
+
+// A page zoom step (#577), as content::PageZoom through zoom::PageZoom::Zoom:
+// ZoomIn and ZoomOut walk Chromium's preset zoom levels (with the default
+// level among them), Reset returns to the default zoom.
+typedef NS_ENUM(NSInteger, ArktZoomCommand) {
+  ArktZoomCommandZoomIn = 0,
+  ArktZoomCommandZoomOut = 1,
+  ArktZoomCommandReset = 2,
+};
+
+// How a page reached the browser (#583), from the tab's security level and
+// visible security state (chrome_security_state) and the URL's scheme:
+// SECURE is Secure; DANGEROUS with a Safe Browsing verdict
+// (malicious_content_status set) is Flagged, else with a certificate error
+// (cert_status) CertificateError, else NotSecure; any other level on https
+// with mixed content (displayed_mixed_content, contained_mixed_form,
+// ran_mixed_content) is NotFullySecure, else NotSecure. file is LocalFile;
+// every scheme other than http, https and file (chrome, chrome-extension,
+// devtools, view-source, about, data) is InternalPage.
+typedef NS_ENUM(NSInteger, ArktPageConnection) {
+  ArktPageConnectionSecure = 0,
+  ArktPageConnectionNotSecure = 1,
+  ArktPageConnectionNotFullySecure = 2,
+  ArktPageConnectionCertificateError = 3,
+  ArktPageConnectionFlagged = 4,
+  ArktPageConnectionLocalFile = 5,
+  ArktPageConnectionInternalPage = 6,
+};
+
+// A content setting as page info offers it (#583): CONTENT_SETTING_ALLOW,
+// _ASK and _BLOCK.
+typedef NS_ENUM(NSInteger, ArktPermissionSetting) {
+  ArktPermissionSettingAllow = 0,
+  ArktPermissionSettingAsk = 1,
+  ArktPermissionSettingBlock = 2,
+};
+
+// The permissions page info lists (#583), each one ContentSettingsType.
+typedef NS_ENUM(NSInteger, ArktSitePermissionKind) {
+  ArktSitePermissionKindLocation = 0,            // GEOLOCATION
+  ArktSitePermissionKindCamera = 1,              // MEDIASTREAM_CAMERA
+  ArktSitePermissionKindMicrophone = 2,          // MEDIASTREAM_MIC
+  ArktSitePermissionKindNotifications = 3,       // NOTIFICATIONS
+  ArktSitePermissionKindPopups = 4,              // POPUPS
+  ArktSitePermissionKindSound = 5,               // SOUND
+  ArktSitePermissionKindJavaScript = 6,          // JAVASCRIPT
+  ArktSitePermissionKindImages = 7,              // IMAGES
+  ArktSitePermissionKindAutomaticDownloads = 8,  // AUTOMATIC_DOWNLOADS
+  ArktSitePermissionKindClipboard = 9,           // CLIPBOARD_READ_WRITE
+  ArktSitePermissionKindMidiDevices = 10,        // MIDI_SYSEX
+  ArktSitePermissionKindMotionSensors = 11,      // SENSORS
+  ArktSitePermissionKindUsbDevices = 12,         // USB_GUARD
+  ArktSitePermissionKindSerialPorts = 13,        // SERIAL_GUARD
+  ArktSitePermissionKindHidDevices = 14,         // HID_GUARD
+  ArktSitePermissionKindBluetoothDevices = 15,   // BLUETOOTH_GUARD
+  ArktSitePermissionKindFileEditing = 16,        // FILE_SYSTEM_WRITE_GUARD
+  ArktSitePermissionKindWindowManagement = 17,   // WINDOW_MANAGEMENT
+  ArktSitePermissionKindLocalFonts = 18,         // LOCAL_FONTS
+  ArktSitePermissionKindIdleDetection = 19,      // IDLE_DETECTION
+  ArktSitePermissionKindBackgroundSync = 20,     // BACKGROUND_SYNC
+  ArktSitePermissionKindInsecureContent = 21,    // MIXEDSCRIPT
 };
 
 // Why the engine asks the embedder for a window host.
@@ -354,6 +465,15 @@ NS_SWIFT_UI_ACTOR
 // DownloadCreated, DownloadUpdated and DownloadRemoved; nil on every other
 // kind.
 @property(nonatomic, readonly, nullable) id<ArktDownloadItem> download;
+// TabCrashed; None on every other kind (#577).
+@property(nonatomic, readonly) ArktTerminationStatus terminationStatus;
+// ZoomChanged; 0, NO and NO on every other kind (#577). The percent is
+// zoom::ZoomController::GetZoomPercent(), rounded.
+@property(nonatomic, readonly) NSInteger zoomPercent;
+@property(nonatomic, readonly) BOOL zoomIsDefault;
+@property(nonatomic, readonly) BOOL zoomIsUserInitiated;
+// TabFullscreenChanged; NO on every other kind (#577).
+@property(nonatomic, readonly) BOOL isTabFullscreen;
 @end
 
 // One download as plain values, read when the event was recorded (#132).
@@ -516,6 +636,15 @@ NS_SWIFT_UI_ACTOR
 // The 16 pt icon at 2x, PNG.
 @property(nonatomic, readonly, nullable, copy) NSData* iconPNG;
 @property(nonatomic, readonly) BOOL isEnabled;
+// The user may uninstall the extension (#721): the management policy lets
+// the user change it and does not keep it installed (not policy-installed,
+// not a component). The shell offers Remove only then; uninstallExtension
+// refuses the others anyway.
+@property(nonatomic, readonly) BOOL canUninstall;
+// The extension updates from the Chrome Web Store, so it has a report page
+// there (#721). The shell offers Report abuse only then; uninstallExtension
+// opens no report page for the others anyway.
+@property(nonatomic, readonly) BOOL canReportAbuse;
 @end
 
 // One back or forward history entry of a tab.
@@ -654,6 +783,68 @@ NS_SWIFT_UI_ACTOR
 @property(nonatomic, readonly) NSInteger disposition;
 @end
 
+// One permission of a site as page info shows it (#583), read from the
+// profile's HostContentSettingsMap as chrome://settings/content/siteDetails
+// reads it.
+NS_SWIFT_UI_ACTOR
+@protocol ArktSitePermission <NSObject>
+@property(nonatomic, readonly) ArktSitePermissionKind kind;
+// Chromium's name for it (PageInfoUI::PermissionTypeToUIString).
+@property(nonatomic, readonly, copy) NSString* title;
+// The effective setting: the site's exception, else the default; an
+// embargoed permission reads Block.
+@property(nonatomic, readonly) ArktPermissionSetting setting;
+// No exception for the site: the setting is the default.
+@property(nonatomic, readonly) BOOL isDefault;
+// ArktPermissionSetting values the permission takes, in Allow, Ask, Block
+// order (the content settings registry's valid settings). Contains setting.
+@property(nonatomic, readonly, copy) NSArray<NSNumber*>* options;
+@end
+
+// A tab's page info as plain values (#583), read when the property is read.
+NS_SWIFT_UI_ACTOR
+@protocol ArktPageInfo <NSObject>
+// The site's origin, url::Origin::Serialize() ("https://example.com",
+// "http://127.0.0.1:8080"); "file://" for a local file; the URL for an
+// internal page.
+@property(nonatomic, readonly, copy) NSString* origin;
+// The host as Chromium shows it (url_formatter::IDNToUnicode, which keeps
+// punycode when its spoof checks decline), the file name for a local file,
+// the URL for an internal page.
+@property(nonatomic, readonly, copy) NSString* host;
+@property(nonatomic, readonly) ArktPageConnection connection;
+// The certificate of a Secure connection: the subject's common name, the
+// issuer's organization (else common name) and the expiry; nil otherwise.
+@property(nonatomic, readonly, nullable, copy) NSString* certificateIssuedTo;
+@property(nonatomic, readonly, nullable, copy) NSString* certificateIssuedBy;
+@property(nonatomic, readonly, nullable, copy) NSDate* certificateValidUntil;
+// Site data as chrome://settings/content/siteDetails counts it
+// (BrowsingDataModel entries matching the origin: their storage bytes and
+// first-party cookies). NO before the profile's first count has arrived;
+// PageInfoChanged follows when it does. A count older than 10 s is recounted
+// when read: the old count is reported meanwhile, and PageInfoChanged
+// follows when the new one differs from what the tab read. NO for a page
+// without site settings.
+@property(nonatomic, readonly) BOOL hasSiteData;
+@property(nonatomic, readonly) NSInteger siteDataCookies;
+@property(nonatomic, readonly) int64_t siteDataBytes;
+// Location, camera, microphone and notifications first, then every other
+// kind that has an exception for the site, is embargoed or in use, in
+// ArktSitePermissionKind order. Empty for a local file or an internal page.
+@property(nonatomic, readonly, copy)
+    NSArray<id<ArktSitePermission>>* permissions;
+@end
+
+// A site with at least one exception in the profile (#583).
+NS_SWIFT_UI_ACTOR
+@protocol ArktSitePermissions <NSObject>
+@property(nonatomic, readonly, copy) NSString* origin;
+@property(nonatomic, readonly, copy) NSString* host;
+// Only the kinds with an exception, in ArktSitePermissionKind order.
+@property(nonatomic, readonly, copy)
+    NSArray<id<ArktSitePermission>>* permissions;
+@end
+
 // The embedder seam of an engine window (week 2's protocol, moved here).
 // The engine never creates or lays out the window: it asks its host for the
 // NSWindow and for the fallback view, and sets the blocks below.
@@ -732,6 +923,16 @@ NS_SWIFT_UI_ACTOR
 @property(nonatomic, readonly) BOOL isAudible;
 // The tab's sound is muted (WebContents::IsAudioMuted).
 @property(nonatomic, readonly) BOOL isMuted;
+// Why the page's process went away, None while it is alive
+// (WebContents::IsCrashed and GetCrashedStatus, #577).
+@property(nonatomic, readonly) ArktTerminationStatus terminationStatus;
+// The page zoom (#577): zoom::ZoomController::GetZoomPercent() and
+// IsAtDefaultZoom(); 100 and YES for a closed tab.
+@property(nonatomic, readonly) NSInteger zoomPercent;
+@property(nonatomic, readonly) BOOL zoomIsDefault;
+// An element of the page is in HTML fullscreen, or about to be
+// (WebContents::IsFullscreen, #577).
+@property(nonatomic, readonly) BOOL isTabFullscreen;
 
 - (void)navigateToURL:(NSURL*)url;
 - (void)reload;
@@ -760,6 +961,12 @@ NS_SWIFT_UI_ACTOR
 // Mutes or unmutes the tab's sound (WebContents::SetAudioMuted), reported
 // with MutedChanged when the state changes (#364).
 - (void)setMuted:(BOOL)muted NS_SWIFT_NAME(setMuted(_:));
+// One zoom step (#577), reported with ZoomChanged (user initiated) when the
+// zoom changes; nothing at either end of the steps or when Reset finds the
+// default. The handle's zoomPercent and zoomIsDefault have the new zoom when
+// the call returns. A no-op for a closed or crashed tab (Chromium does not
+// zoom a page without a live process).
+- (void)zoomWithCommand:(ArktZoomCommand)command NS_SWIFT_NAME(zoom(_:));
 // Starts or continues a find in the tab's page (#134), as
 // FindTabHelper::StartFinding with find_match set: a new text or case starts
 // a new search at the first match; the same text and case again moves to the
@@ -790,6 +997,36 @@ NS_SWIFT_UI_ACTOR
                                             NSSize pixelSize,
                                             CGFloat scale))completion
     NS_SWIFT_NAME(copyFrame(maxPixelSize:completion:)) NS_SWIFT_DISABLE_ASYNC;
+// Page info (#583) of the tab's last committed page, in the tab's profile;
+// nil for a closed tab or one without a committed page. Reading it starts
+// the site data count when the profile's count is older than 10 s.
+@property(nonatomic, readonly, nullable) id<ArktPageInfo> pageInfo;
+// Sets one permission of `origin` in the tab's profile, as Chromium's page
+// info does (PageInfo::OnSitePermissionChanged: the narrowest pattern,
+// embargo cleared when it is not Block). The default setting removes the
+// exception. A setting the kind does not take, or the one it has, does
+// nothing. When `origin` is the tab's own, the change counts for the reload
+// infobar of -pageInfoDidClose. Reported with PageInfoChanged on the tabs of
+// that origin.
+- (void)setPermission:(ArktSitePermissionKind)kind
+            toSetting:(ArktPermissionSetting)setting
+            forOrigin:(NSString*)origin
+    NS_SWIFT_NAME(setPermission(_:to:forOrigin:));
+// Removes the origin-scoped exceptions and the embargoes of `origin`'s
+// permissions in the tab's profile, as setting each to its default
+// (SetNarrowestContentSetting). A broader user exception (a [*.]host pattern)
+// stays, as with Chromium's page info. Cookies and site data stay.
+- (void)resetPermissionsForOrigin:(NSString*)origin
+    NS_SWIFT_NAME(resetPermissions(forOrigin:));
+// The shell's page info panel of this tab closed (PageInfo::OnUIClosing).
+// After a change from this tab that needs a reload (any kind but sound),
+// Chromium's reload infobar (ArktInfobarKindReload) is added to this tab,
+// once; otherwise nothing happens.
+- (void)pageInfoDidClose;
+// Opens chrome://settings/content/siteDetails for `origin` in the tab's
+// window, as page info's Site settings link does.
+- (void)openSiteSettingsForOrigin:(NSString*)origin
+    NS_SWIFT_NAME(openSiteSettings(forOrigin:));
 @end
 
 // An engine window (one Browser).
@@ -928,6 +1165,31 @@ NS_SWIFT_UI_ACTOR
 // was already confirmed finishes with its real result. Does nothing when no
 // batch is running.
 - (void)cancelExtensionInstalls NS_SWIFT_NAME(cancelExtensionInstalls());
+// Uninstalls an extension of the profile the engine started with (#721) as
+// the user's own choice (UNINSTALL_REASON_USER_INITIATED), with no prompt of
+// the engine's: the shell asked already. Built on ExtensionRegistrar's
+// UninstallExtension, the call Chrome's own uninstall dialog makes; that
+// dialog is not shown. Every other uninstall path (chrome.management, for
+// one) keeps its dialog. `completion` runs on the main thread, never inside
+// the call, and always arrives except when the engine shuts down first:
+// `uninstalled` YES once the extension is gone, or NO with a short sentence
+// that holds no id or name ("unknown extension" for an id the profile does
+// not have, "not removable" for one the user may not uninstall, see
+// canUninstall); nothing changed then. The removal reaches the sinks as
+// ExtensionActionsChanged for every window that listed the action.
+// `reportAbuse`: after a successful uninstall the Web Store's report page for
+// the extension opens in a new foreground tab of `browser` (the window of the
+// shell's sheet), as Chrome does after its dialog; when `browser` is nil or
+// has closed meanwhile, of the last active window. Only for an extension
+// whose canReportAbuse is YES; for any other no tab opens.
+- (void)uninstallExtension:(NSString*)extensionID
+               reportAbuse:(BOOL)reportAbuse
+                 inBrowser:(nullable id<ArktBrowserHandle>)browser
+                completion:(void (^)(BOOL uninstalled,
+                                     NSString* _Nullable failureReason))
+                               completion
+    NS_SWIFT_NAME(uninstallExtension(_:reportAbuse:in:completion:))
+        NS_SWIFT_DISABLE_ASYNC;
 
 // Downloads (#132), of the profile the engine started with. The events are
 // DownloadCreated, DownloadUpdated and DownloadRemoved (no tab, no window).
@@ -959,6 +1221,23 @@ NS_SWIFT_UI_ACTOR
 @property(nonatomic, copy, nullable) void (^downloadDestinationHandler)
     (NSString* suggestedFilename, NSURL* directory,
      void (^answer)(NSURL* _Nullable chosen));
+
+// The crashed-session prompt (#577), for the profile the engine started with.
+// YES when the previous run of that profile ended without a clean quit
+// (ExitTypeService's last session exit type is kCrashed, read once at start)
+// and the shell has not dismissed it in this run. Chromium's own "restore
+// pages" bubble needs a BrowserView, so it never shows on an engine window:
+// the shell is the only one that asks. NO for a profile without an exit type
+// service.
+@property(nonatomic, readonly) BOOL lastSessionCrashed;
+// The shell answered the prompt: lastSessionCrashed is NO for the rest of the
+// run. A second call does nothing.
+- (void)dismissLastSession;
+
+// Every site with a permission exception (a user-set pattern for one origin)
+// in the profile the engine started with (#583), sorted by host.
+@property(nonatomic, readonly, copy)
+    NSArray<id<ArktSitePermissions>>* sitesWithPermissions;
 @end
 
 // Implemented by the Swift app: @objc(ArktShellEmbedder), in the main

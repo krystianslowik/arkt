@@ -8,6 +8,7 @@
 #include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "components/infobars/core/infobar_manager.h"
+#include "content/public/browser/web_contents_observer.h"
 
 @class ArktInfobarContent;
 @class ArktInfobarStackView;
@@ -66,7 +67,12 @@ void SetInfobarSink(InfobarSink sink);
 // so) the rows stay in the presenter, hidden: the stack keeps its height so the
 // page still sits below the strip the shell draws, and the shell acts through
 // Perform().
-class ArktInfobarPresenter : public infobars::InfoBarManager::Observer {
+//
+// While an element of the tab's page is in HTML fullscreen the window reserves
+// no height for the stack (#577): the presenter observes the contents and asks
+// for a layout when fullscreen starts or ends.
+class ArktInfobarPresenter : public infobars::InfoBarManager::Observer,
+                             public content::WebContentsObserver {
  public:
   // `layout_changed` runs when the stack's height changed. `color_provider`
   // gives the colors for the infobar icons (the window's provider).
@@ -94,6 +100,10 @@ class ArktInfobarPresenter : public infobars::InfoBarManager::Observer {
   void OnInfoBarReplaced(infobars::InfoBar* old_infobar,
                          infobars::InfoBar* new_infobar) override;
   void OnManagerWillBeDestroyed(infobars::InfoBarManager* manager) override;
+
+  // content::WebContentsObserver:
+  void DidToggleFullscreenModeForTab(bool entered_fullscreen,
+                                     bool will_cause_resize) override;
 
  private:
   using Action = InfobarAction;

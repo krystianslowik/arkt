@@ -171,7 +171,8 @@ public enum EngineEvent: Equatable, Sendable {
   /// zoom per host). Reported once per change.
   case zoomChanged(TabID, TabZoom, userInitiated: Bool)
   /// An element of the page entered or left HTML fullscreen (`requestFullscreen`), as opposed to the window's own full
-  /// screen. A navigation or a crash leaves it.
+  /// screen. A navigation or a crash leaves it. The engine writes `isTabFullscreen` into the tab's snapshot before it
+  /// emits this, so `snapshot(of:)` inside the handler already agrees with the event (#581).
   case tabFullscreenChanged(TabID, isFullscreen: Bool)
 
   // MARK: Page info (#582, EnginePageInfo.swift)

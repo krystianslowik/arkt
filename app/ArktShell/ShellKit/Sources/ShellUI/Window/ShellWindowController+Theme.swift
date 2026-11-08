@@ -21,9 +21,11 @@ extension ShellWindowController {
     ThemeCreatorImages.prepare(scale: window?.backingScaleFactor ?? 2)
   }
 
-  /// One drawn theme per paged Space, so theme index == page index even if a Space lookup fails.
+  /// One drawn theme per paged Space, so theme index == page index even if a Space lookup fails. A blank or incognito
+  /// window draws its neutral backdrop alone (#766).
   func drawnThemes() -> [SpaceThemeInfo] {
-    sidebarController.spaces.map {
+    if let backdrop = sidebarController.privateBackdrop { return [backdrop] }
+    return sidebarController.spaces.map {
       sidebarController.drawnSpace($0)?.theme ?? SpaceThemeInfo(baseColors: [.white(1)], isDark: false)
     }
   }

@@ -154,7 +154,8 @@ ArktInfobarPresenter::ArktInfobarPresenter(
     content::WebContents* contents,
     base::RepeatingCallback<const ui::ColorProvider*()> color_provider,
     base::RepeatingClosure layout_changed)
-    : manager_(infobars::ContentInfoBarManager::FromWebContents(contents)),
+    : content::WebContentsObserver(contents),
+      manager_(infobars::ContentInfoBarManager::FromWebContents(contents)),
       contents_(contents ? contents->GetWeakPtr() : nullptr),
       color_provider_(std::move(color_provider)),
       layout_changed_(std::move(layout_changed)),
@@ -338,6 +339,12 @@ void ArktInfobarPresenter::OnManagerWillBeDestroyed(
   // The contents are going away: no layout call (it would read their view);
   // the bar just leaves the view hierarchy.
   [stack_ removeFromSuperview];
+}
+
+void ArktInfobarPresenter::DidToggleFullscreenModeForTab(
+    bool entered_fullscreen,
+    bool will_cause_resize) {
+  layout_changed_.Run();
 }
 
 // As ConfirmInfoBar::OkButtonPressed / CancelButtonPressed, InfoBarView's

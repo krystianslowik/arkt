@@ -1,6 +1,7 @@
 import AppKit
 import ImageIO
 import ArktEngineABI
+import EngineAPI
 import EngineAPITestSupport
 
 // A scripted Swift implementation of the facade protocols (arkt_engine.h), modelled on the real facade's recorded
@@ -34,6 +35,11 @@ final class ScriptedEvent: NSObject, ArktEngineEvent {
   var findCount = 0
   var findIsFinal = false
   var download: (any ArktDownloadItem)?
+  var terminationStatus: ArktTerminationStatus = .none
+  var zoomPercent = 0
+  var zoomIsDefault = false
+  var zoomIsUserInitiated = false
+  var isTabFullscreen = false
 
   init(_ kind: ArktEngineEventKind, tab: (any ArktTabHandle)?, browser: (any ArktBrowserHandle)?) {
     self.kind = kind; self.tab = tab; self.browser = browser
@@ -174,8 +180,12 @@ final class ScriptedAction: NSObject, ArktExtensionAction {
   let name: String
   let iconPNG: Data?
   let isEnabled: Bool
-  init(actionId: String, name: String, iconPNG: Data? = nil, isEnabled: Bool = true) {
+  let canUninstall: Bool
+  let canReportAbuse: Bool
+  init(actionId: String, name: String, iconPNG: Data? = nil, isEnabled: Bool = true, canUninstall: Bool = true,
+       canReportAbuse: Bool = true) {
     self.actionId = actionId; self.name = name; self.iconPNG = iconPNG; self.isEnabled = isEnabled
+    self.canUninstall = canUninstall; self.canReportAbuse = canReportAbuse
   }
 }
 
@@ -229,6 +239,12 @@ final class ScriptedTab: NSObject, ArktTabHandle {
   /// Sound (#364). Set directly, they model a tab that was already playing or muted when it was inserted.
   var isAudible = false
   var isMuted = false
+  /// Tab state (#577). Set directly, they model a tab that was already crashed, zoomed or fullscreen when it was
+  /// inserted; the methods under "Tab state" record the events.
+  var terminationStatus: ArktTerminationStatus = .none
+  var zoomPercent = 100
+  var zoomIsDefault: Bool { zoomPercent == 100 }
+  var isTabFullscreen = false
   var dialog: PendingDialog?
   /// Inserted later (a deferred createTab); calls queue until then.
   var isPending = false
@@ -381,12 +397,71 @@ final class ScriptedTab: NSObject, ArktTabHandle {
     if isPending { queued.append(call) } else { call() }
   }
 
+  // MARK: Tab state (#577)
+
+  /// `PrimaryMainFrameRenderProcessGone` as the facade reports it: HTML fullscreen left (Chromium exits it before the
+  /// observers hear of the crash) and a load in progress ended, then one `TabCrashed`. A no-op for a crashed tab.
+  func crash(status: ArktTerminationStatus = .crashed) {
+    guard owner != nil, terminationStatus == .none, status != .none else { return }
+    setTabFullscreen(false)
+    if isLoading {
+      isLoading = false
+      record(.loadingChanged) { $0.isLoading = false }
+    }
+    terminationStatus = status
+    record(.tabCrashed) { $0.terminationStatus = status }
+  }
+
+  /// A new live page process for a crashed tab (the reload's or navigation's frame host), reported once.
+  private func recoverIfCrashed() {
+    guard terminationStatus != .none else { return }
+    terminationStatus = .none
+    record(.tabRecovered)
+  }
+
+  /// `zoom::PageZoom::Zoom` on Chromium's preset steps: one user-initiated `ZoomChanged` per change, nothing at
+  /// either end, for a reset at the default, or for a crashed page.
+  func zoom(_ command: ArktZoomCommand) {
+    whenInserted { [self] in
+      guard owner != nil, terminationStatus == .none else { return }
+      let steps = TabZoom.steps
+      let next: Int? = switch command {
+      case .zoomIn: steps.first { $0 > zoomPercent }
+      case .zoomOut: steps.last { $0 < zoomPercent }
+      case .reset: 100
+      @unknown default: nil
+      }
+      guard let next, next != zoomPercent else { return }
+      setZoom(next, userInitiated: true)
+    }
+  }
+
+  /// The zoom changes as Chromium reports it: by this tab's own zoom controller (`userInitiated`), or from the host
+  /// zoom map (a site's saved zoom, another tab of the host zoomed).
+  func setZoom(_ percent: Int, userInitiated: Bool) {
+    zoomPercent = percent
+    let isDefault = zoomIsDefault
+    record(.zoomChanged) {
+      $0.zoomPercent = percent; $0.zoomIsDefault = isDefault; $0.zoomIsUserInitiated = userInitiated
+    }
+  }
+
+  /// `DidToggleFullscreenModeForTab`: one `TabFullscreenChanged` per change.
+  func setTabFullscreen(_ fullscreen: Bool) {
+    guard isTabFullscreen != fullscreen else { return }
+    isTabFullscreen = fullscreen
+    record(.tabFullscreenChanged) { $0.isTabFullscreen = fullscreen }
+  }
+
   // MARK: Loads
 
   func startLoad(_ target: URL, title: String?) {
     isInitialBlank = false
     endFindAndHover()
+    setTabFullscreen(false)       // a navigation leaves HTML fullscreen
+    recoverIfCrashed()            // the frame host is live again (RenderFrameCreated) before the URL and load start
     url = target
+    facade.siteSettings.primaryPageChanged(self)  // the page info session of the old page ends (#583)
     loadingTitle = title
     record(.urlChanged) { $0.url = target }
     if !isLoading {
@@ -459,6 +534,7 @@ final class ScriptedTab: NSObject, ArktTabHandle {
   func reload() {
     whenInserted { [self] in
       guard owner != nil, url != nil, !isLoading else { return }
+      recoverIfCrashed()
       isLoading = true
       record(.loadingChanged) { $0.isLoading = true }
     }
@@ -616,13 +692,15 @@ final class ScriptedTab: NSObject, ArktTabHandle {
 
   // MARK: Engine side
 
-  /// `kReplaced` (crash recovery, prerender): new contents in the same container, a new session id.
-  func replaceContents() {
+  /// `kReplaced` (crash recovery, prerender): new contents in the same container, a new session id. Live new
+  /// contents end an earlier crash, as the facade's `ReportAll` reports it (`TabRecovered` after `TabReplaced`).
+  func replaceContents(live: Bool = true) {
     contentsView.removeFromSuperview()
     contentsView = NSView()
     containerView.addSubview(contentsView)
     sessionId = facade.nextId()
     record(.tabReplaced)
+    if live { recoverIfCrashed() }
   }
 
   /// The dialog's answer (`answerDialogInTab:accept:`).
@@ -731,6 +809,7 @@ final class ScriptedBrowser: NSObject, ArktBrowserHandle {
       tab.isInitialBlank = true
     }
     tabList.append(tab)
+    facade.siteSettings.bound(tab)  // the facade seeds the tab's connection when it binds it (#583)
     let created = ScriptedEvent(.tabCreated, tab: tab, browser: self)
     created.url = tab.url; created.title = tab.title; created.opener = tab.opener; created.origin = tab.origin
     facade.record(created)
@@ -857,6 +936,15 @@ final class ScriptedFacade: NSObject, ArktEngine {
   var revealedDownloads: [String] = []
   var downloadPromptsForLocation = false
   var downloadDestinationHandler: ((String, URL, @escaping (URL?) -> Void) -> Void)?
+  /// Page info and per-site permissions (#583, `ScriptedPageInfo.swift`): the profile's content settings.
+  let siteSettings = ScriptedSiteSettings()
+  /// The crashed-session prompt (#577): set to model a profile whose last run crashed.
+  var lastSessionCrashed = false
+  private(set) var sessionDismissals = 0
+  func dismissLastSession() {
+    sessionDismissals += 1
+    lastSessionCrashed = false
+  }
   /// The default folder is a fresh temporary one, so a test never writes to the real Downloads folder.
   let defaultDownloadDirectory = FileManager.default.temporaryDirectory
     .appending(path: "arkt-scripted-downloads-\(UUID().uuidString)")
@@ -1149,6 +1237,55 @@ final class ScriptedFacade: NSObject, ArktEngine {
     heldBatch = nil
     let results: [any ArktExtensionInstallResult] = held.ids.map { ScriptedExtensionResult($0, .failed, "cancelled") }
     Task { @MainActor in held.completion(results) }
+  }
+
+  /// What each `uninstallExtension` call received, in order (#721): the id, the Report abuse state and the window
+  /// id of the browser it named (nil for none).
+  private(set) var uninstallCalls: [(extensionID: String, reportAbuse: Bool, window: Int32?)] = []
+  /// What each `uninstallExtension` completion answered, in order.
+  private(set) var uninstallAnswers: [(uninstalled: Bool, reason: String?)] = []
+  /// The window ids that received a report page, one per page, in order.
+  private(set) var reportPageWindows: [Int32] = []
+
+  /// What the real facade does, as far as ChromiumEngine can tell:
+  /// - "unknown extension": the scripted model has no profile, so an extension is known while a window lists its
+  ///   action. The real facade asks the profile's registry, which also knows an installed extension no window lists
+  ///   (a disabled one, one without an action); no ChromiumEngine behaviour depends on that difference.
+  /// - "not removable": the listed action's `canUninstall` is false, the flag the real facade lists from the same
+  ///   management policy check its gate applies.
+  /// Both change nothing. Otherwise the action leaves every window that listed it (one `ExtensionActionsChanged`
+  /// each, inside the call, as `OnToolbarActionRemoved` fires inside `UninstallExtension`) and, with `reportAbuse`
+  /// and `canReportAbuse`, one report page goes to the named browser (the last listed one when none is named). The
+  /// completion runs on a later turn.
+  func uninstallExtension(
+    _ extensionID: String, reportAbuse: Bool, in browser: (any ArktBrowserHandle)?,
+    completion: @escaping (Bool, String?) -> Void
+  ) {
+    uninstallCalls.append((extensionID, reportAbuse, browser?.windowId))
+    let listing = browserList.filter { browser in
+      actions[ObjectIdentifier(browser)]?.contains { $0.actionId == extensionID } == true
+    }
+    let action = listing.first.flatMap { browser in
+      actions[ObjectIdentifier(browser)]?.first { $0.actionId == extensionID }
+    }
+    let answer: (Bool, String?)
+    if let action, !action.canUninstall {
+      answer = (false, "not removable")
+    } else if let action {
+      for browser in listing {
+        setActions(actions[ObjectIdentifier(browser)]?.filter { $0.actionId != extensionID } ?? [], in: browser)
+      }
+      if reportAbuse, action.canReportAbuse, let target = (browser as? ScriptedBrowser) ?? browsers.last {
+        reportPageWindows.append(target.windowId)
+      }
+      answer = (true, nil)
+    } else {
+      answer = (false, "unknown extension")
+    }
+    Task { @MainActor in
+      self.uninstallAnswers.append(answer)
+      completion(answer.0, answer.1)
+    }
   }
 
   func answerDialog(in tab: any ArktTabHandle, accept: Bool) -> Bool {

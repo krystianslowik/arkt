@@ -17,8 +17,12 @@ final class TestExtensionAction: NSObject, ArktExtensionAction {
   let name: String
   let iconPNG: Data?
   let isEnabled: Bool
-  init(actionId: String, name: String, iconPNG: Data? = nil, isEnabled: Bool = true) {
+  let canUninstall: Bool
+  let canReportAbuse: Bool
+  init(actionId: String, name: String, iconPNG: Data? = nil, isEnabled: Bool = true, canUninstall: Bool = true,
+       canReportAbuse: Bool = false) {
     self.actionId = actionId; self.name = name; self.iconPNG = iconPNG; self.isEnabled = isEnabled
+    self.canUninstall = canUninstall; self.canReportAbuse = canReportAbuse
   }
 }
 
@@ -99,6 +103,11 @@ final class TestEvent: NSObject, ArktEngineEvent {
   var findCount = 0
   var findIsFinal = false
   var download: (any ArktDownloadItem)?
+  var terminationStatus: ArktTerminationStatus = .none
+  var zoomPercent = 0
+  var zoomIsDefault = false
+  var zoomIsUserInitiated = false
+  var isTabFullscreen = false
   init(_ kind: ArktEngineEventKind, tab: (any ArktTabHandle)?, browser: (any ArktBrowserHandle)?) {
     self.kind = kind; self.tab = tab; self.browser = browser
   }
@@ -125,6 +134,10 @@ final class TestTab: NSObject, ArktTabHandle {
   var wouldHoldClose = false
   var isAudible = false
   private(set) var isMuted = false
+  var terminationStatus: ArktTerminationStatus = .none
+  private(set) var zoomPercent = 100
+  var zoomIsDefault: Bool { zoomPercent == 100 }
+  var isTabFullscreen = false
 
   init(sessionId: Int32, owner: TestBrowser, url: URL?, opener: (any ArktTabHandle)?, origin: ArktTabOrigin) {
     self.sessionId = sessionId; self.owner = owner; self.url = url; self.opener = opener; self.origin = origin
@@ -172,6 +185,22 @@ final class TestTab: NSObject, ArktTabHandle {
     event.isMuted = muted
     owner?.engine.record(event)
   }
+  /// Zoom (#577): ten points a step between 50 and 200, one `ZoomChanged` per change.
+  func zoom(_ command: ArktZoomCommand) {
+    let next = switch command {
+    case .zoomIn: min(zoomPercent + 10, 200)
+    case .zoomOut: max(zoomPercent - 10, 50)
+    case .reset: 100
+    @unknown default: zoomPercent
+    }
+    guard next != zoomPercent else { return }
+    zoomPercent = next
+    let event = TestEvent(.zoomChanged, tab: self, browser: owner)
+    event.zoomPercent = next
+    event.zoomIsDefault = zoomIsDefault
+    event.zoomIsUserInitiated = true
+    owner?.engine.record(event)
+  }
   /// The find (#134): the calls as received, and one final reply of 1 of 1 per non-empty text.
   private(set) var finds: [(text: String, forward: Bool, matchCase: Bool)] = []
   private(set) var stops: [ArktFindAction] = []
@@ -200,6 +229,24 @@ final class TestTab: NSObject, ArktTabHandle {
       completion(hasFrame ? Data("png".utf8) : nil, hasFrame ? NSSize(width: 2, height: 1) : .zero, hasFrame ? 1 : 0)
     }
   }
+  /// Page info (#583): one site permission whose setting the calls change; a close records itself.
+  var permissionSetting: ArktPermissionSetting = .ask
+  private(set) var pageInfoCloses = 0
+  private(set) var openedSiteSettings: [String] = []
+  var pageInfo: (any ArktPageInfo)? {
+    guard let url, let host = url.host else { return nil }
+    return TestPageInfo(origin: "\(url.scheme ?? "https")://\(host)", host: host, permissions: [
+      TestSitePermission(kind: .camera, setting: permissionSetting, isDefault: permissionSetting == .ask)
+    ])
+  }
+  func setPermission(_ kind: ArktSitePermissionKind, to setting: ArktPermissionSetting, forOrigin origin: String) {
+    guard kind == .camera, setting != permissionSetting else { return }
+    permissionSetting = setting
+    owner?.engine.record(TestEvent(.pageInfoChanged, tab: self, browser: owner))
+  }
+  func resetPermissions(forOrigin origin: String) { setPermission(.camera, to: .ask, forOrigin: origin) }
+  func pageInfoDidClose() { pageInfoCloses += 1 }
+  func openSiteSettings(forOrigin origin: String) { openedSiteSettings.append(origin) }
   func duplicate() -> (any ArktTabHandle)? {
     guard let owner else { return nil }
     let copy = owner.insertTab(url: url, active: false, opener: self, origin: .client)
@@ -392,6 +439,13 @@ final class TestEngine: NSObject, ArktEngine {
 
   func answerDialog(in tab: any ArktTabHandle, accept: Bool) -> Bool { false }
 
+  /// The crashed-session prompt (#577).
+  var lastSessionCrashed = false
+  func dismissLastSession() { lastSessionCrashed = false }
+
+  /// Page info (#583): the sites a test sets.
+  var sitesWithPermissions: [any ArktSitePermissions] = []
+
   // Downloads (#132): a list the tests fill, and the commands and prefs the shell sets.
   var downloads: [any ArktDownloadItem] = []
   private(set) var downloadCommands: [(command: ArktDownloadCommand, guid: String)] = []
@@ -423,6 +477,14 @@ final class TestEngine: NSObject, ArktEngine {
 
   func cancelExtensionInstalls() {}
 
+  private(set) var uninstalledExtensions: [(String, Bool, Int32?)] = []
+  /// As the header asks: the completion runs on a later main-thread turn, never inside the call.
+  func uninstallExtension(_ extensionID: String, reportAbuse: Bool, in browser: (any ArktBrowserHandle)?,
+                          completion: @escaping (Bool, String?) -> Void) {
+    uninstalledExtensions.append((extensionID, reportAbuse, browser?.windowId))
+    Task { @MainActor in completion(false, "unknown extension") }
+  }
+
   func importBookmarks(_ bookmarks: [any ArktImportBookmark], completion: @escaping (any ArktImportResult) -> Void) {
     importedBookmarkPaths += bookmarks.map(\.folderPath)
     completion(TestImportResult(written: bookmarks.count, skipped: 0, failed: 0, failureReason: nil))
@@ -448,6 +510,45 @@ final class TestEngine: NSObject, ArktEngine {
 }
 
 /// The app's embedder, as `ArktShellEmbedder` will be: found by name, never linked by the engine.
+final class TestSitePermission: NSObject, ArktSitePermission {
+  let kind: ArktSitePermissionKind
+  let title = "Camera"
+  let setting: ArktPermissionSetting
+  let isDefault: Bool
+  let options: [NSNumber] = [ArktPermissionSetting.allow, .ask, .block].map { NSNumber(value: $0.rawValue) }
+
+  init(kind: ArktSitePermissionKind, setting: ArktPermissionSetting, isDefault: Bool) {
+    self.kind = kind; self.setting = setting; self.isDefault = isDefault
+  }
+}
+
+final class TestPageInfo: NSObject, ArktPageInfo {
+  let origin: String
+  let host: String
+  let connection: ArktPageConnection = .secure
+  let certificateIssuedTo: String? = nil
+  let certificateIssuedBy: String? = nil
+  let certificateValidUntil: Date? = nil
+  let hasSiteData = false
+  let siteDataCookies = 0
+  let siteDataBytes: Int64 = 0
+  let permissions: [any ArktSitePermission]
+
+  init(origin: String, host: String, permissions: [any ArktSitePermission]) {
+    self.origin = origin; self.host = host; self.permissions = permissions
+  }
+}
+
+final class TestSitePermissions: NSObject, ArktSitePermissions {
+  let origin: String
+  let host: String
+  let permissions: [any ArktSitePermission]
+
+  init(origin: String, host: String, permissions: [any ArktSitePermission]) {
+    self.origin = origin; self.host = host; self.permissions = permissions
+  }
+}
+
 @objc(ArktEngineABITestEmbedder)
 final class TestEmbedder: NSObject, ArktEngineEmbedder {
   static let shared = TestEmbedder()
@@ -679,6 +780,27 @@ struct ConformanceTests {
     #expect(engine.testAPIEnabled && !engine.answerDialog(in: tab, accept: true))
   }
 
+  @Test func uninstallReachesTheFacadeWithItsFlagAndWindowAndAnswersLater() async throws {
+    let facade = TestEngine()
+    let engine: any ArktEngine = facade
+    let browser = engine.createBrowser(host: TestWindowHost())
+    var answer: (Bool, String?)?
+    engine.uninstallExtension("action-probe", reportAbuse: true, in: browser) { answer = ($0, $1) }
+    #expect(facade.uninstalledExtensions.map(\.0) == ["action-probe"])
+    #expect(facade.uninstalledExtensions.map(\.1) == [true])
+    #expect(facade.uninstalledExtensions.map(\.2) == [browser.windowId])
+    #expect(answer == nil, "never inside the call")
+    for _ in 0..<100 where answer == nil { await Task.yield() }
+    let answered = try #require(answer)
+    #expect(answered.0 == false && answered.1 == "unknown extension")
+  }
+
+  @Test func theActionSaysWhatTheUserMayDo() {
+    let action: any ArktExtensionAction = TestExtensionAction(actionId: "a", name: "A", canUninstall: false,
+                                                               canReportAbuse: true)
+    #expect(!action.canUninstall && action.canReportAbuse)
+  }
+
   @Test func terminationSeamsRunTheCompletion() {
     let embedder = TestEmbedder()
     var completed = false
@@ -769,6 +891,95 @@ struct MuteABITests {
     let events = try #require(batches.last)
     #expect(events.map(\.kind) == [.mutedChanged])
     #expect(events.first?.isMuted == true && events.first?.tab === tab)
+  }
+}
+
+/// Tab state (#577): the handle's crash, zoom and fullscreen values, the zoom call, the four events' plain values and
+/// the crashed-session prompt are part of the ABI.
+@MainActor
+struct TabStateABITests {
+  @Test func zoomChangesTheHandleAndRecordsOnePlainEventPerChange() throws {
+    let engine = TestEngine()
+    var batches: [[any ArktEngineEvent]] = []
+    let token = engine.addEventSink { batches.append($0) }
+    defer { engine.removeEventSink(token) }
+    let tab = engine.createBrowser(host: TestWindowHost()).createTab(url: nil, active: true)
+    engine.flush()
+    #expect(tab.zoomPercent == 100 && tab.zoomIsDefault && tab.terminationStatus == .none && !tab.isTabFullscreen)
+
+    tab.zoom(.zoomIn)
+    tab.zoom(.reset)
+    tab.zoom(.reset)
+    engine.flush()
+
+    let events = try #require(batches.last)
+    #expect(events.map(\.kind) == [.zoomChanged, .zoomChanged])
+    #expect(events.map(\.zoomPercent) == [110, 100] && events.map(\.zoomIsDefault) == [false, true])
+    #expect(events.allSatisfy { $0.zoomIsUserInitiated && $0.tab === tab })
+  }
+
+  @Test func theNewKindsAndValuesKeepTheirHeaderNumbers() {
+    #expect(ArktEngineEventKind.tabCrashed.rawValue == 26 && ArktEngineEventKind.tabRecovered.rawValue == 27)
+    #expect(ArktEngineEventKind.zoomChanged.rawValue == 28 && ArktEngineEventKind.tabFullscreenChanged.rawValue == 29)
+    let statuses: [ArktTerminationStatus] = [.none, .crashed, .killed, .outOfMemory, .launchFailed]
+    #expect(statuses.map(\.rawValue) == [0, 1, 2, 3, 4])
+    #expect([ArktZoomCommand.zoomIn, .zoomOut, .reset].map(\.rawValue) == [0, 1, 2])
+    let event = TestEvent(.tabCrashed, tab: nil, browser: nil)
+    #expect(event.terminationStatus == .none && event.zoomPercent == 0 && !event.isTabFullscreen)
+  }
+
+  @Test func dismissingTheCrashedSessionAnswersItForTheRun() {
+    let engine = TestEngine()
+    engine.lastSessionCrashed = true
+    engine.dismissLastSession()
+    engine.dismissLastSession()
+    #expect(!engine.lastSessionCrashed)
+  }
+}
+
+/// Page info (#583): the handle's page info values, the four calls, the change event and the engine's per-site list are
+/// part of the ABI.
+@MainActor
+struct PageInfoABITests {
+  @Test func aPermissionChangeIsReadBackAndAnnouncedOnce() throws {
+    let engine = TestEngine()
+    var batches: [[any ArktEngineEvent]] = []
+    let token = engine.addEventSink { batches.append($0) }
+    defer { engine.removeEventSink(token) }
+    let tab = engine.createBrowser(host: TestWindowHost()).createTab(url: URL(string: "https://example.com/a"),
+                                                                      active: true)
+    engine.flush()
+    let info = try #require(tab.pageInfo)
+    #expect(info.origin == "https://example.com" && info.connection == .secure && !info.hasSiteData)
+
+    tab.setPermission(.camera, to: .block, forOrigin: info.origin)
+    tab.setPermission(.camera, to: .block, forOrigin: info.origin)
+    tab.pageInfoDidClose()
+    tab.openSiteSettings(forOrigin: info.origin)
+    engine.flush()
+
+    let camera = try #require(tab.pageInfo?.permissions.first)
+    #expect(camera.kind == .camera && camera.setting == .block && !camera.isDefault)
+    #expect(camera.options.map(\.intValue) == [0, 1, 2])
+    #expect(try #require(batches.last).map(\.kind) == [.pageInfoChanged])
+  }
+
+  @Test func theNewKindsAndValuesKeepTheirHeaderNumbers() {
+    #expect(ArktEngineEventKind.pageInfoChanged.rawValue == 30)
+    let connections: [ArktPageConnection] = [.secure, .notSecure, .notFullySecure, .certificateError, .flagged,
+                                             .localFile, .internalPage]
+    #expect(connections.map(\.rawValue) == Array(0...6))
+    #expect([ArktPermissionSetting.allow, .ask, .block].map(\.rawValue) == [0, 1, 2])
+    #expect(ArktSitePermissionKind.location.rawValue == 0 && ArktSitePermissionKind.javaScript.rawValue == 6)
+    #expect(ArktSitePermissionKind.insecureContent.rawValue == 21)
+  }
+
+  @Test func theEngineListsSitesWithPermissions() {
+    let engine = TestEngine()
+    engine.sitesWithPermissions = [TestSitePermissions(origin: "https://example.com", host: "example.com", permissions: [
+      TestSitePermission(kind: .camera, setting: .block, isDefault: false)
+    ])]
+    #expect(engine.sitesWithPermissions.map(\.origin) == ["https://example.com"])
   }
 }
 

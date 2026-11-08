@@ -1,0 +1,51 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Arkt contributors <noreply@arkt.invalid>
+Date: Sat, 7 Nov 2026 20:19:57 +0100
+Subject: [PATCH] Arkt: take the Close Tab shortcut from the window's
+ accelerator provider
+
+CloseTab with every selected tab pinned asked a BrowserView for the Close
+Tab accelerator. Ask the BrowserWindow's provider instead, and close the tab
+without the confirmation toast when the window has no such shortcut or
+cannot show the toast.
+---
+ chrome/browser/ui/browser_commands.cc | 19 +++++++++++++++----
+ 1 file changed, 15 insertions(+), 4 deletions(-)
+
+diff --git a/chrome/browser/ui/browser_commands.cc b/chrome/browser/ui/browser_commands.cc
+index 14f5a7598d..ad73470c96 100644
+--- a/chrome/browser/ui/browser_commands.cc
++++ b/chrome/browser/ui/browser_commands.cc
+@@ -1512,17 +1512,28 @@ void CloseTab(BrowserWindowInterface* browser) {
+   // already shown.
+   if (all_selected_tabs_pinned &&
+       toast_controller->GetCurrentToastId() != ToastId::kClosePinnedTab) {
+-    BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser);
+-    CHECK(browser_view);
++    // The window's own provider, which an embedder's window (no BrowserView)
++    // implements too. Without a Close Tab shortcut to name, close the tab
++    // without the confirmation toast.
++    BrowserWindow* const window = BrowserWindow::FromBrowser(browser);
++    ui::AcceleratorProvider* const provider =
++        window ? window->GetAcceleratorProvider() : nullptr;
+     ui::Accelerator accelerator;
+-    CHECK(
+-        browser_view->GetAcceleratorForCommandId(IDC_CLOSE_TAB, &accelerator));
++    if (!provider ||
++        !provider->GetAcceleratorForCommandId(IDC_CLOSE_TAB, &accelerator)) {
++      CloseSelectedTabAndRecordTabCountMetric(browser);
++      return;
++    }
+ 
+     ToastParams params(ToastId::kClosePinnedTab);
+     params.body_string_replacement_params.emplace_back(
+         accelerator.GetShortcutText());
+     params.body_string_cardinality_param = selected_tabs.size();
+     toast_controller->MaybeShowToast(std::move(params));
++    if (!toast_controller->IsShowingToast()) {
++      // The window could not show the toast (an embedder's window).
++      CloseSelectedTabAndRecordTabCountMetric(browser);
++    }
+   } else {
+     CloseSelectedTabAndRecordTabCountMetric(browser);
+     if (all_selected_tabs_pinned) {

@@ -244,7 +244,9 @@ public final class SidebarController {
     return source.spaceOrder.filter { source.space($0)?.profile == profile }
   }
 
-  /// Draws this window's sidebar as a normal, blank or incognito window. Does not change the shared source.
+  /// Draws this window's sidebar as a normal, blank or incognito window. Does not change the shared source. Blank and
+  /// incognito are one-way: only `makeBlank` and `makeIncognito` call this, once, and a private window never goes
+  /// back to `.standard`.
   public func present(_ presentation: SidebarPresentation) {
     guard presentation != self.presentation else { return }
     self.presentation = presentation
@@ -257,12 +259,22 @@ public final class SidebarController {
       view.setCurrent(page: nil)
       onEmptySpace?()
     }
+    let pagesBefore = pagedSpaces
     syncPages()
     view.favorites.isHidden = hidesItems
     view.spaceDots.isHidden = hidesItems
     view.pager.isHidden = hidesItems
     view.setPrivateKind(presentation)
+    // The neutral backdrop's flavor and the window's themes; `syncPages` has refreshed them when it dropped pages.
+    if hidesItems, pagesBefore.isEmpty { refreshSpaceDetails() }
     if presentation == .standard, let first = spaces.first { showSpace(first) }
+  }
+
+  /// A blank or incognito window's neutral backdrop (#766) as the window draws it in `themeContext`; nil in a normal
+  /// window. These windows show no Spaces, so no Space's theme says anything about them.
+  var privateBackdrop: SpaceThemeInfo? {
+    guard presentation != .standard else { return nil }
+    return ThemeContrast.drawn(PrivateBackdrop.theme(for: themeContext.appearance), in: themeContext)
   }
 
   /// True once, after the current Space's theme changed. The window consumes it in `refreshThemes`.
@@ -449,7 +461,11 @@ public final class SidebarController {
     pagedFlavors = drawn.map { $0?.theme.flavor ?? .light }
     view.spaceDots.titles = pagedSpaces.map { source.space($0)?.title ?? "" }
     view.spaceDots.icons = pagedSpaces.map { source.space($0)?.icon }
-    if let id = currentSpace, let info = drawnSpace(id) { setChromeFlavor(info.theme.flavor) }
+    if let id = currentSpace, let info = drawnSpace(id) {
+      setChromeFlavor(info.theme.flavor)
+    } else if let backdrop = privateBackdrop {
+      setChromeFlavor(backdrop.flavor)
+    }
     noteCurrentTheme()
     themeCreator?.sourceDidChange()
     if notify { onSpacesChanged?(pagedSpaces) }

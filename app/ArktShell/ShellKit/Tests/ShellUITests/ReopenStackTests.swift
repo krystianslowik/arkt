@@ -184,4 +184,38 @@ struct ReopenStackTests {
     #expect(stack.endBatch() == [oldTab])
     #expect(stack.items == [.batch(ClosedBatch(id: id, nodes: batch))])
   }
+
+  // MARK: Private pages (#746)
+
+  @Test func `a cancelled private page close comes off with its parked copy and other closes stay`() {
+    var stack = ReopenStack()
+    let (page, other) = (TabID(), TabID())
+    let (parked, otherParked) = (TabID(), TabID())
+    _ = stack.push(.privatePage(ClosedPrivatePage(tab: page, parked: parked, url: Self.url)))
+    _ = stack.push(.privatePage(ClosedPrivatePage(tab: other, parked: otherParked, url: Self.url)))
+    let again = TabID()
+    _ = stack.push(.privatePage(ClosedPrivatePage(tab: page, parked: again, url: Self.url)))
+    #expect(stack.isParked(parked))
+    #expect(stack.remove(privatePage: page) == [parked, again])
+    #expect(stack.remove(privatePage: page).isEmpty)
+    #expect(stack.items == [.privatePage(ClosedPrivatePage(tab: other, parked: otherParked, url: Self.url))])
+  }
+
+  @Test func `a private page whose parked copy closed reopens without history`() {
+    var stack = ReopenStack()
+    let (page, parked) = (TabID(), TabID())
+    _ = stack.push(.privatePage(ClosedPrivatePage(tab: page, parked: parked, url: Self.url)))
+    stack.forget(parked: parked)
+    #expect(stack.parkedTabs.isEmpty)
+    #expect(stack.pop() == .privatePage(ClosedPrivatePage(tab: page, parked: nil, url: Self.url)))
+  }
+
+  /// #789: the row a private page closed from stays on its entry when its parked copy goes.
+  @Test func `a private page keeps its row when its parked copy closes`() {
+    var stack = ReopenStack()
+    let (page, parked) = (TabID(), TabID())
+    _ = stack.push(.privatePage(ClosedPrivatePage(tab: page, parked: parked, url: Self.url, row: 2)))
+    stack.forget(parked: parked)
+    #expect(stack.pop() == .privatePage(ClosedPrivatePage(tab: page, parked: nil, url: Self.url, row: 2)))
+  }
 }

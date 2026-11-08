@@ -75,7 +75,7 @@ public final class SettingsSwitch: NSButton {
     }
     knob.cornerRadius = SettingsMetrics.knob / 2
     knob.anchorPoint = CGPoint(x: 0, y: 0.5)          // stretches from its leading edge
-    knob.shadowOffset = SettingsTokens.switchKnobShadow.unflippedOffset
+    knob.shadowOffset = SettingsTokens.switchKnobShadow.flippedOffset   // NSButton is flipped
     knob.shadowRadius = SettingsTokens.switchKnobShadow.radius
     track.addSublayer(onFill)
     track.addSublayer(knob)
@@ -247,7 +247,7 @@ public final class SettingsPopUpButton: NSButton {
     return resigned
   }
 
-  private static let font = NSFont.systemFont(ofSize: 13)
+  private static let font = ShellType.body.font
 
   override public var intrinsicContentSize: NSSize {
     let text = ceil((selectedTitle as NSString).size(withAttributes: [.font: Self.font]).width)
@@ -344,12 +344,12 @@ final class SettingsSegmentedControl: NSControl {
     labels = segments.map { _ in CATextLayer() }
     super.init(frame: .zero)
     wantsLayer = true
-    layer?.cornerRadius = 9
+    layer?.cornerRadius = SettingsMetrics.segmentedRadius
     layer?.cornerCurve = .continuous
-    plate.cornerRadius = 7
+    plate.cornerRadius = SettingsMetrics.segmentedPlateRadius
     plate.cornerCurve = .continuous
     plate.anchorPoint = .zero
-    plate.shadowOffset = SettingsTokens.segmentPlateShadow.unflippedOffset
+    plate.shadowOffset = SettingsTokens.segmentPlateShadow.flippedOffset   // a sublayer of this flipped view
     plate.shadowRadius = SettingsTokens.segmentPlateShadow.radius
     layer?.addSublayer(plate)
     labels.forEach {
@@ -403,7 +403,7 @@ final class SettingsSegmentedControl: NSControl {
       for (index, label) in labels.enumerated() {
         let selected = index == selectedIndex
         label.string = NSAttributedString(string: segments[index], attributes: [
-          .font: NSFont.systemFont(ofSize: 12, weight: selected ? .semibold : .regular),
+          .font: ShellType.caption.weight(selected ? .semibold : .regular).font,
           .foregroundColor: (selected ? ShellTokens.primaryText : ShellTokens.secondaryText).resolve(flavor).nsColor(),
         ])
         label.contentsScale = scale
@@ -427,6 +427,8 @@ final class SettingsSegmentedControl: NSControl {
 /// VoiceOver reads the keys as words ("Shift Command D").
 @MainActor
 final class SettingsKeycapsView: NSView {
+  /// The key label's size on a keycap of `SettingsMetrics.keycapHeight`; it scales with the cap.
+  static let fontSizeAtKeycapHeight: CGFloat = 12
   let keys: [String]
   private let capHeight: CGFloat
   private var caps: [(layer: CALayer, text: CATextLayer, width: CGFloat)] = []
@@ -438,7 +440,7 @@ final class SettingsKeycapsView: NSView {
     wantsLayer = true
     for _ in keys {
       let cap = CALayer()
-      cap.cornerRadius = 6 * height / SettingsMetrics.keycapHeight
+      cap.cornerRadius = SettingsMetrics.keycapRadius * height / SettingsMetrics.keycapHeight
       cap.cornerCurve = .continuous
       let text = CATextLayer()
       text.alignmentMode = .center
@@ -455,7 +457,7 @@ final class SettingsKeycapsView: NSView {
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-  private var font: NSFont { .systemFont(ofSize: 12 * capHeight / SettingsMetrics.keycapHeight, weight: .medium) }
+  private var font: NSFont { .systemFont(ofSize: Self.fontSizeAtKeycapHeight * capHeight / SettingsMetrics.keycapHeight, weight: .medium) }
 
   override var isFlipped: Bool { true }
 
@@ -512,9 +514,9 @@ final class SettingsDefaultCapsule: NSView {
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
     wantsLayer = true
-    layer?.cornerRadius = 12
+    layer?.cornerRadius = ShellRadius.pill(height: SettingsMetrics.capsuleHeight)
     layer?.cornerCurve = .continuous
-    label.font = .systemFont(ofSize: 12, weight: .semibold)
+    label.font = ShellType.captionEmphasis.font
     addSubview(check)
     addSubview(label)
     setAccessibilityElement(true)
@@ -529,7 +531,7 @@ final class SettingsDefaultCapsule: NSView {
   override var isFlipped: Bool { true }
 
   override var intrinsicContentSize: NSSize {
-    NSSize(width: 7 + 12 + 6 + ceil(label.intrinsicContentSize.width) + 10, height: 24)
+    NSSize(width: 7 + 12 + 6 + ceil(label.intrinsicContentSize.width) + 10, height: SettingsMetrics.capsuleHeight)
   }
 
   override func layout() {

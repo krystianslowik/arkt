@@ -9,6 +9,8 @@ import Motion
 /// as a radio button in the "Settings" tab group; with Full Keyboard Access, Tab reaches it and Space selects.
 @MainActor
 public final class SettingsPaneItemView: NSView {
+  /// The pane label under the glyph.
+  static let labelFontSize: CGFloat = 11
   let pane: SettingsPane
   var onSelect: (@MainActor (SettingsPane) -> Void)?
   public private(set) var isSelected = false
@@ -34,7 +36,7 @@ public final class SettingsPaneItemView: NSView {
       fill.cornerRadius = SettingsMetrics.paneItemRadius
       fill.cornerCurve = .continuous
     }
-    plate.shadowOffset = SettingsTokens.paneItemPlateShadow.unflippedOffset
+    plate.shadowOffset = SettingsTokens.paneItemPlateShadow.flippedOffset   // a sublayer of this flipped view
     plate.shadowRadius = SettingsTokens.paneItemPlateShadow.radius
     plate.opacity = 0
     label.alignmentMode = .center
@@ -179,7 +181,7 @@ public final class SettingsPaneItemView: NSView {
       plate.shadowOpacity = plateShadow.alpha > 0 ? 1 : 0
       plate.borderWidth = increase && flavor == .dark ? 1 : 0
       plate.borderColor = SettingsTokens.separatorIncreasedContrast.resolve(flavor).cgColor
-      let font = NSFont.systemFont(ofSize: 11, weight: .medium)
+      let font = NSFont.systemFont(ofSize: Self.labelFontSize, weight: .medium)
       let line = ceil(font.ascender - font.descender)
       let glyphSize = SettingsMetrics.paneGlyph
       let top = ((box.height - glyphSize - SettingsMetrics.paneGlyphToLabel - line) / 2).rounded()
@@ -229,7 +231,7 @@ final class SettingsChromeView: NSView {
     material.state = .followsWindowActiveState
     addSubview(material)
     layer?.addSublayer(tint)
-    titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+    titleLabel.font = ShellType.bodyEmphasis.font
     titleLabel.alignment = .center
     titleLabel.setAccessibilityElement(false)        // the window title says it
     addSubview(titleLabel)

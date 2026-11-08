@@ -64,11 +64,32 @@ public struct ClosedBatch: Equatable, Sendable {
   }
 }
 
+/// A page of a blank or incognito window the user closed (Cmd-W, its row's X, Close Oldest; #746). It has no sidebar
+/// row: it comes back as a private page of the same window, and only there.
+public struct ClosedPrivatePage: Equatable, Sendable {
+  /// The page that closed, so a close cancelled at its leave-site prompt takes the entry off again.
+  public var tab: TabID
+  /// The unloaded copy with its back and forward history; nil when the engine made none or it closed since (the page
+  /// then reopens its URL without history).
+  public var parked: TabID?
+  public var url: URL?
+  /// Its row in the window's Pages list when it closed, so it comes back there (#789); nil when it had none.
+  public var row: Int?
+
+  public init(tab: TabID, parked: TabID?, url: URL?, row: Int? = nil) {
+    self.tab = tab
+    self.parked = parked
+    self.url = url
+    self.row = row
+  }
+}
+
 /// One entry of the reopen stack.
 public enum ClosedItem: Equatable, Sendable {
   case node(ClosedNode)
   case peek(ClosedPeek)
   case batch(ClosedBatch)
+  case privatePage(ClosedPrivatePage)
 
   /// The parked copies this item holds.
   public var parkedTabs: [TabID] {
@@ -76,6 +97,7 @@ public enum ClosedItem: Equatable, Sendable {
     case .node(let node): node.parkedTabs
     case .peek(let peek): peek.parked.map { [$0] } ?? []
     case .batch(let batch): batch.nodes.flatMap(\.parkedTabs)
+    case .privatePage(let page): page.parked.map { [$0] } ?? []
     }
   }
 }
@@ -159,6 +181,15 @@ public struct ReopenStack: Sendable {
     return []
   }
 
+  /// Takes off every close of private page `tab` (its close was cancelled, so none of them happened). Returns their
+  /// parked copies to close.
+  public mutating func remove(privatePage tab: TabID) -> [TabID] {
+    let isTab = { (item: ClosedItem) -> Bool in if case .privatePage(let page) = item { page.tab == tab } else { false } }
+    let removed = items.filter(isTab)
+    items.removeAll(where: isTab)
+    return removed.flatMap(\.parkedTabs)
+  }
+
   /// Puts `peek` on the most recent close of `node`, the row whose close closed it. False when there is none.
   public mutating func attach(_ peek: ClosedPeek, to node: NodeID) -> Bool {
     for index in items.indices.reversed() {
@@ -225,6 +256,9 @@ public struct ReopenStack: Sendable {
           return closed
         }
         return .batch(batch)
+      case .privatePage(var page):
+        if page.parked == tab { page.parked = nil }
+        return .privatePage(page)
       }
     }
   }

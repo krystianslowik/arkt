@@ -29,6 +29,7 @@ Plan: `docs/plans/2026-10-24-engine-week3.md` (pull request #220). Issue: #33. V
 | 0007 | extension dialogs as native sheets (#244, pull request #252) | exists | 4 | 0 |
 | 0008 | link activation throttle for Peek (#313, pull request #349) | exists | 1 | 0 |
 | 0009 | modified link clicks asked in `OpenURLFromTab` (#345) | exists | 2 | 0 |
+| 0012 | `FindBrowserWindowWithWebContents` finds a non-BrowserView window; no iOS address promo on it (#768) | exists | 2 | 0 |
 | - | Handshake (Decision 1) | ObjC runtime lookup, no patch (W3-0: lookup works) | 0 | 0 |
 | - | Framework name (Decision 7) | no patch unless open decision 1 changes | 0 (1-2) | 0 |
 | - | User data directory (Decision 8), `--no-startup-window` (Decision 2) | Info.plist key and argv, no patch | 0 | 0 |
@@ -40,6 +41,7 @@ Current (W3-0): 7 patch files, 17 upstream files, 0 hot-file hunks. Projection a
 if the framework is renamed by patch.
 After #313: 8 patch files, 18 upstream files, 0 hot-file hunks.
 After #345: 9 patch files, 20 upstream files, 0 hot-file hunks.
+After #768: 12 patch files; 0012 adds 2 upstream files (`browser_view.cc`, `address_bubbles_controller.cc`), 0 hot-file hunks.
 
 ## W3-12: Results, patch budget, issue updates, housekeeping
 
@@ -4524,7 +4526,7 @@ Every `Show*` logs `ARKT: autofill bubble <name> not shown` on each call.
 | `omnibox_autofill_bubble_controller.cc:130` | `GetAutofillBubbleHandler()`, unchecked | null-checked | nullptr | no crash, not shown (by construction) |
 | `payments_churned_users_bubble_controller.cc:150`, :218 (bubble, confirmation) | `Get()`, unchecked | null-checked | nullptr | no crash, not shown (by construction) |
 | `wallet_reminder_notice_bubble_controller.cc:139` | `Get()`, null-checked | null-checked | nullptr | no crash, not shown (by construction) |
-| `address_bubbles_controller.cc:61`, :75, :86 (save, update, sign-in promo) | `FindBrowserWindowWithWebContents()`, unchecked | `*`, `CHECK` at :248, :344 | no-op bubble; save and update then post the owned controller's `OnBubbleClosed()` | **crashes before the handler** (smoke); needs a patch, #768 |
+| `address_bubbles_controller.cc:61`, :75, :86 (save, update, sign-in promo) | `FindBrowserWindowWithWebContents()`, unchecked | `*`, `CHECK` at :248, :344 | no-op bubble; save and update then post the owned controller's `OnBubbleClosed()` | crashed before the handler (smoke). Since #768 (patch 0012): save and update reach the handler, no crash, not shown, posted close runs (smoke); sign-in promo not reached (needs DICE sign-in) |
 
 "By construction" rows were not reached in a fresh profile: they need a signed-in account, server cards, offers,
 Autofill AI data or the omnibox autofill flow. The handler and the bubble are non-null for them, and the table records
@@ -4610,3 +4612,1224 @@ In sync; nothing exported. Facade header copies `cmp` identical.
 Every Chromium run stopped by exact PID or crashed (`ps -p` prints nothing); the local HTTP server stopped by PID.
 Deleted: the throwaway profiles under `profiles/575-20261107/`, the logs, and the two crash reports the address runs
 wrote. Nothing under `~/Applications/ArktTest` or `/Applications/Arkt.app` was touched.
+
+## #577: tab state seams in the facade (crash, zoom, HTML fullscreen, crashed session)
+
+Date 2026-11-07. Branch `engine/577-tab-state-seams` from `origin/main` (`d10ec13`). Engine side of #576 (PR #660).
+Overlay and facade only: no patch.
+
+### Gate
+
+- Seams: the facade's per-tab `TabObserver` (crash, recovery, zoom, fullscreen), the facade engine (crashed session),
+  `ArktInfobarPresenter` and `ArktBrowserWindow::LayoutInfobars` (no infobar height while a tab is fullscreen).
+- Facade header: additive only, both copies `cmp` identical. Four event kinds after 25 (`TabCrashed` 26,
+  `TabRecovered` 27, `ZoomChanged` 28, `TabFullscreenChanged` 29), two enums (`ArktTerminationStatus`,
+  `ArktZoomCommand`), five event values, four tab handle values and `zoomWithCommand:`, and on `ArktEngine`
+  `lastSessionCrashed` and `dismissLastSession`. Required members, as #364 added sound: the Swift doubles
+  (`ScriptedFacade`, the ABI conformance doubles) grew them.
+- `.patches`: unchanged (11). `//components/zoom` added to `//arkt/api:embedder`; `exit_type_service.h` is included with
+  `nogncheck` (it is built into `//chrome/browser`).
+- Build: `nice -n 20 autoninja -C out/Spike chrome -j 4`; 1.9 TB free on the Chromium disk, 42 GB on `/`, swap 2.9 GB
+  used before and after.
+
+### What landed
+
+- **Crash.** `PrimaryMainFrameRenderProcessGone`: fullscreen left and the load ended (both reported only if they still
+  differ), then one `TabCrashed` with the folded status. `RenderViewTerminated` exits fullscreen before it notifies, and
+  resets the load progress without a load end, so the facade reports `LoadingChanged NO` itself; the later
+  `DidStopLoading` finds nothing new. `EVICTED_FOR_MEMORY` folds to out of memory (it is in `IsCrashed()`'s set but was
+  not in #576's list).
+- **Recovery.** No observer hears `WebContentsImpl::NotifyPrimaryMainFrameProcessIsAlive`, so the facade checks
+  `IsCrashed()` at `RenderFrameCreated` and `RenderFrameHostChanged` of the primary main frame (both come right after it)
+  and at the commit as a fallback, and reports `TabRecovered` once.
+- **Zoom.** The tab's `zoom::ZoomController` is observed (attached by the tab helpers; observed once it exists).
+  `ZoomChanged` is recorded only when the percent or the default flag changed. User initiated means the change came
+  from this tab's controller (old level differs from new in the event data): the facade's own `zoomWithCommand:`,
+  Chromium's zoom commands, `chrome.tabs.setZoom`. A host zoom map change reaches the other tabs of the host with the
+  current level twice: not user initiated. `can_show_bubble` was not used: it is false for an empty host.
+  `zoomWithCommand:` runs `zoom::PageZoom::Zoom` synchronously, so ChromiumEngine reports the change when its
+  `zoomIn`/`zoomOut`/`resetZoom` returns (contract rule 25) and drops the facade's later event for it (it maps
+  `ZoomChanged` from the handle's live zoom).
+- **`ZoomChangedForActiveTab` (pinned sources).** 156 no longer calls it on `BrowserWindow`: `BrowserView` subscribes to
+  `BrowserWindowZoomObserver` (`browser_view.cc:1072-1076`) and forwards to its toolbar. Nothing reaches
+  `ArktBrowserWindow`; the per-tab controller is the seam.
+- **HTML fullscreen.** `DidToggleFullscreenModeForTab` (with `WebContents::IsFullscreen()`, so a pending enter counts).
+  `ArktInfobarPresenter` now also observes its contents and asks for a layout when fullscreen toggles;
+  `LayoutInfobars` takes the stack out while `contents->IsFullscreen()`, and puts it back after.
+- **Crashed session.** The facade reads `ExitTypeService::GetLastSessionExitType(profile) == kCrashed` once when it
+  starts (the value is fixed when the service is made) and keeps the shell's dismissal for the run. Chromium's own
+  acknowledgement cannot be used: the first tab of a window created outside the startup flow acknowledges the crash
+  (`ExitTypeService::BrowserTabObserverImpl`), and every shell window is one, so Chromium's flag is already cleared
+  when the shell asks. Chromium's bubble needs a `BrowserView` (`SessionCrashedBubbleView::ShowBubble` returns early),
+  so it never shows on an engine window: no double prompt.
+- **ChromiumEngine** (`ChromiumEngine+TabState.swift`): maps the four kinds (snapshot written before the event, the
+  #581 note), seeds a listed tab's snapshot from the handle, forwards the three zoom calls and vends
+  `ChromiumSessionRecovery` (one object; a dismiss when nothing crashed does not reach the facade).
+- **Contract runner and kit tests:** rule 25 runs against Chromium (`chromiumChecks` is every rule below 26). The
+  scripted harness's `crashTab` records a RenderProcessGone batch; the app runner's navigates the tab to
+  `chrome://crash`. With the plain switch the runner prints `ARKT_CONTRACT rule 26 <check> DEFERRED (#583)` for each
+  check it does not run. Header comment fixed (it said "all 18 rules").
+- Self-test embedder: logs the four events and the tab state in `state`; commands `zoom in|out|reset`,
+  `zoom-command plus|minus|normal` (the host's `executeCommand` with `IDC_ZOOM_PLUS`/`MINUS`/`NORMAL`, what the main
+  menu's Cmd-+ and Cmd-0 send), `fullscreen [exit]` and `session [dismiss]`.
+
+### Tests first
+
+`ChromiumTabStateTests` (14 cases) and `TabStateABITests` (3) were written against the new header before ChromiumEngine
+mapped anything: 13 issues failed for the right reason (no events, `sessionRecovery` nil). `ChromiumTabStateDefaultsTests`
+(which asserted that ChromiumEngine reports nothing) was replaced by them. Deliberate breaks: with ChromiumEngine's
+`hub.emit(.tabRecovered(id))` commented out, two `ChromiumTabStateTests` and the contract case
+`reloadRecoversACrashedTabOnce` fail (`recovery reported 0 times, want 1`); with the facade's `TabRecovered` emit
+removed, a self-test reload of a crashed tab logs no `tabRecovered`. Both restored and green again.
+
+### Swift tests (`nice -n 20`, `-j 2`, in `app/ArktShell/ShellKit`)
+
+| Command | Result |
+|---|---|
+| `swift test --filter "ChromiumEngineKitTests\|ArktEngineABITests\|EngineAPITests"` (first version) | 141 + 28 + 279 passed, 0 failed: ChromiumEngineKitTests (14 new `ChromiumTabStateTests`, the rule 25 contract cases over both facade scripts, 1 defaults test removed), ArktEngineABITests (3 new `TabStateABITests`), EngineAPITests (1 new `TabStateTests` case: the snapshot inside the `.tabFullscreenChanged` handler) |
+| Full suite (`swift test --skip ShellKitGUITests`) | not run locally (several lanes building on this Mac); CI's Swift tests job |
+
+### Build
+
+| Step | Result | Numbers |
+|---|---|---|
+| `nice -n 20 autoninja -C out/Spike chrome -j 4` | `The build has finished successfully.`, `FAILED:` 0 | 42 s |
+| `gn check out/Spike //arkt/api:embedder`, `//arkt/browser:window` | the pre-existing errors only (`find_in_page` headers in the facade, `webstore_install_result.h`); none for the new includes | |
+| Engine app, `xcodebuild -scheme ArktShell -configuration Engine PRODUCT_BUNDLE_IDENTIFIER=dev.arkt.Arkt.try577 -jobs 2` (`nice -n 20`, `CONFIGURATION_BUILD_DIR=$CHROMIUM_ROOT/embed-577`) | `BUILD SUCCEEDED`, `Engine framework copied: Chromium Framework.framework 156.0.8078.48` | 3 min; 522 component dylibs cloned next to the bundle (`cp -c`) |
+
+Load average 2 to 9 while building and running (other lanes' work; nothing added).
+
+### Self-test runs (`out/Spike/Chromium.app`, `--no-startup-window --arkt-facade-selftest --arkt-engine-test-api`, fresh profiles under `profiles/577-20261107/`, `--use-mock-keychain`, pages from a loopback server, commands through the page title over the DevTools protocol)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Zoom through the facade | PASS | `zoom in` x3: `zoomChanged percent=110`, `125`, `150`, each `user=yes`; `zoom out`: `125`; `zoom reset`: `100 default=yes`; a second reset: nothing |
+| Chromium's zoom commands (Cmd-+, Cmd-0 path) | PASS | `zoom-command plus` x2: `110`, `125` `user=yes`; `normal`: `100 default=yes`; a second `normal`: `enabled=no`, nothing |
+| Zoom per host | PASS | a `window.open` tab on the same host starts with `zoomChanged percent=110 user=no`; zooming the first tab to 125 reports `125 user=no` on the second; the second navigating to `localhost`: `100 default=yes user=no` |
+| `chrome://crash` | PASS | `loadingChanged loading=no`, then `tabCrashed status=1` (crashed) `loading=no listed=yes`; a second crash of the tab before recovery reports nothing |
+| Zoom of a crashed tab | PASS | `zoom in` on it: no event, zoom stays 100 (Chromium does not zoom a page without a live frame) |
+| Recovery | PASS | `reload` of the crashed tab: `tabRecovered live=0 loading=yes`, before the reload's `urlChanged` and `loadingChanged`; a navigation of a crashed tab: `tabRecovered`, then the new URL |
+| `requestFullscreen` with an infobar | PASS | automation infobar raised from `chrome://infobar-internals` (`internal_only_uis_enabled` set in the fresh profile's Local State): `innerHeight` 600 -> 560, container subviews 2; `fullscreen`: `ARKT: enter fullscreen`, `tabFullscreenChanged fullscreen=yes`, container subviews 1 (no infobar height), page 1130x1800; `fullscreen exit`: `fullscreen=no`, subviews 2, page 560x900 again |
+| Crash while fullscreen | PASS | `ARKT: exit fullscreen`, `loadingChanged no`, `tabFullscreenChanged fullscreen=no`, then `tabCrashed` |
+| `chrome://gpucrash` | NOT REACHED | a facade navigation is `PAGE_TRANSITION_TYPED` without `FROM_ADDRESS_BAR`, and content handles browser debug URLs only for an explicit navigation (`ContentBrowserClient::IsExplicitNavigation`); the DevTools `Page.navigate` is not one either (`net::ERR_ABORTED`, the GPU process kept its pid). See "Needs the maintainer" below |
+| GPU process exits (the GPU helper of the test build killed by PID, 6 times) | PASS to 5 | after each of exits 1-5: `GPU process exited unexpectedly`, `Reinitialized the GPU process after a crash`, the window and both tabs listed, no tab or window event. Exit 6: `GPU process isn't usable. Goodbye.`, the browser ends (Chromium's limit; exits 4-5 already reinitialized in 0 ms, the software fallback) |
+| Killed browser, relaunch (`relaunch` profile, SIGKILL by PID) | PASS | killed 15 s after start (`exit_type` `Crashed` on disk), relaunched: `facade last session crashed`, `embedderReady lastSessionCrashed=yes`, `0 queued request(s)` and one window (Chromium restored nothing and showed no bubble); `session`: yes; `session dismiss`: `crashed session dismissed`, no; a second dismiss: no; SIGTERM: `exit_type` `SessionEnded`; relaunch: clean |
+| Killed 7 s after a fresh start | finding | relaunch reported clean: the first `Preferences` write had not happened yet, so no `Crashed` mark was on disk |
+| Crash, relaunch, quit without answering | finding | the next relaunch reports clean: Chromium acknowledged the crash itself when the shell's first window got its tab, so a clean quit writes `SessionEnded`. Chrome's own behaviour (the crash stays until the bubble is answered) would need the facade to keep the mark; see "Needs the maintainer" |
+
+`FATAL`, `NOTREACHED`, `Check failed` lines: 0 in every run except the sixth GPU exit (Chromium's own fatal, above).
+
+### In-app contract (`dev.arkt.Arkt.try577`, Engine app on `out/Spike`, `--arkt-engine-contract --arkt-engine-test-api`, tabs probe, throwaway profile, `ARKT_DATA_DIR`, `ARKT_ARC_DIR` and `ARKT_DEFAULTS_SUITE` per run, `--use-mock-keychain`)
+
+| Check | Result |
+|---|---|
+| Rule 25 `zoomStepIsReportedOnceAndNothingAtTheEnds` | PASS (89 ms) |
+| Rule 25 `crashedTabStaysListed` (`chrome://crash`) | PASS (691 ms) |
+| Rule 25 `reloadRecoversACrashedTabOnce` | PASS (3841 ms) |
+| Rule 26 (3 checks) | `DEFERRED (#583)` |
+| Result | `21/25`, exit 1: rules 19, 20, 21 and 24 are NOT-APPLICABLE as before (the runner has no `raiseDialog`, `raisePermission`, `raiseInfobar` or `downloads` driver); every other rule PASS, 0 `FATAL` |
+
+### Patch budget
+
+| Source | Count |
+|---|---|
+| `.patches` lines | 11 |
+| `arkt` commits above `156.0.8078.48` | 11 |
+
+In sync; nothing exported. Facade header copies `cmp` identical.
+
+### Left open
+
+- `chrome://gpucrash` from the shell, and the unanswered crashed session across runs (maintainer questions in the pull
+  request).
+- The shell side: #578 (crash panel), #579 (zoom), #581 (fullscreen), #580 / #690 (restore).
+
+### #577 review fixes (PR #770)
+
+- **Replaced contents clear a crash.** `ReportAll` (new contents after `TabReplaced`) now calls `ReportRecovery()` after
+  `ReportCrash`: live new contents end the crash, so the tab's next real crash is reported. The scripted facade models
+  it (`replaceContents(live:)` records `TabRecovered` after `TabReplaced`); `ChromiumTabStateTests` checks crash,
+  live replacement, crash again (`tabCrashed`, `tabRecovered`, `tabCrashed`) and that crashed replacement contents
+  keep the crash. Deliberate break: without the recovery in `replaceContents`, the second crash is lost and the test
+  fails (2 issues); restored. A replacement of a crashed tab's contents was not reachable in the self-test, so the
+  real path is covered by the scripted model only.
+- **Scripted order.** The scripted facade reports `TabRecovered` before the URL and the load start of the reload or
+  navigation, as the real facade does (`RenderFrameCreated` comes first, seen in the self-test runs above).
+- **Zoom batch rule: the last event wins.** ChromiumEngine reports one change per tab and batch, from the live zoom,
+  with the user flag of the batch's last `ZoomChanged` for that tab (the event that set the live zoom). Tested both
+  ways; with the event's own flag instead, both cases fail; restored.
+- **Header:** the `ZoomChanged` comment notes that in an isolated or manual zoom mode a navigation can report user
+  initiated (both copies, `cmp` identical).
+- `ContractCheck.chromiumDeferred` reads a rule-to-issue map (`chromiumDeferredRules`, `[26: 583]`); doc comments moved
+  to the members they describe (`lastSessionCrashed`, `isFiltered`).
+
+| Check | Result |
+|---|---|
+| `swift test --filter "ChromiumEngineKitTests\|ArktEngineABITests\|EngineAPITests"` (`nice -n 20`, `-j 2`) | 144 + 28 + 279 passed, 0 failed (3 new ChromiumTabStateTests cases plus the 2-argument batch test) |
+| `nice -n 20 autoninja -C out/Spike chrome -j 4` | finished successfully, `FAILED:` 0; `gn check` only the pre-existing errors |
+| Self-test, fresh profile: zoom in, then `chrome://crash`, reload, `chrome://crash`, reload | `zoomChanged 110 user=yes`; `tabCrashed`, `tabRecovered`, `tabCrashed`, `tabRecovered`; 0 `FATAL` |
+| `.patches` | 11 = 11, in sync |
+
+Cleanup: the self-test and the loopback server stopped by PID; the profiles, the build log and the three crash dumps
+of the run deleted.
+
+## #768: address bubbles find the Arkt window (patch 0012)
+
+Date 2026-11-07. Branch `engine/768-address-bubble-window` from `origin/main` (`659a70d`). One Chromium patch (0012),
+option A as decided in the issue; overlay, facade header and Swift unchanged.
+
+### Gate
+
+- Why a patch: `BrowserWindow::FindBrowserWindowWithWebContents` (`browser_view.cc:1173-1190`) returned only a
+  `BrowserView`, and the address bubbles dereference its result before any handler is asked (`address_bubbles_controller.cc:61`,
+  :75, :86). No overlay seam changes that static lookup.
+- Facade header: unchanged (`cmp` identical). `.patches`: 11 to 12, number 0012 claimed in the issue; no open engine
+  pull request touches either file, and no earlier patch touches them.
+- Build: `nice -n 15 autoninja -j 4 -C out/Spike chrome`; Chromium disk 1.9 TB free, internal 37 GB, swap 2.9 of 4 GB.
+  Overlay link checked: `$CR/arkt` points at this worktree's `engine/arkt`.
+
+### What landed
+
+Patch 0012 `Arkt: find a non-BrowserView window for a WebContents`, 2 files, 13 insertions, 4 deletions (after the
+review rework below; the first version had 14 and 8):
+
+- `FindBrowserWindowWithWebContents`, tab lookup: before the old return line, the tab's window from
+  `BrowserWindow::FromBrowser(browser)` is returned when it is not a `BrowserView` (the `browser` local is no longer
+  const). `FromBrowser` ends in `GetWindow()`, the Arkt window. A `BrowserView` window, including one being torn down
+  (when `FromBrowser` reaches it through `GetWindow()`), takes the old return line. A `WebUIBrowserWindow` also
+  changes: it was nullptr from the tab lookup and is now returned.
+- The widget branch is not patched. Arkt tabs sit in Arkt's own `NSWindow`, not in a Views widget, so their lookup
+  reaches the tab branch: the smoke below passes without a widget hunk. Contents that are not a tab (WebUI bubbles,
+  dialogs) in a non-`BrowserView` widget still get nullptr.
+- `MaybeShowIOSDektopAddressPromo`: returns when `AsBrowserView()` is nullptr instead of dereferencing it. Only reached
+  after the user accepts the save prompt (`OnUserDecision`, kAccepted), which the no-op handler never does, so it is
+  covered by construction, not by the smoke.
+
+### Build
+
+| Step | Result | Numbers |
+|---|---|---|
+| `nice -n 15 autoninja -j 4 -C out/Spike chrome` (first version) | `The build has finished successfully.`, `FAILED:` 0 | incremental |
+| Deliberate break 1: `browser_view.cc` back to the pinned version (`git checkout HEAD~1 --`), rebuilt | finished, `FAILED:` 0 | 47 s |
+| Deliberate break 2: patch in, overlay `PostAddressClosed` returning before it posts, rebuilt | finished, `FAILED:` 0 | 46 s |
+| Both restored, rebuilt | finished, `FAILED:` 0; `git status` clean in both trees | 30 s |
+| Review rework: tab-lookup hunk reworked, widget hunk dropped (arkt commit amended), rebuilt | finished, `FAILED:` 0 | 47 s |
+| Break 3: `browser_view.cc` back to the pinned version, rebuilt | finished, `FAILED:` 0 | 44 s |
+| Restored, rebuilt | finished, `FAILED:` 0; `git status` clean | 46 s |
+
+Load average 3 to 6 (other lanes' work; nothing added).
+
+### Smoke (run1, run2, break 1 and break 2 on the first version; run3 and break 3 on the reworked patch; `out/Spike/Chromium.app`, fresh profiles under `profiles/768-20261107/`, `--use-mock-keychain`, form on `127.0.0.1:8768`, fields typed with `Input.insertText` over the DevTools protocol)
+
+Every run starts with `ARKT: browsers normal=1 arkt=1 views=0`: the form tab is on an Arkt window. Saved addresses for
+the update rows are written through `chrome.autofillPrivate.saveAddress` on `chrome://settings/addresses` (no phone),
+then the form is submitted with the same name and address plus a phone. All submissions in one tab.
+
+| Run | Check | Result |
+|---|---|---|
+| run1, run2, run3 | full US address (name, street, city, state, ZIP, country, phone, email) | `ARKT: autofill bubble SaveAddressProfile not shown`, no crash |
+| run1, run2, run3 | second and third different addresses, same tab | `SaveAddressProfile not shown` each time: the posted `OnBubbleClosed()` ran and the controller let go of the no-op bubble |
+| run1, run2, run3 | stored address submitted again with a new phone | `ARKT: autofill bubble UpdateAddressProfile not shown`, no crash |
+| run2, run3 | the same update a second time, same tab | `UpdateAddressProfile not shown` again |
+| run1, run2, run3 | tab closed | `ARKT: native window destroyed`, no crash |
+| break 1 | first address submit | `Received signal 11 SEGV_ACCERR 000000000000`; crash report top frame `autofill::(anonymous namespace)::ShowSaveBubble`, then `AddressBubblesController::DoShowBubble` |
+| break 3 (tab-lookup change reverted) | first address submit | the same crash: `Received signal 11 SEGV_ACCERR 000000000000`, top frame `ShowSaveBubble`, then `AddressBubblesController::DoShowBubble` |
+| break 2 | three different addresses, same tab | only the first `SaveAddressProfile not shown`; the next two prompts are not shown: without the posted close the controller keeps the no-op bubble |
+
+`FATAL`, `NOTREACHED`, `Check failed` and `Received signal` lines in run1, run2 and run3: 0. In run1 and break 1 the submit was a
+synthetic mouse click; in the later runs the window was occluded (`visibilityState` hidden) and dropped synthetic
+clicks, so the button was clicked from script (`click()` with a user gesture); the typed values are the same.
+
+### Other callers of `FindBrowserWindowWithWebContents`
+
+The three unchecked callers named in the issue were not reachable in a fresh profile, and the patch helps them only
+when the contents are a tab of an Arkt window:
+
+| Caller | Needs | On an Arkt window |
+|---|---|---|
+| `managed_profile_required_navigation_throttle.cc:213-215` (`->Show()`) | an enterprise sign-in that creates a managed profile | the enterprise action tab now finds the Arkt window (by construction) |
+| `access_code_cast_dialog.cc:65-66` (`->GetBounds()`) | the access code Cast policy | if `web_contents` is a tab of an Arkt window, the lookup now finds the Arkt window; not checked (by construction) |
+| `webui_contents_wrapper.cc:195-196` (`->OpenEyeDropper()`) | a WebUI bubble with an eye dropper | still nullptr: bubble contents are not a tab |
+
+### Patch budget
+
+| Source | Count |
+|---|---|
+| `.patches` lines | 12 |
+| `arkt` commits above `156.0.8078.48` | 12 |
+
+In sync. Export changed only `.patches` and the new patch (patches 0001 to 0011 byte-identical). Facade header copies
+`cmp` identical.
+
+### Cleanup
+
+Every Chromium run stopped by exact PID or exited when its last tab closed, and the break 1 run crashed (`ps -p` prints
+nothing); the loopback server stopped by PID. Deleted: the throwaway profiles under `profiles/768-20261107/`, the build
+logs and the one crash report break 1 wrote. Nothing under `~/Applications/ArktTest` or `/Applications/Arkt.app` was
+touched.
+
+## #583: page info and per-site permissions in the facade
+
+Date 2026-11-07. Branch `engine/583-page-info-seam` from `origin/main` (`a1f49a5`). Engine side of #582 (PR #691).
+Overlay and facade only: no patch. Contract rule 26, deferred to this issue by #770, now runs against Chromium.
+
+### Gate
+
+- Seams: a new overlay file pair `arkt/api/arkt_page_info.{h,cc}` (`PageInfoHub`), reached from the facade's tab handle
+  and engine; the facade's `TabObserver` for the security state. No upstream file is touched.
+- Facade header: additive only, both copies `cmp` identical. One event kind after 29 (`PageInfoChanged` 30, no values),
+  three enums (`ArktPageConnection`, `ArktPermissionSetting`, `ArktSitePermissionKind`, the last in `SitePermissionKind`
+  order), three value protocols (`ArktSitePermission`, `ArktPageInfo`, `ArktSitePermissions`), on the tab handle
+  `pageInfo`, `setPermission:toSetting:forOrigin:`, `resetPermissionsForOrigin:`, `pageInfoDidClose` and
+  `openSiteSettingsForOrigin:`, on the engine `sitesWithPermissions`. Required members, as #577 added its own: the
+  Swift doubles (`ScriptedFacade`, the ABI conformance doubles) grew them.
+- `.patches`: unchanged (12). New deps of `//arkt/api:embedder`: `//components/browsing_data/content`,
+  `//components/content_settings/{browser,core/browser,core/common}`, `//components/page_info`,
+  `//components/permissions`, `//components/security_state/core`, `//components/strings`, `//components/url_formatter`.
+  The `chrome/browser` headers (`ChromePageInfoDelegate`, `ChromeBrowsingDataModelDelegate`, the content settings and
+  auto blocker factories, `chrome_security_state_util.h`, `profile_observer.h`) are included with `nogncheck`, as the
+  facade already does for `//chrome/browser` code.
+- Build: `nice -n 20 autoninja -C out/Spike chrome -j 4`; 1.9 TB free on the Chromium disk, 40 GB on `/`.
+
+### What landed
+
+- **Reads are plain reads** (`PageInfoHub::Read`), cheap enough for the shell's pill, which reads the current tab's page
+  info on every address refresh. Nothing is created per read: no Chromium `PageInfo`, no metrics.
+  - Connection: `chrome_security_state::GetSecurityLevel` and `GetVisibleSecurityState` of the tab, folded as the
+    header says (`SECURE` secure; `DANGEROUS` with a Safe Browsing status flagged, with a certificate error
+    certificate error; `NONE`/`WARNING` on https with mixed content not fully secure, else not secure). `file:` is a
+    local file; every scheme other than http and https is a page of the browser itself.
+  - Host: `url_formatter::IDNToUnicode` (punycode when its spoof checks decline). Origin: `url::Origin::Serialize()`,
+    the same string `sitesWithPermissions` uses, so the two can be matched.
+  - Certificate of a secure page: subject common name, issuer organization (else common name), expiry.
+  - Permissions: each kind's `HostContentSettingsMap::GetContentSetting` for the origin; default when the rule is
+    the wildcard pair (as `PageInfo::PopulatePermissionInfo`); an embargoed Ask reads Block; options from the content
+    settings registry's valid settings; titles from `PageInfoUI::PermissionTypeToUIString` (insecure content has no
+    page info row, so it takes the site settings label `IDS_SITE_SETTINGS_TYPE_INSECURE_CONTENT`). Listed: location,
+    camera, microphone and notifications always, then every other kind with an exception, an embargo, in use
+    (`PageSpecificContentSettings::IsInUse`), or sound once the tab played audio, as page info lists them.
+  - Site data: as `chrome://settings/content/siteDetails` totals it (`BrowsingDataModel::BuildFromDisk`, entries
+    matching the origin, their storage bytes and first-party cookies). The model is per profile and reused for 10 s; a
+    read of an older one starts a new count, keeps answering the old one meanwhile, and the tab hears
+    `PageInfoChanged` when the new count differs from what it read. Before the first count the value is absent
+    (`siteData` nil in Swift, "still counting").
+- **Changes go through Chromium's own page info.** The first change from a tab to its own site opens a `PageInfo` for
+  it (with `ChromePageInfoDelegate` and a page info UI that is never shown) and calls `OnSitePermissionChanged`: the
+  narrowest pattern, embargo cleared, constraints, and the reload infobar bookkeeping (any kind but sound needs it).
+  `pageInfoDidClose` calls `OnUIClosing`, which adds Chromium's `PageInfoInfoBarDelegate` to the tab once
+  (`ArktInfobarKindReload`, already mapped since #400); the session ends there, so a second close adds nothing. A
+  change to another site (Settings' per-site list, #133) writes the same setting directly and raises no infobar. The
+  default setting removes the exception. Reset sets every kind with an exception or an embargo back to the default
+  (the origin-scoped exceptions; a broader `[*.]host` user exception stays, as with Chromium's page info).
+  `openSiteSettings` runs `ChromePageInfoDelegate::ShowSiteSettings` (siteDetails in a tab of the Arkt window).
+- **Announcements.** Each profile's `HostContentSettingsMap` is observed once read. A change from one facade call is
+  reported once per tab of the matching origin, after the call (a reset of 21 kinds is one event). A change made
+  elsewhere (siteDetails, an extension) comes as one notification per kind; the tabs it touched are reported once,
+  from a posted task. Tabs of other origins hear nothing. The connection's security state is reported when the
+  folded connection changes (`DidChangeVisibleSecurityState`).
+- **ChromiumEngine** (`ChromiumEngine+PageInfo.swift`): `siteSettings` is the engine; maps the values and the four
+  calls, and `PageInfoChanged` to `.pageInfoChanged`. A permission kind this build does not know is left out.
+  `ContractCheck.chromiumDeferredRules` is empty: `chromiumChecks` is rules 1 to 26, and the app runner prints no
+  `DEFERRED` line.
+- Self-test embedder: logs `pageInfoChanged`; commands `pageinfo`, `setperm <kind> allow|ask|block`, `resetperm`,
+  `pageinfo-close`, `sitesettings` and `sites`.
+
+### Tests first
+
+`ChromiumPageInfoTests` (16 cases), the scripted facade's page info (`ScriptedPageInfo.swift`) and `PageInfoABITests`
+(3) were written against the new header. Without `ChromiumEngine+PageInfo.swift` the test target does not compile
+(`ChromiumEngine` has no `pageInfo(of:)`, no `siteSettings`): the red run. The mapping itself was written before the
+tests, not after them (deviation). `ChromiumPageInfoDefaultsTests` (ChromiumEngine has no site settings, rule 26 not
+applicable) is removed. Deliberate break: with ChromiumEngine's `hub.emit(.pageInfoChanged(id))` replaced by `break`,
+three `ChromiumPageInfoTests` and four contract cases of rule 26 fail (8 issues); restored and green again.
+
+### Swift tests (`nice -n 20`, `-j 2`, in `app/ArktShell/ShellKit`)
+
+| Command | Result |
+|---|---|
+| `swift test --filter "ChromiumEngineKitTests\|ArktEngineABITests\|EngineAPITests"` | 158 + 31 + 279 passed, 0 failed. ChromiumEngineKitTests: 16 new `ChromiumPageInfoTests` (one with 5 arguments), rule 26 in `contract(_:_:)` over both facade scripts (112 cases, was 106), 2 defaults tests removed. ArktEngineABITests: 3 new `PageInfoABITests` |
+| Full suite (`swift test --skip ShellKitGUITests`) | not run locally (several lanes building on this Mac); CI's Swift tests job |
+
+### Build
+
+| Step | Result | Numbers |
+|---|---|---|
+| `nice -n 20 autoninja -C out/Spike chrome -j 4` | `The build has finished successfully.`, `FAILED:` 0 (first tries failed on a missing `switch` case in the self-test, `-Wunsafe-buffer-usage` on C array indexing and a refcounted bound argument; fixed) | 30 s for the last full step |
+| `gn check out/Spike //arkt/api:embedder` | the 4 pre-existing errors only (`find_in_page` headers in the facade); none for the new file | |
+| Engine app, `xcodebuild -scheme ArktShell -configuration Engine PRODUCT_BUNDLE_IDENTIFIER=dev.arkt.Arkt.try583 -jobs 2` (`nice -n 20`, `CONFIGURATION_BUILD_DIR=$CHROMIUM_ROOT/embed-583`) | `BUILD SUCCEEDED`, `Engine framework copied: Chromium Framework.framework 156.0.8078.48` | 522 component dylibs cloned next to the bundle (`cp -c`) |
+
+Load average 3 to 6 while building and running (other lanes' work; nothing added).
+
+### Self-test runs (`out/Spike/Chromium.app`, `--no-startup-window --arkt-facade-selftest --arkt-engine-test-api --remote-debugging-port=9333`, fresh profiles under `profiles/583-20261107/`, `--use-mock-keychain`, pages from a loopback server on `127.0.0.1:8583` that sets two cookies and 2 KB of local storage, commands through the page title over the DevTools protocol)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Read on `http://127.0.0.1:8583/a` | PASS | `origin=http://127.0.0.1:8583 host=127.0.0.1 connection=1` (not secure), location, camera, microphone, notifications at Ask, default, options Allow, Ask, Block; `siteData=counting`, then one `pageInfoChanged` with `2 cookies 2055 bytes` |
+| Two changes (location Allow, camera Block) | PASS | read back at once (`setting=0 default=no`, `setting=2 default=no`), one `pageInfoChanged` per change on the tab; the `localhost:8583` tab of the same window hears nothing |
+| No-ops | PASS | camera Block again, and Ask for pop-ups (not offered): nothing changes, no event |
+| Per-site list | PASS | `sites count=1`: `http://127.0.0.1:8583` with location Allow and camera Block |
+| Values against `chrome://settings/content/siteDetails?site=http%3A%2F%2F127.0.0.1%3A8583` (opened by `sitesettings`, a tab of the Arkt window; read with the page's own `getOriginPermissions` and `fetchUsageTotal`) | PASS, one difference | camera, microphone, notifications, pop-ups, sound and JavaScript as changed or default agree, each `preference` where page info says not default and `default` where it says default; usage `2,055 B`, `2 cookies` = page info's count. Location: siteDetails `ask (preference)`, page info Allow. siteDetails asks the permission controller, and `GeolocationPermissionContextSystem` turns an Allow into Ask while macOS has not decided location access for the app (`kNotDetermined`, the test build never asked); page info, Chromium's bubble included, shows the stored setting. See "Needs the maintainer" |
+| Reload infobar | PASS | close with no change: nothing. Location Allow and notifications Block, then close: `infobarsChanged count=1`, the tab's page 600 -> 560 high; a second close: nothing. Sound Block on the other tab, then close: no infobar (Chromium needs no reload for sound) |
+| Changes made in siteDetails | PASS | one kind (`setOriginPermissions` for the microphone): one `pageInfoChanged` on the site's tab; every kind reset from there (22 notifications): one `pageInfoChanged`; the other site's tab: nothing |
+| Reset from the facade | PASS | after 21 kinds were blocked: one `pageInfoChanged`, the four common kinds at their default, `sites count=0` |
+| Local file, internal page, certificate error | PASS | `file://.../Local%20Notes.html`: `origin=file:// host=Local Notes.html connection=5`, no permissions, no site data; `chrome://version/`: `connection=6`, no permissions; `https://127.0.0.1:8584/` with a self-signed certificate (the interstitial): `connection=3` (certificate error) |
+
+`FATAL`, `NOTREACHED`, `Check failed` lines: 0 in the final runs. Earlier runs found two things: the first version asked
+`PageInfoUI::PermissionTypeToUIString` for insecure content, which page info has no row for (`NOTREACHED`, fixed with
+the site settings label); and one run was ended by the smoke itself, which passed siteDetails a type name it does not
+know (`geolocation` for `location`, a `CHECK` in the settings handler, not in the facade). A command sent while the
+first navigation had not committed yet read no page info (`GetLastCommittedURL` empty), as it should; the runs wait
+for the commit first.
+
+### In-app contract (`dev.arkt.Arkt.try583`, Engine app on `out/Spike`, `--arkt-engine-contract --arkt-engine-test-api`, tabs probe, throwaway profile, `ARKT_DATA_DIR`, `ARKT_ARC_DIR` and `ARKT_DEFAULTS_SUITE` per run, `--use-mock-keychain`)
+
+| Check | Result |
+|---|---|
+| Rule 26 `pageInfoNamesTheSiteItShows` (`127.0.0.1` and `localhost` pages) | PASS (109 ms) |
+| Rule 26 `permissionChangeIsReadBackAndResetRestoresTheDefault` | PASS (116 ms) |
+| Rule 26 `permissionChangeRaisesTheReloadInfobarOnce` | PASS (147 ms) |
+| Rule 25 (3 checks) | PASS (92, 599, 3750 ms) |
+| Result | `22/26`, exit 1: rules 19, 20, 21 and 24 are NOT-APPLICABLE as before (no `raiseDialog`, `raisePermission`, `raiseInfobar` or `downloads` driver in the runner); every other rule PASS; no `DEFERRED` line; 0 `FATAL` |
+
+### Patch budget
+
+| Source | Count |
+|---|---|
+| `.patches` lines | 12 |
+| `arkt` commits above `156.0.8078.48` | 12 |
+
+In sync, and the 12 commits export to the committed patch files unchanged; nothing exported. Facade header copies
+`cmp` identical.
+
+### Left open
+
+- Location while macOS has not decided location access: page info shows the stored setting, siteDetails the effective
+  one (maintainer question in the pull request).
+- Site data is counted from the whole profile's `BrowsingDataModel`, at most once per 10 s, when the pill or the
+  panel reads page info; an open signal from the shell would let the engine count only for an open panel.
+- A host-scoped exception (a `[*.]host` pattern) lists under `http://host` in `sitesWithPermissions`, the origin its
+  pattern stands for; exceptions this facade writes are origin-scoped.
+
+### Cleanup
+
+Every Chromium and app run stopped by exact PID or exited on its own (the contract runner exits; two self-test runs
+crashed as described above); `ps -p` prints nothing for any of them. The loopback and TLS servers stopped by PID.
+Deleted: the throwaway profiles under `profiles/583-20261107/` (with the crash reports the two crashed runs wrote), the
+`embed-583` folder, the build logs and the run's defaults suite. Nothing under `~/Applications/ArktTest` or
+`/Applications/Arkt.app` was touched.
+
+### #583 review fixes (PR #778)
+
+- **A page info session ends with its page.** `Session` now also ends on `PrimaryPageChanged` (a committed
+  cross-document navigation of the primary main frame: reload, link, back and forward, an activation), without
+  `OnUIClosing`, so closing the panel after a change and a navigation adds no reload infobar. The scripted facade ends
+  its pending reload when a new page commits; `ChromiumPageInfoTests.aNewPageEndsThePanelsChangesSoACloseRaisesNoInfobar`
+  covers it. Deliberate breaks: without the scripted end the test fails; with the facade's `PrimaryPageChanged` body
+  emptied, the self-test's change, `reload`, `pageinfo-close` adds `infobarsChanged count=1`. Restored: nothing.
+- **The connection is seeded when the tab is bound** (`TabObserver::Seed`), so the first security state change that
+  differs is reported (the first commit after the initial empty document is one: `pageInfoChanged connection=1` right
+  after the load starts). Scripted case `theConnectionIsSeededWhenTheTabIsBound`; with the scripted seed removed it
+  fails.
+- Comments: `ArktPageConnection` (both header copies) and `PageConnection` now say what the code does (`DANGEROUS`
+  with neither a Safe Browsing verdict nor a certificate error is not secure; `ran_mixed_content` counts);
+  `hasSiteData` says the old count is reported while a recount runs; reset says it removes origin-scoped exceptions
+  only. `cmp` identical.
+- `TabStateTests.defaultsKeepAnEngineWithoutTabStateUnchanged` checks that an engine without page info has no
+  `siteSettings`.
+- `engine/REBASE.md`, section 5: a check of `kApproximateGeolocationPermission` (`GEOLOCATION` vs
+  `GEOLOCATION_WITH_OPTIONS`) and of the page info string table for every listed kind.
+- `origin/main` merged (`ced72fd`, no conflicts).
+
+| Check | Result |
+|---|---|
+| `swift test --filter "ChromiumEngineKitTests\|ArktEngineABITests\|EngineAPITests"` (`nice -n 20`, `-j 2`) | 160 + 31 + 279 passed, 0 failed (2 new `ChromiumPageInfoTests`; the `siteSettings` default check is in an existing test) |
+| `nice -n 20 autoninja -C out/Spike chrome -j 4` | finished successfully, `FAILED:` 0 |
+| Self-test, fresh profiles: location Allow, `reload`, close; then notifications Block, close | no infobar after the reload; `infobarsChanged count=1` after the second close; 0 `FATAL` |
+| Engine app and in-app contract (`dev.arkt.Arkt.try583`, throwaway profile, `--use-mock-keychain`) | `BUILD SUCCEEDED`; rule 26 PASS (105, 108, 139 ms), rule 25 PASS, `22/26` with the same four NOT-APPLICABLE rules |
+| `.patches` | 12 = 12, in sync |
+
+Cleanup: every run stopped by PID or exited; the loopback server stopped by PID; the profiles, the `embed-583` folder,
+the build logs and the defaults suite deleted.
+
+## #721: uninstall an extension through the facade
+
+Date 2026-11-07. Branch `engine/721-uninstall-extension` from `origin/main` (`03d6c58`). Engine side of #720 (the
+remove sheet and `EngineExtensions.uninstallExtension`). Overlay and facade only: no patch.
+
+### Gate
+
+- Seam: `ExtensionRegistrar::UninstallExtension` with `UNINSTALL_REASON_USER_INITIATED`, the public call
+  `ExtensionUninstallDialog` makes once its dialog is accepted, from a new overlay file pair
+  `arkt/browser/arkt_extension_uninstall.{h,cc}`. The report page is `NavigateParams` with
+  `extension_urls::GetWebstoreReportAbuseUrl` and `NEW_FOREGROUND_TAB`, as `ExtensionUninstallDialog::HandleReportAbuse`.
+  No upstream file is touched; `arkt_extension_dialogs.mm` (the dialog hook) is unchanged.
+- Facade header: additive only, both copies `cmp` identical. One required member on the engine,
+  `uninstallExtension:reportAbuse:completion:` (`completion(BOOL uninstalled, NSString* failureReason)`); the Swift
+  doubles (`ScriptedFacade`, the ABI `TestEngine`) grew it. No new event kind: the removal is the existing
+  `ExtensionActionsChanged`.
+- `.patches`: unchanged (12). New dep of `//arkt/browser:window`: `//chrome/browser/ui/navigator`.
+- Build: `nice -n 20 autoninja -C out/Spike chrome -j 4`; 1.9 TB free on the Chromium disk, 36 GB on `/`, swap 2.9 GB
+  used.
+
+### What landed
+
+- **`arkt::UninstallExtensionForUser`.** An id the registry does not have (`GetInstalledExtension`, enabled or not)
+  fails with "unknown extension" before the registrar is called (it `CHECK`s on an unknown id). A refusal of the
+  management policy (policy-installed, component, `MustRemainInstalled`) fails with "not removable"; the policy's
+  error names the extension, so it is neither returned nor logged. Neither changes anything.
+- **Report abuse.** After a successful uninstall, so the report page is the active tab even when the extension set an
+  uninstall URL. Only for an extension whose update URL is the Web Store's (`ExtensionManagement::UpdatesFromWebstore`,
+  read before the uninstall), the condition for Chrome's own checkbox; otherwise no tab opens and a line is logged. The
+  navigation names only the profile, as Chrome's does, so the tab lands in the last active window: the one the
+  shell's sheet hangs from. The shell's call carries no window to name instead.
+- **Facade.** `uninstallExtension:reportAbuse:completion:` runs through `RunOrDefer` like the other mutators and
+  posts the completion, so it never runs inside the call.
+- **ChromiumEngine** (`ChromiumEngine+Uninstall.swift`): `uninstallExtension(_:reportAbuse:)` calls the facade once;
+  a refusal is logged (`dev.arkt.shell`, `ChromiumExtensions`), as the shell's call has no answer. The action leaves
+  through the window's `.extensionActionsChanged`, which ChromiumEngine already maps.
+- Self-test embedder: command `uninstall <id> [abuse]`, which logs the answer and whether it came inside the call.
+
+### Tests first
+
+`ChromiumExtensionUninstallTests` (3 tests, 5 cases) and `ConformanceTests.uninstallReachesTheFacadeWithItsFlagAndAnswers`
+were written against the new header and the scripted facade's `uninstallExtension` before ChromiumEngine had the
+method. Red run: ChromiumEngine fell back to `EngineExtensions`' default no-op, and all 5 cases failed (15 issues:
+the facade saw no call, the action stayed, no event). With `ChromiumEngine+Uninstall.swift` all pass.
+
+### Swift tests (`nice -n 20`, `-j 2`, in `app/ArktShell/ShellKit`)
+
+| Command | Result |
+|---|---|
+| `swift test --filter "ChromiumEngineKitTests\|ArktEngineABITests\|EngineAPITests"` | 163 + 32 + 279 passed, 0 failed (baseline 160 + 31 + 279): 3 new `ChromiumExtensionUninstallTests` (5 cases), 1 new ABI test |
+| Full suite (`swift test --skip ShellKitGUITests`) | not run locally (several lanes building on this Mac); CI's Swift tests job |
+
+### Build
+
+| Step | Result |
+|---|---|
+| `nice -n 20 autoninja -C out/Spike chrome -j 4` | `The build has finished successfully.`, `FAILED:` 0 |
+| `gn check out/Spike //arkt/browser:window` | 1 error, pre-existing (`arkt_extension_batch_install.mm:29`, `webstore_installer`); none for the new files |
+| `gn check out/Spike //arkt/api:embedder` | the 4 pre-existing errors only |
+
+Load average 2.5 to 3.5 while building and running (other lanes' work; nothing added).
+
+### Self-test runs (`out/Spike/Chromium.app`, `--no-startup-window --arkt-facade-selftest --arkt-engine-test-api --remote-debugging-port=9333`, fresh profiles `profiles/721-20261107/run1` and `run2`, `--use-mock-keychain`, unpacked copies of the action probe loaded with `--load-extension` (one with the Web Store's `update_url`), commands through the page title over the DevTools protocol)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Unknown id (`aaaa...`, with abuse) | PASS | `answered failed reason=unknown extension insideCall=no`; no event, 1 page |
+| Component extensions (`mhjfbmdgcfjbbpaeojofohoefgiehjai` PDF viewer, `glbjnfimcajjenihimblfaponejbkoph`, with abuse) | PASS | `uninstall refused by the management policy`, `answered failed reason=not removable insideCall=no`; the listing still has its 3 actions, no tab |
+| Plain unpacked extension, with abuse | PASS | `uninstalled`, one `ExtensionActionsChanged`, the listing drops to 2, `report page skipped: the extension does not update from the Web Store`, no tab; its `extensions.settings` entry is empty after quit |
+| Web Store extension, with abuse, two windows (window 2 opened last by `chrome.windows.create`; the command sent from window 1's tab) | PASS | `ExtensionActionsChanged` for both windows, both listings drop the action, ONE `tabCreated` in window 2 with `https://chromewebstore.google.com/detail/<id>/report?utm_source=chrome-remove-extension-dialog`, active |
+| Web Store extension, abuse off (run2) | PASS | `uninstalled`, listing drops it, no tab |
+| Web Store extension, with abuse, one window (run2) | PASS | one report tab in that window; the run created 2 tabs in all (the first page and the report) |
+| No Chromium dialog on the facade path | PASS | `dialog sheet shown`: 0 in run2, and in run1 only the one below |
+| Other uninstall paths keep their dialog: `chrome.management.uninstallSelf({showConfirmDialog: true})` from the probe's page (user gesture) | PASS | `ARKT: dialog sheet shown ExtensionUninstallDialog` (patch 0007's native sheet); the extension stays installed until it is answered |
+
+`FATAL`, `NOTREACHED`, `Check failed` lines: 0 in both runs.
+
+### Patch budget
+
+| Source | Count |
+|---|---|
+| `.patches` lines | 12 |
+| `arkt` commits above `156.0.8078.48` | 12 |
+
+In sync, and the 12 commits export to the committed patch files unchanged; nothing exported. Facade header copies
+`cmp` identical.
+
+### Left open
+
+- The shell's Remove from Arkt... end to end in an Engine app build (criterion 4) was not run: it needs clicks in the
+  shell's window, and this lane sends no synthetic input it cannot check against the frontmost app. The facade path
+  under it is covered by the self-test runs; the sheet by #720's GUI tests.
+- Pins and commands: ChromiumEngine has no engine-backed `pinnedExtensionIDs` or `extensionCommands` yet (the facade
+  has no surface for them), so an uninstall emits no `.commandsChanged` and only the action's removal is verified.
+- Report abuse for an extension that does not update from the Web Store opens nothing, while the shell's sheet shows
+  the checkbox for every extension (maintainer question in the pull request).
+- The report tab goes to the last active window; the shell's call names no window.
+
+### Cleanup
+
+Both Chromium runs stopped by exact PID (`ps -p` prints nothing). Deleted: the throwaway profiles under
+`profiles/721-20261107/` and the build log. The fixtures and run logs lived in a temporary folder outside the repo.
+Nothing under `~/Applications/ArktTest` or `/Applications/Arkt.app` was touched.
+
+### #721 review fixes (PR #792)
+
+Same branch, `origin/main` merged (`d3a9120`, no conflicts). Still no patch; `.patches` 12, in sync.
+
+- **What the user may do is listed.** `ArktExtensionAction` gains `canUninstall` (the management policy's
+  `UserMayModifySettings` and not `MustRemainInstalled`, no error text) and `canReportAbuse`
+  (`ExtensionManagement::UpdatesFromWebstore`), both copies `cmp` identical. One helper
+  (`arkt::GetUninstallAbility`) answers the listing and the uninstall gate, so they cannot drift; the gate stays as the
+  safety net. `ExtensionAction` mirrors both (default true, so FakeEngine, which has no extensions, and existing
+  callers keep their behaviour); InMemoryEngine refuses an action whose `canUninstall` is false. The shell leaves
+  Remove from Arkt... out of the context menu and does not open the sheet when `canUninstall` is false, and builds
+  the sheet without the Report abuse checkbox when `canReportAbuse` is false.
+- **The window is named.** The facade method is now `uninstallExtension:reportAbuse:inBrowser:completion:` (nullable
+  browser), and `EngineExtensions` gains `uninstallExtension(_:reportAbuse:in:)`, whose default forwards to the call
+  without a window. The panel passes its engine window; ChromiumEngine maps it to the browser handle. The report
+  page uses `NavigateParams(browser, url, ...)`; a nil browser, one of another profile, or one closed during a
+  deferral falls back to the last active window. The window is not brought forward, as with Chrome's dialog.
+- Header: the completion "always arrives except when the engine shuts down first".
+- `TestEngine` (ABI conformance) posts its completion; its test waits for it and checks it did not run inside the
+  call. `ScriptedFacade` documents its "unknown extension" model (a window lists the action; the real facade asks the
+  profile's registry).
+- **Rule 27** (`uninstallRemovesTheExtensionFromEveryWindow`, `ContractCheck` 57 checks, rules 1 to 27): two windows
+  list a removable extension (driver `removableExtension`); an unknown id changes nothing; the uninstall from the
+  first window takes the action out of both, announced on each, and opens no tab. InMemoryEngine, the scripted facade
+  and the app's runner (which now also loads `engine/test-extensions/action-probe`, uninstalled by the rule) provide
+  the driver.
+
+#### Tests (`nice -n 20`, `-j 2`, in `app/ArktShell/ShellKit`)
+
+| Command | Result |
+|---|---|
+| `swift test --filter "ChromiumEngineKitTests\|ArktEngineABITests\|EngineAPITests"` | 168 + 33 + 285 passed, 0 failed (was 163 + 32 + 279): ChromiumExtensionUninstallTests 8 tests (flags, window, closed window, no report page), ABI flag test, InMemoryEngine window, refusal and default-forwarding tests, rule 27 on InMemoryEngine and over both facade scripts |
+| `swift test --filter "ExtensionRemoveSheetTests\|ExtensionContextMenu"` | 15 passed (3 new: Remove left out, sheet not opened, no checkbox); existing checks now include the sheet's window |
+| `swift test --filter ExtensionsPanelTests` | 36 passed |
+
+Deliberate breaks, each restored and green again:
+
+| Break | Fails |
+|---|---|
+| `ExtensionContextMenu`'s filter returns `true` | `testRemoveFromArktIsLeftOutForAnExtensionTheUserMayNotRemove` |
+| `FacadeValues.swift` maps `canUninstall: true` | `theListingCarriesWhatTheUserMayDo` (2 of 4 cases) |
+| InMemoryEngine records `window: nil` | 3 `ExtensionRemoveSheetTests` (the window the sheet names) |
+
+#### Build
+
+| Step | Result |
+|---|---|
+| `nice -n 20 autoninja -C out/Spike chrome -j 4` | finished successfully, `FAILED:` 0 |
+| `gn check` (`//arkt/browser:window`, `//arkt/api:embedder`) | the pre-existing errors only |
+| Engine app, `xcodebuild -scheme ArktShell -configuration Engine PRODUCT_BUNDLE_IDENTIFIER=dev.arkt.Arkt.try721 -jobs 2` (`nice -n 20`, `CONFIGURATION_BUILD_DIR=$CHROMIUM_ROOT/embed-721`, component dylibs cloned next to it) | `BUILD SUCCEEDED`, `Engine framework copied: Chromium Framework.framework 156.0.8078.48` |
+
+#### Self-test run 3 (`out/Spike`, fresh profile `profiles/721-20261107/run3`, `--use-mock-keychain`, four unpacked probes: one plain, three with the Web Store `update_url`, one of them calling `chrome.runtime.setUninstallURL("http://127.0.0.1:8721/bye")`)
+
+| Check | Result |
+|---|---|
+| Listing flags | plain `canUninstall=1 canReportAbuse=0`; the three store copies `1 1` |
+| Two windows, window 2 last active (`chrome.windows.create`), uninstall with Report abuse naming window 1 | `report page in the given window`; ONE report tab in window 1, active; nothing in window 2 |
+| Extension with an uninstall URL, Report abuse, naming window 1 | the uninstall URL tab opens first in the last active window (window 2; Chromium's `RuntimeAPI`, user-initiated reason), then the report tab in window 1, active |
+| No window named (`nowin`) | the report tab goes to the last active window (window 2) |
+| Plain extension, Report abuse | uninstalled, `report page skipped`, no tab |
+| Unknown id; component extension (PDF viewer) | `unknown extension`; `uninstall refused: the user may not remove it`, `not removable` (the new gate, before the registrar) |
+
+6 tabs in all (the first page, window 2's, three report pages, the uninstall URL); 0 `FATAL`, `NOTREACHED` or
+`Check failed`; 0 `dialog sheet shown`.
+
+#### In-app contract (`dev.arkt.Arkt.try721`, Engine app on `out/Spike`, `--arkt-engine-contract --arkt-engine-test-api`, tabs probe and action probe, throwaway profile, `ARKT_DATA_DIR`, `ARKT_ARC_DIR` and `ARKT_DEFAULTS_SUITE` per run, `--use-mock-keychain`)
+
+| Check | Result |
+|---|---|
+| Rule 27 `uninstallRemovesTheExtensionFromEveryWindow` | PASS (167 ms): `ChromiumEngine.uninstallExtension(_:reportAbuse:in:)` through EngineAPI, no clicks |
+| Rules 25, 26 | PASS |
+| Result | `23/27`, exit 1: rules 19, 20, 21 and 24 NOT-APPLICABLE as before; 40 checks PASS, 0 FAIL; no `DEFERRED` line; 0 `FATAL` |
+
+#### Gaps recorded
+
+- **Forced-install policy.** Not reproduced: `ExtensionManagement` loads `ExtensionInstallForcelist` only from a
+  managed preference (`LoadPreference(..., force_managed = true)` needs `pref->IsManaged()`), which on macOS needs MDM
+  or root-owned managed preferences; a user-level `defaults` value is only recommended, and the command-line policy
+  provider exists only on Android. The refusal path is the same gate (`UserMayModifySettings`), shown with a component
+  extension. No extension with a toolbar action and `canUninstall` false exists in a test profile, so the false flag
+  is covered by the Swift tests only.
+- **Criterion 4 in a Chromium build.** ChromiumEngine has no `extensionContextMenu` yet, so the shell's context menu,
+  and with it Remove from Arkt..., does not exist in a Chromium build. The click path is covered by
+  `ExtensionRemoveSheetTests` against InMemoryEngine and the engine side by rule 27 in the app; the end-to-end click
+  waits for the Chromium context menu (the engine side of #596).
+- **Pins and commands** (criterion 1) moved to #591 as the acceptance check "uninstall leaves no pin and no command".
+
+#### Patch budget
+
+| Source | Count |
+|---|---|
+| `.patches` lines | 12 |
+| `arkt` commits above `156.0.8078.48` | 12 |
+
+#### Cleanup
+
+Run 3 stopped by exact PID; the contract run exited on its own (`ps` shows no `embed-721` process). Deleted: the
+profiles under `profiles/721-20261107/`, the `embed-721` folder, the derived data folder `arkt-shell-dd/721`, the
+build logs and the run's defaults suite.
+
+## E1: crash guards (patches 0013 and 0014)
+
+Date 2026-11-07. Branch `engine/e1-crash-guards` from `origin/main` (`e7bccbf`). Batch E1 of the engine connector
+design (`docs/plans/2026-11-07-engine-connector-design.md`, PR #795, sections 2.3 and 3 "E1. Crash guards"). No issue
+yet; the batch issue list waits for the maintainer. Guards and one generalization only, no hook: the hooks question
+(design section 1.2) is still open.
+
+### Gate
+
+- Why patches: the five crash sites dereference `BrowserView::GetBrowserViewForBrowser`, which is always nullptr on
+  an Arkt window; no overlay seam reaches inside them. The toast site `CHECK`s that only tests lack an anchor.
+- Facade header: unchanged (`cmp` identical). `.patches`: 12 to 14; no open engine pull request touches it.
+- Overlay link checked before every build: `$CR/arkt` points at this worktree's `engine/arkt`; branch `arkt` in
+  sync with `.patches` before the work (12 = 12).
+- Build: `nice -n 15 autoninja -j 4 -C out/Spike chrome`; Chromium disk 1.9 TB free, internal 36 GB, swap 2.9 of
+  4 GB. Load average 2 to 6 (other lanes' work; nothing added).
+
+### What landed
+
+Two patch files, one per theme (design section 2.3), 4 upstream files, 59 insertions, 9 deletions (after the review
+fixes below):
+
+| Patch | Site | Change |
+|---|---|---|
+| 0013 guards | `ui/views/storage/storage_pressure_bubble_view.cc` (row 1) | `ShowBubble` returns when the last active window has no `BrowserView` (4 lines) |
+| 0013 | `ui/browser_actions.cc` Cut, Copy, Paste (rows 3-5) | without a `BrowserView`, the action calls the active tab's `WebContents::Cut/Copy/Paste` (3 hunks, 8 lines each) |
+| 0013 | `ui/toasts/toast_controller.cc` `CreateToast` (row T) | no anchor and a `BrowserElementsViews` with no primary window widget (an embedder's window): the toast is dropped as if its widget closed at once, in `OnWidgetDestroyed`'s order (timer stopped, close callback run, widget-destroyed subscribers notified, current id cleared) instead of `CHECK_IS_TEST()`. Webium keeps its path, and so do unit tests with no browser (the `ToastController` unit tests). Tests that do have a `BrowserElementsViews` but no widget (a `TestBrowserWindow`) now take the drop path too |
+| 0014 generalization | `ui/browser_commands.cc` `CloseTab` (row 2) | the Close Tab accelerator comes from `BrowserWindow::FromBrowser(browser)->GetAcceleratorProvider()`; no provider or no `IDC_CLOSE_TAB` shortcut: close without the confirmation toast; a toast the window could not show: close too. `kClosePinnedTab` is actionable, so in Chrome a toast is always showing or queued after `MaybeShowToast` and the last branch never runs there |
+
+- `GetAnchorView` needed no guard: `BrowserElementsViewsImpl` exists for every window (`browser_window_features.cc:357`)
+  and returns no view on an Arkt window, so the crash was in `CreateToast` (`toast_controller.cc:327`), not where the
+  design expected (`:442-452`).
+- Why the toast state is cleared: the first version only skipped the `CHECK`. `ShowToast` sets the current toast id
+  before `CreateToast`, and only the widget's destruction clears it, so after one dropped toast every later toast was
+  queued forever, and a pinned tab could never be closed with `IDC_CLOSE_TAB` (run `after-a` v1: two Copy URL toasts,
+  then close-tab twice, tab still open).
+- Cut, Copy and Paste on an Arkt window behave like Chrome on Windows and Linux, not like Chrome on Mac: they act on
+  the page (`WebContents::Cut/Copy/Paste` on the focused frame), not on the focused native view through
+  `NSApp`. Today nothing in the app sends these commands (the shell's Edit menu uses `cut:`, `copy:` and `paste:`
+  through the responder chain). If E2 routes these commands to the engine, the guard should forward them to `NSApp`
+  as `BrowserView::CutCopyPaste` does on Mac.
+- The other `CHECK_DEREF(BrowserView::GetBrowserViewForBrowser(bwi))` sites in `browser_actions.cc` are unreachable on
+  an Arkt window. Each action is invoked only from a Views page action icon, the Views toolbar or the WebUI toolbar,
+  never from a browser command, and an Arkt window has none of those:
+  - `:812` `kActionShowJsOptimizationsIcon`: the JS optimizations page action icon.
+  - `:1485` `kActionShowCookieControls`: the cookie controls page action icon (location bar).
+  - `:2014` `kActionShowCollaborationRecentActivity`: the collaboration messaging page action icon.
+  - `:2152` `kActionPinActionToToolbar` and `:2176` `kActionUnpinActionFromToolbar`: the pinned toolbar button's
+    context menu (`pinned_action_toolbar_button_menu_model.cc`).
+- Overlay: `ArktAcceleratorProvider` (`arkt_browser_window_parts`), returned by `ArktBrowserWindow::GetAcceleratorProvider`
+  (was an `ARKT_STUB`). It reads the main menu: the first `commandDispatch:` item tagged with the command id that has
+  a key equivalent (the shell's page commands, `MainMenu.swift`). The app's Cmd-W is Archive Tab, so the app has no
+  `IDC_CLOSE_TAB` accelerator and a pinned tab closes without a toast.
+- Overlay comment: `arkt_browser_window.h` now names the three browser types Arkt takes (design section 2.1).
+- Self-test (test-only): `arkt-selftest chrome-command copy-url|close-tab|cut|copy|paste|pin` sends the Chromium
+  command through the host's `executeCommand`, as a menu item would.
+
+### Gated sites (design section 2.3, "The 15 gated dereferences")
+
+No patch. Checked against the pinned source with a fresh profile, no sign-in and no policy:
+
+| Site | Switch | Evidence |
+|---|---|---|
+| WebAuthn ambient sign-in (`ambient_signin_controller.cc:120`) | `--disable-features=WebAuthenticationAmbientSignin` (shell launch list) | already `FEATURE_DISABLED_BY_DEFAULT` (`device/fido/public/features.cc:92-94`); the switch also wins over `--enable-experimental-web-platform-features` |
+| Media remoting dialog (`media_remoting_dialog_view.cc:49`) | `--disable-features=MediaRouter` (shell launch list) | reached while casting a tab; `kMediaRouter` is enabled by default. The remoting pref cannot be set by a default value (`cast_remoting_connector.cc:447-452`). This turns Cast off until E2 draws its device list (#653) |
+| glic (`browser_conditions.cc:191`, `glic_metrics.cc:1003`, `context_sharing_border_view.cc:109`) | `--disable-features=Glic` (shell launch list) | `kGlic` is enabled by default on Mac; glic stays inert without a capable signed-in account, the switch removes it |
+| iOS promos (`ios_promo_controller.cc:125`, `ios_promos_utils.cc:172`) | local-state default `browser.promotions_enabled` = false (`PreProfileInit`, next to the quit confirmation default; the PromotionsEnabled policy still wins) | needs active sync otherwise. See the next row for what else the pref turns off |
+| `browser.promotions_enabled` = false, side effects | the same default | it acts as the PromotionsEnabled policy. It also skips Chromium's profile first-run and the sign-in intercept first-run dialog (`IsFirstRunDisabledByPolicy`, `profile_picker.cc:51-55`), the avatar promos, the startup infobar promos, the app menu promos and the extensions zero-state promo. Arkt shows none of those surfaces: it has its own onboarding and no avatar, toolbar or app menu |
+| Lens region search (`lens_region_search_controller.cc:40`) | none needed | not compiled: `ENABLE_LENS_DESKTOP_GOOGLE_BRANDED_FEATURES` is 0 in an unbranded build |
+| Relaunch notification (`relaunch_recommended_bubble_view.cc:47`) | none needed | `browser.relaunch_notification` defaults to 0, which never shows the bubble |
+| Idle timeout (`idle_bubble.cc:67`) | none needed | `idle_timeout` defaults to zero: no polling |
+| DICE interception (`dice_web_signin_interception_bubble_view.cc:504`) | none needed | the support check returns false without a `BrowserView` and the interceptor aborts before the bubble |
+| Batch upload (`batch_upload_service.cc:382`) | none needed | needs a signed-in primary account |
+| Web app update review (`web_app_update_review_dialog.cc:143`, `:148`, `:262`) | none needed on Arkt windows | only app windows (`TYPE_APP`) reach it, and those stay Views windows with a `BrowserView` |
+| HaTS | none needed | Arkt overrides `ShowHatsDialog` (design) |
+
+The three feature names join `DestroyProfileOnBrowserClose` in `EngineLaunchArguments.requiredDisabledFeatures`,
+so every engine launch from the shell carries them; a caller's own `--disable-features` list is extended.
+
+### Tests first
+
+`EngineLaunchArgumentsTests` (ChromiumEngineKitTests): the expected list gained the three names, and two tests were
+added (`keepsFeaturesWithoutNativeUIOff`, `addsOnlyTheFeaturesACallerDidNotName`). Before the change:
+`nice -n 20 swift test -j 2 --filter EngineLaunchArgumentsTests` failed with 7 issues; after: 9 tests in 1 suite
+passed. The full suite is left to CI.
+
+### Build
+
+| Step | Result | Time |
+|---|---|---|
+| Before: `main` plus the self-test command, no new patch | `The build has finished successfully.`, `FAILED:` 0 (one earlier attempt failed on `-Wexit-time-destructors` in the self-test command, fixed) | 35 s |
+| Patches 0013 and 0014 (first toast guard) and the overlay | finished, `FAILED:` 0 | 50 s |
+| Toast state cleared, CloseTab falls back when no toast shows | finished, `FAILED:` 0 | 40 s |
+| Break 1: 0013's three files back to 0012 (working tree only) | finished, `FAILED:` 0 | 43 s |
+| Break 2: 0013 restored, `browser_commands.cc` back to 0013 | finished, `FAILED:` 0 | 42 s |
+| Restored, promotions default added | finished, `FAILED:` 0; `git status` clean in `$CR` | 41 s |
+
+### Smoke (`out/Spike/Chromium.app`, `--no-startup-window --arkt-facade-selftest --arkt-engine-test-api --remote-debugging-port=9333`, fresh profiles under `profiles/e1-20261107/`, `--use-mock-keychain`, a page with two text fields on `127.0.0.1:8791`, commands through the page title over the DevTools protocol; Chromium's main menu unless `--arkt-menu-probe` is named)
+
+Every run starts with `ARKT: browsers normal=1 arkt=1 views=0`.
+
+| Run | Check | Result |
+|---|---|---|
+| before | `chrome-command copy-url` (Copy URL toast) | `FATAL toast_controller.cc:327 Check failed: base::internal::get_is_test_impl()`, stack `CreateToast` < `ShowToast` < `MaybeShowToast` < `chrome::CopyURL` |
+| before | Clear Browsing Data from `chrome://settings` (`clearBrowsingData` message) | no crash, no toast: `kClearBrowsingDataToast` is disabled by default |
+| before | storage pressure (`chrome://quota-internals`, Simulate) | `Received signal 11 SEGV_ACCERR`; crash report top frames `BrowserView::toolbar_button_provider()` < `StoragePressureBubbleView::ShowBubble` |
+| before | `pin`, then `close-tab` | `FATAL browser_commands.cc:1516 Check failed: browser_view.` |
+| before | `cut`, `copy`, `paste` (one launch each, text selected in a field) | `FATAL browser_actions.cc:2270`, `:2288`, `:2306 Check failed: *BrowserView::GetBrowserViewForBrowser(bwi).` |
+| after-a | `copy-url` twice | no crash; the clipboard holds the page URL |
+| after-a | `copy`, `paste`, `cut`, twice each | clipboard `alpha`, second field `alpha`, clipboard `beta` and the first field `alpha `: the commands act on the focused field |
+| after-a | storage pressure twice | no crash (the second is inside the throttling interval) |
+| after-a | `pin`, then `close-tab` once (after two dropped toasts) | `facade tab closed ... reason page`, `native window destroyed`: closed on the first command, no crash |
+| after-b (`--arkt-menu-probe`: Cmd-W is Archive Tab, no `IDC_CLOSE_TAB` item) | `copy-url`, `pin`, `close-tab` | closed on the first command, no crash |
+| after-final (with `--disable-features=DestroyProfileOnBrowserClose,WebAuthenticationAmbientSignin,MediaRouter,Glic`, as the shell launches) | every check of after-a once, then pin and close | the same results, 0 `FATAL`, `Check failed`, `NOTREACHED` or `Received signal` lines |
+| break 1, Chromium menu | `pin`, `close-tab` | `Check failed: base::internal::get_is_test_impl()`: the provider found Cmd-W in Chromium's menu and the toast path ran |
+| break 1, probe menu | `pin`, `close-tab` | closed, no crash: the provider found no `IDC_CLOSE_TAB` item and the tab closed before the toast |
+| break 1 | `copy-url`; `cut`; `copy`; `paste`; storage pressure (one launch each) | the before crashes again: `toast_controller.cc` `CHECK_IS_TEST`; `browser_actions.cc` `CHECK_DEREF` for each; `SEGV_ACCERR` |
+| break 2, both menus | `pin`, `close-tab` | `Check failed: browser_view.` |
+
+`after-a` v1 (the first toast guard, which only skipped the `CHECK`) is the run that found the stuck toast id: two
+Copy URL toasts, then `close-tab` twice, and the pinned tab stayed open with no crash.
+
+Not checked directly: that the three disabled features and the promotions default are off at run time
+(`chrome://local-state` lists only changed values, and the debug pages are disabled); they rest on the switch
+reaching the command line and on the code paths in the table above.
+
+### Patch budget
+
+| Source | Count |
+|---|---|
+| `.patches` lines | 14 |
+| `arkt` commits above `156.0.8078.48` | 14 |
+
+In sync. Export added 0013 and 0014 and changed only `.patches` otherwise (0001 to 0012 byte-identical). Facade header
+copies `cmp` identical.
+
+| Gate (design section 2.5) | Before | After E1 |
+|---|---|---|
+| Patch files | 12 | 14 |
+| Upstream files outside 0001-0004 | 15 | 19 |
+| Seam patch files | 4 | 6 |
+| Hunks in `browser_actions.cc` and `browser_commands.cc` | 0 | 4 (3 and 1; the proposed cap) |
+| Hot-file hunks (`browser_window_features.cc`, `tab_features.cc`) | 0 | 0 |
+| Widely included headers changed | 0 | 0 |
+
+### Left open
+
+- **Low-disk notice.** Patch 0013 only stops the crash; nothing tells the user. The overlay disk watcher needs a
+  facade event (an additive header change both lanes agree to in an issue) and a native notice designed first
+  (`arkt-design-first`). Follow-up, with the E1 issue.
+- **Toasts are dropped, not shown.** Routing them to the shell is a hook in `ToastController` and waits for the hooks
+  answer (design section 2.4).
+- **0004's subject** still says "normal windows" (design section 2.1); rewording it rewrites the `arkt` history under
+  eight later commits, so it waits for the next rebase.
+- **Cast is off** with `MediaRouter` until E2 draws the device list (#653). The alternative from design section 2.3
+  (a guard of about 5 lines for a site no switch can stop): guard `media_remoting_dialog_view.cc:49` in 0013, one more
+  upstream file, and leave Cast on. For the maintainer to choose.
+- **Upstream unit tests** that have a `BrowserElementsViews` but no widget (a `TestBrowserWindow`) and a real
+  `CreateToast` now take the drop path instead of a toast that stays current; none were run (they are not part of
+  `arkt_patch_unittests`).
+- **MediaRouter** stays disabled (agreed in review); E2 removes it from `requiredDisabledFeatures` once #653's native
+  device picker lands.
+
+### Cleanup
+
+Every Chromium run stopped by exact PID or exited when it crashed or closed its last tab (`ps -p` prints nothing for
+each); the loopback server stopped by PID. Deleted: the throwaway profiles under `profiles/e1-20261107/`, the build
+logs, and the crash reports the crashing runs wrote. The runs wrote to the system clipboard (it held no text before);
+it was cleared afterwards. Nothing under `~/Applications/ArktTest` or `/Applications/Arkt.app` was touched.
+
+### #800 review fixes
+
+- 0013, toast drop path: `on_widget_destroyed_callbacks_.Notify(*currently_showing_toast_id_)` now runs between the
+  close callback and clearing the id, in `OnWidgetDestroyed`'s order. Without it, subscribers such as
+  `ManagePasswordsAutoSigninToastDelegate` never hear that the toast is gone, and the tab stays in `AUTO_SIGNIN_STATE`
+  instead of moving to `MANAGE_STATE`.
+- 0014, `CloseTab`: `BrowserWindow::FromBrowser` is null-checked; with no window the tab closes without the toast.
+- Results: Cut, Copy and Paste semantics, the remaining `CHECK_DEREF` sites, row T for unit tests with a
+  `BrowserElementsViews` but no widget, and the side effects of `promotions_enabled` (above).
+- Build: `nice -n 15 autoninja -j 4 -C out/Spike chrome`, `FAILED:` 0, 40 s; the overlay link was checked first.
+- Re-smoke (`out/Spike`, fresh profiles under `profiles/e1r-20261107/`, the shell's `--disable-features` list,
+  `--use-mock-keychain`): Copy URL three times, then pin and close-tab, once with Chromium's menu and once with
+  `--arkt-menu-probe`. Both runs: 3 of 3 Copy URL commands completed, the pinned tab closed on the first command,
+  `native window destroyed`, 0 `FATAL`, `Check failed`, `NOTREACHED` or `Received signal` lines. The notification
+  itself was not observed: auto sign-in needs a saved credential with auto sign-in on, so `MANAGE_STATE` holds by
+  construction.
+- Export: `.patches` 14 lines, 14 `arkt` commits, in sync; 0001 to 0012 byte-identical; only 0013 and 0014 changed.
+- Cleanup: both runs and the loopback server stopped by exact PID; profiles and build log deleted; no crash report.
+  The clipboard held text this time and the run replaced it with the page URL; it was cleared afterwards and the
+  earlier text was not restored.
+
+### Restore pages Swift boundary (#580)
+
+The Swift recovery contract carries only non-private Little Arkt and Peek page titles, URLs and kinds, and supplies the list to the shell, which requests reopening outside the sidebar. The shell presents the offer after its own window
+session restoration; an empty offer acknowledges the crash and shows the status notice. The crashed-session state seam shipped in #577; recoverable-page data integration and
+feature-level killed-process validation remain unverified.
+
+Test-first CI run 42112475936 at 75b3800 failed to compile the missing model in ShellKit tests (job 127543462923)
+and GUI tests (job 127543462890); the Swift tests gate (job 127547434337) consequently failed. No tests executed in
+those jobs. Local builds and tests were not run: the installed toolchain cannot compile the baseline. Syntax parsing
+and diff checks are recorded in the pull request. GUI, accessibility, motion, app and real-engine validation remain
+pending.
+
+### Restore pages review fixes (#580)
+
+The window set retains an unanswered decision across regular-window closure and presents it when another window is
+available. The panel remains above the content in Split View. The shell requests the pages before acknowledging; an unavailable shell path retains the offer and crash. Crash-only providers expose no page capability. A persistent
+database-recovery notice remains underneath the six-second crash notice and reappears after dismissal or expiry.
+
+Regression coverage exercises the production window-set coordinator and window lifecycle, capability and unavailable shell paths,
+Split View, and notice ordering. These additions have not run locally because the installed toolchain cannot compile the
+baseline; syntax parsing alone does not validate behavior. Direct `AppSession.finishLaunch`, GUI, keyboard, accessibility,
+motion and real-engine killed-process validation remain pending. The crashed-session state seam shipped in #577; recoverable-page data integration remains unverified.
+
+### Restore pages privacy routing (#580)
+
+Only ordinary regular windows may host the decision. The window set selects an eligible window even when the primary
+window is private, retains the unanswered offer while only private windows exist, and classifies Blank and Incognito
+windows before considering presentation. A host changing to private mode relinquishes the offer before that mode is
+shown. Little Arkt and popup requests use separate hosts.
+
+New GUI regressions cover both private modes, transfer with a private primary, deferred presentation after the last
+regular host closes, private creation while an offer is pending, and a host changing mode. They were written before
+the fix but not run locally: the installed toolchain cannot compile the baseline. CI must validate compilation and
+behavior on the new head; syntax parsing and source checks do not establish test results.
+
+### Maintainer feedback on restore pages (#580)
+
+The provider supplies a list only; the shell reopens Little Arkt and Peek pages using the host's current tab for Peek.
+A missing source or multiple Peek pages retain the offer: the current Peek controller replaces an existing Peek from
+the same source, so multiple Peek recovery requires a further shell solution. Closing windows are ineligible and a
+cancelled close retries pending presentation. New regression tests and the private-routing suite are not run locally;
+CI must validate the merged head. Recoverable-page data integration and feature-level killed-process validation remain unverified; the crashed-session state seam shipped in #577.
+
+### Restore pages Peek preservation (#580)
+
+Recovery declines a Peek when the host has any live or hidden Peek, and attempts its one supported Peek before
+opening Little Arkt windows. A missing Peek content view closes the new tab and retains the unanswered offer. Ordinary
+link opening retains its replacement behavior. Little Arkt's API does not report presentation success; the shell
+can only report that its opening was requested. Multiple recovered Peeks remain unanswered pending the maintainer's
+routing decision. The crashed-session state seam shipped in #577; recoverable-page data integration and feature-level killed-process validation remain unverified.
+
+GUI regressions cover live and hidden Peek preservation, missing-view cleanup and retry, and Find closing on Escape.
+They were written before the fix but not run locally because the installed toolchain cannot compile the baseline.
+Syntax parsing is not a runtime test. CI on the new head, GUI appearance, VoiceOver, Reduce Motion and UI tests remain
+unverified.
+
+### Restore pages CI evidence and remaining decision (#580)
+
+CI run [42364783894](https://github.com/krystianslowik/arkt/actions/runs/42364783894) applies only to commit
+`4158a3411c5a5e286b2f05b7f7b4ebfd8592c0b7`: all 8 reported checks passed. ShellKit pure tests ran 2,454 tests
+across 278 suites; GUI tests executed 2,025, skipped 48 and had 0 failures. The app build, lint and required Swift gate
+passed; Core and optional UI tests were skipped. The held-close and recovery-window suite passed. These results do not
+validate the subsequent merge head, which requires new CI.
+
+The multi-Peek routing decision is tracked in [#776](https://github.com/krystianslowik/arkt/issues/776)
+(`status:needs-user`); the maximum-one-Peek safety remains in place. #577 shipped crash state and dismissal, but
+recoverable page payload and source grouping integration and feature-level killed-process validation remain missing.
+
+Test-first integration of #777: private-window reopen coverage observes recovery routing during creation and checks
+that a separate empty-crash notice remains available to a regular window. Both private kinds are covered. The current
+`makePrivateWindow` creates a regular window before converting it, so CI is expected to expose the regression; this
+has not yet been observed. Production routing remains unchanged pending that red run. Local tests were not executed:
+the installed toolchain cannot compile baseline ShellKit. Swift source parsing and diff checks passed. The prior green
+for this integration is attributable only to `22d4906e12ddb3cd053b4f836e3be00810c0e1d1`: 2,454 pure tests in 278
+suites, 2,038 GUI tests executed, 51 skipped, zero failures, and all eight reported checks passed. Those results do not
+validate this test-first merge. The PR stays draft while #776 awaits the maintainer; maximum-one-Peek safety remains.
+
+### Private reopen creation routing (#777)
+
+Blank and Incognito reopen windows now receive their final kind during construction, before recovery routing runs.
+The private-window handover still precedes `isClosed`, and recovery reassignment follows it. The existing synchronous
+GUI regressions were not run locally because the installed toolchain cannot compile baseline ShellKit. Swift source
+parsing and `git diff --check` passed; they do not establish compilation or runtime behavior. The shell-owned
+recovery migration remains incomplete and the test-first APIs at `781c729` remain missing.
+
+
+### Restore pages combined migration and live recording (#580)
+
+The local combined head includes the App/Persistence snapshot adapter, shell-owned recovery records and source-node
+routing, removal of the engine page payload, and live Little Arkt and Peek recording. Controller events track opens,
+navigation, titles and actual closes, including hidden Peeks. Private windows and sidebar pages are excluded. The
+initial offer remains immutable; at offer time missing or archived Peek sources are excluded and duplicates keep the
+last. Empty offers show the notice and acknowledge. Confirmed clean quit clears and stops further shell writes; a
+cancelled quit resumes tracking. The App suspends writes during teardown and resumes them after the outcome.
+
+There is no final confirmed-termination hook for SIGTERM: its flush retains the snapshot. Normal confirmed quit
+requests a clear; a failed flush is logged and the existing quit flow allows failure. Neither durable clearing nor
+feature completion is guaranteed by this change. Killed-process validation and App adapter integration remain open.
+
+No migration tests or builds were executed locally: the installed toolchain cannot compile the baseline. Source
+parsing, diff and import checks are static checks only; CI on this combined head is pending. Prior CI green at
+`22d4906` (2,454 pure tests; 2,038 GUI executed, 51 skipped) does not validate this head. The `da223` GUI run had
+eight assertion failures; the private creation path was fixed in `b203`, but has not been runtime verified locally.
+
+### Restore pages cancellation snapshot refresh (#580)
+
+The combined migration at `0fdd51c` passed CI run 42377016354: ArktCore 579 tests in 47 suites, ShellKit pure
+2,489 tests in 281 suites, and GUI 2,068 executed with 53 skipped and no failures. The app build, lint and required
+Swift gate passed; optional UI tests were skipped. These counts apply to that revision.
+
+Independent review found that changes ignored during a cancellable quit left stale recovery records after
+cancellation. The test-first GUI run 42378422902 at `8a9f1df` executed 2,069 tests, with 53 skipped and one failure:
+`testCancelledQuitRebuildsRecordsAfterSuspendedChanges` retained a closed Little Arkt and the old metadata of a
+surviving page. Cancellation now immediately rebuilds records after tracking resumes, without waiting for another
+page event. Current main is merged with both results histories preserved. At `98e63f7`, [CI run 42380522535](https://github.com/krystianslowik/arkt/actions/runs/42380522535) passed all eight reported checks: ArktCore 579 tests in 47 suites, ShellKit pure 2,508 tests in 282 suites, GUI 2,075 executed, 53 skipped and zero failures (including the cancellation regression), app build, lint and the required gate. Optional UI tests were skipped. These results apply to `98e63f7`; the subsequent screenshot fixture head requires fresh CI and a manual workflow for XCUITest. Manual appearance, VoiceOver, Reduce Motion and
+killed-process validation, plus the documented SIGTERM and failed-flush limits, remain outstanding.
+
+
+### Restore pages screenshot evidence (#580)
+
+`RestorePagesScreenshotTests` exports synthetic light and dark window captures with a long title and overflow when
+`ARKT_RESTORE_SHOTS_DIR` is set. The existing GUI CI job exports `restore-pages-screenshots` as a seven-day artifact.
+Rendering, visual inspection and the manually dispatched XCUITest workflow remain pending on the evidence head.
+
+### Restore pages final CI and screenshots (#580)
+
+CI run 42385504787 at `1c110df` passed all eight reported checks: ArktCore 579 tests in 47 suites, ShellKit pure
+2,508 tests in 282 suites, and GUI 2,077 executed with 54 skipped and zero failures. The cancellation regression
+and screenshot fixture passed; the app build, lint and required gate passed. Optional UI tests were skipped.
+The light/dark synthetic 1000 × 674 window-content PNGs are preserved in `docs/evidence/restore-pages/` and
+were visually inspected for the panel, long-title truncation, overflow and action count. This evidence applies
+to `1c110df`; the subsequent evidence commit changes documentation and images only.
+
+Manual XCUITest run 42382637990 at `dd8e937` built the app but did not complete: import/onboarding consent queries
+timed out and a command-bar accessibility snapshot was interrupted before the 40-minute job limit cancelled it.
+The preceding main nightly run 42357672719 has the same signature; #799 tracks the import/onboarding diagnosis.
+This is not a complete XCUITest pass. Real killed-process, VoiceOver, appearance and motion checks remain for
+maintainer validation, together with review of the documented SIGTERM and failed-flush limits. #580 remains open.
+
+### Restore pages full-review cleanup (#580)
+
+The full review of `844074a` found no blocking issue. The engine protocol comment now describes the shell's offer,
+and the noted Swift declarations and expressions are wrapped. Main is merged with both results histories retained,
+main's sections first. Source parsing and diff checks validate syntax and whitespace only; fresh CI must validate the
+integrated revision. The GUI screenshot upload step and committed PNGs remain unchanged pending the maintainer's
+answer. Manual killed-process, VoiceOver and motion checks, and the documented quit limits, remain outstanding.
+
+### Unanswered restore offer contract tests (#580)
+
+The maintainer follow-up requires retaining the crashed snapshot through live page changes and a clean quit until the
+offer is answered, matching the marker behavior proposed in [#803](https://github.com/krystianslowik/arkt/pull/803).
+The test-first GUI cases cover repeated offers using the same record store and persisted sidebar NodeID with fresh fake
+engines, independent overwrite and clear assertions, and resumed recording and clearing after Restore or Dismiss. This
+is a Shell contract test, not a real Chromium or database roundtrip; Core Persistence already tests database reopening.
+The empty filtered offer notice remains covered. At test-first head `912443b`, [GUI run 42422178440](https://github.com/krystianslowik/arkt/actions/runs/42422178440/job/128552912724) executed 2,081 tests, skipped 54 and reported 9 assertion failures in the four unanswered-offer regressions. The earlier `4beeeec` compile error was not a behavioral red.
+
+The window set now protects the captured crashed records from initialization through an unanswered offer, including
+live changes, cancelled quit and confirmed clean quit. Restore, Dismiss and the empty notice release protection and
+immediately rebuild the live snapshot; a failed Restore retains the offer. A pre-offer and cancelled-quit boundary
+regression and an immediate empty-notice refresh assertion supplement the existing tests. The fake engine models the
+retained marker; this is not a Chromium relaunch. #803 remains unmerged.
+
+Swift 6.2.4 source parsing and scoped diff/import checks are static only. Local full builds and tests were not run
+because the baseline cannot compile; CI on the implementation head is pending. Earlier green run 42407828692 at
+`004e3ca` reported Core 579 tests/47 suites, pure ShellKit 2,510/282 and GUI 2,077 executed/54 skipped/0 failures;
+those results predate these regressions and the fix.
+
+## #846: an HTTP-only site crashes the engine at `TabDialogManager`'s `CHECK(host)`
+
+Date 2026-11-08. Branch `engine/846-https-first-dialog` from `origin/main` (`3a0263c`). Found while reviewing #795.
+
+### Gate
+
+- Seam: no patch. The mitigation is one more name in the shell's `--disable-features` list
+  (`EngineLaunchArguments.requiredDisabledFeatures`, where `MediaRouter`, `Glic` and the others are switched off).
+  The check adds test-only code to the self-test embedder.
+- Facade header: unchanged (`cmp` identical). `.patches`: unchanged, 14 lines, 14 `arkt` commits above
+  `156.0.8078.48` (`in sync`).
+- Overlay link checked before each build: `$CR/arkt` points at this worktree's `engine/arkt`.
+- Build: `nice -n 10 autoninja -j 4 -C out/Arkt chrome`, incremental. Chromium disk 1.9 TB free, internal 73 GB,
+  swap 5.5 to 5.7 GB of 7 GB (under the 6.5 GB stop line), load average 4 to 7 from other lanes' work.
+- Test bundle: `out/Arkt/Arkt.app` (`dev.arkt.Arkt`), launched by path; the installed app is `com.arkt.Arkt` and the
+  ArktTest copies are `dev.arkt.ArktShell`. Nothing under `/Applications` or `~/Applications/ArktTest` was touched.
+
+### What triggers it
+
+`HttpsOnlyModeTabHelper::DidFinishNavigation` shows the ask-before-HTTP dialog when an HTTPS-First navigation falls
+back to HTTP and `HttpsFirstDialogUi` is on (on by default). The dialog goes through
+`TabDialogManager::CreateAndShowDialog`, whose `CreateTabScopedDialog` checks the host widget, which an Arkt window
+does not have. Loopback hosts never reach it: `HttpsUpgradesInterceptor` exempts `localhost` and loopback addresses by
+name, non-strict modes exempt non-unique hostnames and URLs with a port. So the page is served on `127.0.0.1:8846` but
+loaded as `http://http-only.example.com/`, with
+`--host-resolver-rules=MAP http-only.example.com:80 127.0.0.1:8846, MAP http-only.example.com:443 127.0.0.1:8846`.
+The HTTPS attempt reaches the plain HTTP server, fails the TLS handshake (the server logged three `400` client
+hellos), and the navigation falls back to HTTP.
+
+An off-the-record Arkt window comes from Chromium's New Incognito Window command sent through the host (the facade's
+`createBrowser(host:)` always uses the profile the engine started with, #705); the shell's private windows run on
+that regular profile today.
+
+### What landed
+
+- `HttpsFirstDialogUi` joins the shell's `--disable-features` list, with its reason in the doc comment, and
+  `EngineLaunchArgumentsTests` follows (`keepsTheHttpsFirstDialogOff`, the expected lists).
+- Self-test embedder: `arkt-selftest private-window <url> [ms]` sends `IDC_NEW_INCOGNITO_WINDOW` through the host,
+  loads `url` in the new window's tab and, after `ms` (3000 by default), logs the tab's `state` and evaluates
+  `document.title` plus the interstitial's `#primary-button` text.
+
+### Smoke (`out/Arkt/Arkt.app`, `--no-startup-window --arkt-facade-selftest --arkt-engine-test-api`, fresh profiles in a scratch folder, `--use-mock-keychain`, the host rules above)
+
+"Old list" is the shell's list before this change (`DestroyProfileOnBrowserClose,WebAuthenticationAmbientSignin,
+MediaRouter,Glic`); "new list" adds `HttpsFirstDialogUi`. Each run lasted 20 s unless it crashed first.
+
+| Run | Window | List | Result |
+|---|---|---|---|
+| a-repro | off the record (`private-window`, driver page on `127.0.0.1:8846/private`) | old | CRASH: `FATAL:chrome/browser/ui/tabs/tab_dialog_manager.cc:307] Check failed: host.`, `Received signal 6`, exit 134, 0.36 s after `urlChanged ... url=http://http-only.example.com/` |
+| a-mitigated | off the record | new | PASS: `titleChanged ... title=Site is not secure`, `state ... url=http://http-only.example.com/ title=Site is not secure loading=no crash=0`, `eval private-window page ... result=Site is not secure \| Go back`; process alive, stopped by PID |
+| b-repro | regular, `https_only_mode_enabled: true` written into the fresh profile ("Always use secure connections") | old | CRASH: the same `Check failed: host.`, exit 134 |
+| b-mitigated | the same | new | PASS: `title=Site is not secure`, alive |
+| c-control | regular, fresh profile, default settings | old | CRASH: the same `Check failed: host.`, exit 134 |
+| c-mitigated | the same | new | PASS: `title=Site is not secure`, alive |
+
+The crash report's crashing thread (symbolized from the framework):
+`HttpsOnlyModeTabHelper::DidFinishNavigation` -> `AskBeforeHttpDialogController::ShowDialog` ->
+`TabDialogManager::CreateAndShowDialog` -> `TabDialogManager::CreateTabScopedDialog` -> `CheckLogMessage` -> `abort`.
+
+The control was meant to load the HTTP page quietly; instead a fresh regular profile also gets the HTTPS-First warning
+on this host, so the crash is not limited to private windows: any HTTP-only site with a public hostname took down the
+engine in a normal window with default settings. No Arkt patch or overlay file touches HTTPS-First, and the
+profile held no HTTPS-First pref, so this is stock 156 behaviour; which heuristic turns the warning on for a fresh
+profile was not traced. With the dialog off, every case shows the interstitial in the tab and the engine stays up.
+
+The old/new pairs are the deliberate break: the same build and page, with and without the one feature name.
+
+| Step | Result |
+|---|---|
+| Build with the self-test command | `The build has finished successfully.`, `FAILED:` 0, under 2 min |
+| Format-only rebuild (clang-format on the added lines) | finished, `FAILED:` 0, 71 s; `git status` in `$CR` clean apart from the untracked `build/util/MINIBRANCH` |
+| `swift test --filter EngineLaunchArgumentsTests` (ShellKit, `nice -n 20 -j 2`) | 10 tests passed |
+
+### Not done here
+
+- The guard before `CHECK(host)` (acceptance 4): left to the maintainer. It would be E3b's choke-point guard landing
+  early and costs one upstream file (`tab_dialog_manager.cc`); with the dialog off, nothing in these runs reaches it.
+- The #795 doc's E3b inventory row for ask-before-HTTP (acceptance 5) lives on the open #795 branch; it should say
+  "switched off by #846" when that doc lands.
+- The Engine app itself was not launched: it builds the same `--disable-features` value through
+  `EngineLaunchArguments`, which the Swift tests cover; the self-test runs pass the list by hand.
+
+### Patch budget
+
+Unchanged: 14 patch files, 14 `arkt` commits, in sync. No upstream file touched.
+
+### Cleanup
+
+Every engine run and the loopback server stopped by exact PID (`ps -p` prints nothing for each). The throwaway
+profiles were deleted. The two macOS crash reports the crashing runs wrote (bundle `dev.arkt.Arkt`) were copied to the
+artifacts folder and removed from `DiagnosticReports`. The runs did not use the clipboard.
+
+
+### Restore pages integration with current main (#580)
+
+Merged main `4d40f38` into the recovery branch. The sole conflict was this shared results document; both the
+complete recovery history and main's #846 engine diagnosis/results were retained. ToastView's automatic merge
+keeps the recovery-specific multiline decision and main's radius/type roles. The unanswered-offer coordinator,
+AppSession recording guard and their existing regression files are byte-identical to the previously tested recovery
+head `aa72ced6a94c478b9c83cead32f09804b19c88c7`.
+
+#810 is now merged. The recovery panel uses `ShellRadius.sheet` and its recessed list uses `ShellRadius.field`,
+preserving their 14 pt and 10 pt values. A source scan mirroring CornerRadiusLintTests' exact regex and exemptions
+found two offending assignments before that correction and zero afterward. This is a static source check, not an
+executed Swift Testing result. No screenshots were regenerated; the existing captures remain historical evidence.
+
+Swift 6.2.4 frontend parsing passed for all 80 changed Swift files. The workflow import/UI-source checks, actionlint
+and whitespace/conflict-marker checks passed. No full local package/App build, GUI, engine or manual accessibility
+run was performed. CI must validate the merged head; the last full green remains run 42424301771 at `aa72ced`.
+#803 remains open, so production-engine repeated unanswered recovery and cross-launch validation still depend on
+that retained crash marker. Native killed-process recovery, quit/cancellation and VoiceOver remain unverified.
+
+## #851: a tab-modal dialog on an Arkt window is cancelled, not a crash (patch 0015)
+
+Date 2026-11-08. Branch `engine/851-tab-dialog-guard` from `engine/846-https-first-dialog` (PR #849, not merged
+yet). The maintainer chose to land E3b's one-file guard now (#851, acceptance 2).
+
+### Gate
+
+- Why a patch: `TabDialogManager::CreateTabScopedDialog` does `CHECK(host)` on the tab's Views host widget, which an
+  Arkt window does not have. Every tab-modal dialog reaches it (`CreateAndShowDialog`, and the direct
+  `CreateTabScopedDialog` callers `chrome_webui_dialog.cc:93` and `indigo_onboarding_dialog.cc:199`), and no overlay
+  seam sits in front of it. #849's switch closes only the HTTPS-First dialog.
+- Facade header: unchanged (`cmp` identical). `.patches`: 14 to 15, number 0015 claimed in the pull request; no open
+  engine pull request touches `engine/patches` and no earlier patch touches `tab_dialog_manager.cc`.
+- Overlay link checked before each build: `$CR/arkt` points at this worktree's `engine/arkt`.
+- Builds: `nice -n 10 autoninja -j 4 -C out/Arkt chrome`. Chromium disk 1.9 TB free, internal 72 GB, swap 5.7 GB of
+  7 GB throughout (under the 6.5 GB stop line), load average 4 to 5.
+
+### Why the guard returns a widget, not nothing
+
+Patch 0013's toast guard drops the toast and returns. Here that would move the crash one line: most callers
+dereference the returned widget at once (`dialog_widget_->MakeCloseSynchronous(...)` in the ask-before-HTTP, credential
+leak, Lens permission, password change, autofill progress, account chooser and Indigo callers). So patch 0015:
+
+- `CreateTabScopedDialog`: with no host widget, the dialog widget is created as usual but parented to the tab's own
+  view (`GetContents()->GetNativeView()`, inside the Arkt window). It is not shown.
+- `ShowDialog` (every path, including the two direct callers' own calls): with no host widget it logs
+  `ARKT: tab-modal dialog cancelled, the window has no Views widget`, posts `Close()` through the widget's weak
+  pointer and returns. The close runs on the next turn, after the caller has set its close handling, so the caller
+  sees an ordinary dismissal (its `MakeCloseSynchronous` callback, or the delegate's close callback).
+
+One file, 27 insertions and 1 deletion.
+
+### Smoke (`out/Arkt/Arkt.app`, `--no-startup-window --arkt-facade-selftest --arkt-engine-test-api`, fresh profiles in a scratch folder, `--use-mock-keychain`, the #846 page `http://http-only.example.com/` mapped to `127.0.0.1:8851`)
+
+"Old list" is the shell's list without `HttpsFirstDialogUi`, so the HTTPS-First dialog is on for that run only;
+"new list" is the shipping list from #849.
+
+| Run | Window | List | Patch 0015 | Result |
+|---|---|---|---|---|
+| g-private-old | off the record (`private-window`) | old | in | PASS: `ARKT: tab-modal dialog cancelled, the window has no Views widget`, then `state ... url=http://http-only.example.com/ title=http-only.example.com loading=no crash=0`; engine alive 20 s, stopped by PID |
+| g-strict-old | regular, "Always use secure connections" | old | in | PASS: the same log line, engine alive |
+| g-default-old | regular, fresh profile, defaults | old | in | PASS: the same log line, engine alive |
+| g-private-new | off the record | new | in | PASS: unchanged from #849, `Site is not secure \| Go back`, no cancel line |
+| break-private-old | off the record | old | removed (`tab_dialog_manager.cc` back to the pin, rebuilt) | CRASH: `Check failed: host.`, `Received signal 6`, exit 134 |
+| break-default-old | regular, defaults | old | removed | CRASH: the same, exit 134 |
+
+`FATAL`, `NOTREACHED` and `DumpWithoutCrashing` lines in the g-runs: 0. With the dialog cancelled, the tab stays on an
+empty page at the HTTP URL: the HTTPS-First throttle has already stopped the navigation, and the dialog that would
+have let the user go on is gone. So the guard is a backstop against the crash, not the user path; the user path stays
+#849's interstitial.
+
+| Step | Result |
+|---|---|
+| Build with patch 0015 | `The build has finished successfully.`, `FAILED:` 0, 75 s |
+| Break build (file back to `156.0.8078.48`) | finished, `FAILED:` 0, 69 s |
+| Restore build | finished, `FAILED:` 0, 69 s; `git status` in `$CR` clean apart from the untracked `build/util/MINIBRANCH` |
+
+### Reachability of the credential leak and edit address dialogs (acceptance 1)
+
+One probe run on the patched build with the new list: a normal window, loopback forms on `127.0.0.1:8851`, values
+typed with DevTools `Input.insertText` (`--remote-debugging-port=9851`), then the button clicked from script with a
+user gesture; `--log-net-log` into the artifacts folder.
+
+- **Edit address: not reachable on an Arkt window.** The only way in is `AddressBubblesController::ShowEditor`, from
+  the Edit button of the save and update address bubbles (`save_address_bubble_controller.cc:244`,
+  `update_address_bubble_controller.cc:124`). The overlay's `ArktAutofillBubbleHandler` closes those prompts without
+  showing them (#768), so there is no Edit button to press. Runtime: a full US address submitted logged
+  `ARKT: autofill bubble SaveAddressProfile not shown`, no tab-modal line, no crash.
+- **Credential leak: the check runs, the warning cannot come back on this build.** Signed out, a sign-in form
+  submitted with a well-known leaked test pair started the lookup: the net log shows
+  `passwordsleakcheck-pa.googleapis.com/v1/leaks:lookupSingle`, which this run sent to `~NOTFOUND`
+  (`--host-resolver-rules`) so nothing left the machine. A signed-out lookup carries the build's Google API key, and
+  this build has none: the framework holds only the `dummytoken` placeholder, not a valid key (the rejection itself was
+  not observed, since nothing was sent). So no leak answer and no dialog here. It becomes reachable in a build with Google API keys, or once a user signs in to a
+  Google account in the engine. With patch 0015 it would then be cancelled rather than crash; drawing it natively,
+  or switching the warning off (the `profile.password_manager_leak_detection` pref), is the follow-up's call.
+
+### Patch budget
+
+| Source | Count |
+|---|---|
+| `.patches` lines | 15 |
+| `arkt` commits above `156.0.8078.48` | 15 |
+
+In sync. Export added 0015 and its `.patches` line; 0001 to 0014 byte-identical. Facade header copies `cmp` identical.
+
+| Gate (design section 2.5) | Before | After #851 |
+|---|---|---|
+| Patch files | 14 | 15 |
+| Upstream files outside 0001-0004 | 19 | 20 |
+| Hunks in `browser_actions.cc` and `browser_commands.cc` | 4 | 4 |
+| Hot-file hunks (`browser_window_features.cc`, `tab_features.cc`) | 0 | 0 |
+| Widely included headers changed | 0 | 0 |
+
+### Left open
+
+- #795's E3b gate grep should also match `CreateTabScopedDialog(` (#851, acceptance 3); #795 is still open, so the
+  line is noted in this pull request instead of edited on that branch.
+- Upstream unit tests for `TabDialogManager` were not run; tests whose tab has no host widget would now get a
+  cancelled dialog instead of the CHECK.
+- The leak warning above, once a build has API keys or sign-in.
+
+### Cleanup
+
+Every engine run and the loopback server stopped by exact PID (`ps -p` prints nothing for each); nothing listens on
+8851 or 9851. The throwaway profiles were deleted. Three macOS crash reports from these runs (the two break runs, and
+one renderer helper that failed to set up its sandbox while g-strict-old was quitting after its `kill`) were copied
+to the artifacts folder and removed from `DiagnosticReports`. The runs did not use the clipboard.

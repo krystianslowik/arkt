@@ -23,6 +23,20 @@ extension FindStopAction {
   }
 }
 
+extension TabTerminationStatus {
+  /// Nil for `None`: the page is alive.
+  init?(facade status: ArktTerminationStatus) {
+    switch status {
+    case .none: return nil
+    case .crashed: self = .crashed
+    case .killed: self = .killed
+    case .outOfMemory: self = .outOfMemory
+    case .launchFailed: self = .launchFailed
+    @unknown default: self = .crashed
+    }
+  }
+}
+
 extension CloseReason {
   /// `ArktCloseReasonNone` never arrives on a `TabClosed` from the real facade; a close nobody claimed is the
   /// page's own (Decision 12's default).
@@ -79,7 +93,8 @@ extension HistoryEntry {
 
 extension ExtensionAction {
   @MainActor init(facade action: any ArktExtensionAction) {
-    self.init(id: action.actionId, name: action.name, iconPNG: action.iconPNG, isEnabled: action.isEnabled)
+    self.init(id: action.actionId, name: action.name, iconPNG: action.iconPNG, isEnabled: action.isEnabled,
+              canUninstall: action.canUninstall, canReportAbuse: action.canReportAbuse)
   }
 }
 
@@ -125,6 +140,100 @@ public enum ScriptValue: Equatable, Sendable {
     case let array as [Any]: self = .array(array.map { ScriptValue(facade: $0) ?? .null })
     case let object as [String: Any]: self = .object(object.mapValues { ScriptValue(facade: $0) ?? .null })
     default: return nil
+    }
+  }
+}
+
+// MARK: Page info (#583)
+
+extension PageConnection {
+  init(facade connection: ArktPageConnection) {
+    switch connection {
+    case .secure: self = .secure
+    case .notSecure: self = .notSecure
+    case .notFullySecure: self = .notFullySecure
+    case .certificateError: self = .certificateError
+    case .flagged: self = .flagged
+    case .localFile: self = .localFile
+    case .internalPage: self = .internalPage
+    @unknown default: self = .notSecure
+    }
+  }
+}
+
+extension PermissionSetting {
+  init(facade setting: ArktPermissionSetting) {
+    switch setting {
+    case .allow: self = .allow
+    case .block: self = .block
+    case .ask: self = .ask
+    @unknown default: self = .ask
+    }
+  }
+
+  var facade: ArktPermissionSetting {
+    switch self {
+    case .allow: .allow
+    case .ask: .ask
+    case .block: .block
+    }
+  }
+}
+
+extension SitePermissionKind {
+  /// Nil for a kind added to the facade after this build.
+  init?(facade kind: ArktSitePermissionKind) {
+    switch kind {
+    case .location: self = .location
+    case .camera: self = .camera
+    case .microphone: self = .microphone
+    case .notifications: self = .notifications
+    case .popups: self = .popups
+    case .sound: self = .sound
+    case .javaScript: self = .javascript
+    case .images: self = .images
+    case .automaticDownloads: self = .automaticDownloads
+    case .clipboard: self = .clipboard
+    case .midiDevices: self = .midiDevices
+    case .motionSensors: self = .motionSensors
+    case .usbDevices: self = .usbDevices
+    case .serialPorts: self = .serialPorts
+    case .hidDevices: self = .hidDevices
+    case .bluetoothDevices: self = .bluetoothDevices
+    case .fileEditing: self = .fileEditing
+    case .windowManagement: self = .windowManagement
+    case .localFonts: self = .localFonts
+    case .idleDetection: self = .idleDetection
+    case .backgroundSync: self = .backgroundSync
+    case .insecureContent: self = .insecureContent
+    @unknown default: return nil
+    }
+  }
+
+  var facade: ArktSitePermissionKind {
+    switch self {
+    case .location: .location
+    case .camera: .camera
+    case .microphone: .microphone
+    case .notifications: .notifications
+    case .popups: .popups
+    case .sound: .sound
+    case .javascript: .javaScript
+    case .images: .images
+    case .automaticDownloads: .automaticDownloads
+    case .clipboard: .clipboard
+    case .midiDevices: .midiDevices
+    case .motionSensors: .motionSensors
+    case .usbDevices: .usbDevices
+    case .serialPorts: .serialPorts
+    case .hidDevices: .hidDevices
+    case .bluetoothDevices: .bluetoothDevices
+    case .fileEditing: .fileEditing
+    case .windowManagement: .windowManagement
+    case .localFonts: .localFonts
+    case .idleDetection: .idleDetection
+    case .backgroundSync: .backgroundSync
+    case .insecureContent: .insecureContent
     }
   }
 }

@@ -38,7 +38,12 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   public var isShowingEmptyState: Bool { !isPrivateWindow && sidebarController.spaces.isEmpty }
   private var commandBarPrewarmed = false
   /// When each tab was last shown in this window, for the command bar's "12 min" (not persisted).
-  private var viewedAt: [NodeID: Date] = [:]
+  private var viewedAt: [NodeID: Date] = [:] {
+    didSet { openTabsCache = nil }
+  }
+  /// The command bar's open tabs for a Space order, kept between keystrokes (#606): with 2,000 tabs the walk cost
+  /// 3 ms of every keystroke. Any sidebar change and any newly viewed tab drop it.
+  private var openTabsCache: (spaces: [SpaceID], tabs: [CommandBarResults.OpenTab])?
   /// The focused tab: the shown plain tab, or the focused pane of a shown split (decision 7). The engine's active tab
   /// of this window follows it (week-3 Decision 6: extension `active` flags stay true).
   public internal(set) var currentTab: TabID? {
@@ -81,6 +86,9 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// The window closed. A closed controller is not shown again (its command bar and pager released their display
   /// links); the app builds a new window instead (#241: Dock reopen).
   public private(set) var isClosed = false
+  public var onRecoveryWindowClosed: (@MainActor () -> Void)?
+  var onRecoveryEligibilityChanged: (@MainActor () -> Void)?
+  var onBecomingPrivate: (@MainActor () -> Void)?
   /// Shown in the sidebar when the engine runs extensions (`EngineExtensions`).
   public internal(set) var extensionsButton: ExtensionsButton?
   /// The Extensions panel the button opens (#595); nil with the button.
@@ -159,6 +167,18 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// back (#355). Set by `ShellWindowSet`.
   var reopenLittleArkt: (@MainActor () -> Void)?
   var canReopenLittleArkt: @MainActor () -> Bool = { false }
+  /// Reopen Closed Tab in a blank or incognito window with nothing of its own to reopen: the last closed private
+  /// window comes back (#746). Set by `ShellWindowSet`.
+  var reopenPrivateWindow: (@MainActor () -> Void)?
+  var canReopenPrivateWindow: @MainActor () -> Bool = { false }
+  /// This blank or incognito window closed with pages (#746): the window set keeps them in memory, never on disk, for
+  /// Reopen Closed Tab in another private window.
+  var onPrivateWindowClosed: (@MainActor (ClosedPrivateWindow) -> Void)?
+  /// The private window's pages as its close began; handed over when the window closes, dropped when it stays.
+  var closingPrivateWindow: ClosedPrivateWindow?
+  /// The last URL of each private page, as the Pages list last showed it: the engine forgets a closing page's URL
+  /// before it reports the close, so a window the engine closes on its own is noted from here (#746).
+  var privatePageURLs: [TabID: URL] = [:]
   /// Unloaded copies of closed pages that the stack holds (or is about to): tabs without a row that never show.
   var parkedTabs: Set<TabID> = []
   /// The reopen batch the visible undo toast belongs to; nil without one.
@@ -338,6 +358,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     wireThemeDrawing()
     // A removed Space's nodes emit no structure change, so `.spaceRemoved` checks too.
     sidebarObservation = sidebar.observe { [weak self] change in
+      self?.openTabsCache = nil                     // a title, an order or a Space changed what the bar lists
       switch change {
       case .structure, .spaceRemoved:
         self?.closeEngineTabsOfRemovedNodes()
@@ -371,6 +392,27 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     _ = peek                                          // its click monitor records where links are clicked
   }
 
+  /// Presents the one launch recovery decision after the sidebar session was restored.
+  public func presentRestorePages(_ model: RestorePagesModel) {
+    switch model.presentation {
+    case .none: break
+    case .notice:
+      toasts.show(Toast(text: "Arkt quit unexpectedly. Your Spaces and tabs are back.",
+                        kind: .recovery, glyph: "exclamationmark.shield", isPolite: true))
+    case .offer(let pages):
+      guard !rootView.subviews.contains(where: { $0 is RestorePagesView }) else { return }
+      rootView.layoutSubtreeIfNeeded()
+      let view = RestorePagesView(model: model, pages: pages)
+      let card = rootView.card.frame
+      view.frame.origin = NSPoint(x: card.maxX - view.frame.width - 22, y: card.minY + 22)
+      rootView.addSubview(view, positioned: .above, relativeTo: rootView.split)
+      view.appear()
+      if let window, window.firstResponder == nil || window.firstResponder === window {
+        window.makeFirstResponder(view)
+      }
+    }
+  }
+
   public func activate(node: NodeID) { sidebarController.activate(node: node) }
   /// The sidebar URL bar (BH-031, GS-042).
   public var urlBar: URLBarView { sidebarController.view.urlBar }
@@ -386,8 +428,13 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   }
 
   /// Toasts follow the theme of the Space the pager is nearest to: its flavor and its first color stop (BH-190,
-  /// alerts design decision 2).
+  /// alerts design decision 2). A blank or incognito window has no Space theme: its toasts keep the untinted surface
+  /// in the backdrop's flavor (design/private-pages, "Past the cap").
   private func refreshToastFlavor() {
+    if let backdrop = sidebarController.privateBackdrop {
+      toasts.view?.theme = ToastView.plainTheme(backdrop.flavor)
+      return
+    }
     let themes = rootView.themeBackground.themes
     guard !themes.isEmpty else { return }
     let index = min(max(Int(pager.position.rounded()), 0), themes.count - 1)
@@ -717,7 +764,10 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// Space first like the suggestions (BH-111). Forgets the time of a tab that is gone.
   private func recentTabs() -> [CommandBarResults.OpenTab] {
     let open = openTabs()
-    viewedAt = viewedAt.filter { entry in open.contains { $0.node == entry.key } }
+    let openNodes = Set(open.map(\.node))
+    if viewedAt.keys.contains(where: { !openNodes.contains($0) }) {
+      viewedAt = viewedAt.filter { openNodes.contains($0.key) }
+    }
     let candidates = open.filter { $0.node != currentNode }
     let viewed = candidates.filter { $0.lastViewed != nil }
       .sorted { ($0.lastViewed ?? .distantPast) > ($1.lastViewed ?? .distantPast) }
@@ -733,10 +783,13 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     } else {
       ordered = spaces
     }
-    return CommandBarResults.openTabs(in: sidebar, spaces: ordered).map { tab in
+    if let cache = openTabsCache, cache.spaces == ordered { return cache.tabs }
+    let tabs = CommandBarResults.openTabs(in: sidebar, spaces: ordered).map { tab in
       CommandBarResults.OpenTab(node: tab.node, title: tab.title, url: tab.url, isSplitPane: tab.isSplitPane,
                                 lastViewed: viewedAt[tab.node], spaceTitle: tab.spaceTitle)
     }
+    openTabsCache = (ordered, tabs)
+    return tabs
   }
 
   /// The action search's verbs (BH-106); ids are handled in `runCommandBarAction`.
@@ -860,6 +913,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       return
     case .pageInfoChanged(let tab):
       if tab == currentTab { refreshPageInfo() }                    // #582: before the map, as a private page has no row
+      if let node = nodeByTab[tab] { refreshPaneToolbar(of: node) } // #698: a pane's own Toolbar glyph
       return
     default:
       break
@@ -1013,6 +1067,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     guard engineWindow != nil, let request = engineHost.onCloseRequested else { return true }
     let open = Array(tabsByNode.values)
     saveSession()                                    // #116: before the tabs close
+    holdClosingPrivateWindow()                       // #746: while its pages are still there
     isWindowCloseRequested = true
     stampsShownTabsOnWindowClose = true
     request()
@@ -1024,7 +1079,9 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// its controller; release it with the window.
   public func windowWillClose(_ notification: Notification) {
     settlePendingClear()                             // #413: a window closed without `windowShouldClose`
+    handOverClosedPrivateWindow()                    // #746
     isClosed = true
+    onRecoveryWindowClosed?()
     for node in shownNodes { onTabHidden?(node) }
     removePaneMouseMonitor()
     javaScriptDialogs.closeAll()

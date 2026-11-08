@@ -259,6 +259,11 @@ void ArktBrowserMainExtraParts::PreProfileInit() {
   // earlier still wins (W3-9 smoke: Cmd-Q did not quit).
   g_browser_process->local_state()->SetDefaultPrefValue(
       prefs::kConfirmToQuitEnabled, base::Value(false));
+  // Chromium's own promotions (the PromotionsEnabled policy): the iOS promo
+  // bubbles look for a BrowserView and do not find one on an Arkt window
+  // (engine connector design, E1), and Arkt draws its own prompts.
+  g_browser_process->local_state()->SetDefaultPrefValue(
+      prefs::kPromotionsEnabled, base::Value(false));
   // Profile init precedes the startup browser, so every normal Browser is
   // created through the override.
   if (NativeWindowEnabled()) {

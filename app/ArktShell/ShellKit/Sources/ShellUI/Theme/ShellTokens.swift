@@ -25,7 +25,7 @@ public enum ShellTokens {
   /// The hover-revealed sidebar floating over the page (BH-004). Unlike the card it needs a shadow in dark too: its
   /// edge sits on page content, not on the theme. TODO(measure): RT-10.
   public static let sidebarOverlayShadow = TokenPair(light: .black(0.22), dark: .black(0.45))
-  /// The floating sidebar's lift: `sidebarOverlayShadow` at the reveal's blur, which the conceal clears too.
+  /// The floating sidebar's lift, 2 pt down: `sidebarOverlayShadow` at the reveal's blur, which the conceal clears too.
   public static let sidebarOverlayLiftShadow = ShadowToken(color: sidebarOverlayShadow,
                                                            radius: SidebarRevealMotion.shadowRadius, offsetY: 2)
   /// Icon-only (idle page dots, bottom-bar symbols, the hover close X): WCAG non-text 3:1 over every shipped
