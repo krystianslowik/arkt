@@ -17,8 +17,9 @@ public struct ArchiveStore: Sendable {
   /// `archived_item.format_version`: the version of the stored `NodeSnapshot` JSON. It is versioned apart from the
   /// sidebar document (`SidebarStorageFormat.currentVersion`) because a snapshot holds no Space data: sidebar format
   /// 2 added `Space.icon` and left `NodeSnapshot` unchanged, so archive rows stay at 1 and builds that read only
-  /// version 1 keep reading them. Bump this only when `NodeSnapshot`'s stored shape changes.
-  public static let snapshotFormatVersion = 1
+  /// version 1 keep reading them. Bump this only when `NodeSnapshot`'s stored shape changes. Version 2 adds a split's
+  /// title (`SplitItem.title`, #787); a version 1 row is read with its splits unnamed.
+  public static let snapshotFormatVersion = 2
 
   let database: ArktDatabase
 
@@ -275,8 +276,9 @@ private struct FetchedRow: Sendable {
       let version = formatVersion, version <= ArchiveStore.snapshotFormatVersion,
       let reason = reason.flatMap(ArchiveReason.init(rawValue:)),
       let archivedAt, let body = snapshot,
-      let snapshot = try? decoder.decode(NodeSnapshot.self, from: body), snapshot.id == id
+      let decoded = try? decoder.decode(NodeSnapshot.self, from: body), decoded.id == id
     else { return nil }
+    let snapshot = version >= 2 ? decoded : decoded.withoutSplitTitles()
     let source: ArchiveSource
     switch sourceKind {
     case "space":

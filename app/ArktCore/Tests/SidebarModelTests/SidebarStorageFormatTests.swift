@@ -112,7 +112,7 @@ struct SidebarStorageFormatTests {
       try #require(try JSONSerialization.jsonObject(with: fixture) as? [String: Any]))
     expected["version"] = SidebarStorageFormat.currentVersion
     let actual = try #require(try JSONSerialization.jsonObject(with: reencoded) as? NSDictionary)
-    #expect(SidebarStorageFormat.currentVersion == 3)
+    #expect(SidebarStorageFormat.currentVersion == 4)
     #expect(actual == (expected as NSDictionary))
   }
 
@@ -135,9 +135,9 @@ struct SidebarStorageFormatTests {
     #expect(actual == (expected as NSDictionary))
   }
 
-  /// Golden test: decoding and re-encoding the frozen v3 fixture reproduces it (compared as JSON values, not bytes),
-  /// including a theme's `noiseFactor` and `opacity`.
-  @Test func reencodingVersion3FixtureReproducesIt() throws {
+  /// Version 3 has no split title. Reading it is the migration: every split stays unnamed, and writing it back
+  /// stores the current version with nothing else changed, including a theme's `noiseFactor` and `opacity`.
+  @Test func reencodingVersion3FixtureMigratesToTheCurrentVersion() throws {
     let fixture = try Self.fixtureData(version: "sidebar-v3")
     let sidebar = try SidebarStorageFormat.decode(fixture)
     let alpha = try #require(UUID(uuidString: "D1000000-0000-4000-8000-0000000000A1"))
@@ -146,9 +146,37 @@ struct SidebarStorageFormatTests {
     #expect(theme.opacity == 0.8)
     #expect(sidebar.spaces[alpha]?.icon == .symbol("star"))
     let reencoded = try SidebarStorageFormat.encode(sidebar)
+    var expected = try #require(try JSONSerialization.jsonObject(with: fixture) as? [String: Any])
+    expected["version"] = SidebarStorageFormat.currentVersion
+    let actual = try #require(try JSONSerialization.jsonObject(with: reencoded) as? NSDictionary)
+    #expect(actual == (expected as NSDictionary))
+  }
+
+  /// Golden test: decoding and re-encoding the frozen v4 fixture reproduces it (compared as JSON values, not bytes),
+  /// including a split's title (#787).
+  @Test func reencodingVersion4FixtureReproducesIt() throws {
+    let fixture = try Self.fixtureData(version: "sidebar-v4")
+    let sidebar = try SidebarStorageFormat.decode(fixture)
+    let split = try #require(UUID(uuidString: "D1000000-0000-4000-8000-000000000103"))
+    guard case .split(let item)? = sidebar.nodes[split]?.kind else { Issue.record("not a split"); return }
+    #expect(item.title == "Research")
+    let reencoded = try SidebarStorageFormat.encode(sidebar)
     let expected = try #require(try JSONSerialization.jsonObject(with: fixture) as? NSDictionary)
     let actual = try #require(try JSONSerialization.jsonObject(with: reencoded) as? NSDictionary)
+    #expect(SidebarStorageFormat.currentVersion == 4)
     #expect(actual == expected)
+  }
+
+  /// A split `title` key is not part of versions 1 to 3: an older document that holds one is read without it.
+  @Test(arguments: [1, 2, 3])
+  func olderDocumentsIgnoreASplitTitle(version: Int) throws {
+    var json = try #require(
+      try JSONSerialization.jsonObject(with: Self.fixtureData(version: "sidebar-v4")) as? [String: Any])
+    json["version"] = version   // the older Space shapes ignore the newer Space keys, so only the split matters
+    let sidebar = try SidebarStorageFormat.decode(try JSONSerialization.data(withJSONObject: json))
+    let split = try #require(UUID(uuidString: "D1000000-0000-4000-8000-000000000103"))
+    guard case .split(let item)? = sidebar.nodes[split]?.kind else { Issue.record("not a split"); return }
+    #expect(item.title == nil)
   }
 
   /// Version 3 always writes both theme fields, so a version 3 theme without them is not a version 3 document.

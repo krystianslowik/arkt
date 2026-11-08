@@ -22,6 +22,9 @@ import Foundation
 /// with a texture, 0 without) and `opacity` 1, so every stored theme draws as it did. Those keys inside an older
 /// document are ignored.
 ///
+/// Version 4 adds `SplitItem.title` (#787), written only when a split has a name. Versions 1 to 3 have no split
+/// titles: decoding them leaves every split unnamed, and a split `title` key inside one is ignored.
+///
 /// Equality: two stored documents hold the same sidebar when their decoded values are equal. Byte equality is only a
 /// fast path (the encoding is deterministic for a given build), never the definition.
 ///
@@ -29,12 +32,13 @@ import Foundation
 /// `Sidebar.maximumNestingDepth`, enforced by `insert`, bounds how deep the decoded tree may be, and is reported as
 /// `.invalidTree(.nestingTooDeep(id))`.
 public enum SidebarStorageFormat {
-  public static let currentVersion = 3
+  public static let currentVersion = 4
 
   /// Documents this build reads. Version 1 migrates by leaving `Space.icon` nil (the field did not exist); versions
-  /// 1 and 2 give themes the version 3 defaults. `SidebarStorageFormat` versions only the sidebar document; archived
+  /// 1 and 2 give themes the version 3 defaults; versions 1 to 3 leave splits unnamed. `SidebarStorageFormat`
+  /// versions only the sidebar document; archived
   /// `NodeSnapshot`s carry no Space data and are versioned on their own (`ArchiveStore.snapshotFormatVersion`).
-  public static let readableVersions: Set<Int> = [1, 2, 3]
+  public static let readableVersions: Set<Int> = [1, 2, 3, 4]
 
   /// Same value as `Sidebar.maximumNestingDepth`, the model invariant that decoding enforces through `insert`.
   public static let maximumNestingDepth = Sidebar.maximumNestingDepth
@@ -149,19 +153,26 @@ extension Sidebar: Codable {
     default: try container.decode([SpaceEntry].self, forKey: .spaces)
     }
     let favorites = try container.decode([FavoritesEntry].self, forKey: .favorites)
+    // Split titles arrived in version 4: an older document's trees are read without them.
+    let readsSplitTitles = version >= 4
+    func tree(_ snapshot: NodeSnapshot) -> NodeSnapshot {
+      readsSplitTitles ? snapshot : snapshot.withoutSplitTitles()
+    }
     var sidebar = Sidebar()
     var profiles: Set<String> = []
     do {
       for entry in spaces {
         try sidebar.addSpace(entry.space)
-        for tree in entry.pinned { try sidebar.insert(tree, in: .pinned(entry.space.id)) }
-        for tree in entry.today { try sidebar.insert(tree, in: .today(entry.space.id)) }
+        for snapshot in entry.pinned { try sidebar.insert(tree(snapshot), in: .pinned(entry.space.id)) }
+        for snapshot in entry.today { try sidebar.insert(tree(snapshot), in: .today(entry.space.id)) }
       }
       for entry in favorites {
         guard profiles.insert(entry.profile).inserted else {
           throw SidebarDocumentError.duplicateFavoritesProfile(entry.profile)
         }
-        for tree in entry.items { try sidebar.insert(tree, in: .favorites(profile: entry.profile)) }
+        for snapshot in entry.items {
+          try sidebar.insert(tree(snapshot), in: .favorites(profile: entry.profile))
+        }
       }
     } catch let error as SidebarError {
       throw SidebarDocumentError.invalidTree(error)
