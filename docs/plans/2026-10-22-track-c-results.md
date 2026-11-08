@@ -2896,3 +2896,23 @@ Written first. Each failed to compile before the code existed.
 - `LittleArktTests` (XCUITest, 4): Opt-Cmd-click opens Little Arkt, Open in, Cmd-W and the chooser's Open in New Window.
   The app and test bundle build (`xcodebuild ... build-for-testing`: TEST BUILD SUCCEEDED). Not run: the suite needs
   the real pointer and keyboard, and the Mac was in use.
+
+### Multi-window session store (#116, in progress)
+
+The session store now supports an ordered collection of window states, each with its own collapsed folder IDs.
+The existing single-window defaults key and API remain intact. A missing collection reads the legacy value; a saved
+empty collection stays empty. The new defaults value is a version 1 JSON envelope. Unreadable or unsupported
+collections and collections containing an unusable window frame are rejected without falling back to legacy data.
+States written before folder collapse was included decode with an empty set. This bounded slice uses injected user
+defaults, following the existing session store; the full issue's storage decision remains open.
+
+The five collection tests failed to compile against the unchanged model because the collection APIs and folder state
+were absent. An isolated macOS 15 package using the actual session source, relevant EngineAPI declarations, ID aliases,
+and both session test files passed 30 tests: 21 existing single-window tests, the five initial collection tests, and
+four compatibility and invalid-data tests. This is a focused check, not the full ShellKit suite or an app build.
+Swift source parsing, changed-file import inspection, and diff whitespace checks passed. Full CI remains to validate
+this slice.
+
+Capturing and reopening regular windows, excluding private windows, the General setting, deleted-item fallback,
+screen clamping during multi-window restore, and lifecycle integration remain. Preserve #690 recovery behavior during
+integration; navigation history is tracked separately by #612. Real relaunch and multi-display checks remain.
