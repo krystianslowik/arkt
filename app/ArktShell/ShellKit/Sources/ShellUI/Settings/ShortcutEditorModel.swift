@@ -44,6 +44,12 @@ public final class ShortcutEditorModel {
     let modifiers: UInt?
   }
 
+  /// A damaged entry must not discard the rest of the user's overrides.
+  private struct DecodedOverride: Decodable {
+    let value: StoredOverride?
+    init(from decoder: Decoder) { value = try? StoredOverride(from: decoder) }
+  }
+
   private static let defaultsKey = "shortcutOverrides"
   public let catalog: [ShortcutDefinition]
   public private(set) var overrides: [ShortcutActionID: ShortcutOverride] = [:]
@@ -58,9 +64,9 @@ public final class ShortcutEditorModel {
     self.catalog = catalog.filter { seen.insert($0.id).inserted }
     self.defaults = defaults
     guard let data = defaults.data(forKey: Self.defaultsKey),
-          let stored = try? JSONDecoder().decode([String: StoredOverride].self, from: data) else { return }
+          let stored = try? JSONDecoder().decode([String: DecodedOverride].self, from: data) else { return }
     for definition in self.catalog {
-      guard let value = stored[definition.id.rawValue] else { continue }
+      guard let value = stored[definition.id.rawValue]?.value else { continue }
       if let key = value.key, let flags = value.modifiers, !key.isEmpty {
         overrides[definition.id] = .binding(ShortcutBinding(key: key, modifiers: .init(rawValue: flags)))
       } else if value.key == nil && value.modifiers == nil {
@@ -91,7 +97,16 @@ public final class ShortcutEditorModel {
   }
 
   public func reset(_ id: ShortcutActionID) {
-    guard catalog.contains(where: { $0.id == id }) else { return }
+    guard let definition = catalog.first(where: { $0.id == id }) else { return }
+    if let binding = definition.defaultBinding {
+      let conflicts = catalog.filter { $0.id != id && self.binding(for: $0.id) == binding }.map(\.id)
+      if !conflicts.isEmpty {
+        beginRecording(id)
+        pendingBinding = binding
+        conflictingActions = conflicts
+        return
+      }
+    }
     overrides.removeValue(forKey: id)
     if recordingAction == id { cancelRecording() }
     persist()

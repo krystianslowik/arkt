@@ -2911,3 +2911,8 @@ catalog to menus or Settings, implement system conflict warnings, or audit remai
   Swift 6.1.2 was used locally. This is not a full ShellKit run.
 - Full ShellKit tests and app build were not run locally; the baseline and full Xcode are unavailable. CI remains
   pending for this slice.
+- Review regressions: reassigning an action's default and resetting it now uses the existing conflict choices
+  without changing saved bindings until acceptance. Saved entries decode independently, so a malformed known or
+  unknown entry cannot discard a valid override. Two added actual-source isolated tests failed before the fix
+  (6 tests passed, 2 failed with 8 assertion issues); after the fix `swift test --jobs 2` passed all 8 tests.
+  Swift 6.1.2 and the same macOS 15 isolated package were used. Full package and UI checks still require CI.

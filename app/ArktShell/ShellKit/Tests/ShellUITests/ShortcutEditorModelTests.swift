@@ -132,6 +132,50 @@ struct ShortcutEditorModelTests {
     #expect(reloaded.binding(for: newTab) == store.binding(for: newTab))
   }
 
+  @Test func resettingAReassignedDefaultUsesTheConflictChoices() throws {
+    let suite = try Suite()
+    let store = ShortcutEditorModel(catalog: catalog(), defaults: suite.defaults)
+    store.beginRecording(sidebar)
+    store.record(event: try event("t", keyCode: 17, modifiers: .command))
+    store.useRecordedShortcut()
+    #expect(store.binding(for: newTab) == nil)
+    #expect(store.binding(for: sidebar) == commandT)
+
+    store.reset(newTab)
+    #expect(store.conflictingActions == [sidebar])
+    #expect(store.binding(for: newTab) == nil)
+    #expect(store.binding(for: sidebar) == commandT)
+    let unanswered = ShortcutEditorModel(catalog: catalog(), defaults: suite.defaults)
+    #expect(unanswered.binding(for: newTab) == nil)
+    store.keepExisting()
+    #expect(store.binding(for: newTab) == nil)
+
+    store.reset(newTab)
+    store.useRecordedShortcut()
+    let reloaded = ShortcutEditorModel(catalog: catalog(), defaults: suite.defaults)
+    #expect(reloaded.binding(for: newTab) == commandT)
+    #expect(reloaded.binding(for: sidebar) == nil)
+    #expect(reloaded.overrides[newTab] == nil)
+    #expect(reloaded.overrides[sidebar] == .cleared)
+  }
+
+  @Test func malformedEntriesDoNotDiscardValidOverrides() throws {
+    let suite = try Suite()
+    let saved = Data(#"""
+      {"newTab":{"key":"e","modifiers":1048576},
+       "showSidebar":{"key":42,"modifiers":1048576},
+       "unknown":{"key":false,"modifiers":"invalid"}}
+      """#.utf8)
+    suite.defaults.set(saved, forKey: "shortcutOverrides")
+    let store = ShortcutEditorModel(catalog: catalog(), defaults: suite.defaults)
+    #expect(store.binding(for: newTab) == commandE)
+    #expect(store.binding(for: sidebar) == commandS)
+    store.setBinding(nil, for: sidebar)
+    let reloaded = ShortcutEditorModel(catalog: catalog(), defaults: suite.defaults)
+    #expect(reloaded.binding(for: newTab) == commandE)
+    #expect(reloaded.binding(for: sidebar) == nil)
+  }
+
   private func event(_ characters: String, keyCode: UInt16,
                      modifiers: NSEvent.ModifierFlags = []) throws -> NSEvent {
     try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: modifiers,
