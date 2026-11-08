@@ -41,6 +41,55 @@ final class CommandBarFolderExtensionActivationTests: XCTestCase {
     bar.commit()
   }
 
+  func testFolderAndExtensionReviewCaptures() throws {
+    let directory = try commandBarReviewCaptureDirectory()
+    for dark in [false, true] {
+      var model = SidebarModel.Sidebar()
+      let personal = model.addSpace(title: "Personal")
+      let work = model.addSpace(title: "Work")
+      let tab = try model.addTab(url: URL(string: "https://review.example.test/")!, title: "Reference", in: .today(work))
+      let folder = try model.addFolder(title: "Review notes — 設計と調査 — a long folder name to check truncation", in: .pinned(work))
+      _ = try model.addFolder(title: "Review notes", in: .today(personal))
+      let engine = InMemoryEngine()
+      let host = shell(engine: engine, source: ModelSidebarSource(sidebar: model), node: tab)
+      let window = try XCTUnwrap(host.window)
+      window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+      window.setFrame(NSRect(origin: NSPoint(x: 80, y: 80), size: window.minSize), display: true)
+      host.themeContextObserver?.notify()
+      host.showWindow(nil)
+      let engineWindow = try XCTUnwrap(host.engineWindow)
+      engine.setExtensionActions([.init(id: "review-action", name: "Review extension — save research notes and references")],
+                                 in: engineWindow)
+      let bar = host.commandBar
+      bar.show(.newTab)
+      bar.setQueryForTesting("review")
+      let folders = bar.results.filter {
+        if case .folder = $0.kind { return true }
+        return false
+      }
+      XCTAssertEqual(folders.count, 2)
+      XCTAssertTrue(bar.results.contains { $0.kind == .extensionAction("review-action") })
+      for (kind, name) in [(CommandBarResults.Kind.folder(folder), "folder"),
+                           (.extensionAction("review-action"), "extension")] {
+        let target = try XCTUnwrap(bar.results.firstIndex { $0.kind == kind })
+        let editor = NSTextView()
+        // Use the real selection path so captions, Return hints and preview reflect the captured row.
+        for _ in 0..<bar.results.count where bar.barView.table.selectedRow != target {
+          XCTAssertTrue(bar.control(bar.barView.field, textView: editor, doCommandBy: #selector(NSResponder.moveDown(_:))))
+        }
+        XCTAssertEqual(bar.barView.table.selectedRow, target)
+        bar.barView.selectionMotion.settleNow()
+        bar.barView.layer?.removeAllAnimations()
+        bar.barView.layer?.opacity = 1
+        bar.barView.layoutSubtreeIfNeeded()
+        XCTAssertNotNil(bar.barView.table.view(atColumn: 0, row: target, makeIfNecessary: true))
+        try saveCommandBarReviewCapture(bar.panel, directory: directory, name: "results-\(name)-\(dark ? "dark" : "light")")
+      }
+      bar.hide()
+      host.close()
+    }
+  }
+
   func testFolderSelectionRevealsAndExpandsItsAncestorsInItsSpace() throws {
     for inToday in [false, true] {
       var model = SidebarModel.Sidebar()

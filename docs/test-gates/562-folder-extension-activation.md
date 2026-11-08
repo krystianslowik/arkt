@@ -61,3 +61,25 @@ unrelated folder's closed state before and after switching away, and the same ou
 and stale-target assertions are retained. This is a test-only setup repair; production activation is unchanged.
 Parsing and whitespace checks passed; the corrected GUI behavior still needs a fresh run. No local GUI or App build
 ran. The prior component successes do not establish native keyboard/VoiceOver or installed-extension popup behavior.
+
+
+## Corrected activation green and review captures
+
+Run `42533916376` at `fb5810a` passed all seven executed normal checks (XCUITest skipped). GUI reported 2,184 tests,
+64 skipped, zero failures. All four actual-window folder/extension activation tests passed, including the corrected
+Pinned/Today setup, plus both search Settings component tests and the real command-bar closed-folder tab-peek
+regression. Core, pure ShellKit, App build and lint passed. This establishes the bounded component acceptance; it
+still does not establish native installed-extension behavior, VoiceOver, Chromium popup handling or hot-path timing.
+
+The follow-up adds opt-in synthetic review captures, using the real window providers and existing Settings service
+composition. The existing GUI job exports `synthetic-command-bar-review-screenshots`: folder-selected and
+extension-selected rows in light/dark at the shell's minimum window size, plus Google/on and DuckDuckGo/off Settings
+in both appearances (eight PNGs). Long and non-Latin folder text and duplicate folder names in distinct Spaces are
+included. Selection uses the actual field-delegate keyboard-selection path; before capture the fixture checks the
+provider rows, selected index/realized row and Settings values. It settles the selection indicator and removes the
+entrance fade without sleeping. The writer checks nonzero dimensions and nonblank samples. These are view-cache
+captures, not a native pointer/keyboard or OS extension-popup test. No production files change.
+
+Capture-stage tests and artifact inspection remain pending; parsing, import/UI source checks, parity-script tests,
+actionlint and whitespace checks are the local validation. No local GUI or full App build ran. Keep the PR draft
+until those images and the acceptance mapping have been reviewed; formal code review is still required.

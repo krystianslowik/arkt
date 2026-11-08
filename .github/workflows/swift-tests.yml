@@ -260,6 +260,7 @@ jobs:
         working-directory: app/ArktShell/ShellKit
         env:
           ARKT_RESTORE_SHOTS_DIR: ${{ runner.temp }}/restore-pages-screenshots
+          ARKT_COMMAND_BAR_SHOTS_DIR: ${{ runner.temp }}/command-bar-review-screenshots
         run: swift test --filter ShellKitGUITests
       - name: Upload restore pages screenshots
         if: always()
@@ -267,6 +268,15 @@ jobs:
         with:
           name: restore-pages-screenshots
           path: ${{ runner.temp }}/restore-pages-screenshots/*.png
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Upload command bar review screenshots
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: synthetic-command-bar-review-screenshots
+          path: ${{ runner.temp }}/command-bar-review-screenshots/*.png
           if-no-files-found: warn
           retention-days: 7
 

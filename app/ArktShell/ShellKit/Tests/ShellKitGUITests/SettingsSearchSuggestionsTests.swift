@@ -72,6 +72,34 @@ final class SettingsSearchSuggestionsTests: XCTestCase {
     return try XCTUnwrap(control as? SettingsSwitch)
   }
 
+  func testSearchSettingsReviewCaptures() throws {
+    let directory = try commandBarReviewCaptureDirectory()
+    for dark in [false, true] {
+      let setting = CommandBarSettings(defaults: defaults)
+      setting.setSearchEngine(.google)
+      setting.setSearchSuggestionsEnabled(true)
+      let controller = makeSettings(setting)
+      let window = try XCTUnwrap(controller.window)
+      window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+      let root = try XCTUnwrap(window.contentView)
+      let engine = try XCTUnwrap(find(AXID.Settings.control("spaces", "searchEngine"), in: root) as? SettingsPopUpButton)
+      let suggestions = try suggestionsSwitch(controller)
+      XCTAssertEqual(engine.items, ["Google", "DuckDuckGo"])
+      XCTAssertTrue(engine.isEnabled)
+      XCTAssertTrue(suggestions.isEnabled)
+      XCTAssertEqual(suggestions.state, .on)
+      XCTAssertEqual(engine.selectedTitle, "Google")
+      try saveCommandBarReviewCapture(window, directory: directory, name: "settings-google-on-\(dark ? "dark" : "light")")
+      engine.select("DuckDuckGo")
+      suggestions.performClick(nil)
+      XCTAssertEqual(setting.searchEngine, .duckDuckGo)
+      XCTAssertEqual(engine.selectedTitle, "DuckDuckGo")
+      XCTAssertEqual(suggestions.state, .off)
+      try saveCommandBarReviewCapture(window, directory: directory, name: "settings-duckduckgo-off-\(dark ? "dark" : "light")")
+      window.close()
+    }
+  }
+
   func testEngineChangeAndResetReachBothBarsWithoutNavigation() throws {
     let setting = CommandBarSettings(defaults: defaults)
     let first = try makeBar(setting)

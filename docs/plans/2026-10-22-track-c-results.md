@@ -3117,3 +3117,17 @@ The fixture displayed Work's tab via internal `show` without selecting Work in t
 Personal's separate outline. It now uses real `activate`, asserts the target Space and closed state before the action,
 and verifies the same outline after reveal. All existing reveal and stale-target assertions remain. Production is
 unchanged. Parsing and whitespace passed; no local GUI/App run occurred and corrected-head runtime CI is pending.
+
+
+### #562 corrected activation green and visual review gate
+
+At `fb5810a`, run `42533916376` passed Core, pure ShellKit, App build, lint and required aggregate. GUI executed
+2,184 reported tests / 64 skipped / zero failures, including all four folder/extension activation methods, both
+Settings methods and closed-folder tab peek. The stronger fixture setup passed without production changes.
+
+An opt-in review-only fixture now exports eight synthetic light/dark PNGs through the existing GUI CI job:
+minimum-window folder/extension rows with long/non-Latin names and Space context, plus Google/on and DuckDuckGo/off
+Settings. It uses real providers and controls, asserts state before capture and writes nonblank view-cache PNGs.
+Production is unchanged. Local parsing, static checks and actionlint pass; no local App/GUI build ran. Capture-stage
+CI and actual artifact inspection remain pending before review readiness; native keyboard/VoiceOver, installed
+extension popup behavior and worst-case timing remain unverified.
