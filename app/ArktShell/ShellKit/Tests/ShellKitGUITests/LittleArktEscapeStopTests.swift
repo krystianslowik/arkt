@@ -20,10 +20,12 @@ final class LittleArktEscapeStopTests: XCTestCase {
     NSApp.setActivationPolicy(.accessory)
   }
 
+  // XCTest keeps each test case object until the run ends: release the windows too, not only hide them (#805).
   override func tearDown() async throws {
     for set in sets {
-      for little in set.littleArkts { little.window.orderOut(nil) }
+      for little in set.littleArkts { little.window.close() }
     }
+    for set in sets { set.closeAllForTesting() }
     sets = []
   }
 

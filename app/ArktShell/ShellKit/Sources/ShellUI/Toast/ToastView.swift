@@ -140,7 +140,7 @@ final class ToastView: NSView {
   }
 
   private func configure(for toast: Toast) {
-    let multiLine = toast.isPersistent
+    let multiLine = toast.isMultiline
     label.maximumNumberOfLines = multiLine ? Self.maximumLines : 1
     label.lineBreakMode = multiLine ? .byWordWrapping : .byTruncatingTail
     label.cell?.truncatesLastVisibleLine = true
@@ -180,7 +180,7 @@ final class ToastView: NSView {
 
   // MARK: - Size and layout
 
-  private var isMultiLine: Bool { shown?.isPersistent ?? false }
+  private var isMultiLine: Bool { shown?.isMultiline ?? false }
 
   /// The text's own one-line width, plus the field's insets.
   private var naturalTextWidth: CGFloat {
@@ -478,7 +478,7 @@ final class ToastView: NSView {
     glyphView.contentTintColor = glyph.nsColor()
     dismissButton.contentTintColor = glyph.nsColor()
     dismissButton.flavor = flavor
-    if let shown { label.attributedStringValue = attributedText(shown.text, multiLine: shown.isPersistent) }
+    if let shown { label.attributedStringValue = attributedText(shown.text, multiLine: shown.isMultiline) }
     actionButton.edge = increaseContrast() ? AlertTokens.increasedContrastEdge.resolve(flavor) : nil
   }
 }

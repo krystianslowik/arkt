@@ -133,11 +133,11 @@ final class SidebarBannerPopoverView: NSView {
   let titleLabel: NSTextField
   let bodyLabel: NSTextField
   let actionButton: ArchivePillButton?
-  let dismissButton = NSButton(title: "Dismiss", target: nil, action: nil)
+  let dismissButton = TokenTitleButton(title: "Dismiss", target: nil, action: nil)
 
   init(notice: SidebarNotice, flavor: ThemeFlavor) {
-    titleLabel = NSTextField(wrappingLabelWithString: notice.title)
-    bodyLabel = NSTextField(wrappingLabelWithString: notice.body)
+    titleLabel = TokenLabel(wrappingLabelWithString: notice.title)
+    bodyLabel = TokenLabel(wrappingLabelWithString: notice.body)
     actionButton = notice.actionTitle.map { ArchivePillButton(style: .neutral, title: $0, metrics: .infobar) }
     super.init(frame: .zero)
     // The flavor before any subview joins: the pill restyles for it as it is added, before the panel exists or draws,

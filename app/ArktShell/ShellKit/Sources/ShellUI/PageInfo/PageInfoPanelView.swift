@@ -180,7 +180,7 @@ final class PageInfoPanelView: NSView {
   private var listHeight: CGFloat {
     let m = PageInfoMetrics.self
     let data = 1 + 2 * m.sectionPadding + m.rowHeight
-    let list = CGFloat(rows.count) * m.rowHeight
+    let list = rows.reduce(0) { $0 + $1.height }
     let readOnly = readOnlyLabel.isHidden ? 0 : m.readOnlyNoteHeight
     let permissions = rows.isEmpty ? 0 : 1 + m.sectionTitleHeight + readOnly + list + m.sectionPadding
     return data + permissions
@@ -243,8 +243,8 @@ final class PageInfoPanelView: NSView {
         y += m.readOnlyNoteHeight
       }
       for row in rows {
-        row.frame = NSRect(x: 0, y: y, width: width, height: m.rowHeight)
-        y += m.rowHeight
+        row.frame = NSRect(x: 0, y: y, width: width, height: row.height)
+        y += row.height
       }
     }
     updateFade()
@@ -373,12 +373,15 @@ final class PageInfoDataRow: NSView {
 }
 
 /// One permission: glyph, the engine's title, and a pop-up of the settings it offers. VoiceOver reads the pop-up as
-/// "Camera, Block, pop-up button".
+/// "Camera, Block, pop-up button". While macOS denies Arkt the permission, a secondary note sits under the title
+/// ("Turned off in macOS", #786) and VoiceOver reads it with the title.
 @MainActor
 final class PageInfoPermissionRow: NSView {
   let kind: SitePermissionKind
   private let glyph = NSImageView()
   let title = NSTextField(labelWithString: "")
+  let note = NSTextField(labelWithString: "")
+  private(set) var height = PageInfoMetrics.rowHeight
   let popUp = NSPopUpButton(frame: .zero, pullsDown: false)
   var onChoose: (@MainActor (SitePermissionKind, PermissionSetting) -> Void)?
 
@@ -392,6 +395,9 @@ final class PageInfoPermissionRow: NSView {
     title.font = ShellType.body.font
     title.lineBreakMode = .byTruncatingTail
     title.setAccessibilityElement(false)
+    note.font = ShellType.footnote.font
+    note.lineBreakMode = .byTruncatingTail
+    note.setAccessibilityElement(false)
     popUp.isBordered = false
     popUp.controlSize = .small
     popUp.font = ShellType.caption.font
@@ -401,7 +407,7 @@ final class PageInfoPermissionRow: NSView {
     popUp.target = self
     popUp.action = #selector(chose(_:))
     popUp.setAccessibilityIdentifierWithCell(AXID.PageInfo.permission(model.kind))
-    for view in [glyph, title, popUp] as [NSView] { addSubview(view) }
+    for view in [glyph, title, note, popUp] as [NSView] { addSubview(view) }
     configure(model)
   }
 
@@ -412,6 +418,9 @@ final class PageInfoPermissionRow: NSView {
     glyph.image = NSImage(systemSymbolName: model.symbol, accessibilityDescription: nil)
       ?? NSImage(systemSymbolName: "circle", accessibilityDescription: nil)
     title.stringValue = model.title
+    note.stringValue = model.systemNote ?? ""
+    note.isHidden = model.systemNote == nil
+    height = model.height
     popUp.removeAllItems()
     for option in model.options {
       popUp.addItem(withTitle: option.title)
@@ -437,13 +446,21 @@ final class PageInfoPermissionRow: NSView {
     popUp.frame = NSRect(x: bounds.width - m.sideInset - popUpWidth, y: (bounds.height - m.popUpHeight) / 2,
                          width: popUpWidth, height: m.popUpHeight)
     let textX = glyph.frame.maxX + m.glyphGap
-    title.frame = NSRect(x: textX, y: (bounds.height - 17) / 2, width: max(0, popUp.frame.minX - 8 - textX),
-                         height: 17)
+    let textWidth = max(0, popUp.frame.minX - 8 - textX)
+    if note.isHidden {
+      title.frame = NSRect(x: textX, y: (bounds.height - 17) / 2, width: textWidth, height: 17)
+    } else {
+      // Title and note as one block, centered on the glyph and the pop-up.
+      let top = ((bounds.height - 17 - 1 - 14) / 2).rounded()
+      title.frame = NSRect(x: textX, y: top, width: textWidth, height: 17)
+      note.frame = NSRect(x: textX, y: title.frame.maxY + 1, width: textWidth, height: 14)
+    }
   }
 
   func restyle(flavor: ThemeFlavor, increaseContrast: Bool) {
     glyph.contentTintColor = ShellTokens.sidebarForeground.resolve(flavor).nsColor()
     title.textColor = ShellTokens.primaryText.resolve(flavor).nsColor()
+    note.textColor = ShellTokens.secondaryText.resolve(flavor).nsColor()
     popUp.layer?.backgroundColor = ShellTokens.sidebarItemHovered.resolve(flavor).cgColor
     popUp.layer?.borderWidth = increaseContrast ? 1 : 0
     popUp.layer?.borderColor = AlertTokens.increasedContrastEdge.resolve(flavor).cgColor
