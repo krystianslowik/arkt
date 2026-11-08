@@ -2897,6 +2897,259 @@ Written first. Each failed to compile before the code existed.
   The app and test bundle build (`xcodebuild ... build-for-testing`: TEST BUILD SUCCEEDED). Not run: the suite needs
   the real pointer and keyboard, and the Mac was in use.
 
+### Shortcut editor model slice (#119)
+
+The typed model accepts catalog definitions with stable action IDs, normalizes bindings and stores only overrides,
+including explicit clears. It supports per-action and all reset, recording, cancellation and clear, and resolves all
+conflicting actions when the recorded shortcut is accepted. Unknown IDs are ignored. This slice does not wire the
+catalog to menus or Settings, implement system conflict warnings, or audit remaining shortcut rows; those remain open.
+
+- Red: CI run 42428840901, ShellKit job 128573038493, failed to compile the three initial
+  `ShortcutEditorModelTests` because the model types were missing; no tests executed. The app build passed.
+- Scoped green: an isolated Swift package containing the actual model source and the actual test file, macOS 15
+  deployment target and macOS 15.5 SDK, `swift test`: 6 tests passed (the 3 original scenarios and 3 boundary tests).
+  Swift 6.1.2 was used locally. This is not a full ShellKit run.
+- Full ShellKit tests and app build were not run locally; the baseline and full Xcode are unavailable. CI remains
+  pending for this slice.
+- Review regressions: reassigning an action's default and resetting it now uses the existing conflict choices
+  without changing saved bindings until acceptance. Saved entries decode independently, so a malformed known or
+  unknown entry cannot discard a valid override. Two added actual-source isolated tests failed before the fix
+  (6 tests passed, 2 failed with 8 assertion issues); after the fix `swift test --jobs 2` passed all 8 tests.
+  Swift 6.1.2 and the same macOS 15 isolated package were used. Full package and UI checks still require CI.
+
+### Shortcut Settings and app wiring test gate (#119)
+
+The next test-only stage covers stable IDs for New Tab and the sidebar action, Settings recorder keys, explicit
+conflict choices, conflict-aware reset, Reset All persistence, and an injected system-warning source. A real-app
+scenario edits New Tab through Settings and exercises changed, cleared, reset and reloaded bindings through the
+app's menu and regular window target. The separately bound in-process menu test is component coverage.
+
+The competing-key test now installs its menu temporarily and routes Cmd-W and Cmd-1–7 through the application,
+asserting capture while recording and normal Settings behavior afterward. The conflict check identifies the
+explanation field and requires both the conflicting action and binding. Negative old/cleared-binding checks wait
+for a later ordinary key to reach a synthetic loopback page before checking that the command bar stayed closed;
+they do not dismiss a panel or issue the next positive command in between.
+
+Swift 6.2.4 frontend parsing and diff checks passed for this test gate. No test suite or app ran locally. The intended
+initial failure is compilation on the missing catalog and Settings integration APIs; that failure remains
+unobserved. The earlier eight isolated model passes do not establish UI behavior. CI must establish the correct red
+before implementation, then validate the completed wiring. The full action catalog, actual system-warning source,
+keyboard delivery and focus still need verification. Initial conflict focus and Return's default remain explicitly
+held for the maintainer's answer in PR #828 comment 6715272110. Per-action page priority remains #441.
+
+## Shortcut catalog and menu binding stage (#119)
+
+CI run 42436049928, ShellKit job 128595052878, failed compilation before any tests ran: the new gate required
+`ShortcutCatalog.definitions(from:)`, `ShortcutCatalog.bind(model:to:)`, and Settings services for the editor and
+system warnings. Aggregate job 128599173201 failed on required ShellKit. The other diagnostics included contextual
+cascades; the line 66 solver diagnostic was in an expression containing missing definitions.
+
+The catalog now supports only New Tab and Toggle Sidebar Visibility, identified by selectors, with live menu
+binding and replacement of an earlier model. Other actions, including dynamic Space and tagged dispatcher items,
+remain unaudited and read-only. The Settings services, controls, app composition, system warning source, full
+catalog audit, and page priority follow-up #441 remain open. The maintainer's conflict focus and Return decision
+remains pending.
+
+The new replacement regression first failed to compile against the actual sources because the two catalog APIs
+were missing. An isolated package using the actual catalog and model sources, the existing model tests, the
+read-only catalog test suite and the new synthetic menu tests passed 15 tests in 3 suites (the search test has
+10 cases), Swift 6.4.1 in Swift 6 mode, macOS 15 target and macOS 15.5 SDK. The isolated catalog test suite was
+copied without the unrelated Space summary suite. This is not the full ShellKit or app build, and does not exercise
+real application dispatch. Full CI, GUI and UI tests remain pending.
+
+### Shortcut defaults after binding review regression (#119)
+
+Reconstructing catalog definitions from a bound menu read an override or explicit clear as the default. The new
+parameterized regression binds a separate pristine menu without first reading its definitions, then overrides or
+clears New Tab, rebuilds the model, and resets it. Against the previous production source, both cases failed: one
+Swift Testing test with two cases recorded five assertion issues. The current validated title remains part of the
+assertion, so preserving defaults must not freeze the menu title.
+
+Each supported menu item now retains its original optional binding before definitions read it or live binding
+changes it. Definitions continue to read the current title. The focused actual-source package passed 16 tests in
+three suites using Swift 6.2.4, macOS 15 target and SDK 15.5: eight model tests, five read-only catalog tests including
+ten parameterized search cases, and three menu-binding tests including this two-case regression. The unrelated
+Space summary suite is excluded. Source parsing and diff checks passed. Full ShellKit, actual app dispatch and GUI
+checks remain unverified locally; new-head CI is required. The pending Settings and conflict-default work is unchanged.
+
+
+### Settings shortcut services injection (#119)
+
+At `06c9499`, CI run 42438466896 failed compilation in both ShellKit job 128602456213 and GUI job
+128602456256: `SettingsWindowTests.swift` lines 50–51 required `SettingsServices.shortcutEditor` and
+`isSystemShortcut`. No tests ran; there were no catalog or default compiler errors. The 16 focused passes above
+belong to `06c9499`, not this stage.
+
+Settings services now expose an optional editor and an injected system-shortcut predicate, defaulting to nil and
+false. No Settings controls or app composition are wired; the read-only pane remains in use. The actual system
+warning source, catalog audit, app dispatch and page priority (#441) remain future work. Initial conflict focus and
+Return's default remain with the maintainer. New-head CI must compile and run the existing GUI tests; parsing is not
+a test pass. Full ShellKit, GUI and app tests were not run locally.
+
+
+### Shortcut service predicate test isolation repair (#119)
+
+At `752e518`, CI run 42439465407, ShellKit job 128605426429, failed before tests ran. The only distinct compiler
+error was assignment of the test helper's non-Sendable `isSystemShortcut` parameter to the main-actor service
+closure. The helper now declares the same `@MainActor` function type as `SettingsServices`; production behavior
+and the held conflict-focus decision are unchanged.
+
+A Swift 6.2.4 complete-concurrency type-check probe passed using the actual shortcut model source and the service's
+predicate declaration. The changed test file passed source parsing, and diff checks passed. The probe is not a
+ShellKit test-suite result: no tests or full app/GUI build ran locally. New-head CI must validate the full gate.
+
+### #119 bounded action-catalog audit (continued)
+
+Audited `MainMenu`, `SpacesMenu`, `TabsMenu`, `SplitMenu`, and copy-link selector ownership. Added the four existing
+Copy URL / Markdown / Quote and Paste URL as New Tab selector identities to the existing New Tab and Sidebar
+catalog. Their original responder-chain targets and menu defaults are unchanged; binding only changes key equivalents.
+Tagged dispatch, numbered Space/sidebar/split rows, differently keyed hidden tab aliases, and unaudited selectors
+remain read-only as detailed in `docs/shortcut-wiring-test-notes.md`. No recorder or app composition was added.
+
+Test first: the focused actual catalog/model source package with synthetic menu items ran
+`swift test --package-path <isolated-package> --filter CopyLinkCatalogTests`: 1 test failed with 3 issues because
+all four definitions and defaults were missing. After mapping, `swift test --package-path <isolated-package>` ran
+13 tests in 3 suites successfully (Swift 6.1.2, macOS 15 deployment target). The synthetic component setup follows
+the production menu declarations; it does not compile `MainMenu`, execute the commands, or establish real GUI,
+app dispatch, system-conflict detection or the full app build. The conflict focus and Return decision remains held;
+page priority remains #441.
+
+### #119 conflict default test follow-up
+
+The maintainer chose Keep Existing as the app-shortcut conflict default on Return
+([decision](https://github.com/krystianslowik/arkt/pull/828#issuecomment-6721408776)). The Settings GUI test now
+asserts initial Keep focus, Return preserving both bindings, and Reset All remaining clear after reopening. These new
+assertions have not run. The previously observed GUI run 42441404301 executed 2052 tests, skipped 54, and had six
+assertion failures across five Settings methods; it does not establish a Return-specific failure. The recorder and
+app composition remain outstanding. Native keyboard delivery, VoiceOver and a real macOS system-warning source are
+unverified; the injected warning seam is not a system detector. App shortcuts retain priority over pages until
+RT-29/#78, with per-action priority deferred to #441.
+
+`xcrun swiftc -frontend -parse app/ArktShell/ShellKit/Tests/ShellKitGUITests/SettingsWindowTests.swift` and
+`git diff --check` passed; parsing is not compilation or execution. Full local builds and app/GUI tests were not run.
+
+### Settings shortcut recorder component (#119)
+
+The existing injected editor now drives recorder buttons for the six audited actions, per-row reset and Reset All.
+Recording captures Settings window keys before its pane and close shortcuts; Tab leaves, Escape cancels, and Delete
+clears. Conflicts offer Keep Existing with initial focus and Return as the default, or an explicit Use Shortcut.
+The warning uses the injected predicate only. Controls are retained across model notifications; the component does
+not compose the editor into the app or detect macOS system shortcuts.
+
+At `993a386`, GUI CI run 42481041992, job 128732861365, reported 2072 tests, 54 skipped, and six failures in five
+SettingsWindowTests. All five failed to find the sidebar recorder; the competing-key test also failed its initial
+`isKeyWindow` assertion. The Return assertion was not reached. The key-window setup failure remains separate and
+undiagnosed; it has not been weakened. No GUI or app was launched locally. New-head CI must establish compilation,
+focus, event delivery and the component result. Actual app composition and dispatch, live ShortcutWiringTests,
+remaining catalog audit, real system-warning source, RT-29/#78 and per-action priority #441 remain open.
+
+Swift 6.4.1 with SDK 15.5 type-checked the actual model and catalog sources; the changed Settings sources parsed.
+These are not GUI execution or a full ShellKit compile. The type check emitted the libSwiftScan fallback warning.
+
+### Settings recorder review regression gate (#119)
+
+Source review of `d920c609` found stale shortcut-search bindings, recording that captures input after focus moves
+to Search, and a missing injected system warning after accepting an app conflict. Four new component tests use
+the real Settings window and editor. They inspect live filtered rows through edit, clear and reset, text-editor
+input and persisted bindings after a focus change, warning content after Keep and Use, and explicit focused Use
+activation with Space. Existing recorder, reset, conflict and key-window assertions are retained.
+
+The requested Return change is not adopted: the maintainer explicitly chose Keep Existing for Return, and Settings
+design section 7 records that behavior. Apple's
+[keyboard guidance](https://developer.apple.com/library/archive/documentation/Accessibility/Conceptual/AccessibilityMacOSX/OSXAXKeyboardShortcuts.html)
+assigns Return to the default button and Space to the focused control. The new scenario checks both choices through
+window events; it does not establish native keyboard delivery until executed.
+
+This stage changes tests and documentation only. Swift 6.2.4 source parsing, test import inspection and
+`git diff --check` passed. No new tests, GUI or app build ran locally; the expected assertion failures for the three
+defects are unobserved. CI must establish them before production fixes. The previous missing-control red does not
+prove these new regressions. App composition, the full catalog, real system-warning detection, VoiceOver and app
+dispatch remain outstanding.
+
+### Shortcut conflict panel radius lint repair (#119)
+
+At `86bcd965683c68891c146b94571bf99105bf1db5`, pure ShellKit job 128748523909 in run 42486183358
+executed 2528 tests in 284 suites and failed with one issue: `CornerRadiusLintTests.noCornerRadiusIsALiteral`
+reported `panel.layer?.cornerRadius = 8` in `SettingsPanes+Shortcuts.swift`. This is an executed source-lint failure,
+not a recorder GUI regression result. The app build passed; GUI was still running at the inspection.
+
+Merged main `3bd3271`, including the radius scale, type roles, Favorite split behavior and shared pacing rules.
+The floating conflict panel now uses the role-based `ShellRadius.popover` (12 pt), replacing its 8 pt literal. All
+recorder regressions are unchanged; search, focus and warning defects remain open pending their runtime gate.
+A source scan using the existing lint's regex and exemptions found that one offending assignment before the
+correction and zero afterward. This scan is separate from executing the Swift Testing suite. Swift 6.2.4 parsing of
+changed Swift files, actionlint and whitespace checks passed. No full local package, GUI or app build ran; current-head
+CI and visual review of the panel remain required. App composition, the remaining catalog and real system-warning
+detection are still unfinished; the PR remains draft.
+
+
+### Shortcut recorder runtime regressions and repair (#119)
+
+At `b9a65d731b393a9422310ea1f4848d0a32b83e71`, GUI job 128757602654 in
+[run 42489143541](https://github.com/krystianslowik/arkt/actions/runs/42489143541) reported 2082 tests,
+60 skipped, and 20 assertion failures across four Settings methods. The live-search regression had four failed
+assertions; focus leaving the recorder had three; accepting an app conflict without the system warning had two.
+Those nine assertions establish the intended runtime red for the three source findings. The Return-default and
+focused-Use Space scenario passed; its behavior is preserved.
+
+Search now rebuilds its descriptors from the editor's effective bindings, independently of menu-observer order,
+and refreshes filtered rows after edits, clears and resets. Rebuilding waits until a recording mutation releases
+the recorder. Ordinary key capture checks that the recorder still has focus, otherwise cancels and lets the focused
+control handle the event. Accepting Use also checks the accepted binding against the injected system-warning
+predicate. The three regression tests and their behavioral assertions are unchanged.
+
+The competing Settings-key method had eleven failures beginning with `isKeyWindow == false`; those undelivered
+application events do not establish a recorder routing defect. Its setup now explicitly activates the application,
+matching the existing command-bar fixture, before requesting the key window. The key-window assertion remains;
+a failed precondition stops the method before producing misleading downstream routing failures. Application event
+dispatch and all successful-routing assertions are retained. New CI must establish whether activation repairs setup.
+
+Swift 6.2.4 frontend parsing of the three changed Swift files and `git diff --check` passed. No component suite,
+GUI, app launch or full package build ran locally. This repair has no new-head executable result yet. App/menu
+composition, real-app dispatch, the remaining catalog audit, macOS system-warning detection, VoiceOver and visual
+review remain outstanding; the PR stays draft.
+
+
+### Recorder regressions green; application activation fixture remains (#119)
+
+At `079ae3ae52c6d8896bbbc7fb3b06d57e15a655af`, [GUI job 128770392288](https://github.com/krystianslowik/arkt/actions/runs/42493380660/job/128770392288)
+reported 2087 tests, 60 skipped and one failed assertion. The live-binding search, focus-leaving recorder and
+app-conflict system warning regressions all passed, as did Return-default/focused-Use Space activation and the
+existing recorder component scenario. The sole failure was `isKeyWindow` before application-level key dispatch;
+no competing Cmd-W/number event was sent in that failed method. Other required checks and the App build passed.
+
+The SDK declaration of NSApplication.activate states that activation need not be immediate or succeed. The test
+now awaits activation over finite main-actor turns, requests its key window, then awaits key status over finite
+turns. It retains the key-window failure, early exit on invalid setup, and every application-dispatch, captured
+binding, pane and visibility assertion. No sleep, wall-clock deadline, skip, direct-window event substitution or
+production change is included. If the runner refuses activation, the failure now records active/visible/key-capable
+and existing-key-window state. This does not guarantee activation or establish a passing application-routing test.
+
+Swift 6.2.4 frontend parsing and whitespace/import checks passed. The asynchronous fixture has not run locally;
+CI must verify its behavior. No local full package/App build, GUI or app launch ran. App/menu composition, the
+remaining catalog audit, real system-warning detection, native accessibility and visual checks remain unfinished.
+
+
+### Application key-routing gate moved to the running app (#119)
+
+At `e638dfd150332f3660b65dd4e96257f076e9718b`, [GUI job 128791715128](https://github.com/krystianslowik/arkt/actions/runs/42500394665/job/128791715128)
+reported 2096 tests, 61 skipped and one failure. Activation remained refused (`active=false`, visible and key-capable
+window, no key window), so no competing application key was dispatched. The three recorder regressions and
+Return/Space conflict behavior passed. Repeating or extending the same activation wait is not justified.
+
+The component gate now calls the real Settings window key-equivalent boundary and retains binding, pane and close
+assertions. A separate real-app UI method sends Cmd-W and Cmd-1–7 through OS keyboard delivery, checks retained
+Settings and Shortcuts, verifies each effective binding via a filtered action row, and then checks ordinary pane
+and close behavior after recording. The original changed/cleared/reset/reloaded app-command test remains intact.
+This is a change of test boundary, not a passing application-routing result. The shared app editor composition
+remains absent. The optional focused UI workflow selector follows the contract already approved for #180.
+
+Swift 6.2.4 frontend parsing, the exact workflow import-layering and UI-source checks, actionlint, parity-report
+script tests and whitespace checks passed. An initial local invocation of the UI-source check used the repository
+root instead of its workflow working directory; the corrected invocation passed in `app/ArktShell/UITests`.
+No revised GUI/native test, App build or local app launch ran. CI must establish the component result and the native
+missing-composition red before the app wiring is implemented.
+
 ## Composite Space theme overlays (#534)
 
 The drawn base and opacity-scaled overlay are expanded in OKLab and source-over composited at the union of their
@@ -2930,3 +3183,57 @@ maintainer hardware after landing. No frame-time improvement is claimed. Merged 
 the deterministic completion and asynchronous download cancellation fixes. The existing 50% contrast fallback may
 remain below target, contrast samples do not cover every point or texture, and the pre-existing empty-base
 opacity-scaling limitation remains unchanged.
+
+### #119 main integration update
+
+Merged main `1188868` into the shortcut editor draft. The sole conflict was this append-only results history; both histories are retained. The catalog, recorder component, Keep Existing default, focus/search/warning regressions and real-app keyboard gate remain unchanged. The optional `ui_test_filter` dispatch input is preserved alongside main's workflow changes.
+
+Changed Swift parsing, workflow import/UI-source checks, actionlint and engine-header parity are checked after integration. No local full build, GUI run or App launch was performed. New-head CI is pending; the previous head's 16 SidebarAutosaver test issues remain unexplained historical evidence rather than an established flake. App/menu composition, real dispatch and macOS warning integration remain outstanding.
+
+The previously dispatched native run `42504571824` at `d84985d` is now observed: both ShortcutWiring methods failed waiting for the actual Settings recorder controls (`toggleSidebarVisibility` at line 16 and `newTab` at line 87). Keyboard capture/rebinding assertions were not reached, so this establishes the missing App composition boundary, not a key-delivery failure. Its GUI job reported 2,082 tests, 60 skipped, zero failures. The same run's independent Core job passed 576 tests in 45 suites, while the earlier normal run had 16 autosaver issues; no retry or established-flake claim is needed from that passing control. New merged-head checks remain pending.
+
+### #119 local review fixes (unpublished)
+
+The menu binding now routes effective editable shortcuts before the focused page in both window hosts, with the existing reserved-key fallback. Recording and reset check current noneditable menu owners, including hidden and dynamic items, and leave their keys intact; the notice names the candidate and owner and disables Use. Added component and native regressions, including a focused page that prevents Control-Y and an unassigned page-handling control. Native execution is still required to establish OS delivery.
+
+A bounded executable built from the actual ShortcutEditorModel and ShortcutCatalog sources first reproduced Command-N stealing New Window, then passed visible and hidden owner protection and live reservation, clear, reset, rebind and unbind checks. All changed Swift files parsed; the model/catalog module compiled with Swift 6.4.1 and the macOS 15.5 SDK. A standalone typecheck of the Swift Testing test file could not find the Testing module; no test-suite count is claimed. The toolchain warned that libSwiftScan was unavailable and used the frontend scanner. Full packages, App build, GUI, native UI tests and menu-reinstall GUI gate were not run. The 16 earlier autosaver issues remain unexplained; real system-shortcut detection and the remaining catalog audit remain open.
+
+### #119 root follow-up for saved collisions and ordered page evidence
+
+Saved custom bindings that collide with a current protected menu owner are now unavailable rather than reapplied. Their requested values remain on disk and in the model for repair; unrelated overrides continue working. Settings labels the unavailable shortcut and exposes the conflicting binding/owner in its accessibility value and tooltip. Conflict state is cached at binding installation and model changes, so key reservation does not scan the menu for every event.
+
+The committed `ProtectedShortcutProbe.swift`, built with the actual model and catalog, failed before the fix (`FAIL: a saved protected collision is unavailable`), then passed 20 checks for visible and hidden owners, unchanged stored data, unaffected valid overrides and reset repair. Command: `SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX15.5.sdk /opt/homebrew/opt/swift/bin/swiftc -swift-version 6 -target arm64-apple-macos15.0 app/ArktShell/ShellKit/Sources/ShellUI/Settings/ShortcutEditorModel.swift app/ArktShell/ShellKit/Sources/ShellUI/Settings/ShortcutCatalog.swift app/ArktShell/ShellKit/Probes/ProtectedShortcutProbe.swift -o /tmp/arkt-119-protected-probe && /tmp/arkt-119-protected-probe`. The compiler reported the libSwiftScan fallback warning. No browser or app window is created by this bounded executable.
+
+The real-app Control-Y negative observation now waits for a later ordinary key on the same page. That page reports its synchronous Control-Y count in the barrier URL, so a delayed fetch cannot hide prior page delivery. Existing event-count assertions and the unassigned Control-Y control remain. Canonical Swift Testing/GUI tests and App/native behavior remain unexecuted locally; parsing and static checks are separate evidence. No per-fix native routing red or full issue completion is claimed.
+
+### #119 observed native wiring and test setup repairs
+
+At `054929a`, normal run `42522786288` passed the required tests and App build, but GUI job `128859775250` reported 2,180 tests, 64 skipped and three assertions in the reinstall fixture. That fixture chose Command-Y, already owned by read-only Show All History; protected ownership correctly left the attempted override unapplied. The fixture now uses Control-Y and also asserts the modifier on both installed and disconnected items; no protected-command assertion is removed.
+
+Focused native run `42522786896`, job `128859786753`, compiled and ran both ShortcutWiring methods. The actual override/clear/reset/reopen test passed in 99.742 seconds, including focused-page assigned Control-Y with its ordered page witness and the unassigned page-handling control. The recorder method stopped before recording at its initial pane-selection check. The exact-head AX attachment `8880B47C-3B50-4E98-A8AC-EE4EB6BBCCE2.txt` shows Shortcuts RadioButton value 1 (all other panes 0) and the Sidebar recorder below the visible viewport. The test now reads the radio's observed value, preserving every pane/window assertion, and filters to make that recorder hittable before capture. It clears and observes the search baseline before asserting each effective binding. No production behavior changed; recorder Cmd-W/1–7 capture still needs the next native run.
+
+Artifact `13633723446` ZIP digest was verified against GitHub. The two changed tests parsed and whitespace checks passed; local GUI/App execution remains unavailable. A fresh focused run is required for these setup repairs. No timeout, skip, guard exception, target replacement or product assertion was weakened.
+
+
+### #119 recorder native green and merged fixture cleanup (2026-11-08)
+
+Focused workflow 42527266769 at `f6815aa` passed the actual recorder method in **144.129 s**: one native test, zero failures. It exercises protected Command-W/1-7 capture, exact owner notices, disabled Use, Keep Existing, retained/effective binding search, and normal pane/close routing afterward. The same-head component GUI run passed the menu-reinstall test in 0.011 s and the whole GUI job passed. The second native override/clear/reset/relaunch method passed at parent `deb3c4b` in 105.316 s; that method and production sources were unchanged by `f6815aa`'s owner-name correction. These are separate runs, not a claimed whole-class current-head native pass.
+
+The normal PR-merge run 42527260290 reported 2,186 GUI tests / 64 skipped / one failure: the new main AddressBarNavigationTests fixture retained five CommandBarPanels after only ordering its controllers out. Main is now integrated explicitly, and that fixture uses the existing closeAllForTesting teardown helper before clearing its retained sets. The guard and feature assertions remain unchanged. Fresh merged-head GUI/App/native checks are required; no local full build, app launch or GUI/native test was run. Real system-warning detection and the remaining action-catalog audit remain open.
+
+
+### #119 main integration after same-head native green
+
+Parent `88e3c96` passed all seven executed normal checks in run `42529751759` (normal XCUITest skipped): pure
+ShellKit 2,574 tests / 293 suites, GUI 2,186 reported / 64 skipped / zero failures, Core, App build, lint and required
+aggregate. Focused run `42529789904` passed all eight checks at that same head, including both ShortcutWiring native
+methods: recorder 150.046 seconds and override/clear/reset/relaunch 101.508 seconds (two tests, zero failures).
+
+Merged main `ff5bb59`, preserving the real Appearance haptics row, inverted reset key, observer and AppSession bind
+alongside the shared shortcut editor and installed menu binding. The only conflict was the equivalent test-fixture
+array-release spelling; main's `sets = []` and explanatory comment remain with the existing close helper. Shortcut
+model/catalog and AppComposition wiring are unchanged. Fresh merged-head CI remains required; the native results
+above apply to the parent. Real system-shortcut detection, remaining catalog audit and manual VoiceOver remain open.
+All 12 incoming/resolved Swift files parsed; workflow import/UI-source checks, parity-script tests, actionlint,
+ABI header comparison and staged whitespace checks passed. No local merged-head full App/ShellKit/GUI or native run
+was performed. The earlier native run is preserved as parent-head evidence, not relabeled as a merged-head pass.

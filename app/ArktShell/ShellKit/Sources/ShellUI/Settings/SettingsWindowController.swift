@@ -64,6 +64,11 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
   var sendCrashReportRow: SettingsRowView?
   let shortcutsSearch = ArchiveSearchField(frame: .zero)
   var shortcutSections: [ShortcutCatalog.Section] = []
+  var shortcutRecorders: [ShortcutActionID: NSButton] = [:]
+  var shortcutResetAll: NSButton?
+  var shortcutObserver: UUID?
+  var shortcutConflictView: NSView?
+  var shortcutWarningView: NSView?
   /// Settings > General > Downloads (#132): the mode, the folder row and the Library row.
   var downloadModeControl: SettingsSegmentedControl?
   var downloadModeRow: SettingsRowView?
@@ -107,6 +112,7 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
     window.setAccessibilityIdentifier(AXID.Settings.window)
     super.init(window: window)
     window.delegate = self
+    window.onShortcutKey = { [weak self] event in self?.handleShortcutKey(event) ?? false }
     window.onCommandNumber = { [weak self] number in self?.commandNumber(number) ?? false }
     buildContent(in: window)
     SettingsMotion.reduceMotion = reduceMotion
@@ -158,6 +164,7 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
   public func show(pane: SettingsPane? = nil) {
     guard let window = window as? SettingsWindow else { return }
     let wasVisible = window.isVisible
+    observeShortcutEditor()
     if !wasVisible {
       // The Spaces (and the preview's theme) may have changed while the window was closed.
       paneViews[.spaces] = nil
@@ -195,6 +202,7 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
   /// Selects `pane`. A click animates (window frame, pane fade and rise); the keyboard does not.
   public func select(_ pane: SettingsPane, animated: Bool) {
     guard pane != selectedPane || paneContainer.subviews.isEmpty else { return }
+    if selectedPane == .shortcuts { cancelShortcutRecording() }
     let reduce = reduceMotion()
     // The old pane, as drawn now, fades out over the new one (a click only).
     let snapshot = animated ? paneContainer.subviews.first.flatMap(snapshot(of:)) : nil
@@ -356,7 +364,11 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
 
   public func windowDidMove(_ notification: Notification) { rememberPosition() }
 
-  public func windowWillClose(_ notification: Notification) { rememberPosition() }
+  public func windowWillClose(_ notification: Notification) {
+    cancelShortcutRecording()
+    if let observer = shortcutObserver { services.shortcutEditor?.removeObserver(observer); shortcutObserver = nil }
+    rememberPosition()
+  }
 
   private func rememberPosition() {
     guard isPlaced, let frame = window?.frame else { return }

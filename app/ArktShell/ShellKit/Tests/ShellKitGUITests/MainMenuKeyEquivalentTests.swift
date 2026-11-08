@@ -1,5 +1,6 @@
 import AppKit
 import Carbon.HIToolbox
+import EngineAPITestSupport
 import XCTest
 @testable import ShellUI
 
@@ -47,6 +48,73 @@ final class MainMenuKeyEquivalentTests: XCTestCase {
     }
     collect(menu)
     return items
+  }
+
+  /// IDs come from the command, not the title that validation can change; defaults match the actual menu.
+  func testEditableDefinitionsIdentifyActualMenuCommands() throws {
+    let menu = MainMenu.make(commands: AppCommands()).menu
+    let definitions = ShortcutCatalog.definitions(from: menu)
+    let sidebar = try XCTUnwrap(definitions.first { $0.id == ShortcutActionID("toggleSidebarVisibility") })
+    let tab = try XCTUnwrap(definitions.first { $0.id == ShortcutActionID("newTab") })
+    XCTAssertEqual(sidebar.defaultBinding, ShortcutBinding(key: "s", modifiers: .command))
+    XCTAssertEqual(tab.defaultBinding, ShortcutBinding(key: "t", modifiers: .command))
+    XCTAssertEqual(Set(definitions.map(\.id)).count, definitions.count)
+    let view = try XCTUnwrap(menu.items.first { $0.title == "View" }?.submenu)
+    let item = try XCTUnwrap(view.items.first { $0.action == #selector(ShellWindowController.toggleSidebarVisibility(_:)) })
+    item.title = "Show Sidebar"
+    let renamed = ShortcutCatalog.definitions(from: menu)
+    XCTAssertNotNil(renamed.first { $0.id == sidebar.id && $0.defaultBinding == sidebar.defaultBinding })
+  }
+
+  /// The manually bound menu keeps its selector and dispatches to an explicitly assigned window controller.
+  /// App composition and responder-chain wiring are covered separately by ShortcutWiringTests.
+  func testOverridesDriveRealMenuAndCommandAfterReload() throws {
+    _ = NSApplication.shared
+    let suite = "dev.arkt.tests.shortcutMenu.\(UUID().uuidString)"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+    defer { UserDefaults().removePersistentDomain(forName: suite) }
+    let commands = AppCommands()
+    let menu = MainMenu.make(commands: commands).menu
+    let definitions = ShortcutCatalog.definitions(from: menu)
+    let id = ShortcutActionID("toggleSidebarVisibility")
+    let model = ShortcutEditorModel(catalog: definitions, defaults: defaults)
+    let controller = ShellWindowController(engine: InMemoryEngine(), sidebar: StubSidebar.sample())
+    defer { controller.close() }
+    let view = try XCTUnwrap(menu.items.first { $0.title == "View" }?.submenu)
+    let item = try XCTUnwrap(view.items.first { $0.action == #selector(ShellWindowController.toggleSidebarVisibility(_:)) })
+    item.target = controller
+    ShortcutCatalog.bind(model: model, to: menu)
+    model.setBinding(ShortcutBinding(key: "k", modifiers: .command), for: id)
+    XCTAssertEqual(item.keyEquivalent, "k")
+    XCTAssertEqual(item.keyEquivalentModifierMask, [.command])
+    XCTAssertEqual(item.action, #selector(ShellWindowController.toggleSidebarVisibility(_:)))
+
+    let reloaded = ShortcutEditorModel(catalog: definitions, defaults: defaults)
+    ShortcutCatalog.bind(model: reloaded, to: menu)
+    func event(_ key: String) throws -> NSEvent {
+      try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command, timestamp: 0,
+                                     windowNumber: 0, context: nil, characters: key,
+                                     charactersIgnoringModifiers: key, isARepeat: false, keyCode: 0))
+    }
+    XCTAssertFalse(try view.performKeyEquivalent(with: event("s")))
+    XCTAssertTrue(controller.isSidebarVisible)
+    XCTAssertTrue(try view.performKeyEquivalent(with: event("k")))
+    XCTAssertFalse(controller.isSidebarVisible)
+    reloaded.setBinding(nil, for: id)
+    XCTAssertEqual(item.keyEquivalent, "")
+    XCTAssertFalse(try view.performKeyEquivalent(with: event("k")))
+    let cleared = ShortcutEditorModel(catalog: definitions, defaults: defaults)
+    ShortcutCatalog.bind(model: cleared, to: menu)
+    XCTAssertEqual(item.keyEquivalent, "")
+    XCTAssertFalse(try view.performKeyEquivalent(with: event("k")))
+    cleared.reset(id)
+    XCTAssertEqual(item.keyEquivalent, "s")
+    XCTAssertTrue(try view.performKeyEquivalent(with: event("s")))
+    XCTAssertTrue(controller.isSidebarVisible)
+    let restored = ShortcutEditorModel(catalog: definitions, defaults: defaults)
+    ShortcutCatalog.bind(model: restored, to: menu)
+    XCTAssertEqual(item.keyEquivalent, "s")
+    XCTAssertEqual(restored.binding(for: id), ShortcutBinding(key: "s", modifiers: .command))
   }
 
   func testNoMenuItemBindsCommandOrOptionReturn() {
@@ -466,6 +534,47 @@ final class MainMenuInventoryTests: XCTestCase {
       let target = try XCTUnwrap(target, name)
       XCTAssertTrue(submenus.contains { $0 === target }, "\(name) menu is inside Arkt's menu")
     }
+  }
+
+  func testReinstallBindsSharedEditorAndDisconnectsReplacedMenu() throws {
+    let saved = (NSApp.mainMenu, NSApp.servicesMenu, NSApp.windowsMenu, NSApp.helpMenu)
+    let suite = "dev.arkt.tests.menuInstall.\(UUID().uuidString)"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+    defer {
+      if let menu = NSApp.mainMenu { ShortcutCatalog.unbind(from: menu) }
+      NSApp.mainMenu = saved.0
+      NSApp.servicesMenu = saved.1
+      NSApp.windowsMenu = saved.2
+      NSApp.helpMenu = saved.3
+      defaults.removePersistentDomain(forName: suite)
+    }
+    let definitions = ShortcutCatalog.definitions(from: MainMenu.make(commands: commands).menu)
+    XCTAssertEqual(definitions.count, 6)
+    let id = ShortcutActionID("newTab")
+    let editor = ShortcutEditorModel(catalog: definitions, defaults: defaults)
+    let override = ShortcutBinding(key: "y", modifiers: .control)
+    editor.setBinding(override, for: id)
+    MainMenu.install(commands: commands, shortcutEditor: editor)
+    let first = try XCTUnwrap(NSApp.mainMenu)
+    let oldItem = try XCTUnwrap(allItems(first).first { $0.action == #selector(ShellWindowController.newTab(_:)) })
+    XCTAssertEqual(oldItem.keyEquivalent, "y")
+    XCTAssertEqual(oldItem.keyEquivalentModifierMask, .control)
+    MainMenu.install(commands: commands, shortcutEditor: editor)
+    let second = try XCTUnwrap(NSApp.mainMenu)
+    let current = try XCTUnwrap(allItems(second).first { $0.action == #selector(ShellWindowController.newTab(_:)) })
+    XCTAssertEqual(current.keyEquivalent, "y")
+    XCTAssertEqual(current.keyEquivalentModifierMask, .control)
+    editor.setBinding(nil, for: id)
+    XCTAssertEqual(current.keyEquivalent, "")
+    XCTAssertEqual(oldItem.keyEquivalent, "y")
+    XCTAssertEqual(oldItem.keyEquivalentModifierMask, .control)
+    XCTAssertEqual(ShortcutCatalog.definitions(from: second).first { $0.id == id }?.defaultBinding,
+                   ShortcutBinding(key: "t", modifiers: .command))
+    let reopened = ShortcutEditorModel(catalog: definitions, defaults: defaults)
+    XCTAssertNil(reopened.binding(for: id))
+    editor.reset(id)
+    XCTAssertEqual(current.keyEquivalent, "t")
+    XCTAssertNil(current.target)
   }
 
   /// Onboarding spec, section 12: "Welcome to Arkt" is the first Help item, with no shortcut and an explicit target.

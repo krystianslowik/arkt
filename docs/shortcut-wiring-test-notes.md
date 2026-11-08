@@ -1,0 +1,102 @@
+# Shortcut gate boundaries
+
+`ShortcutWiringTests` uses the production app, its Settings window, menu and regular window command target in a
+throwaway defaults suite. The in-process menu test constructs and binds its own menu and target; it checks reusable
+pieces, not app composition. The UI test covers New Tab only. A full action catalog and all App-only command targets
+still need an audit. Keyboard delivery, focus, menu validation and macOS-reserved combinations need a real GUI run;
+negative checks use a later ordinary key delivered to a loopback page as an ordered observation before checking
+that the command bar remains closed. They do not click, dismiss a panel or start the next positive command between
+the tested key and that observation. This bounds the check to delivery through that later event; it does not prove
+that no arbitrary future callback can run. The fixture and its synchronization have not yet run in the GUI. Do not
+interpret parsing as runtime coverage. The injected system-warning test does not audit the real macOS conflict source. App shortcuts take priority over page shortcuts until RT-29/#78; per-action priority remains #441. The maintainer
+[decided](https://github.com/krystianslowik/arkt/pull/828#issuecomment-6721408776) that app-shortcut conflicts
+default to Keep Existing on Return, as extension shortcuts do. The Settings test now asserts initial Keep focus and
+Return preserving both bindings; that new assertion has not been run. Escape also keeps both bindings, and Use
+Shortcut must be explicit.
+The confirmation described there for Reset All Settings is in Advanced (line 83); no confirmation is specified for
+Reset All Shortcuts. Extensions already use Keep Existing for Return.
+
+The competing Cmd-W and Cmd-1–7 component gate installs the catalog menu temporarily and sends events through
+`NSApplication.sendEvent`, with Settings as the key window. It checks captured bindings, pane and window survival
+while recording, then the normal pane/close behavior after recording. The conflict explanation is asserted on the
+identified message field itself, including the occupied action and binding, rather than matching a shortcut row.
+These test-only revisions have been parsed but not compiled or executed; the first missing integration API failure
+and the subsequent supported-environment GUI runs are still required.
+
+The initial editable catalog recognized `newTab:` and `toggleSidebarVisibility:`. IDs come from those
+selectors, not mutable menu titles; the first visible non-alternate occurrence defines each default. Hidden aliases
+of a supported selector receive the same binding and are cleared with it. Dynamic Space items, tagged dispatcher
+commands and other unaudited menu actions remain read-only. The existing
+read-only listing and search continue to cover visible keyed menu items independently of this bounded catalog.
+Binding a menu applies the model immediately and on subsequent changes; rebinding disconnects the old model. This
+component does not install itself into the app or provide Settings controls.
+
+The catalog additionally supports the four distinct responder-chain selectors `copyCurrentURL:`,
+`copyCurrentURLAsMarkdown:`, `copyCurrentURLAsQuote:` and `pasteURLAsNewTab:`. Their defaults are read from the
+pristine menu items, not a second defaults table. The component test recreates the production menu entries; it does
+not compile `MainMenu` or prove actual app dispatch.
+
+Remaining read-only scope: `commandDispatch:` carries the EngineCommand tag for Save Page As, Print, Find/Next/
+Previous, Stop, Reload/Force Reload, Actual Size/Zoom In/Out, View Source, Developer Tools, Inspect Elements,
+JavaScript Console, Back, Forward, Show All History and Downloads; a selector alone conflates these rows. The
+numbered `goToSpace:` rows use changing Space order and tags, `goToSidebarItem:` rows 1–9 use tags, and
+`focusSplitPane:` rows 1–4 use tags. Their identity and persistence across dynamic rebuilds need separate design.
+Next Tab and Previous Tab each have a visible arrow binding and a hidden, separately keyed brace alias; collapsing
+both to one binding would erase an existing default. Other selector-based App, File, Edit, View, Spaces, Tabs,
+Window and Help commands remain read-only pending their own identity, alias and routing audit. Visible keyed rows
+remain listed by the existing read-only sections; unbound and hidden rows are not shown there.
+
+The Settings component now provides the six audited recorder controls through the injected editor; AppSession and
+MainMenu composition remains a later stage. CI run 42481041992 at `993a386` failed all five recorder scenarios on
+the missing sidebar control, and the competing-key scenario also failed its initial key-window assertion. The
+latter remains an independent setup/focus question. The new Return assertion was not reached. New-head GUI CI is
+needed for the implemented controls and native event routing; source parsing does not establish either.
+
+## Recorder review regression gate
+
+The next test-only change targets three Settings component defects: search retains old bindings after edits,
+recording intercepts typing after focus leaves its button, and accepting an app conflict omits the injected system
+warning. The tests use the real Settings window, editor and menu binding; assertions inspect displayed controls,
+persisted bindings and warning content. Everything runs on the main actor, with synchronous event delivery and no
+new clocks or animations. The changed files are this note, the shared Track C results, and `SettingsWindowTests`;
+no production change is included. Existing GUI assertions and the separate key-window setup assertion stay intact.
+
+The approved Return behavior remains Keep Existing even when Use is focused. This follows the
+[maintainer decision](https://github.com/krystianslowik/arkt/pull/828#issuecomment-6721408776) and Settings design
+section 7. Apple's [accessibility keyboard guidance](https://developer.apple.com/library/archive/documentation/Accessibility/Conceptual/AccessibilityMacOSX/OSXAXKeyboardShortcuts.html)
+distinguishes Return for the default button from Space for the focused control. A separate component scenario
+checks both Return preserving bindings and explicit Use activation with Space. Native execution of these checks
+remains required; documentation does not prove the implementation's keyboard delivery.
+
+Expected red: the Settings GUI suite must reach the new assertions and demonstrate stale search, stolen search
+input, and the missing warning against the current component before their production fixes. Source parsing and
+`git diff --check` are preliminary checks, not that red. The later green must retain the existing recorder,
+conflict, reset and competing-key tests. Full local app/GUI execution remains unavailable; CI owns that gate.
+
+The pure test failure at `86bcd96` is separate from the recorder regressions: the new main-branch corner-radius
+lint rejects the conflict panel's numeric assignment. The branch now merges main `3bd3271`, including the radius
+and type roles. The floating conflict panel uses `ShellRadius.popover` (12 pt) instead of its original 8 pt literal.
+Its visual appearance still needs review with the recorder component; the radius change is not GUI validation.
+The search, focus and system-warning regressions remain unchanged and their runtime outcomes are still required.
+
+## Application routing fixture correction
+
+Run [42500394665](https://github.com/krystianslowik/arkt/actions/runs/42500394665), head `e638dfd`,
+reported **2,096 GUI tests, 61 skipped and one failure**. The only failure was the application-dispatch setup:
+`active=false, visible=true, canBecomeKey=true, hasKeyWindow=false`. The bounded activation yields did not make
+the package test application active, and the guard sent no competing keys. The live-search, recorder focus-loss,
+app-conflict system-warning and existing Return/Space conflict checks passed. This is not a recorder behavior red.
+
+The in-process competing-key test now explicitly covers `SettingsWindow.performKeyEquivalent`: every recorded
+Cmd-W and Cmd-1–7 must update the model while the window stays visible in Shortcuts; after recording ends, Cmd-1
+must select General and Cmd-W must close. This is component coverage, with no dependency on runner activation.
+The application-dispatch obligation moves to a separate `ShortcutWiringTests` method in the real running app.
+It uses OS keyboard events, checks the Shortcuts pane and surviving Settings window, and checks each effective
+binding by filtering to that binding while requiring the unrelated New Tab recorder to disappear and reappear
+when search clears. It then checks normal pane and close routing after recording. The existing changed, cleared,
+reset and reload app-dispatch test remains intact.
+
+The optional workflow selector follows the already approved `ui_test_filter` contract: one quoted xcodebuild
+`-only-testing` argument, with an empty input retaining the full UI suite. Neither the revised component test nor
+the new native test has executed yet. AppSession still does not inject the shared editor; missing recorder controls
+through actual app composition are the expected initial native failure, subject to successful harness setup.

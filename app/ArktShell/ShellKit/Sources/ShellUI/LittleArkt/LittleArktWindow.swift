@@ -52,7 +52,8 @@ final class LittleArktWindow: NSWindow {
 
   override func performKeyEquivalent(with event: NSEvent) -> Bool {
     if onKeyEquivalent?(event) == true { return true }
-    if reservedKeys.matches(event), NSApp.mainMenu?.performKeyEquivalent(with: event) == true { return true }
+    if (reservedKeys.matches(event) || ShortcutCatalog.reserves(event, in: NSApp.mainMenu)),
+       NSApp.mainMenu?.performKeyEquivalent(with: event) == true { return true }
     return super.performKeyEquivalent(with: event)
   }
 
