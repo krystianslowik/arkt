@@ -3057,3 +3057,22 @@ This gate does not exercise `AppDelegate.application(_:open:)`, the early-URL qu
 and resolver injection, or Chromium's engine window requests; those require a later composition gate. Source parsing and
 whitespace checks are not a test red. Full ShellKit and the app cannot be compiled locally on this baseline; GUI and
 XCUITest were not run. The focused actual-source probe stopped in the existing Motion dependency: the local compiler rejected `isolated deinit` without its experimental feature flag, before reaching the new tests. Zero tests ran. The intended missing-API red is **UNOBSERVED**; CI must establish it before implementation.
+
+### #113 external-link component dispatch
+
+The loaded CoreBridge editor maps Core's first-match destination to the existing plain ShellUI destination; an unloaded
+or currently loading snapshot returns nil. The optional window-set resolver dispatches each qualifying URL in order to
+Little Arkt, a specified Space, or the most recently main eligible regular window. Private and close-requested windows
+are excluded; if no regular host exists, a regular window is created. The returned per-input results distinguish ignored,
+unresolved and missing-Space URLs from dispatch, without choosing a missing-Space fallback. No resolver preserves #446.
+
+At `4b03f635cf08a7bab96b75617a2a6175bcb386a3`, the actual-source test-first gate compiled its dependencies and failed
+on seven missing `LinkRoutingSettingsModel.destination(for:)` references in the canonical Settings rows tests; zero tests
+ran. This supersedes the unsupported-toolchain attempt above. After implementation, Swift 6.4.1 with the macOS 15.5 SDK,
+`swift test --package-path integration/LinkRouting -j 2`, passed **54 tests in 12 suites**. Existing linker warnings
+reported missing developer framework and library search paths. Source parsing, changed-source import inspection and
+whitespace checks passed; parsing is not compilation or behavioral validation.
+
+The real window-set GUI tests, full ShellKit and App builds, GUI and XCUITest were not run locally. Normal CI must
+validate window behavior. AppDelegate early URL forwarding, AppSession readiness, retry and resolver injection, and
+Chromium startup window requests remain a later composition stage; no persisted startup routing is wired here.

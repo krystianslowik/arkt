@@ -154,6 +154,11 @@ private actor RetryRowsStore: LinkRoutingSettingsStoring {
 /// The dispatch adapter returns ShellUI values while Core remains the only matcher.
 @MainActor
 struct LinkRoutingDestinationBoundaryTests {
+  @Test func unloadedModelDoesNotResolveItsPlaceholderSnapshot() {
+    let model = LinkRoutingSettingsModel(state: RoutingRowsStore(initial: LinkRouting(routes: [])))
+    #expect(model.destination(for: URL(string: "https://example.com/")!) == nil)
+  }
+
   @Test func loadedModelMapsOrderedMatchesAndDefaultToPlainDestinations() async {
     let space = UUID(uuidString: "00000000-0000-0000-0000-000000000101")!
     let target = URL(string: "https://example.com/Path?q=One")!

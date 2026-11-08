@@ -66,6 +66,12 @@ public final class LinkRoutingSettingsModel {
     loading = nil
   }
 
+  /// Nil means the snapshot is unavailable or Core could not resolve the URL.
+  public func destination(for url: URL) -> SettingsLinkDestination? {
+    guard isLoaded, !loadInProgress, let destination = settings.destination(for: url) else { return nil }
+    return SettingsLinkDestination(destination)
+  }
+
   public func removeRoutes(to id: UUID) {
     removalGeneration += 1
     pendingRemovedSpaces.insert(id)

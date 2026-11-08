@@ -126,6 +126,26 @@ final class RoutedOpenFromOtherAppTests: XCTestCase {
     XCTAssertEqual(urls(set, in: first), before)
   }
 
+  func testAllPrivateWindowsCreateRegularHostAndMissingDestinationsAreReported() async throws {
+    let (set, _, model, first, _) = try await fixture(LinkRouting(routes: []))
+    model.setDefaultDestination(.mostRecentSpace)
+    let privateWindow = set.openWindow(opensFirstTab: false)
+    privateWindow.makeIncognito()
+    let pages = privateWindow.privatePageOrder.pages
+    let target = URL(string: "https://example.com/regular")!
+    XCTAssertEqual(set.openFromOtherApp([target]), [.dispatched(target)])
+    XCTAssertEqual(privateWindow.privatePageOrder.pages, pages)
+    XCTAssertEqual(urls(set, in: first).first, target.absoluteString)
+    XCTAssertTrue(set.controllers.contains { !$0.isPrivateWindow })
+
+    let missing = UUID()
+    model.setDefaultDestination(.space(missing))
+    XCTAssertEqual(set.openFromOtherApp([target]), [.missingSpace(target, missing)])
+    set.externalLinkDestination = { _ in nil }
+    XCTAssertEqual(set.openFromOtherApp([target]), [.unresolved(target)])
+    XCTAssertEqual(urls(set, in: first).filter { $0 == target.absoluteString }.count, 1)
+  }
+
   func testBatchPreservesQualifyingURLsAndSkipsOtherSchemes() async throws {
     let (set, engine, model, first, second) = try await fixture(LinkRouting(routes: []))
     model.setDefaultDestination(.space(second))
