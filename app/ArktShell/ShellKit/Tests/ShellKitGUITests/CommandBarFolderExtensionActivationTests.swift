@@ -4,7 +4,7 @@ import EngineAPI
 import EngineAPITestSupport
 import SidebarModel
 import XCTest
-@testable import ShellUI
+@_spi(Smoke) @testable import ShellUI
 
 /// #562: production window wiring, not a synthetic provider or callback installed by the test.
 @MainActor
