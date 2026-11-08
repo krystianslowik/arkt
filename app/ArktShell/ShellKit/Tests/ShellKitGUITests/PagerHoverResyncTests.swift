@@ -144,6 +144,31 @@ final class PagerHoverResyncTests: XCTestCase {
     XCTAssertEqual(h.counts, [1, 1])
   }
 
+  func testFrozenSettleCancelledAtOriginalSpaceFlushesPendingHosts() throws {
+    let h = try Harness()
+    defer { h.controller.close() }
+    let pager = h.controller.pager
+    let original = pager.index
+    h.controller.nextSpace(nil)
+    XCTAssertTrue(pager.isSettling)
+    h.request()
+    h.drain()
+    XCTAssertEqual(h.counts, [0, 0])
+
+    // Freeze before presenting the first frame, so the original page is already at its resting offset.
+    pager.gestureMayBegin()
+    XCTAssertFalse(pager.isSettling)
+    XCTAssertFalse(pager.isTracking)
+    XCTAssertNotNil(pager.frozenTarget)
+    XCTAssertEqual(pager.offset, -CGFloat(original) * pager.bounds.width)
+    pager.go(to: original)
+    XCTAssertNil(pager.frozenTarget)
+    h.drain()
+    XCTAssertEqual(h.counts, [1, 1], "returning to idle must flush both pending hosts")
+    h.drain()
+    XCTAssertEqual(h.counts, [1, 1], "the resting flush is coalesced")
+  }
+
   func testDetachedHostDoesNotFlushItsOldRequest() throws {
     let h = try Harness()
     defer { h.controller.close() }
