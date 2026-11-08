@@ -17,9 +17,12 @@ final class AddressBarNavigationTests: XCTestCase {
     NSApp.setActivationPolicy(.accessory)
   }
 
+  // XCTest keeps each test case object until the run ends: close the windows, not only hide them (#805). The command
+  // bar panel stays ordered in once shown, and only the shell window's close (windowWillClose) orders it out and stops
+  // the display link that retains its controller; an ordered-out window leaves both alive (#857).
   override func tearDown() async throws {
     for set in sets { set.closeAllForTesting() }
-    sets.removeAll()
+    sets = []
   }
 
   private func makeSet() -> (ShellWindowSet, InMemoryEngine) {

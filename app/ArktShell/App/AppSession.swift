@@ -156,6 +156,7 @@ final class AppSession {
     archiveSearch.onRestored = { [weak self] restored, text in self?.didRestore(restored, toast: text) }
     archiveSearch.onRestoreFailed = { [weak self] text in self?.shownWindow().toasts.show(Toast(text: text, kind: .error)) }
     settings.addObserver(self)
+    ReorderHapticGate.bind(settings)
   }
 
   /// `defersWindows`: the launch window and auto-archive wait for `finishLaunch(opensWindow:)` (the Chromium engine

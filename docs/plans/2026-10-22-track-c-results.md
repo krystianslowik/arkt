@@ -3220,3 +3220,20 @@ Artifact `13633723446` ZIP digest was verified against GitHub. The two changed t
 Focused workflow 42527266769 at `f6815aa` passed the actual recorder method in **144.129 s**: one native test, zero failures. It exercises protected Command-W/1-7 capture, exact owner notices, disabled Use, Keep Existing, retained/effective binding search, and normal pane/close routing afterward. The same-head component GUI run passed the menu-reinstall test in 0.011 s and the whole GUI job passed. The second native override/clear/reset/relaunch method passed at parent `deb3c4b` in 105.316 s; that method and production sources were unchanged by `f6815aa`'s owner-name correction. These are separate runs, not a claimed whole-class current-head native pass.
 
 The normal PR-merge run 42527260290 reported 2,186 GUI tests / 64 skipped / one failure: the new main AddressBarNavigationTests fixture retained five CommandBarPanels after only ordering its controllers out. Main is now integrated explicitly, and that fixture uses the existing closeAllForTesting teardown helper before clearing its retained sets. The guard and feature assertions remain unchanged. Fresh merged-head GUI/App/native checks are required; no local full build, app launch or GUI/native test was run. Real system-warning detection and the remaining action-catalog audit remain open.
+
+
+### #119 main integration after same-head native green
+
+Parent `88e3c96` passed all seven executed normal checks in run `42529751759` (normal XCUITest skipped): pure
+ShellKit 2,574 tests / 293 suites, GUI 2,186 reported / 64 skipped / zero failures, Core, App build, lint and required
+aggregate. Focused run `42529789904` passed all eight checks at that same head, including both ShortcutWiring native
+methods: recorder 150.046 seconds and override/clear/reset/relaunch 101.508 seconds (two tests, zero failures).
+
+Merged main `ff5bb59`, preserving the real Appearance haptics row, inverted reset key, observer and AppSession bind
+alongside the shared shortcut editor and installed menu binding. The only conflict was the equivalent test-fixture
+array-release spelling; main's `sets = []` and explanatory comment remain with the existing close helper. Shortcut
+model/catalog and AppComposition wiring are unchanged. Fresh merged-head CI remains required; the native results
+above apply to the parent. Real system-shortcut detection, remaining catalog audit and manual VoiceOver remain open.
+All 12 incoming/resolved Swift files parsed; workflow import/UI-source checks, parity-script tests, actionlint,
+ABI header comparison and staged whitespace checks passed. No local merged-head full App/ShellKit/GUI or native run
+was performed. The earlier native run is preserved as parent-head evidence, not relabeled as a merged-head pass.

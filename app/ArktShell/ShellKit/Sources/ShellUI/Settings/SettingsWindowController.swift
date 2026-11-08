@@ -55,6 +55,8 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
   var littleArktClickSwitch: SettingsSwitch?
   var countFavoritesSwitch: SettingsSwitch?
   var ninthTabSwitch: SettingsSwitch?
+  /// Settings > Appearance > Haptic feedback when reordering tabs (BH-024).
+  var reorderHapticsSwitch: SettingsSwitch?
   var importButton: ArchivePillButton?
   /// Settings > Privacy > Crash reports (#129).
   var crashReportsSwitch: SettingsSwitch?
@@ -437,6 +439,7 @@ extension SettingsWindowController: AppSettingsObserver {
     littleArktClickSwitch?.setOn(settings.opensLittleArktOnOptionCommandClick, animated: true)   // #356
     countFavoritesSwitch?.setOn(settings.tabNavigation.countsFavorites, animated: true)
     ninthTabSwitch?.setOn(settings.tabNavigation.ninthOpensNinth, animated: true)
+    reorderHapticsSwitch?.setOn(settings.playsReorderHaptics, animated: true)
     crashReportsSwitch?.setOn(settings.sendsCrashReports, animated: true)
     applySendCrashReportState()                     // #129
     applyDownloadLocation()                         // #132
