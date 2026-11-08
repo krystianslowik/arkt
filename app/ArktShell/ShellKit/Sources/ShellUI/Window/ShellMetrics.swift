@@ -39,7 +39,7 @@ public struct ShellMetrics: Sendable, Equatable {
     cardInsetTop: 10,                            // Arc 1.168
     cardInsetRight: 10,
     cardInsetBottom: 10,
-    cardCornerRadius: 10,
+    cardCornerRadius: ShellRadius.card,
     resizeHandleWidth: 8,
     trafficLightOrigin: CGPoint(x: 12, y: 16),   // Arc 1.168: close button frame (16 x 16)
     trafficLightSpacing: 23,                     // Arc 1.168: close x 12, minimize x 35, zoom x 58

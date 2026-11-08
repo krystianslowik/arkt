@@ -323,7 +323,7 @@ final class SettingsAddRowButton: NSButton {
     let plus = SymbolImageCache.shared.symbol("plus", box: 12, weight: .medium, color: color, scale: scale)
     plus.draw(in: NSRect(x: SettingsMetrics.addRowLeading, y: ((bounds.height - 12) / 2).rounded(), width: 12,
                          height: 12))
-    let font = NSFont.systemFont(ofSize: 13)
+    let font = ShellType.body.font
     let text = NSAttributedString(string: titleText, attributes: [.font: font, .foregroundColor: color.nsColor()])
     let line = ceil(font.ascender - font.descender + font.leading)
     text.draw(at: NSPoint(x: SettingsMetrics.addRowLeading + 12 + 8, y: ((bounds.height - line) / 2).rounded()))
