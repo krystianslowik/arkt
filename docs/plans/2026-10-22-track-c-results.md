@@ -2910,3 +2910,17 @@ Written first. Each failed to compile before the code existed.
   reset fallback, including favicon updates and both folder states. Add integration and UI coverage and run the required
   package and GUI checks on a suitable macOS toolchain. Coordinate later Favorite grid and context menu edits with
   #278, #338 and #801; #618 changes layout math, and #580 touches session/window files.
+
+### Custom Favorite and folder icons (#339): Core model and storage
+
+- Added independent optional node overrides using the existing symbol/emoji icon type. Tab updates, snapshot restore
+  and fresh-ID copies retain them; clearing restores nil. Sidebar format 4 writes the field and migrates formats 1–3
+  through their older node shape. Archive snapshot format 2 records the changed snapshot shape; version 1 remains
+  readable. Added a frozen synthetic version 4 fixture and coverage for migration, copying and archive persistence.
+- Test-first evidence remains the scoped compile probe above, not a Swift Testing suite failure. Swift 6.2.4 compiled
+  all seven production SidebarModel sources for macOS 15 with the selected SDK. A separate standard-assert driver
+  linked that module and passed 3 flows with 11 assertions: independent overrides and clearing, tab update and snapshot
+  copying, and version 3/4 fixture migration. This is not a package test run. Swift 6.2.4 parse, diff whitespace and
+  SidebarModel import checks passed. Core and ShellKit suites were not run; CI must run them.
+- This is a Core-only draft. Picker and menu wiring, Favorite favicon fallback, folder expanded/collapsed rendering,
+  integration and UI checks remain. No UI, performance or animation behavior was checked in this slice.

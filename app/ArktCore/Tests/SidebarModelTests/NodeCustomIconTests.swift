@@ -50,4 +50,24 @@ struct NodeCustomIconTests {
     let restored = try SidebarStorageFormat.decode(SidebarStorageFormat.encode(sidebar))
     #expect(restored.nodes.values.allSatisfy { $0.customIcon == nil })
   }
+  @Test func frozenVersionFourAndFreshSnapshotIDsPreserveIcons() throws {
+    let fixture = try #require(Bundle.module.url(forResource: "sidebar-v4", withExtension: "json", subdirectory: "Fixtures"))
+    let data = try Data(contentsOf: fixture)
+    let sidebar = try SidebarStorageFormat.decode(data)
+    let folder = try #require(UUID(uuidString: "D1000000-0000-4000-8000-000000000101"))
+    let snapshot = try #require(sidebar.snapshot(of: folder)).withFreshIDs()
+    #expect(snapshot.customIcon == .symbol("star"))
+    #expect(snapshot.children.first?.customIcon == .emoji("\u{1F680}"))
+    #expect(snapshot.id != folder)
+    #expect(try SidebarStorageFormat.decode(SidebarStorageFormat.encode(sidebar)) == sidebar)
+  }
+
+  @Test func legacyDocumentIgnoresFutureNodeIconField() throws {
+    let fixture = try #require(Bundle.module.url(forResource: "sidebar-v4", withExtension: "json", subdirectory: "Fixtures"))
+    var object = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: fixture)) as? [String: Any])
+    object["version"] = 3
+    let sidebar = try SidebarStorageFormat.decode(JSONSerialization.data(withJSONObject: object))
+    #expect(sidebar.nodes.values.allSatisfy { $0.customIcon == nil })
+  }
+
 }

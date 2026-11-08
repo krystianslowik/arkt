@@ -178,19 +178,20 @@ struct ArchiveStoreTests {
     #expect(try await store.count() == 0)
   }
 
-  /// Archive rows carry the snapshot's own format version, not the sidebar document's: sidebar format 2 (Space icons)
-  /// did not change `NodeSnapshot`, so rows stay readable by builds that read only version 1.
+  /// Archive rows carry the snapshot format version, independently of the sidebar document.
   @Test func archivedRowsAreStampedWithTheSnapshotFormatVersion() async throws {
     let database = try ArktDatabase.inMemory()
     let store = ArchiveStore(database: database)
-    let item = Self.tab("A", url: "https://example.com/a", source: .unknown, at: 1)
+    var item = Self.tab("A", url: "https://example.com/a", source: .unknown, at: 1)
+    item.snapshot.customIcon = .symbol("star")
     _ = try await store.add([item], onConflict: .replace)
+    let itemID = item.id
     let stamped = try await database.writer.read { db in
       try Int.fetchOne(
-        db, sql: "SELECT format_version FROM archived_item WHERE id = ?", arguments: [item.id.uuidString])
+        db, sql: "SELECT format_version FROM archived_item WHERE id = ?", arguments: [itemID.uuidString])
     }
-    #expect(stamped == 1)
-    #expect(ArchiveStore.snapshotFormatVersion == 1)
+    #expect(stamped == 2)
+    #expect(ArchiveStore.snapshotFormatVersion == 2)
     #expect(try await store.items().items == [item])
   }
 

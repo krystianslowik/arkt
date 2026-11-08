@@ -101,7 +101,7 @@ struct SidebarStorageFormatTests {
   }
 
   /// Version 1 has no Space icon and no theme `noiseFactor` or `opacity`. Reading it is the migration: every icon
-  /// stays nil, themes take the version 3 defaults, and writing it back stores version 3. Compared as JSON values,
+  /// stays nil, themes take the version 3 defaults, and writing it back stores the current version. Compared as JSON values,
   /// not bytes.
   @Test func reencodingVersion1FixtureMigratesToTheCurrentVersion() throws {
     let fixture = try Self.fixtureData()
@@ -112,7 +112,7 @@ struct SidebarStorageFormatTests {
       try #require(try JSONSerialization.jsonObject(with: fixture) as? [String: Any]))
     expected["version"] = SidebarStorageFormat.currentVersion
     let actual = try #require(try JSONSerialization.jsonObject(with: reencoded) as? NSDictionary)
-    #expect(SidebarStorageFormat.currentVersion == 3)
+    #expect(SidebarStorageFormat.currentVersion == 4)
     #expect(actual == (expected as NSDictionary))
   }
 
@@ -135,7 +135,7 @@ struct SidebarStorageFormatTests {
     #expect(actual == (expected as NSDictionary))
   }
 
-  /// Golden test: decoding and re-encoding the frozen v3 fixture reproduces it (compared as JSON values, not bytes),
+  /// Migrating the frozen v3 fixture preserves its contents (compared as JSON values, not bytes),
   /// including a theme's `noiseFactor` and `opacity`.
   @Test func reencodingVersion3FixtureReproducesIt() throws {
     let fixture = try Self.fixtureData(version: "sidebar-v3")
@@ -146,9 +146,10 @@ struct SidebarStorageFormatTests {
     #expect(theme.opacity == 0.8)
     #expect(sidebar.spaces[alpha]?.icon == .symbol("star"))
     let reencoded = try SidebarStorageFormat.encode(sidebar)
-    let expected = try #require(try JSONSerialization.jsonObject(with: fixture) as? NSDictionary)
+    var expected = try #require(try JSONSerialization.jsonObject(with: fixture) as? [String: Any])
+    expected["version"] = SidebarStorageFormat.currentVersion
     let actual = try #require(try JSONSerialization.jsonObject(with: reencoded) as? NSDictionary)
-    #expect(actual == expected)
+    #expect(actual == (expected as NSDictionary))
   }
 
   /// Version 3 always writes both theme fields, so a version 3 theme without them is not a version 3 document.
