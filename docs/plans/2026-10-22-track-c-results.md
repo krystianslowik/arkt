@@ -3327,3 +3327,11 @@ window fixes. Independent source review found no P1/P2 defect but established no
 byte-identical to that reviewed merge. Both histories remain, and inherited patch whitespace is untouched. Source
 validation passed; no merged-head build, GUI/native test or focused probe ran locally. Fresh CI and a representative
 combined recovery/routing gate remain required before whole-feature acceptance.
+
+### #113 reviewed carrier contract and recovery coexistence gate
+
+Added the reviewed pure, Debug-only launch-argument carrier; it remains unwired to App startup and NSWorkspace. Explicit optional switches reject unknown values. The added regression failed with 16 assertions before that fix; the actual-source startup probe passed 31 tests in four suites afterward, with the existing linker search-path warnings. Pure transport green does not prove native argument delivery, pre-migration application of configuration, PID/XCUI association, or cold routing. All mandatory bundle, ACK and profile barriers remain in place.
+
+Added Shell-boundary tests for routed Space/Little Arkt activity during unanswered crashed recovery, cancellation, Restore/Dismiss and empty acknowledgment. Review follow-up leaves the source recorder writable during the quit interval and checks recovery-record count as well as URLs. These tests were parsed, not type-checked or executed; they do not prove App quit ordering or the native #803 crash marker.
+
+Main `1188868` integrated without conflict after these local changes. Import/UI-source checks, actionlint, Swift parsing and engine-header parity were checked; no local full App/ShellKit/GUI build or launch was performed. Merged-head CI remains pending.
