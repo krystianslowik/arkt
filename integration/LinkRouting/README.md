@@ -17,3 +17,6 @@ The termination cases also hold or fail the initial read and reopen the typed da
 The probe also source-links the canonical Core matching, typed routing persistence, atomic store, and CoreBridge
 editor tests. Together they verify case-insensitive contains, exact-string matches, and first-match precedence
 through stored list order without replacing the normal Core and ShellKit CI targets.
+
+The canonical external-open coordinator contract tests are also linked here. They deliberately fail to compile until
+`CoreBridge` supplies the coordinator; this probe exercises the actual editor and dependencies, not App composition.
