@@ -25,6 +25,12 @@ extension ShellWindowController {
       if case .emoji(let value)? = sidebar.nodeIcon(id) { current = value }
       let answer: @MainActor (String?) -> Void = { [weak self] text in
         guard let self, let text, let icon = SpaceIconInfo.validatedEmoji(text) else { return }
+        switch self.sidebar.node(id) {
+        case .folder?: break
+        case .tab?:
+          guard case .favorites? = self.sidebar.section(containing: id) else { return }
+        default: return
+        }
         self.sidebar.setNodeIcon(id, to: icon)
       }
       if let nodeEmojiPromptForTesting { nodeEmojiPromptForTesting(current, answer) }

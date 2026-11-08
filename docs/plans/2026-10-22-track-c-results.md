@@ -2991,3 +2991,16 @@ confirmation. Its expected runtime red is the current completion changing that i
 unobserved. Swift 6.2.4 frontend parsing and diff checks passed; no local build or tests ran. CI must establish the
 correct regression failure before the completion guard is fixed. Earlier UI and menu results apply to their stated
 heads, not this gate; manual rendering, accessibility and screenshots remain unverified.
+
+
+### Node emoji stale-target completion correction (#339)
+
+At `184a288`, GUI run 42438892411, job 128603784145, executed 2051 tests with 54 skipped and three assertion
+failures, all in `testNodeEmojiCompletionIgnoresFavoriteMovedToTodayWhilePromptIsOpen`. The held completion changed
+the moved tab's icon, saved once and notified instead of leaving it untouched. The cancellation and valid-confirmation
+control passed for both a Favorite and a Today folder. This establishes the intended runtime red.
+
+Completion now reads the current node and section before writing: folders remain eligible, and tabs must still
+be Favorites. Missing nodes, splits and tabs moved elsewhere are ignored. The regression tests are unchanged.
+Swift 6.2.4 source parsing, the ShellUI import-boundary inspection and diff checks passed. No local full build or GUI
+test ran; new-head CI must establish green. Manual light/dark rendering, accessibility and screenshots remain unverified.
