@@ -43,6 +43,7 @@ final class PageInfoPanelTests: XCTestCase {
     controller.window?.contentView?.layoutSubtreeIfNeeded()
     controller.pageInfo.reduceMotion = { reduceMotion }
     controller.pageInfo.increaseContrast = { false }
+    controller.pageInfo.deniedInMacOS = { [] }          // never the host's real location state (#786)
   }
 
   private var panel: PageInfoPanelController { controller.pageInfo }

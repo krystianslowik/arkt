@@ -3035,3 +3035,43 @@ UserDefaults suite; no network or app launch. The new Swift Testing and GUI comp
 They cover Settings reset/composition, both open bars, selection, preview and hints, and intercepted activation.
 AppSession composition, real app Settings, native UI and full package/GUI suites remain unverified locally; no
 full Xcode or app build was used. Disk available before the probe was 1.8 GiB.
+
+## Composite Space theme overlays (#534)
+
+The drawn base and opacity-scaled overlay are expanded in OKLab and source-over composited at the union of their
+stop locations in the first base color's space. Mixed-space stops are converted through D65 XYZ and clamped to the
+destination gamut before expansion and blending. Each Space uses one opaque gradient below the separate texture layers.
+The view caches both colors and explicit locations for the current drawn themes, reuses them across swipes and drops
+entries when those themes change, including appearance or contrast changes. An empty base falls back to white before
+compositing; a single stop is duplicated for Core Animation. Finite stops approximate the continuous result between
+samples when overlay alpha varies. The previous #381 overlay-layer description records the original implementation.
+
+At `6ad459c75bc321647a8ce4c849b97b1662952288`, CI run 41362710601 passed 1,872 pure ShellKit tests in 225
+suites, the app build, lint and the required Swift gate. The informative GUI run had 1,501 tests, 38 skipped and one
+failure in download cancellation. The partial-file cleanup race was subsequently fixed in merged PR #551; its
+`InvalidTransition` message was identified as coming from Apple's gesture framework. This evidence predates the
+integration with current main; CI for the integrated head is pending. The empty-base fallback uses white in the first
+overlay color's space, or sRGB without an overlay. Renderer tests cover P3 overlays at alpha 0.25 and 1.
+
+Local full builds and tests were not run because the available SDK/toolchain cannot compile baseline ShellKit.
+At `ed9dcb77dab149675a54269c7746a0289c5990f7`, manual CI run 41919150446 passed the required gate,
+1,969 ShellKit tests in 230 suites, 574 ArktCore tests in 45 suites, app build and lint; GUI ran 1,528 tests,
+39 skipped, zero failures. The workflow was cancelled only because the optional UI job was cancelled. Its
+[Repository-backed screenshots on #534](https://github.com/krystianslowik/arkt/issues/534#issuecomment-6705310586)
+show light and dark before/after images (baseline production `a4009de5bbd2bc70def89fe05b62dec0faf9bfa3`).
+The evidence run also recorded 20 loaded crossfade runs of seven tests each and the intended stale-completion failure
+after guard removal followed by a restored pass. These results apply to that revision; CI must verify the new head.
+The one-off evidence job and scripts were removed after the screenshots were preserved. Mixed-space regression cases
+compare against Core Graphics in both directions at fractional and full alpha; the full suite awaits CI.
+
+The quiet physical 120 Hz swipe frame-time gate with overlay themes was not measured and is deferred to #704 for
+maintainer hardware after landing. No frame-time improvement is claimed. Merged PR #551 supplies
+the deterministic completion and asynchronous download cancellation fixes. The existing 50% contrast fallback may
+remain below target, contrast samples do not cover every point or texture, and the pre-existing empty-base
+opacity-scaling limitation remains unchanged.
+
+### #562 search-engine choice main integration
+
+The reviewed Google/DuckDuckGo change is integrated with main `1188868`; Google remains the default and Bing is not offered. The sole new merge conflict was this append-only history. The prior CommandBarResults conflict retains provider identities/counts and main's optimized builder. Folder and extension results remain non-actionable in this bounded stage.
+
+The focused settings/parser executable passed 26 checks before this merge. New Swift Testing/GUI tests, actual AppSession forwarding and native activation remain unexecuted locally. Source parsing, workflow import/UI checks, actionlint and header parity are checked for this merge; merged-head CI is pending.
