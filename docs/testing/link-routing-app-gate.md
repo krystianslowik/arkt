@@ -390,3 +390,5 @@ Focused actual-source probe: `SDKROOT=/Library/Developer/CommandLineTools/SDKs/M
 /opt/homebrew/opt/swift/bin/swift test --package-path integration/StartupPolicy -j 2`. Test-first compilation failed
 on the absent carrier API (zero tests); after implementation and a test macro correction, 30 tests in four suites
 passed (prior reported baseline 26 in three suites, plus four carrier tests). No app or GUI build was run.
+
+Carrier review follow-up: explicit optional switches now accept only their defined values (skip onboarding: absent, empty, `0`, or `1`; default browser: absent, empty, `default`, or `notDefault`). Missing and empty remain distinct on the wire; unknown nonempty values fail closed rather than taking the override parser's fallback. A focused behavior test failed with 16 assertions before the validation fix; the actual-source startup probe then passed 31 tests in four suites. App startup and NSWorkspace argument transport remain unwired and unverified.

@@ -64,4 +64,25 @@ import Testing
       #expect(throws: (any Error).self) { try decode([arg]) }
     }
   }
+
+  @Test func optionalSwitchesRejectUnknownNonemptyValues() throws {
+    for (key, accepted) in [("ARKT_SKIP_ONBOARDING", ["", "0", "1"]),
+                            ("ARKT_DEFAULT_BROWSER", ["", "default", "notDefault"])] {
+      for value in accepted {
+        var values = config
+        values[key] = value
+        let arg = try LaunchArgumentCarrier.encode(values, bundleIdentifier: "org.example.app")
+        #expect(try decode([arg]) == values)
+      }
+      for value in ["typo", "true", "DEFAULT", " 1 "] {
+        var values = config
+        values[key] = value
+        #expect(throws: (any Error).self) {
+          try LaunchArgumentCarrier.encode(values, bundleIdentifier: "org.example.app")
+        }
+        let arg = try wire(values.sorted { $0.key < $1.key }.map { [$0.key, $0.value] })
+        #expect(throws: (any Error).self) { try decode([arg]) }
+      }
+    }
+  }
 }

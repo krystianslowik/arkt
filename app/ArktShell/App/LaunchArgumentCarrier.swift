@@ -45,6 +45,8 @@ enum LaunchArgumentCarrier {
     guard Set(values.keys).isSubset(of: allowed),
           values.values.allSatisfy({ $0.utf8.count <= maxValueBytes && !$0.contains("\0") }),
           values[EnvironmentOverrides.uiTestKey] == "1",
+          values[EnvironmentOverrides.skipOnboardingKey].map({ ["", "0", "1"].contains($0) }) ?? true,
+          values[EnvironmentOverrides.defaultBrowserKey].map({ ["", "default", "notDefault"].contains($0) }) ?? true,
           EnvironmentOverrides(environment: values).uiTestStartupViolations(required: true,
             bundleIdentifier: bundleIdentifier).isEmpty,
           let endpoint = values[TestIdentity.endpointKey], TestIdentity.endpoint(endpoint) != nil else {
