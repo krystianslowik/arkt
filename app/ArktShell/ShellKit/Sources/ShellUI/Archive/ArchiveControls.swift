@@ -511,7 +511,7 @@ final class ArchiveSearchField: NSSearchField {
     isBordered = false
     drawsBackground = false
     focusRingType = .default
-    font = .systemFont(ofSize: 13)
+    font = ShellType.body.font
     restyle()
   }
 
@@ -525,7 +525,7 @@ final class ArchiveSearchField: NSSearchField {
     let scale = window?.backingScaleFactor ?? 2
     textColor = ShellTokens.primaryText.resolve(flavor).nsColor()
     placeholderAttributedString = NSAttributedString(string: placeholder, attributes: [
-      .font: NSFont.systemFont(ofSize: 13), .foregroundColor: ShellTokens.secondaryText.resolve(flavor).nsColor(),
+      .font: ShellType.body.font, .foregroundColor: ShellTokens.secondaryText.resolve(flavor).nsColor(),
     ])
     guard let cell = cell as? ArchiveSearchFieldCell else { return }
     cell.fill = ShellTokens.sidebarItemBackground.resolve(flavor)
@@ -597,7 +597,7 @@ final class ArchiveSearchFieldCell: NSSearchFieldCell {
   /// One text line, vertically centered between the magnifier and the clear button.
   override func searchTextRect(forBounds rect: NSRect) -> NSRect {
     let x = rect.minX + Self.leading + Self.glyph + Self.glyphToText
-    let lineHeight = ceil((font ?? .systemFont(ofSize: 13)).boundingRectForFont.height)
+    let lineHeight = ceil((font ?? ShellType.body.font).boundingRectForFont.height)
     let height = min(rect.height, lineHeight)
     return NSRect(x: x, y: rect.minY + ((rect.height - height) / 2).rounded(),
                   width: max(0, rect.maxX - Self.trailing - Self.cancel - 4 - x), height: height)
