@@ -82,6 +82,13 @@ enum SessionWindowPolicy {
 @MainActor
 public final class WindowSessionStore {
   public static let defaultsKey = "windowSession"
+  public static let windowsDefaultsKey = "windowSessions"
+
+  private struct Collection: Codable {
+    let version: Int
+    let windows: [WindowSessionState]
+  }
+  private static let collectionVersion = 1
 
   private let defaults: UserDefaults?
 
@@ -97,6 +104,23 @@ public final class WindowSessionStore {
           let state = try? JSONDecoder().decode(WindowSessionState.self, from: data),
           WindowFramePlacement.isUsable(state.frame) else { return nil }
     return state
+  }
+
+  /// A missing collection falls back to the legacy single window. An unreadable collection does not.
+  public func loadWindows() -> [WindowSessionState]? {
+    guard let defaults else { return nil }
+    guard defaults.object(forKey: Self.windowsDefaultsKey) != nil else { return load().map { [$0] } }
+    guard let data = defaults.data(forKey: Self.windowsDefaultsKey),
+          let collection = try? JSONDecoder().decode(Collection.self, from: data),
+          collection.version == Self.collectionVersion,
+          collection.windows.allSatisfy({ WindowFramePlacement.isUsable($0.frame) }) else { return nil }
+    return collection.windows
+  }
+
+  public func saveWindows(_ windows: [WindowSessionState]) {
+    guard let data = try? JSONEncoder().encode(Collection(version: Self.collectionVersion, windows: windows))
+    else { return }
+    defaults?.set(data, forKey: Self.windowsDefaultsKey)
   }
 
   public func save(_ state: WindowSessionState) {
@@ -125,8 +149,8 @@ public struct ScreenGeometry: Equatable, Sendable {
 /// Where a saved frame lands on the screens connected now.
 public enum WindowFramePlacement {
   static func isUsable(_ frame: CGRect) -> Bool {
-    let values = [frame.origin.x, frame.origin.y, frame.width, frame.height]
-    return values.allSatisfy(\.isFinite) && frame.width > 0 && frame.height > 0
+    let values = [frame.origin.x, frame.origin.y, frame.size.width, frame.size.height]
+    return values.allSatisfy(\.isFinite) && frame.size.width > 0 && frame.size.height > 0
   }
 
   /// `saved` kept on the screen it overlaps most; when no screen shows any of it, on the screen with `savedScreen`'s

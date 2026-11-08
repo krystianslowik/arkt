@@ -2921,3 +2921,24 @@ collection load/save APIs and defaults key; no tests execute. This is the expect
 Capturing and reopening regular windows, excluding private windows, the General setting, deleted-item fallback,
 screen clamping during multi-window restore, and lifecycle integration remain. Preserve #690 recovery behavior during
 integration; navigation history is tracked separately by #612. Real relaunch and multi-display checks remain.
+
+### Multi-window session store: approved backend restoration (#116, in progress)
+
+The maintainer [decided](https://github.com/krystianslowik/arkt/pull/829#issuecomment-6721408956) that session state
+stays in UserDefaults. This follows the single-window convention shipped in #485 and supersedes Track D question 11's
+session-table proposal and the hold described above. The ordered version 1 collection and existing single-window key
+and API coexist. An absent collection reads the legacy state; an empty collection stays empty; malformed, unsupported,
+or invalid-frame collections return nil without legacy fallback. Failed JSON encoding leaves the prior value intact.
+The raw frame size is checked because CoreGraphics' width and height accessors standardize negative sizes.
+
+A fresh isolated macOS 15 SwiftPM test run with Swift 6.4.1, the actual WindowSession source, real EngineAPI source
+files and the relevant source declarations, and real isolated UserDefaults passed **32 tests**: 21 existing single-window,
+9 collection and boundary, and 2 compatibility tests. The frozen pre-collection encoder payload preserves every old
+field; a separate case checks non-finite encoding failure against invalid persisted frames. The negative-size case
+failed before the raw-size validation fix. The toolchain reported missing developer framework and library search paths
+at link time. This focused run is not the full ShellKit suite, app build or GUI run; the local full package baseline is
+compiler-broken and full Xcode is unavailable. The earlier 30-test prototype result above is historical evidence only.
+
+Capturing and reopening regular windows, private exclusion, the General setting, deleted-item fallback, per-window
+screen clamping and quit/cancel lifecycle remain. Compose with #690 when it lands; navigation history is #612. Manual
+relaunch and display checks remain unverified.

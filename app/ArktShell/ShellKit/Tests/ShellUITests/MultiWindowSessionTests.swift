@@ -26,7 +26,9 @@ struct MultiWindowSessionTests {
     try withSuite { defaults in
       let space = UUID(), tab = UUID(), folder = UUID(), otherFolder = UUID()
       let first = window(100, space: space, tab: tab, collapsed: [folder])
-      let second = window(1100, space: space, tab: tab, collapsed: [otherFolder])
+      var second = window(1100, space: UUID(), tab: UUID(), collapsed: [otherFolder])
+      second.screenFrame = CGRect(x: 1000, y: 0, width: 1920, height: 1080)
+      second.isFullScreen = true
       WindowSessionStore(defaults: defaults).saveWindows([first, second])
 
       let restored = try #require(WindowSessionStore(defaults: defaults).loadWindows())

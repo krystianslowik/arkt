@@ -3772,4 +3772,5 @@ git commit -m "Add typed archive settings with Arc defaults"
    (`ArchiveStore.remove`) and Clear Archive (`ArchiveStore.removeAll`, BH-087).
 10. App Support directory name `Arkt` assumes the final bundle id; adjust `DatabaseLocation.applicationSupport()` if
     the product name or sandboxing changes.
-11. Window/session state (data-model section 3) is out of Track D scope; it will need its own table (`v4-...`).
+11. Window/session state (data-model section 3) stays in UserDefaults, extending the single-window convention from
+    #485. The proposed session table is superseded by the [maintainer decision](https://github.com/krystianslowik/arkt/pull/829#issuecomment-6721408956); no database migration is needed. Multi-window lifecycle remains in progress under #116.
