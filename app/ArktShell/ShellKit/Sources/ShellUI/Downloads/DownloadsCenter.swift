@@ -23,7 +23,9 @@ public final class DownloadsCenter {
 
   public private(set) lazy var library: LibraryWindowController = {
     let controller = LibraryWindowController(model: model, settings: settings)
-    controller.onReview = { [weak self] id in self?.review(id, on: controller.window) }
+    // The controller keeps the closure, so it holds the controller weakly; a strong capture kept the Library window,
+    // the model and the engine alive after the center was released (#817).
+    controller.onReview = { [weak self, weak controller] id in self?.review(id, on: controller?.window) }
     controller.onChangeLocation = onChangeLocation
     return controller
   }()

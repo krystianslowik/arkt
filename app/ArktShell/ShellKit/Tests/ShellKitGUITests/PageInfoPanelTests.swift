@@ -24,9 +24,13 @@ final class PageInfoPanelTests: XCTestCase {
   // Reduce Motion by default: a hide then takes the panel down at once, so no fade outlives a test (the run loop does
   // not spin between tests to finish it). The motion tests set what they check.
 
+  // XCTest keeps each test case object until the run ends: release the windows too, not only hide them (#805).
   override func tearDown() async throws {
     controller.pageInfo.hide(keyboard: true)
     controller.close()
+    controller = nil
+    sidebar = nil
+    engine = nil
   }
 
   private func makeController(reduceMotion: Bool = true) {
@@ -39,6 +43,7 @@ final class PageInfoPanelTests: XCTestCase {
     controller.window?.contentView?.layoutSubtreeIfNeeded()
     controller.pageInfo.reduceMotion = { reduceMotion }
     controller.pageInfo.increaseContrast = { false }
+    controller.pageInfo.deniedInMacOS = { [] }          // never the host's real location state (#786)
   }
 
   private var panel: PageInfoPanelController { controller.pageInfo }

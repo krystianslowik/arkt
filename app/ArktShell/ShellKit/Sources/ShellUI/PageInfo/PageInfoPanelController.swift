@@ -34,6 +34,8 @@ public final class PageInfoPanelController: NSObject {
   var isReadOnly: @MainActor () -> Bool = { false }
   /// The favicon of a tab's page, for the header badge.
   var favicon: @MainActor (TabID) -> Data? = { _ in nil }
+  /// The permissions macOS denies Arkt itself, read each time the panel shows a page (tests set them) (#786).
+  var deniedInMacOS: @MainActor () -> Set<SitePermissionKind> = { SystemPermissions.deniedKinds() }
 
   public var isShown: Bool { panel?.isVisible == true }
 
@@ -49,7 +51,9 @@ public final class PageInfoPanelController: NSObject {
   }
 
   private func model(for tab: TabID) -> PageInfoModel? {
-    siteSettings()?.pageInfo(of: tab).flatMap { PageInfoModel($0, isReadOnly: isReadOnly(), favicon: favicon(tab)) }
+    siteSettings()?.pageInfo(of: tab).flatMap {
+      PageInfoModel($0, isReadOnly: isReadOnly(), favicon: favicon(tab), deniedInMacOS: deniedInMacOS())
+    }
   }
 
   // MARK: Opening

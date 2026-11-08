@@ -47,13 +47,14 @@ final class PrivatePageRowView: NSView {
   static let padding: CGFloat = 9
   static let gap: CGFloat = 9
   static let faviconRadius: CGFloat = 4
+  static let buttonRadius: CGFloat = 4
   static let buttonSize: CGFloat = 16
 
   let tab: TabID
   let faviconView = NSImageView()
   let titleLabel: NSTextField = {
     let label = NSTextField(labelWithString: "")
-    label.font = .systemFont(ofSize: 13)
+    label.font = ShellType.body.font
     label.lineBreakMode = .byTruncatingTail
     label.usesSingleLineMode = true
     label.cell?.truncatesLastVisibleLine = true
@@ -268,7 +269,7 @@ final class PrivatePageRowButton: NSButton {
     title = ""
     refusesFirstResponder = true
     wantsLayer = true
-    layer?.cornerRadius = 4
+    layer?.cornerRadius = PrivatePageRowView.buttonRadius
     layer?.cornerCurve = .continuous
     setAccessibilityRole(.button)
   }

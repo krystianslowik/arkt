@@ -38,7 +38,7 @@ final class CommandBarFilterPills: NSView {
       wantsLayer = true
       layer?.cornerRadius = CommandBarFilterPills.pillHeight / 2
       layer?.cornerCurve = .continuous
-      title.font = .systemFont(ofSize: 12, weight: .medium)
+      title.font = ShellType.chip.font
       title.stringValue = filter.title
       count.font = .monospacedDigitSystemFont(ofSize: 10.5, weight: .regular)
       for label in [title, count] {

@@ -30,6 +30,7 @@ public enum PeekLayout {
   public static let controlOffset: CGFloat = 12
   public static let grabberSize = CGSize(width: 36, height: 5)
   public static let grabberOffset: CGFloat = 12
+  static let grabberRadius: CGFloat = 3
 
   /// The Peek over `content` (the content card's frame), or over `sourcePane` inside a split when that pane is at
   /// least `minimumWidth` wide.
