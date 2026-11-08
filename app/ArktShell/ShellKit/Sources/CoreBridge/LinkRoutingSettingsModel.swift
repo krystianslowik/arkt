@@ -1,5 +1,6 @@
 import Foundation
 import SidebarModel
+import ShellUI
 
 /// An explicitly flushed snapshot editor. Load successfully before editing; edits before a successful load are ignored.
 /// Flushes on this instance are serialized and retain later edits. Separate editors write whole snapshots, so the last
@@ -17,6 +18,7 @@ public final class LinkRoutingSettingsModel {
   private var savedRevision = 0
   private var pendingWrites = 0
   private var loadInProgress = false
+  private var loading: Task<Void, Never>?
   private var saving: Task<Bool, Never>?
 
   public init(state: any LinkRoutingSettingsStoring, now: @escaping @MainActor () -> Date = { Date() }) {
@@ -26,17 +28,24 @@ public final class LinkRoutingSettingsModel {
 
   /// A reload is ignored while edits are unsaved or writes are pending, to avoid discarding them.
   public func load() async {
-    guard !loadInProgress, pendingWrites == 0, revision == savedRevision else { return }
+    if let loading { await loading.value; return }
+    guard pendingWrites == 0, revision == savedRevision else { return }
     loadInProgress = true
-    defer { loadInProgress = false }
-    do {
-      let value = try await state.loadLinkRouting()
-      settings = value
-      isLoaded = true
-      lastError = nil
-    } catch {
-      lastError = error
+    let task = Task { @MainActor in
+      defer { self.loadInProgress = false }
+      do {
+        let value = try await self.state.loadLinkRouting()
+        self.settings = value
+        self.isLoaded = true
+        self.lastError = nil
+      } catch {
+        self.isLoaded = false
+        self.lastError = error
+      }
     }
+    loading = task
+    await task.value
+    loading = nil
   }
 
   public func appendRoute(_ route: LinkRouting.Route) {
@@ -89,5 +98,30 @@ public final class LinkRoutingSettingsModel {
     guard updated != settings else { return }
     settings = updated
     revision += 1
+  }
+}
+
+public extension LinkRoutingSettingsModel {
+  /// Plain Settings actions over this editor. Multiple consumers share its snapshot.
+  var settingsRows: SettingsLinkRoutingRows {
+    SettingsLinkRoutingRows(
+      load: { [weak self] in await self?.load() },
+      destination: { [weak self] in
+        guard let self, self.isLoaded else { return nil }
+        switch self.settings.defaultDestination {
+        case .littleArkt: return .littleArkt
+        case .mostRecentSpace: return .mostRecentSpace
+        case .space(let id): return .space(id)
+        }
+      },
+      hasLoadError: { [weak self] in self?.isLoaded == false && self?.lastError != nil },
+      setDestination: { [weak self] destination in
+        switch destination {
+        case .littleArkt: self?.setDefaultDestination(.littleArkt)
+        case .mostRecentSpace: self?.setDefaultDestination(.mostRecentSpace)
+        case .space(let id): self?.setDefaultDestination(.space(id))
+        }
+      },
+      flush: { [weak self] in await self?.flush() ?? false })
   }
 }

@@ -216,12 +216,56 @@ extension SettingsWindowController {
       section("Profiles", profiles + [newProfile],
               note: "Each profile keeps its own Favorites, history, cookies, passwords and extensions."),
       section("Link routing", [
-        row("Links from other apps open in", nil,
-            [popUp(.spaces, "linksFromOtherApps", ["Current Space", "Little Arkt"], "Little Arkt")], planned: true),
+        linkRoutingRow(spaces: spaces),
         addRoute,
       ]),
     ]
     return blocks
+  }
+
+  private func linkRoutingRow(spaces: [SettingsSpaceSummary]) -> SettingsBlockView {
+    guard let rows = services.linkRoutingRows else {
+      return row("Links from other apps open in", nil,
+                 [popUp(.spaces, "linksFromOtherApps", ["Little Arkt"], "Little Arkt")], planned: true)
+    }
+    let control = popUp(.spaces, "linksFromOtherApps", ["Loading..."], "Loading...")
+    let row = self.row("Links from other apps open in", "Loading...", [control])
+    row.setDimmed(true)
+    Task { [weak self, weak row] in
+      await rows.load()
+      guard let self, let row else { return }
+      self.updateLinkRoutingRow(row, rows: rows, spaces: spaces)
+      if self.selectedPane == .spaces { self.layoutPane(); self.updateKeyViewLoop() }
+    }
+    return row
+  }
+
+  private func updateLinkRoutingRow(_ row: SettingsRowView, rows: SettingsLinkRoutingRows,
+                                    spaces: [SettingsSpaceSummary]) {
+    guard let destination = rows.destination() else {
+      row.setCaption(rows.hasLoadError() ? "Could not load link routing settings. Reopen Settings to retry." : "Loading...")
+      row.setDimmed(true)
+      return
+    }
+    var choices: [(String, SettingsLinkDestination)] = [("Little Arkt", .littleArkt),
+      ("Most Recent Space", .mostRecentSpace)]
+    choices += spaces.map { ($0.title, .space($0.id)) }
+    if !choices.contains(where: { $0.1 == destination }) {
+      choices.append(("Unavailable Space", destination))
+    }
+    let index = choices.firstIndex(where: { $0.1 == destination }) ?? 0
+    let control = popUp(.spaces, "linksFromOtherApps", choices.map(\.0), choices[index].0)
+    control.showIndex(index)
+    control.onIndexChange = { [weak row] index in
+      rows.setDestination(choices[index].1)
+      Task {
+        let saved = await rows.flush()
+        row?.setCaption(saved ? nil : "Could not save link routing settings.")
+      }
+    }
+    row.setTrailing([control])
+    row.setCaption(nil)
+    row.setDimmed(false)
   }
 
   /// The pop-ups' titles, shortest first (BH-081; decision on #448: all seven, Never included).

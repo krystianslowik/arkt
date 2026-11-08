@@ -198,6 +198,8 @@ public final class SettingsPopUpButton: NSButton {
   public private(set) var items: [String]
   public private(set) var selectedTitle: String
   var onChange: (@MainActor (String) -> Void)?
+  var onIndexChange: (@MainActor (Int) -> Void)?
+  private var selectedIndex: Int?
   private let body = CALayer()
   private let label = CATextLayer()
   private let chevron = CALayer()
@@ -208,6 +210,7 @@ public final class SettingsPopUpButton: NSButton {
   init(items: [String], selected: String) {
     self.items = items
     selectedTitle = selected
+    selectedIndex = items.firstIndex(of: selected)
     super.init(frame: .zero)
     cell = SettingsBlankCell()
     title = ""
@@ -256,16 +259,38 @@ public final class SettingsPopUpButton: NSButton {
 
   @objc private func pressed(_ sender: Any?) {
     let menu = NSMenu()
-    for title in items {
+    for (index, title) in items.enumerated() {
       let item = NSMenuItem(title: title, action: #selector(chose(_:)), keyEquivalent: "")
       item.target = self
-      item.state = title == selectedTitle ? .on : .off
+      item.tag = index
+      item.state = index == selectedIndex ? .on : .off
       menu.addItem(item)
     }
     menu.popUp(positioning: menu.items.first { $0.state == .on }, at: NSPoint(x: 0, y: bounds.height - 3), in: self)
   }
 
-  @objc private func chose(_ sender: NSMenuItem) { select(sender.title) }
+  @objc private func chose(_ sender: NSMenuItem) {
+    guard items.indices.contains(sender.tag) else { return }
+    if let onIndexChange {
+      guard selectedIndex != sender.tag else { return }
+      selectedIndex = sender.tag
+      selectedTitle = items[sender.tag]
+      restyle()
+      invalidateIntrinsicContentSize()
+      onIndexChange(sender.tag)
+    } else {
+      select(sender.title)
+    }
+  }
+
+  /// Select by identity-bearing position, including when titles are duplicated.
+  func showIndex(_ index: Int) {
+    guard items.indices.contains(index) else { return }
+    selectedIndex = index
+    selectedTitle = items[index]
+    restyle()
+    invalidateIntrinsicContentSize()
+  }
 
   /// Chooses `title` as the menu does: a different title restyles and reports it; the current one does nothing.
   func select(_ title: String) {
@@ -278,6 +303,7 @@ public final class SettingsPopUpButton: NSButton {
   func show(_ title: String) -> Bool {
     guard title != selectedTitle, items.contains(title) else { return false }
     selectedTitle = title
+    selectedIndex = items.firstIndex(of: title)
     restyle()
     invalidateIntrinsicContentSize()
     return true

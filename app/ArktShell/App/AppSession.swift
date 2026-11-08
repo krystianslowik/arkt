@@ -45,6 +45,8 @@ final class AppSession {
   /// The archive thresholds Settings edits (#448): each change reaches `autoArchive` at once and is stored. Little
   /// Arkt reads its threshold here (`littleArktThreshold`, 6 hours by default).
   let archiveSettings: ArchiveSettingsModel
+  /// One editor shared by every Settings consumer for the session.
+  let linkRoutingSettings: LinkRoutingSettingsModel
   /// Archived matches in every window's command bar (#111).
   let archiveSearch: ArchiveCommandBarSearch
   /// The command bar preview's page thumbnails (#370): live tabs through the engine, history items from the cache.
@@ -120,6 +122,7 @@ final class AppSession {
     let archiveSettings = ArchiveSettingsModel(state: settingsStore)
     archiveSettings.onChange = { [weak autoArchive] in autoArchive?.apply($0) }
     self.archiveSettings = archiveSettings
+    self.linkRoutingSettings = LinkRoutingSettingsModel(state: settingsStore)
     self.archiveSearch = ArchiveCommandBarSearch(source: source, store: archiveStore, coordinator: archive)
     self.faviconStore = faviconStore
     let pageImageCache = AppEnvironment.pageImageCache(in: location)
@@ -502,6 +505,7 @@ final class AppSession {
     services.crashReportCount = { [weak self] in self?.crashCapture.storedCount ?? 0 }     // #129
     services.sendCrashReport = { [weak self] in self?.crashCapture.sendNewest() }
     services.spaces = { [weak self] in self.map { SettingsSpaceSummary.list(from: $0.source) } ?? [] }
+    services.linkRoutingRows = linkRoutingSettings.settingsRows
     services.archiveRows = archiveSettings.settingsRows                                // #448
     return services
   }
@@ -648,11 +652,14 @@ final class AppSession {
     let onboarding = Task { [onboardingRecords] in
       await onboardingRecords.flush(atMost: Self.onboardingFlushTimeout)
     }
+    let routingSaved: Bool
+    if linkRoutingSettings.isLoaded { routingSaved = await linkRoutingSettings.flush() }
+    else { routingSaved = true }
     let archived = await archive.flush()
     let sidebar = archived ? await autosaver.flush() : false
     await Self.wait(for: favicons, atMost: Self.faviconFlushTimeout)
     let onboardingSaved = await onboarding.value
-    return sidebar && archived && onboardingSaved
+    return sidebar && archived && onboardingSaved && routingSaved
   }
 
   /// `flush()` for a quit whose main thread never runs again (#298: Chromium's SIGTERM path blocks the main thread

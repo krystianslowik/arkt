@@ -29,6 +29,8 @@ public struct SettingsServices {
   public var openLibrary: (@MainActor () -> Void)?
   /// Settings > Spaces and Profiles > Archive (#448); both rows stay planned while nil.
   public var archiveRows: SettingsArchiveRows?
+  /// Link routing uses the session-owned editor; nil keeps the row planned.
+  public var linkRoutingRows: SettingsLinkRoutingRows?
 
   public init() {}
 }
@@ -55,6 +57,32 @@ public struct SettingsArchiveRows {
     self.littleArktAfter = littleArktAfter
     self.setLittleArktAfter = setLittleArktAfter
     self.reset = reset
+  }
+}
+
+/// A destination identified independently of its display title.
+public enum SettingsLinkDestination: Equatable, Sendable {
+  case littleArkt, mostRecentSpace, space(UUID)
+}
+
+@MainActor
+public struct SettingsLinkRoutingRows {
+  public var load: @MainActor () async -> Void
+  public var destination: @MainActor () -> SettingsLinkDestination?
+  public var hasLoadError: @MainActor () -> Bool
+  public var setDestination: @MainActor (SettingsLinkDestination) -> Void
+  public var flush: @MainActor () async -> Bool
+
+  public init(load: @escaping @MainActor () async -> Void,
+              destination: @escaping @MainActor () -> SettingsLinkDestination?,
+              hasLoadError: @escaping @MainActor () -> Bool,
+              setDestination: @escaping @MainActor (SettingsLinkDestination) -> Void,
+              flush: @escaping @MainActor () async -> Bool) {
+    self.load = load
+    self.destination = destination
+    self.hasLoadError = hasLoadError
+    self.setDestination = setDestination
+    self.flush = flush
   }
 }
 
