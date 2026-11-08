@@ -2985,3 +2985,15 @@ false. No Settings controls or app composition are wired; the read-only pane rem
 warning source, catalog audit, app dispatch and page priority (#441) remain future work. Initial conflict focus and
 Return's default remain with the maintainer. New-head CI must compile and run the existing GUI tests; parsing is not
 a test pass. Full ShellKit, GUI and app tests were not run locally.
+
+
+### Shortcut service predicate test isolation repair (#119)
+
+At `752e518`, CI run 42439465407, ShellKit job 128605426429, failed before tests ran. The only distinct compiler
+error was assignment of the test helper's non-Sendable `isSystemShortcut` parameter to the main-actor service
+closure. The helper now declares the same `@MainActor` function type as `SettingsServices`; production behavior
+and the held conflict-focus decision are unchanged.
+
+A Swift 6.2.4 complete-concurrency type-check probe passed using the actual shortcut model source and the service's
+predicate declaration. The changed test file passed source parsing, and diff checks passed. The probe is not a
+ShellKit test-suite result: no tests or full app/GUI build ran locally. New-head CI must validate the full gate.

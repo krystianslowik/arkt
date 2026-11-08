@@ -35,7 +35,8 @@ final class SettingsWindowTests: XCTestCase {
   private func make(settings: AppSettings? = nil, services: Services = Services(),
                     menu: NSMenu? = nil, sidebar: StubSidebar? = nil,
                     editor: ShortcutEditorModel? = nil,
-                    isSystemShortcut: @escaping (ShortcutBinding) -> Bool = { _ in false }) -> SettingsWindowController {
+                    isSystemShortcut: @escaping @MainActor (ShortcutBinding) -> Bool = { _ in false }
+  ) -> SettingsWindowController {
     var env = SettingsServices()
     env.isDefaultBrowser = { services.isDefault }
     env.makeDefaultBrowser = {
