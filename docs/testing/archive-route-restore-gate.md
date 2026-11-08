@@ -13,3 +13,10 @@ The source-linked `integration/ArchiveRouting` probe compiles the actual coordin
 The canonical ArchiveListModel tests additionally exercise row retention, retry, store removal, neighbors and destination membership without adding a routed insertion-order rule. They have not run locally. The probe does not compile AppSession or run the Archive window, SQLite, OS delivery or Chromium. Full target compilation, App forwarding and UI/native behavior remain CI/runtime boundaries. See `integration/ArchiveRouting/README.md` for the exact command.
 
 BH-086/BH-157 cover archive restores obeying explicit routes. The [maintainer decision](https://github.com/krystianslowik/arkt/pull/825#issuecomment-6721408579) specifies case-insensitive contains, exact unnormalized matches and first match. BH-156's default describes external links; this change preserves the existing unmatched archive behavior. It does not complete #113.
+
+
+## Full-suite fixture correction
+
+At `5006b7e`, run 42528538251 / ShellKit job 128877432002 executed 2,612 tests in 300 suites and reported 14 issues, all at the newly added tests' `flush()` assertions. The production one-second termination race was being used as an ordinary fake-store barrier. App build, Core and lint passed; this is not a green full ShellKit result. Routing assertions did not report failures.
+
+The new fixtures now wait for actual add/remove acknowledgments and a drained writer using finite state-based yield bounds, matching the established archive-test pattern. The list-model cases retain their explicit row/store/snapshot assertions. Production deadlines, termination tests and placement/retention assertions are unchanged. The source-linked probe must be rerun; fresh full-suite CI remains required to establish the fixture correction.

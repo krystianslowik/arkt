@@ -16,7 +16,9 @@ struct ArchiveRestoreRoutingTests {
     let store = RoutingArchiveStore()
     let coordinator = ArchiveCoordinator(source: source, store: store)
     let item = try #require(coordinator.archive([tab], reason: .manual).first)
-    #expect(await coordinator.flush())
+    try #require(await archiveWriteReaches {
+      await store.entries[item.id] == item && !coordinator.hasPendingWrites
+    })
     return (source, coordinator, store, item, original, destination)
   }
 
@@ -47,7 +49,9 @@ struct ArchiveRestoreRoutingTests {
     #expect(appearances == [.today(target)])
     #expect(source.sidebar.snapshot(of: item.id) == item.snapshot)
     #expect(source.children(of: .today(original)).isEmpty)
-    #expect(await coordinator.flush())
+    try #require(await archiveWriteReaches {
+      await store.removals == [[item.id]] && !coordinator.hasPendingWrites
+    })
     #expect(await store.removals == [[item.id]])
     #expect(await store.entries.isEmpty)
   }
@@ -65,7 +69,9 @@ struct ArchiveRestoreRoutingTests {
     #expect(await store.removals.isEmpty)
     available = LinkRouting(routes: [.init(condition: .contains("DOCS.EXAMPLE.TEST"), destination: .space(destination))])
     #expect(try coordinator.restore(item, fallbackSpace: original)?.space == destination)
-    #expect(await coordinator.flush())
+    try #require(await archiveWriteReaches {
+      await store.removals == [[item.id]] && !coordinator.hasPendingWrites
+    })
     #expect(await store.removals == [[item.id]])
   }
 
@@ -94,7 +100,9 @@ struct ArchiveRestoreRoutingTests {
     #expect(try coordinator.restore(item, fallbackSpace: destination)?.space == original)
     #expect(source.children(of: .today(original)) == [item.id])
     #expect(source.children(of: .today(destination)).isEmpty)
-    #expect(await coordinator.flush())
+    try #require(await archiveWriteReaches {
+      await store.removals == [[item.id]] && !coordinator.hasPendingWrites
+    })
     #expect(await store.removals == [[item.id]])
   }
 }
@@ -116,4 +124,15 @@ private actor RoutingArchiveStore: ArchiveStoring {
   }
   func count(matching filter: ArchiveFilter) async throws -> Int { entries.values.filter(filter.matches).count }
   func removeAll() async throws { entries.removeAll() }
+}
+
+/// Waits for ordinary store/writer state rather than racing the production termination deadline. A finite
+/// yield bound follows the canonical archive tests and fails the requirement if the expected write never arrives.
+@MainActor
+private func archiveWriteReaches(_ condition: @MainActor () async -> Bool) async -> Bool {
+  for _ in 0..<20_000 {
+    if await condition() { return true }
+    await Task.yield()
+  }
+  return false
 }

@@ -64,7 +64,7 @@ struct ArchiveListModelTests {
     let currentNeighbor = try harness.source.addTab(url: Self.urlForRoutingNeighbor, title: "Current neighbor", in: .today(current))
     let destinationNeighbor = try harness.source.addTab(url: Self.urlForRoutingNeighbor, title: "Destination neighbor", in: .today(destination))
     let item = try #require(harness.coordinator.archive([tab], reason: .manual).first)
-    #expect(await harness.coordinator.flush())
+    await eventually { !harness.coordinator.hasPendingWrites }
     let target = exact ? current : destination
     let routing = LinkRouting(routes: [
       .init(condition: .matches("https://unrelated.example.test/"), destination: .space(original)),
@@ -72,7 +72,7 @@ struct ArchiveListModelTests {
       .init(condition: .matches("https://status.example.test/Case?literal=%2F"), destination: .space(current)),
       .init(condition: .contains("example.test"), destination: .space(original)),
     ])
-    // Proposed production seam: provide the shared, already-loaded routing value, not a test-side match.
+    // Supply loaded settings to the production coordinator, without a test-side match or placement.
     harness.coordinator.linkRoutingProvider = { routing }
     harness.model.currentSpaceProvider = { current }
     var appearedAt: [SidebarLocation] = []
@@ -98,7 +98,7 @@ struct ArchiveListModelTests {
     #expect(destinationChildren.count == (exact ? 1 : 2))
     #expect(Set(destinationChildren) == Set(exact ? [destinationNeighbor] : [destinationNeighbor, item.id]))
     #expect(!harness.model.rows.contains { $0.id == item.id })
-    #expect(await harness.coordinator.flush())
+    await eventually { !harness.coordinator.hasPendingWrites }
     #expect(await harness.store.removed == [[item.id]])
     let remaining = try await harness.store.items(matching: ArchiveFilter(), limit: nil)
     #expect(!remaining.items.contains { $0.id == item.id })
@@ -113,7 +113,7 @@ struct ArchiveListModelTests {
                                        title: "Retry", in: .today(original))
     let neighbor = try harness.source.addTab(url: Self.urlForRoutingNeighbor, title: "Neighbor", in: .today(destination))
     let item = try #require(harness.coordinator.archive([tab], reason: .manual).first)
-    #expect(await harness.coordinator.flush())
+    await eventually { !harness.coordinator.hasPendingWrites }
     var available: LinkRouting?
     harness.coordinator.linkRoutingProvider = { available }
     var failures: [String] = []
@@ -127,7 +127,7 @@ struct ArchiveListModelTests {
     #expect(harness.source.children(of: .today(original)).isEmpty)
     #expect(harness.source.children(of: .today(destination)) == [neighbor])
     #expect(harness.model.rows.map(\.id) == [item.id])
-    #expect(await harness.coordinator.flush())
+    await eventually { !harness.coordinator.hasPendingWrites }
     #expect(await harness.store.removed.isEmpty)
     let archived = try await harness.store.items(matching: ArchiveFilter(), limit: nil)
     #expect(archived.items == [item])
@@ -138,7 +138,7 @@ struct ArchiveListModelTests {
     #expect(harness.source.sidebar.snapshot(of: item.id) == item.snapshot)
     #expect(harness.model.rows.isEmpty)
     #expect(failures.count == 1)
-    #expect(await harness.coordinator.flush())
+    await eventually { !harness.coordinator.hasPendingWrites }
     #expect(await harness.store.removed == [[item.id]])
   }
 
@@ -162,7 +162,7 @@ struct ArchiveListModelTests {
       #expect(harness.model.rows.map(\.id) == [item.id])
       #expect(harness.source.sidebar.snapshot(of: item.id) == nil)
       #expect(harness.restored.isEmpty)
-      #expect(await harness.coordinator.flush())
+      await eventually { !harness.coordinator.hasPendingWrites }
       #expect(await harness.store.removed.isEmpty)
       let retained = try await harness.store.items(matching: ArchiveFilter(), limit: nil)
       #expect(retained.items == [item])
@@ -185,7 +185,8 @@ struct ArchiveListModelTests {
     #expect(harness.restored.first?.0.space == original)
     #expect(harness.source.children(of: .today(original)) == [item.id])
     #expect(harness.source.children(of: .today(current)).isEmpty)
-    #expect(await harness.coordinator.flush())
+    await eventually { !harness.coordinator.hasPendingWrites }
+    #expect(await harness.store.removed == [[item.id]])
   }
 
   private static let urlForRoutingNeighbor = URL(string: "https://neighbor.example.test/")!
