@@ -198,3 +198,20 @@ point's call order; that order was reviewed in source. Static build-setting plum
 Info value or compiled App behavior: neither XcodeGen output, App build nor native execution was observed. The cold
 gate remains held until actual PID, effective profile identity and persisted routing profile are observed and the
 remaining identity barrier is reviewed. No cold run or routing-green claim follows from this stage.
+
+
+### Startup guard review and OS-open preflight
+
+Independent source review of `037dd2a` found no P1/P2 issue in the narrow guard stage. It confirmed the guard
+precedes defaults migration, NSApplication and delegate construction, and found no remaining references to the
+removed late-check wrappers. The generated Info.plist and built app were not inspected. A missing or differently
+typed metadata value would read as off, so a built-value check remains required.
+
+The cold helper now repeats the validated-bundle/no-running-instance preflight and refuses OS open unless the
+actual bundle's mandatory-guard value is the expected String YES. It requests a new instance for cold delivery,
+disables running-application substitution, and checks the returned bundle URL and nonzero PID. Warm opens also pin
+the specified installation. The six route/default cases and destination assertions remain unchanged.
+
+These checks are prerequisites, not effective sandbox or persisted-profile evidence. No native run is dispatched:
+exact per-test environment identity, sole-instance correlation and persisted configured Spaces/routes still need
+a supported observation barrier. This stage adds no acknowledgement/report path and establishes no path confinement.

@@ -60,12 +60,28 @@ final class LinkRoutingAppTests: ArktUITestCase {
 
   /// Target the same validated bundle used by `launch`; never consult or modify the default browser.
   @MainActor
-  private func open(_ address: String, sandbox: Sandbox) async throws {
+  private func open(_ address: String, sandbox: Sandbox, cold: Bool) async throws -> NSRunningApplication {
     let url = try XCTUnwrap(URL(string: address))
+    let applicationURL = Self.appURL().standardizedFileURL.resolvingSymlinksInPath()
+    if cold {
+      _ = try Self.makeApplication() // Repeat bundle validation and the no-running-instance preflight.
+      guard let bundle = Bundle(url: applicationURL),
+            bundle.object(forInfoDictionaryKey: "ArktRequireUITestOverrides") as? String == "YES" else {
+        throw HarnessError("cold OS open requires the mandatory UI-test startup guard")
+      }
+    }
     let configuration = NSWorkspace.OpenConfiguration()
+    configuration.allowsRunningApplicationSubstitution = false
+    configuration.createsNewApplicationInstance = cold
     configuration.environment = try Self.mergedEnvironment(sandbox: sandbox, extraEnv: [:])
     configuration.arguments = Self.launchArguments
-    _ = try await NSWorkspace.shared.open([url], withApplicationAt: Self.appURL(), configuration: configuration)
+    let opened = try await NSWorkspace.shared.open([url], withApplicationAt: applicationURL,
+                                                   configuration: configuration)
+    guard opened.bundleURL?.standardizedFileURL.resolvingSymlinksInPath() == applicationURL,
+          opened.processIdentifier > 0 else {
+      throw HarnessError("OS open returned an unexpected application identity")
+    }
+    return opened
   }
 
   @MainActor
@@ -102,7 +118,7 @@ final class LinkRoutingAppTests: ArktUITestCase {
     let name = "\(destination.rawValue)-\(cold ? "cold" : "warm")"
     let address = "\(server.base)/routing/\(name)"
     // Cold opens start the validated bundle with the same sandbox, without an XCUIApplication launch first.
-    try await open(address, sandbox: sandbox)
+    _ = try await open(address, sandbox: sandbox, cold: cold)
     switch destination {
     case .routed: expectSpacePage(name, index: 0, server: server, app: app)
     case .little: expectLittlePage(name, server: server, app: app)

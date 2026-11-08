@@ -3191,3 +3191,24 @@ final green. Swift 6.2.4 source parsing, layering and whitespace checks passed; 
 These results cover production CoreBridge sources and the model's Settings adapter, not actual App forwarding or
 native quit cancellation. No local full App/GUI build or launch ran. Cold OS-open profile identity remains unverified,
 so the prior cold onboarding failures are not routing evidence and no new cold run is dispatched here.
+
+
+### #113 mandatory UI-test startup guard and cold preflight
+
+The Debug guard now precedes defaults migration, NSApplication and delegate construction. An independent bundle
+flag defaults to NO in ordinary configurations and is set to YES only by the UI workflow. Required builds reject
+a missing UI-test flag or incomplete existing overrides; explicit UI-test launches also validate when the bundle
+flag is off. The guard reuses the existing validator and adds no report destination or path-authority claim.
+
+The actual-source StartupPolicy probe first failed compilation on eight missing-policy API errors, with zero tests
+run, then passed 22 tests in one suite (five new policy cases and seventeen existing cases). Publication repeated
+that supported probe successfully: `SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX15.5.sdk /opt/homebrew/opt/swift/bin/swift test --package-path integration/StartupPolicy -j 2`.
+Three linker search-path warnings remain. Independent source review found no P1/P2 blockers; it did not execute the
+probe and did not inspect a generated plist or built binary.
+
+The cold helper now refuses to invoke OS open without the expected String YES in the actual bundle, repeats the
+validated-bundle/no-running-instance preflight, disables substitution, requests a fresh instance, and checks the
+returned bundle URL and nonzero PID. All six route/default cases and assertions remain. Swift parsing, source
+layering/UI lint, actionlint, startup-order inspection and whitespace checks passed. No local full App/GUI build or
+launch ran. Generated flag values, compiled startup behavior, effective sandbox/process correlation and persisted
+profile identity are not established. No cold native run is dispatched by this stage.
