@@ -173,14 +173,18 @@ final class MultiWindowLifecycleGateTests: XCTestCase {
                                                          screens: [screen], minSize: native.minSize)
       XCTAssertEqual(native.frame, expected)
     }
-    windows[0].sidebarController.showSpace(work)
-    XCTAssertEqual(windows[0].currentNode, b)
-    windows[1].sidebarController.showSpace(personal)
-    XCTAssertEqual(windows[1].currentNode, c)
-    windows[0].sidebarController.showSpace(personal)
-    XCTAssertEqual(windows[0].currentNode, a)
-    windows[1].sidebarController.showSpace(work)
-    XCTAssertEqual(windows[1].currentNode, d)
+    XCTAssertEqual(windows[0].sidebarController.selectedTabs, states[0].selectedTabs)
+    XCTAssertEqual(windows[1].sidebarController.selectedTabs, states[1].selectedTabs)
+    for (window, space, selected) in [(windows[0], work, b), (windows[1], personal, c),
+                                      (windows[0], personal, a), (windows[1], work, d)] {
+      // showSpace only positions the page. The dot/keyboard path selects its remembered tab when it settles;
+      // Reduce Motion completes that same path synchronously, without a display-link or wall-clock wait.
+      window.pager.reduceMotionForTesting = true
+      let index = try XCTUnwrap(window.sidebarController.spaces.firstIndex(of: space))
+      window.sidebarController.goToSpace(at: index)
+      XCTAssertEqual(window.currentSpace, space)
+      XCTAssertEqual(window.currentNode, selected)
+    }
   }
 
   func testBlankAndIncognitoIncludingReopenedWindowsStayOutOfCollection() throws {

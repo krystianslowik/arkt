@@ -27,3 +27,11 @@ checks the empty current selection, retained per-Space history, collection order
 The second switch also protects the nil-to-nil tab transition. This is a synchronous main-actor GUI test, with no
 new clocks or animation. Only the test, this note and Track C results change; the production correction is pending
 the observed runtime red. Existing lifecycle assertions remain intact. Source parsing cannot establish that red.
+
+The runtime red is now observed at `c6ba758` in GUI job 128752869704: four assertions retain the previous Space/tab
+through both empty switches. The Space-change callback now saves the session, including nil-to-nil tab transitions.
+The same run exposed two test errors in the remembered-tab check: `showSpace` intentionally positions the page
+without activating its remembered tab. That check now asserts both complete restored selection dictionaries and
+uses the real dot/keyboard switch path with Reduce Motion enabled for synchronous settling. It still requires each
+window's distinct tab on every switch; no persistence or history assertion is removed. Current-head CI must verify
+the unchanged empty-Space regression and corrected interaction path.

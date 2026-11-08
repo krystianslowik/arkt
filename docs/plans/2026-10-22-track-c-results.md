@@ -2982,3 +2982,19 @@ Swift 6.2.4 frontend parsing, test import inspection and `git diff --check` pass
 executed locally; its expected runtime red remains unobserved. CI must establish the regression failure before the
 small persistence correction. The earlier missing-API red and historical backend passes do not establish this
 regression or a passing lifecycle implementation. The PR remains draft with the reviewed P2 open.
+
+### Empty-Space persistence correction and remembered-tab test repair (#116)
+
+At `c6ba758576ad86fc417cc0a7e43318abb26c9ec8`, GUI run 42487571348, job 128752869704, reported 2079 tests,
+56 skipped and six failed assertions in two methods. Four assertions in the new empty-Space regression confirm the
+collection retained the previous Space and non-nil tab after both switches. The existing Space-change callback now
+saves the session as well as refreshing suggestions, so nil-to-nil tab transitions also capture the new Space.
+
+The remaining two assertions were test errors: `showSpace` positions a page with no settle callback, while the
+dot/keyboard path selects the Space's remembered tab on settling. The history test now checks both complete restored
+selection dictionaries, then uses that user-switch path with the existing Reduce Motion seam for synchronous
+settling. It retains all four distinct per-window selection assertions. The empty-Space regression is unchanged.
+
+Swift 6.2.4 frontend parsing and `git diff --check` passed. No local full package, GUI or App build ran; green at the
+new head remains unobserved. The separate unpublished App/General gate is not included here, and app launch, actual
+termination/cancellation composition, full relaunch and #690 recovery remain unfinished.

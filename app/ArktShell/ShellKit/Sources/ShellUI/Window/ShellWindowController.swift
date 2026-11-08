@@ -341,7 +341,10 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     commandBar.onSwitchSpace = { [weak self] id in self?.sidebarController.showSpace(id) }
     commandBar.actionsProvider = { [weak self] in self?.commandBarActions() ?? [] }
     commandBar.onAction = { [weak self] id in self?.runCommandBarAction(id) }
-    sidebarController.onCurrentSpaceChanged = { [weak self] _ in self?.commandBar.refreshSuggestions() }
+    sidebarController.onCurrentSpaceChanged = { [weak self] _ in
+      self?.commandBar.refreshSuggestions()
+      self?.saveSession()
+    }
     sidebarController.clipboardURLProvider = { CommandBarController.pasteboardURL(NSPasteboard.general) }
     sidebarController.onPasteAndGo = { [weak self] url in self?.open(url, inNewTab: true) }
     wireAddressBars()
