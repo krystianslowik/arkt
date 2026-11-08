@@ -1,0 +1,1 @@
+../../../../app/ArktShell/ShellKit/Sources/ShellUI/Settings/SettingsData.swift

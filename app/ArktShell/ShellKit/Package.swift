@@ -63,7 +63,6 @@ let package = Package(
       name: "CoreBridgeTests",
       dependencies: [
         "CoreBridge", "ShellUI", "EngineAPI",
-        .product(name: "Persistence", package: "ArktCore"),
         .product(name: "SidebarModel", package: "ArktCore"),
         .product(name: "Archive", package: "ArktCore"),
         .product(name: "ArcImport", package: "ArktCore"),
