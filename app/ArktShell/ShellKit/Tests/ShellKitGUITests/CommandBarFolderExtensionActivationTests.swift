@@ -49,10 +49,12 @@ final class CommandBarFolderExtensionActivationTests: XCTestCase {
       let workTab = try model.addTab(url: URL(string: "https://work.example.test/")!, title: "Work", in: .today(work))
       let outer = try model.addFolder(title: "Outer", in: inToday ? .today(work) : .pinned(work))
       let folder = try model.addFolder(title: "Project notes", in: .folder(outer))
+      let untouched = try model.addFolder(title: "Untouched", in: .pinned(work))
       let child = try model.addTab(url: URL(string: "https://child.example.test/")!, title: "Child", in: .folder(folder))
       let source = ModelSidebarSource(sidebar: model)
       let shell = shell(engine: InMemoryEngine(), source: source, node: workTab)
       let outline = try XCTUnwrap(shell.sidebarController.currentPage?.outlineController)
+      outline.toggleFolder(untouched, animated: false)
       outline.toggleFolder(folder, animated: false)
       outline.toggleFolder(outer, animated: false)
       XCTAssertFalse(outline.isFolderOpen(outer))
@@ -71,6 +73,7 @@ final class CommandBarFolderExtensionActivationTests: XCTestCase {
       let revealed = try XCTUnwrap(shell.sidebarController.currentPage?.outlineController)
       XCTAssertTrue(revealed.isFolderOpen(outer))
       XCTAssertTrue(revealed.isFolderOpen(folder))
+      XCTAssertFalse(revealed.isFolderOpen(untouched), "reveal must not expand unrelated folders")
       XCTAssertGreaterThanOrEqual(revealed.row(for: folder), 0)
       XCTAssertGreaterThanOrEqual(revealed.row(for: child), 0)
       XCTAssertEqual(source.sidebar.snapshot(of: outer), snapshot, "revealing does not move or duplicate nodes")
@@ -80,6 +83,10 @@ final class CommandBarFolderExtensionActivationTests: XCTestCase {
       bar.setQueryForTesting("renamed project")
       XCTAssertEqual(bar.results.first { $0.kind == .folder(folder) }?.title, "Renamed project")
       source.removeNode(outer)
+      // An activation already handed off before removal must not reveal a different node.
+      bar.onRevealFolder?(folder)
+      XCTAssertEqual(shell.currentSpace, work)
+      XCTAssertFalse(revealed.isFolderOpen(untouched))
       bar.setQueryForTesting("renamed project")
       XCTAssertFalse(bar.results.contains { $0.kind == .folder(folder) })
       bar.hide()
@@ -117,6 +124,31 @@ final class CommandBarFolderExtensionActivationTests: XCTestCase {
     XCTAssertEqual(engine.tabIDs, tabs, "extension actions must not open a search or duplicate a tab")
   }
 
+  func testFolderProvidersExcludeOtherProfilesAndPrivateSidebarData() throws {
+    var model = SidebarModel.Sidebar()
+    let own = model.addSpace(title: "Work")
+    let foreign = model.addSpace(title: "Other", profile: "other")
+    let tab = try model.addTab(url: URL(string: "https://work.example.test/")!, title: "Work", in: .today(own))
+    let visible = try model.addFolder(title: "Notes own", in: .pinned(own))
+    let hidden = try model.addFolder(title: "Notes foreign", in: .pinned(foreign))
+    let shell = shell(engine: InMemoryEngine(), source: ModelSidebarSource(sidebar: model), node: tab)
+    let bar = shell.commandBar
+    bar.show(.newTab)
+    bar.setQueryForTesting("notes")
+    XCTAssertTrue(bar.results.contains { $0.kind == .folder(visible) })
+    XCTAssertFalse(bar.results.contains { $0.kind == .folder(hidden) })
+    bar.onRevealFolder?(hidden)
+    XCTAssertEqual(shell.currentSpace, own)
+    bar.hide()
+    shell.makeIncognito()
+    bar.show(.newTab)
+    bar.setQueryForTesting("notes")
+    XCTAssertFalse(bar.results.contains {
+      if case .folder = $0.kind { return true }
+      return false
+    })
+  }
+
   func testOpenBarFollowsTheWindowsExtensionActionChanges() throws {
     var model = SidebarModel.Sidebar()
     let space = model.addSpace(title: "Work")
@@ -130,12 +162,17 @@ final class CommandBarFolderExtensionActivationTests: XCTestCase {
     bar.setQueryForTesting("notes")
     XCTAssertEqual(bar.results.first { $0.kind == .extensionAction("notes") }?.title, "Notes original")
 
+    let selected = try XCTUnwrap(bar.results.firstIndex { $0.kind == .extensionAction("notes") })
+    bar.barView.table.selectRowIndexes(IndexSet(integer: selected), byExtendingSelection: false)
     engine.setExtensionActions([.init(id: "notes", name: "Notes renamed"),
                                 .init(id: "added", name: "Notes added")], in: id)
     waitUntil("extension changes reach the already open query") {
       bar.results.first { $0.kind == .extensionAction("notes") }?.title == "Notes renamed"
         && bar.results.contains { $0.kind == .extensionAction("added") }
     }
+    let retained = bar.barView.table.selectedRow
+    let retainedResult = try XCTUnwrap(bar.results.indices.contains(retained) ? bar.results[retained] : nil)
+    XCTAssertEqual(retainedResult.kind, .extensionAction("notes"), "a renamed action retains selection by ID")
     engine.setExtensionActions([.init(id: "notes", name: "Notes renamed", isEnabled: false)], in: id)
     waitUntil("disabled and removed actions leave the open query") {
       !bar.results.contains {
@@ -143,6 +180,9 @@ final class CommandBarFolderExtensionActivationTests: XCTestCase {
         return false
       }
     }
+    // The real window callback also rechecks a stale action ID before reaching the engine.
+    bar.onExtensionAction?("notes")
+    bar.onExtensionAction?("added")
     XCTAssertTrue(engine.ranExtensionActions.isEmpty)
     XCTAssertTrue(bar.isVisible)
   }

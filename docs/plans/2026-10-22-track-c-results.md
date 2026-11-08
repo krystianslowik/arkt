@@ -3081,3 +3081,28 @@ The focused settings/parser executable passed 26 checks before this merge. New S
 At `cd908de`, run `42519307867` GUI job `128849124672` reported 2,171 tests, 64 skipped and one failure. The search-setting behavior tests passed; the subsequent class's window guard identified `SettingsSearchSuggestionsTests` retaining 15 hidden windows (eight CommandBarPanel, three SettingsWindow and four ShellWindow). Teardown closed/invalidated them but retained its controller arrays on the XCTest case objects. The test-only fix empties all three arrays after the existing teardown calls, following the established fixture lifetime pattern. The guard and production code are unchanged.
 
 The changed test source parsed and whitespace checks passed. No local GUI/App/full package build ran; fresh CI must demonstrate that the window guard now passes. The earlier required gate, Core, pure ShellKit, app build and lint passed at `cd908de`; those results do not validate this follow-up head.
+
+
+### #562 folder and extension activation after observed red
+
+At `d88ed06`, run `42528726868` reached the intended behavior failures: pure ShellKit 2,567 tests / 294 suites /
+eight issues in the provider actionability test; GUI 2,181 reported / 64 skipped / four new activation failures and
+one separate AddressBarNavigationTests lifetime-guard failure. Core, app build and lint passed. The earlier missing
+Smoke import was already corrected; this is the activation red.
+
+The real window now forwards profile-scoped cached folder rows and its current engine-window extension actions.
+Folder activation reveals and expands the existing folder and its ancestors in its Space; extension activation
+rechecks the enabled action and invokes the existing engine API. Open queries refresh on source/action changes and
+retain selection by identity. Rows have distinct symbols, action hints and accessible positions; folder rows include
+Space context. Existing ordering and All-only filter classification remain. Tests add stale/deleted/disabled targets,
+profile/private-folder exclusion, unrelated collapsed folders, selection retention, Space labels and filter counts.
+
+Main `cfc4e69` is merged with the haptics and search-engine reset keys both preserved, including the haptics row and
+AppSession bind. The inherited AddressBarNavigationTests fixture now closes its sets through the existing helper
+before releasing them; its guard is unchanged. Google/DuckDuckGo and Google default remain unchanged.
+
+Local checks passed: parsing of all 47 changed Swift files relative to `d88ed06`, workflow import-layer and UI-source
+checks, actionlint, UI parity-script tests, ABI header comparison and whitespace checks. No current-head ShellKit, App or GUI
+compile/run is claimed; approximately 1 GiB available disk prevents a full local build. Fresh CI and independent review
+are required. Native keyboard/VoiceOver, real installed-extension popup behavior, visual review and worst-case hot-path
+performance remain unverified. See `docs/test-gates/562-folder-extension-activation.md` for the bounded contract.

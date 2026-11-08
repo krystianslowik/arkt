@@ -42,7 +42,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     didSet {
       if let settingsObserver { oldValue.removeObserver(settingsObserver) }
       settingsObserver = nil
-      if !invalidated { observeSettings(); refreshForSettingsChange() }
+      if !invalidated { observeSettings(); refreshCurrentResults() }
     }
   }
   private var settingsObserver: UUID?
@@ -52,6 +52,10 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   /// BH-104: the Spaces a query can switch to; the handler switches.
   public var spacesProvider: () -> [CommandBarResults.Space] = { [] }
   public var onSwitchSpace: ((SpaceID) -> Void)?
+  public var foldersProvider: () -> [CommandBarResults.Folder] = { [] }
+  public var onRevealFolder: ((NodeID) -> Void)?
+  public var extensionActionsProvider: () -> [ExtensionAction] = { [] }
+  public var onExtensionAction: ((String) -> Void)?
   /// BH-106 / KB-081: the actions the action search lists; the handler runs a chosen one.
   public var actionsProvider: () -> [CommandBarAction] = { [] }
   public var onAction: ((String) -> Void)?
@@ -231,15 +235,15 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   }
 
   private func observeSettings() {
-    settingsObserver = settings.observe { [weak self] in self?.refreshForSettingsChange() }
+    settingsObserver = settings.observe { [weak self] in self?.refreshCurrentResults() }
   }
 
-  private func refreshForSettingsChange() {
+  private func refreshCurrentResults() {
     guard isVisible else { return }
     let selected = results.indices.contains(barView.table.selectedRow) ? results[barView.table.selectedRow] : nil
     reloadResults()
     if let selected {
-      let index = results.firstIndex(of: selected) ?? results.firstIndex {
+      let index = results.firstIndex { $0.kind == selected.kind } ?? results.firstIndex {
         if case .search = selected.kind, case .search = $0.kind { return true }
         return false
       }
@@ -689,7 +693,9 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     case .restore(let id): onRestoreArchived?(id)
     case .action(let id): onAction?(id)
     case .switchSpace(let space): onSwitchSpace?(space)
-    case .noMatch, .folder, .extensionAction: break
+    case .folder(let node): onRevealFolder?(node)
+    case .extensionAction(let id): onExtensionAction?(id)
+    case .noMatch: break
     }
   }
 
@@ -864,6 +870,10 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     input.openTabs = openTabsProvider()
     input.spaces = spacesProvider()
     input.actions = actionsProvider()
+    if scope == .normal, !trimmed.isEmpty {
+      input.folders = foldersProvider()
+      input.extensionActions = extensionActionsProvider()
+    }
     // BH-108: Paste and Go is a new-tab surface; Cmd-L's prefill and the split pane bar never offer it. The row
     // shows only on an empty query, so a typed keystroke never pays for a pasteboard read.
     let queryIsEmpty = barView.field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -946,11 +956,19 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     relayout()
   }
 
-  /// BH-111: the open bar's suggestions follow the current Space; the window calls this on a Space switch.
-  public func refreshSuggestions() {
-    guard isVisible else { return }
-    reloadResults()
-    relayout()
+  /// BH-111: the open bar follows current providers, retaining the selected identity when it still exists.
+  public func refreshSuggestions() { refreshCurrentResults() }
+
+  private var suggestionsRefreshScheduled = false
+  /// A sidebar mutation can emit many changes; collect and redraw its final state once, off the event fanout.
+  func scheduleSuggestionsRefresh() {
+    guard isVisible, !suggestionsRefreshScheduled else { return }
+    suggestionsRefreshScheduled = true
+    DispatchQueue.main.async { [weak self] in
+      guard let self else { return }
+      self.suggestionsRefreshScheduled = false
+      self.refreshSuggestions()
+    }
   }
 
   // MARK: Removal (BH-109, KB-083)

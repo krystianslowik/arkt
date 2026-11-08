@@ -64,7 +64,7 @@ public enum CommandBarPreview {
                      showsOpenDot: false, primaryTitle: facts.isAlsoOpen ? switchTitle : openTitle,
                      splitTitle: splitTitle, thumbnail: .cachedPage(facts.url),
                      url: facts.url, node: facts.isAlsoOpen ? facts.node : nil)
-    case .searchSuggestion, .siteSearch, .action, .pasteAndGo, .archived, .address, .space, .noMatch:
+    case .searchSuggestion, .siteSearch, .action, .pasteAndGo, .archived, .address, .space, .folder, .extensionAction, .noMatch:
       return nil
     }
   }

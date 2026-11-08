@@ -345,6 +345,25 @@ extension ShellWindowController {
 
   /// The window's actions changed, or the engine window came or went: the open panel follows.
   func refreshExtensions() {
+    if let extensions = engine as? any EngineExtensions, let engineWindow {
+      commandBarExtensionActions = extensions.extensionActions(in: engineWindow)
+    } else {
+      commandBarExtensionActions = []
+    }
     extensionsPanel?.refresh()
+    commandBar.refreshSuggestions()
+  }
+
+  /// Use the same per-window engine action as the Extensions panel, rechecking removal and enabled state at commit.
+  func runCommandBarExtensionAction(_ id: String) {
+    guard !isClosed, !isWindowCloseRequested, let engineWindow,
+          let extensions = engine as? any EngineExtensions,
+          extensions.extensionActions(in: engineWindow).contains(where: { $0.id == id && $0.isEnabled }) else { return }
+    extensionsPanel?.hide(keyboard: false)
+    let anchor: NSView
+    if rootView.sidebarVisible, let button = extensionsButton { anchor = button }
+    else { anchor = rootView.card }
+    guard anchor.window === window else { return }
+    extensions.runExtensionAction(id, in: engineWindow, anchor: anchor)
   }
 }

@@ -67,6 +67,23 @@ struct CommandBarFolderExtensionResultsTests {
     }
   }
 
+  @Test func folderRowsCarrySpaceContextWithoutChangingFilterClassification() {
+    let sidebar = StubSidebar()
+    let personal = sidebar.addSpace(title: "Personal")
+    let work = sidebar.addSpace(title: "Work")
+    let first = sidebar.addFolder(title: "Notes", in: .pinned(personal))
+    let second = sidebar.addFolder(title: "Notes", in: .today(work))
+    var input = CommandBarResults.Input()
+    input.folders = CommandBarResults.folders(in: sidebar, spaces: [personal, work])
+    input.extensionActions = [.init(id: "notes", name: "Notes action")]
+    let made = CommandBarResults.makeWithCounts(query: "notes", input: input)
+    #expect(made.results.first { $0.kind == .folder(first) }?.secondaryText == "Personal")
+    #expect(made.results.first { $0.kind == .folder(second) }?.secondaryText == "Work")
+    #expect(made.counts == CommandBarFilter.counts(of: made.results))
+    #expect(made.counts[.tabs] == 0)
+    #expect(made.counts[.actions] == 0, "provider rows retain their existing All-only classification")
+  }
+
   @Test func newSourcesPreserveExistingMixedResultKindsAndRelativeOrder() {
     let sidebar = StubSidebar()
     let space = sidebar.addSpace(title: "Notes space")

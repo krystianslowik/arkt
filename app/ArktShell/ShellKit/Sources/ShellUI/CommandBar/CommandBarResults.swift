@@ -51,7 +51,10 @@ public enum CommandBarResults {
   public struct Folder: Sendable, Equatable {
     public let node: NodeID
     public let title: String
-    public init(node: NodeID, title: String) { self.node = node; self.title = title }
+    public let spaceTitle: String?
+    public init(node: NodeID, title: String, spaceTitle: String? = nil) {
+      self.node = node; self.title = title; self.spaceTitle = spaceTitle
+    }
   }
 
   /// A Space the bar can switch to (BH-104).
@@ -192,15 +195,15 @@ public enum CommandBarResults {
       case .switchSpace: "Switch to Space"
       case .history: previewFacts?.isAlsoOpen == true ? CommandBarResults.switchHint : "Open"
       case .noMatch: title
-      case .folder: "Folder"
-      case .extensionAction: "Extension action"
+      case .folder: "Reveal Folder"
+      case .extensionAction: "Run Extension"
       }
     }
 
     /// Whether Return does anything on the row.
     public var isActionable: Bool {
       switch kind {
-      case .noMatch, .folder, .extensionAction: false
+      case .noMatch: false
       default: true
       }
     }
@@ -353,7 +356,7 @@ public enum CommandBarResults {
     let folders = input.folders.filter { match.found(in: $0.title) }
     let extensionActions = input.extensionActions.filter { $0.isEnabled && match.found(in: $0.name) }
     for folder in folders {
-      results.append(Result(kind: .folder(folder.node), title: folder.title, subtitle: "Folder",
+      results.append(Result(kind: .folder(folder.node), title: folder.title, subtitle: folder.spaceTitle ?? "",
                             trailingHint: nil, removalID: nil))
     }
     for action in extensionActions {
@@ -480,16 +483,17 @@ extension CommandBarResults {
   public static func folders(in source: any SidebarSource, spaces: [SpaceID]) -> [Folder] {
     var folders: [Folder] = []
     var visited: Set<NodeID> = []
-    func visit(_ id: NodeID, depth: Int) {
+    func visit(_ id: NodeID, depth: Int, spaceTitle: String?) {
       guard depth < 64, visited.insert(id).inserted, let info = source.node(id) else { return }
       if case .folder(let node, let title) = info {
-        folders.append(Folder(node: node, title: title))
-        for child in source.children(of: .folder(node)) { visit(child, depth: depth + 1) }
+        folders.append(Folder(node: node, title: title, spaceTitle: spaceTitle))
+        for child in source.children(of: .folder(node)) { visit(child, depth: depth + 1, spaceTitle: spaceTitle) }
       }
     }
     for space in spaces {
+      let spaceTitle = source.space(space)?.title
       for id in source.children(of: .pinned(space)) + source.children(of: .today(space)) {
-        visit(id, depth: 0)
+        visit(id, depth: 0, spaceTitle: spaceTitle)
       }
     }
     return folders
