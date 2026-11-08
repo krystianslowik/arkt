@@ -21,6 +21,8 @@ public final class LinkRoutingSettingsModel {
   private var submissions = 0
   private var storeCall: Task<Result<Void, any Error>, Never>?
   private let flushTimeout: Duration?
+  private var pendingRemovedSpaces: Set<UUID> = []
+  private var removalGeneration = 0
   private var loadInProgress = false
   private var loading: Task<Void, Never>?
 
@@ -34,7 +36,7 @@ public final class LinkRoutingSettingsModel {
   /// A reload is ignored while edits are unsaved or writes are pending, to avoid discarding them.
   public func load() async {
     if let loading { await loading.value; return }
-    guard !needsFlush else { return }
+    guard revision == savedRevision, !writePending, !saveFailed else { return }
     loadInProgress = true
     let task = Task { @MainActor in
       defer { self.loadInProgress = false }
@@ -42,6 +44,7 @@ public final class LinkRoutingSettingsModel {
         let value = try await self.state.loadLinkRouting()
         self.settings = value
         self.isLoaded = true
+        self.applyPendingRemovals()
         self.lastError = nil
       } catch {
         self.isLoaded = false
@@ -51,6 +54,23 @@ public final class LinkRoutingSettingsModel {
     loading = task
     await task.value
     loading = nil
+  }
+
+  public func removeRoutes(to id: UUID) {
+    removalGeneration += 1
+    pendingRemovedSpaces.insert(id)
+    if isLoaded && !loadInProgress { applyPendingRemovals() }
+  }
+
+  private func applyPendingRemovals() {
+    let ids = pendingRemovedSpaces
+    pendingRemovedSpaces.removeAll()
+    var updated = settings
+    updated.routes.removeAll { route in
+      if case .space(let id) = route.destination { return ids.contains(id) }
+      return false
+    }
+    if updated != settings { settings = updated; revision += 1 }
   }
 
   public func appendRoute(_ route: LinkRouting.Route) {
@@ -72,7 +92,7 @@ public final class LinkRoutingSettingsModel {
   }
 
   /// True for an unsaved edit or the latest submitted write, including a timed-out write.
-  public var needsFlush: Bool { revision != savedRevision || writePending || saveFailed }
+  public var needsFlush: Bool { revision != savedRevision || writePending || saveFailed || !pendingRemovedSpaces.isEmpty }
 
   private enum FlushError: Error { case timedOut }
 
@@ -177,6 +197,13 @@ public extension LinkRoutingSettingsModel {
       routes: { [weak self] in self?.settings.routes.map(SettingsLinkRoute.init) ?? [] },
       appendRoute: { [weak self] in self?.appendRoute($0.coreRoute) },
       replaceRoute: { [weak self] index, route in self?.replaceRoute(at: index, with: route.coreRoute) },
+      replaceRouteIfUnchanged: { [weak self] index, expected, route in
+        guard let self, self.settings.routes.map(SettingsLinkRoute.init) == expected,
+              self.settings.routes.indices.contains(index) else { return false }
+        self.replaceRoute(at: index, with: route.coreRoute)
+        return true
+      },
+      removalGeneration: { [weak self] in self?.removalGeneration ?? 0 },
       hasLoadError: { [weak self] in self?.isLoaded == false && self?.lastError != nil },
       hasSaveError: { [weak self] in self?.isLoaded == true && self?.lastError != nil },
       setDestination: { [weak self] destination in

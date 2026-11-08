@@ -288,10 +288,17 @@ extension SettingsWindowController {
     guard let window, window.attachedSheet == nil else { return }
     let sheet = SettingsRouteSheet(route: route, spaces: spaces)
     routeSheet = sheet
+    let originalRoutes = rows.routes()
+    let generation = rows.removalGeneration()
+    sheet.validate = { result in
+      guard rows.removalGeneration() == generation, rows.routes() == originalRoutes else { return false }
+      if let index { return rows.replaceRouteIfUnchanged(index, originalRoutes, result) }
+      rows.appendRoute(result)
+      return true
+    }
     sheet.onFinish = { [weak self] result in
       self?.routeSheet = nil
-      guard let result else { return }
-      if let index { rows.replaceRoute(index, result) } else { rows.appendRoute(result) }
+      guard result != nil else { return }
       refresh()
       Task {
         _ = await rows.flush()

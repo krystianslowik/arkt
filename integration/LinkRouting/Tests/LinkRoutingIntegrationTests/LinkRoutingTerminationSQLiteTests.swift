@@ -34,6 +34,31 @@ struct LinkRoutingTerminationSQLiteTests {
     #expect(try await SettingsStore(database: reopened).loadLinkRouting() == expected)
   }
 
+  @Test func removalPersistsThroughTypedSQLiteReopen() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let url = directory.appendingPathComponent("settings.sqlite")
+    let id = UUID(), other = UUID()
+    let removed = LinkRouting.Route(condition: .matches("deleted"), destination: .space(id))
+    let kept = LinkRouting.Route(condition: .contains("kept"), destination: .space(other))
+    let expected = LinkRouting(routes: [kept, kept], defaultDestination: .space(id))
+    do {
+      let database = try ArktDatabase.open(at: url)
+      let model = LinkRoutingSettingsModel(state: SettingsStore(database: database), flushTimeout: nil)
+      await model.load()
+      for route in [removed, kept, removed, kept] { model.appendRoute(route) }
+      model.setDefaultDestination(.space(id))
+      #expect(await model.flush())
+      model.removeRoutes(to: id)
+      #expect(model.flushBlocking())
+      try database.close()
+    }
+    let reopened = try ArktDatabase.open(at: url)
+    defer { try? reopened.close() }
+    #expect(try await SettingsStore(database: reopened).loadLinkRouting() == expected)
+  }
+
   @Test func failedBlockingWriteKeepsDirtySnapshotAndError() async throws {
     let database = try ArktDatabase.inMemory()
     let model = LinkRoutingSettingsModel(state: SettingsStore(database: database), flushTimeout: nil)

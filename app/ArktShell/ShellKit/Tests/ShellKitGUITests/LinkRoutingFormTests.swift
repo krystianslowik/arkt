@@ -157,6 +157,25 @@ final class LinkRoutingFormTests: XCTestCase {
     }
   }
 
+  func testSpaceRemovalWhileEditingKeepsDraftAndRejectsSave() async throws {
+    let deleted = LinkRouting.Route(condition: .contains("first"), destination: .space(first))
+    let kept = LinkRouting.Route(condition: .matches("second"), destination: .space(second))
+    try await withWindow(initial: LinkRouting(routes: [deleted, kept])) { window, model, _ in
+      try find("settings.spaces.route.0.edit", in: window, as: NSButton.self).performClick(nil)
+      let sheet = try XCTUnwrap(window.attachedSheet)
+      let field = try find("settings.route.literal", in: sheet, as: NSTextField.self)
+      field.stringValue = "local draft"
+      model.removeRoutes(to: first)
+      try find("settings.route.save", in: sheet, as: NSButton.self).performClick(nil)
+      XCTAssertNotNil(window.attachedSheet)
+      XCTAssertEqual(field.stringValue, "local draft")
+      XCTAssertFalse(try find("settings.route.conflict", in: sheet, as: NSTextField.self).isHidden)
+      XCTAssertEqual(model.settings.routes, [kept])
+      try find("settings.route.cancel", in: sheet, as: NSButton.self).performClick(nil)
+      XCTAssertNil(window.attachedSheet)
+    }
+  }
+
   func testAddAppendsLiteralAndSelectsSecondSpaceWithDuplicateTitle() async throws {
     let original = LinkRouting.Route(condition: .matches("Existing"), destination: .littleArkt)
     let initial = LinkRouting(routes: [original, original])

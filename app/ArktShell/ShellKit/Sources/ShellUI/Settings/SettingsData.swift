@@ -92,6 +92,8 @@ public struct SettingsLinkRoutingRows {
   public var routes: @MainActor () -> [SettingsLinkRoute]
   public var appendRoute: @MainActor (SettingsLinkRoute) -> Void
   public var replaceRoute: @MainActor (Int, SettingsLinkRoute) -> Void
+  public var replaceRouteIfUnchanged: @MainActor (Int, [SettingsLinkRoute], SettingsLinkRoute) -> Bool
+  public var removalGeneration: @MainActor () -> Int
   public var hasLoadError: @MainActor () -> Bool
   public var hasSaveError: @MainActor () -> Bool
   public var setDestination: @MainActor (SettingsLinkDestination) -> Void
@@ -102,6 +104,8 @@ public struct SettingsLinkRoutingRows {
               routes: @escaping @MainActor () -> [SettingsLinkRoute] = { [] },
               appendRoute: @escaping @MainActor (SettingsLinkRoute) -> Void = { _ in },
               replaceRoute: @escaping @MainActor (Int, SettingsLinkRoute) -> Void = { _, _ in },
+              replaceRouteIfUnchanged: (@MainActor (Int, [SettingsLinkRoute], SettingsLinkRoute) -> Bool)? = nil,
+              removalGeneration: @escaping @MainActor () -> Int = { 0 },
               hasLoadError: @escaping @MainActor () -> Bool,
               hasSaveError: @escaping @MainActor () -> Bool = { false },
               setDestination: @escaping @MainActor (SettingsLinkDestination) -> Void,
@@ -111,6 +115,12 @@ public struct SettingsLinkRoutingRows {
     self.routes = routes
     self.appendRoute = appendRoute
     self.replaceRoute = replaceRoute
+    self.replaceRouteIfUnchanged = replaceRouteIfUnchanged ?? { index, expected, route in
+      guard routes() == expected, expected.indices.contains(index) else { return false }
+      replaceRoute(index, route)
+      return true
+    }
+    self.removalGeneration = removalGeneration
     self.hasLoadError = hasLoadError
     self.hasSaveError = hasSaveError
     self.setDestination = setDestination

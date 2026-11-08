@@ -3,6 +3,7 @@ import AppKit
 /// Edits a local draft; the caller receives a value only when Save is pressed.
 @MainActor
 final class SettingsRouteSheet: NSWindowController {
+  var validate: (@MainActor (SettingsLinkRoute) -> Bool)?
   var onFinish: (@MainActor (SettingsLinkRoute?) -> Void)?
   private let literal = NSTextField(frame: .zero)
   private let condition: SettingsPopUpButton
@@ -10,6 +11,7 @@ final class SettingsRouteSheet: NSWindowController {
   private var conditionIndex: Int
   private var destinationIndex: Int
   private let destinations: [SettingsLinkDestination]
+  private let errorLabel = settingsLabel("Routes changed while editing. Cancel and reopen to review.", size: 12, weight: .regular)
   private let save = ArchivePillButton(style: .primary, title: "Save", metrics: .dialog)
   private let cancel = ArchivePillButton(style: .neutral, title: "Cancel", metrics: .dialog)
 
@@ -70,6 +72,12 @@ final class SettingsRouteSheet: NSWindowController {
     destination.showIndex(destinationIndex)
     destination.onIndexChange = { [weak self] in self?.destinationIndex = $0 }
     root.addSubview(destination)
+    errorLabel.frame = NSRect(x: 24, y: 174, width: 452, height: 20)
+    errorLabel.isHidden = true
+    errorLabel.setAccessibilityElement(true)
+    errorLabel.setAccessibilityLabel("Routes changed while editing. Cancel and reopen to review.")
+    errorLabel.setAccessibilityIdentifier("settings.route.conflict")
+    root.addSubview(errorLabel)
     cancel.frame = NSRect(x: 304, y: 202, width: 76, height: 28)
     save.frame = NSRect(x: 400, y: 202, width: 76, height: 28)
     cancel.setAccessibilityIdentifierWithCell("settings.route.cancel")
@@ -100,7 +108,9 @@ final class SettingsRouteSheet: NSWindowController {
   @objc private func savePressed(_ sender: Any?) {
     window?.makeFirstResponder(nil)
     let value: SettingsLinkRoute.Condition = conditionIndex == 0 ? .contains(literal.stringValue) : .matches(literal.stringValue)
-    finish(SettingsLinkRoute(condition: value, destination: destinations[destinationIndex]))
+    let route = SettingsLinkRoute(condition: value, destination: destinations[destinationIndex])
+    guard validate?(route) != false else { errorLabel.isHidden = false; return }
+    finish(route)
   }
   private func finish(_ result: SettingsLinkRoute?) {
     guard let callback = onFinish else { return }
