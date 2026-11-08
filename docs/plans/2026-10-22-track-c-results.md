@@ -3076,3 +3076,18 @@ The next bounded App change invokes the existing collection restore through the 
 whether to create a default launch window. The existing engine-startup `opensWindow: false` behavior and subsequent
 onboarding, crash/recovery notices, auto-archive and observation completion order are retained. Parser, source and
 whitespace checks do not establish App behavior; new-head review and native execution remain necessary.
+
+
+### Enabled App restore green; disabled fallback preservation gate (#116)
+
+Head `88d7d56` passed the enabled native round trip in [run 42507901483](https://github.com/krystianslowik/arkt/actions/runs/42507901483)
+(49.345 seconds). Normal PR run 42507899180 passed all executed checks, with GUI 2118 reported, 63 skipped, zero
+failures. The native test verifies restored selected pages and private exclusion at capture; it does not establish
+quit-capture timing or complete issue acceptance.
+
+A new test-only native case closes the helper/App boundary gap for disabled restore: set the real General popup,
+quit with the identified private window and two regular selections, relaunch, require the old two-entry initial
+snapshot plus a fresh launch-completion report, then check exactly one regular window and unchanged current bytes.
+The enabled test retains all behavior assertions through shared setup. The new preservation case has not run;
+source parsing, workflow import/UI-source checks and whitespace validation are preliminary evidence only. The
+production disabled-launch path is unchanged until an intended runtime red is observed.

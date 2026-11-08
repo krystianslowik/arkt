@@ -223,3 +223,23 @@ that its queued startup requests already opened a window, the existing `opensWin
 use the primary window. Onboarding, crash prompts, recovery notice, auto-archive and the observation latch retain
 their order after that launch decision. This has been parsed and source-inspected only; independent review and
 a fresh native run must establish behavior before claiming green. #690 recovery composition remains separate.
+
+
+## Enabled native green and disabled-launch regression gate
+
+At `88d7d56`, [focused run 42507901483](https://github.com/krystianslowik/arkt/actions/runs/42507901483) passed the
+real-app two-window round trip in 49.345 seconds. The normal PR [run 42507899180](https://github.com/krystianslowik/arkt/actions/runs/42507899180)
+passed all executed checks; GUI reported 2118 tests, 63 skipped and zero failures. This is enabled FakeEngine App
+composition evidence, including private exclusion at capture and matching ordered pre/post-quit selections; it
+still does not prove that a quit-time capture was necessary or cover native Chromium cancellation.
+
+The source review identified a separate P2: disabling restoration returns no collection windows, then the App's
+fresh fallback immediately captures over the previous collection. The helper-only preservation test never created
+that fallback. A second native case now uses the real General popup to disable restoration before quit, requires
+the two-entry frozen initial collection after relaunch, then requires exactly one regular window and byte-for-byte
+unchanged current collection at the launch-completion report before further interaction. The already-green enabled
+case shares only setup and retains its restore, private, identity and fresh-page assertions. The new case covers
+preservation at this launch boundary, not a promise to retain that snapshot after later user actions or another quit.
+
+The new case has only parsed and passed source/whitespace checks; its intended preservation failure is unobserved.
+No production behavior changed for this gate. CI must establish that failure before the preservation fix.

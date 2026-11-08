@@ -6,6 +6,14 @@ import XCTest
 @MainActor
 final class WindowSessionLifecycleTests: ArktUITestCase {
   func test_E_relaunchRestoresDistinctRegularWindowsWithPrivateWindowOpen() async throws {
+    try await exerciseRelaunch(restores: true)
+  }
+
+  func test_F_disabledRestorePreservesSavedCollectionAtLaunch() async throws {
+    try await exerciseRelaunch(restores: false)
+  }
+
+  private func exerciseRelaunch(restores: Bool) async throws {
     let server = try await fixtureServer()
     let sandbox = try Sandbox()
     let app = try launch(sandbox)
@@ -57,6 +65,21 @@ final class WindowSessionLifecycleTests: ArktUITestCase {
         return label.exists && label.label == "Incognito"
       }.count == 1
     })
+    if !restores {
+      app.typeKey(",", modifierFlags: .command)
+      let settings = app.windows[AXID.Settings.window]
+      guard waitFor(settings) else { return }
+      app.typeKey("1", modifierFlags: .command)
+      let opening = Shell.element(app, AXID.Settings.control("general", "whenArktOpens"))
+      guard waitForEnabled(opening) else { return }
+      opening.click()
+      let fresh = app.menuItems["Open a new window"]
+      guard waitFor(fresh) else { return }
+      fresh.click()
+      guard waitFor(opening, value: "Open a new window") else { return }
+      app.typeKey(.escape, modifierFlags: [])
+      guard waitUntilGone(settings) else { return }
+    }
     var firstReport: WindowSessionObservation.Report?
     XCTAssertTrue(Waits.until("two raw regular-window entries while Incognito remains open") {
       guard windows.count == 3,
@@ -85,12 +108,20 @@ final class WindowSessionLifecycleTests: ArktUITestCase {
       secondReport = report
       return true
     })
-    let initial = try XCTUnwrap(secondReport).initial
+    let completedLaunch = try XCTUnwrap(secondReport)
+    let initial = completedLaunch.initial
     let afterWindows = try savedWindows(initial)
     XCTAssertEqual(afterWindows.count, 2, "quit cannot append an empty private-window entry")
     guard afterWindows.count == 2 else { return }
     XCTAssertEqual(try selectedIdentities(afterWindows), before, "quit must preserve the final ordered selections")
     let restored = reopened.windows.matching(identifier: AXID.Shell.window)
+    if !restores {
+      // This launch-specific latch follows creation of the fallback window. Inspect before any further UI action.
+      XCTAssertEqual(restored.count, 1, "disabled restore opens one fresh regular window")
+      XCTAssertEqual(completedLaunch.current, initial,
+                     "creating the disabled-launch fallback must not replace the saved collection")
+      return
+    }
     // AX enumeration order is not window creation order; ordered identity is checked in the stored collection above.
     XCTAssertTrue(Waits.until("both distinct window selections restored") {
       restored.count == 2 && self.hasSelection(restored, space: "Space 1", tab: alphaTitle)
