@@ -56,3 +56,25 @@ struct LinkRoutingTests {
     #expect(LinkRouting(routes: [match, other]).destination(for: url) == .space(space))
   }
 }
+
+extension LinkRoutingTests {
+  @Test func competingDestinationsRemainUnresolved() {
+    let first = LinkRouting.Route(condition: .contains("example"), destination: .space(space))
+    let second = LinkRouting.Route(condition: .contains("example.com"), destination: .mostRecentSpace)
+    let routing = LinkRouting(routes: [first, second])
+
+    #expect(routing.matchingRoutes(for: url) == [first, second])
+    #expect(routing.resolution(for: url) == .ambiguous([first, second]))
+    #expect(routing.destination(for: url) == nil)
+    #expect(LinkRouting(routes: [second, first]).destination(for: url) == nil)
+  }
+
+  @Test func multipleMatchesWithSameDestinationResolveUniquely() {
+    let first = LinkRouting.Route(condition: .contains("example"), destination: .space(space))
+    let second = LinkRouting.Route(condition: .contains("example.com"), destination: .space(space))
+    let routing = LinkRouting(routes: [first, second])
+
+    #expect(routing.matchingRoutes(for: url) == [first, second])
+    #expect(routing.destination(for: url) == .space(space))
+  }
+}

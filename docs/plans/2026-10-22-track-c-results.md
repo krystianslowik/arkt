@@ -2896,3 +2896,20 @@ Written first. Each failed to compile before the code existed.
 - `LittleArktTests` (XCUITest, 4): Opt-Cmd-click opens Little Arkt, Open in, Cmd-W and the chooser's Open in New Window.
   The app and test bundle build (`xcodebuild ... build-for-testing`: TEST BUILD SUCCEEDED). Not run: the suite needs
   the real pointer and keyboard, and the Mac was in use.
+
+## Link routing Core model (#113, draft PR #825)
+
+- Added a value-only SidebarModel for URL text containment and exact URL text equality, Space, Little Arkt and most
+  recent Space destinations, and the configurable default. All matching routes are exposed. Different matching
+  destinations yield an explicit ambiguous result; matching routes with the same destination resolve to that
+  destination. This does not decide BH-160 / RT-25 precedence and is not integrated into the app.
+- Test-first red: CI run 42428288297, Core job 128571317717, at 773c9adae45abfa6ba030e6bff60ad7f51b8c014
+  failed compilation because `LinkRouting` was missing, with dependent type inference errors. The seven tests did
+  not execute. Two more tests cover ambiguous and agreeing matches.
+- Full Core and ShellKit package tests were not run locally: the local baseline cannot compile full ShellKit and
+  Xcode is unavailable. CI must validate the full packages. Profile integration (#611), RT-26 toast, Settings,
+  persistence, external links, Peek, Archive, deleted Spaces, Meet and import remain pending.
+- Swift 6.2.4 syntax parsing passed for the model and tests. An isolated macOS 15 Swift package containing the
+  actual model and test files and the existing `SpaceID = UUID` alias compiled and passed 9 tests in 1 suite;
+  this is not a full ArktCore package run. The initial isolated attempt used the package's implicit macOS 10.13
+  target and failed to import Testing; setting the repository's macOS 15 target fixed the harness.
