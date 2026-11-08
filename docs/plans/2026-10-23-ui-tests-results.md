@@ -1359,3 +1359,13 @@ cannot be claimed as executed or passing; menu separation remains unverified. A 
 real menu control and evidence of the popup's actual accessibility scope or input delivery is needed before choosing
 a repair or filing a product bug. No timeout, menu assertion, workflow selector, or production behavior was changed
 on this evidence. The selector's ownership decision remains pending; partial parity deferrals and #827 remain open.
+
+#### U15 popup presentation diagnostics pending
+
+The sidebar method now probes the sidebar URL bar's `Show Toolbar` context menu using the same item query and
+hittability condition as `ToolbarTests`, alongside the Today `Rename` and split `Separate All Tabs` probes for both
+input methods. It records target properties, item counts, menu-scoped and app accessibility descriptions, and
+screenshots immediately after each click and after the bounded query. Attachments are retained on failure. All probes
+run before the feature assertions. This independent control has not yet been runtime verified in this scenario.
+A focused diagnostic run is pending; the five-of-six result above applies only to `97486f0`. No cause or product
+bug has been established, and the Separate All Tabs assertion and action remain unverified.

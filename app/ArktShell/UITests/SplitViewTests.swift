@@ -118,33 +118,54 @@ final class SplitViewTests: ArktUITestCase {
 
   func test_BH121_GS033_sidebarSplitRow() async throws {
     let (app, _, _) = try await startSplit()
-    // Probe both menus before either separation assertion can fail. Escape dismisses each real menu.
+    // Collect every probe before feature assertions: each menu is dismissed before the next click.
     let control = try XCTUnwrap(Shell.todayRows(app).allElementsBoundByIndex.first)
+    let urlBar = Shell.element(app, AXID.Sidebar.urlBar)
     let splitItem = app.menuItems["Separate All Tabs"]
-    let controlItem = app.menuItems["Rename"]
+    // Match ToolbarTests, including its hittability check to distinguish the menu bar item.
+    let toolbarItems = app.menuItems.matching(NSPredicate(
+      format: "title == %@ OR identifier == %@", "Show Toolbar", "Show Toolbar"))
     var snapshots = ""
     var controlOpened = [Bool]()
     var splitOpened = [Bool]()
+    var toolbarOpened = [Bool]()
     var dismissed = [Bool]()
+    func screenshot(_ method: String, _ target: String, _ stage: String) {
+      let attachment = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+      attachment.name = "\(method) \(target) \(stage)"
+      attachment.lifetime = .deleteOnSuccess
+      add(attachment)
+    }
+    func observe(_ condition: @escaping @MainActor () -> Bool) -> Bool {
+      let predicate = NSPredicate { _, _ in MainActor.assumeIsolated { condition() } }
+      return XCTWaiter().wait(for: [XCTNSPredicateExpectation(predicate: predicate, object: nil)],
+                              timeout: Waits.scaled(3)) == .completed
+    }
     for controlClick in [false, true] {
       let method = controlClick ? "control-click" : "right-click"
-      func click(_ target: XCUIElement) {
+      func probe(_ target: XCUIElement, name: String, items: XCUIElementQuery, hittable: Bool) -> Bool {
+        snapshots += "\n\(method) \(name) before: identifier=\(target.identifier) label=\(target.label) frame=\(target.frame) hittable=\(target.isHittable)\n"
         if controlClick { XCUIElement.perform(withKeyModifiers: .control) { target.click() } }
         else { target.rightClick() }
+        screenshot(method, name, "after-click")
+        let found = observe {
+          items.allElementsBoundByIndex.contains { $0.exists && (!hittable || $0.isHittable) }
+        }
+        screenshot(method, name, "after-query")
+        snapshots += "\(method) \(name) found=\(found) itemCount=\(items.count) menus=\(app.menus.count):\n"
+        snapshots += "menu-scoped AX:\n" + app.menus.debugDescription + "\napp AX:\n" + app.debugDescription
+        app.typeKey(.escape, modifierFlags: [])
+        dismissed.append(observe {
+          !items.allElementsBoundByIndex.contains { $0.exists && (!hittable || $0.isHittable) }
+        })
+        return found
       }
-      click(control)
-      controlOpened.append(controlItem.waitForExistence(timeout: Waits.scaled(3)))
-      snapshots += "\n\(method) regular row menu=\(controlOpened.last!):\n" + app.debugDescription
-      app.typeKey(.escape, modifierFlags: [])
-      dismissed.append(Waits.until("regular menu dismissed") { !controlItem.exists })
-      click(splitRow(app))
-      splitOpened.append(splitItem.waitForExistence(timeout: Waits.scaled(3)))
-      snapshots += "\n\(method) split row menu=\(splitOpened.last!):\n" + app.debugDescription
-      app.typeKey(.escape, modifierFlags: [])
-      dismissed.append(Waits.until("split menu dismissed") { !splitItem.exists })
+      toolbarOpened.append(probe(urlBar, name: "sidebar-url-bar", items: toolbarItems, hittable: true))
+      controlOpened.append(probe(control, name: "today-row", items: app.menuItems.matching(identifier: "Rename"), hittable: false))
+      splitOpened.append(probe(splitRow(app), name: "split-row", items: app.menuItems.matching(identifier: "Separate All Tabs"), hittable: false))
     }
     let probe = XCTAttachment(string: snapshots)
-    probe.name = "regular and split row context menu accessibility probes"
+    probe.name = "context menu target and accessibility probes"
     probe.lifetime = .deleteOnSuccess
     add(probe)
 
@@ -158,6 +179,7 @@ final class SplitViewTests: ArktUITestCase {
         && pinned.matching(NSPredicate(format: "label == %@", "Fixture /docs/left")).count == 1
         && pinned.matching(NSPredicate(format: "label == %@", "Fixture /docs/right")).count == 1
     })
+    XCTAssertTrue(toolbarOpened.contains(true), "sidebar URL bar menu missing; inspect the paired probes")
     XCTAssertTrue(controlOpened.contains(true), "regular row menu missing; inspect the paired probes")
     XCTAssertTrue(splitOpened.contains(true), "split menu missing; inspect the paired control probes")
     XCTAssertTrue(dismissed.allSatisfy { $0 }, "a context menu did not dismiss")
@@ -170,7 +192,11 @@ final class SplitViewTests: ArktUITestCase {
     guard let method = splitOpened.firstIndex(of: true) else { return }
     if method == 0 { splitRow(app).rightClick() }
     else { XCUIElement.perform(withKeyModifiers: .control) { self.splitRow(app).click() } }
-    XCTAssertTrue(splitItem.waitForExistence(timeout: Waits.scaled(3)))
+    let actionMethod = method == 0 ? "right-click" : "control-click"
+    screenshot(actionMethod, "split-row-action", "after-click")
+    let actionItemFound = splitItem.waitForExistence(timeout: Waits.scaled(3))
+    screenshot(actionMethod, "split-row-action", "after-query")
+    XCTAssertTrue(actionItemFound)
     splitItem.click()
     XCTAssertTrue(Waits.until("context menu separates the pinned split") {
       !self.splitRow(app).exists && pinned.count == count
