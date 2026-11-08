@@ -1,8 +1,8 @@
 import Foundation
 
 /// The settled, value-only part of link routing. Competing destinations require a policy decision.
-public struct LinkRouting: Hashable, Sendable {
-  public enum Condition: Hashable, Sendable {
+public struct LinkRouting: Codable, Hashable, Sendable {
+  public enum Condition: Codable, Hashable, Sendable {
     case contains(String)
     case matches(String)
 
@@ -15,13 +15,13 @@ public struct LinkRouting: Hashable, Sendable {
     }
   }
 
-  public enum Destination: Hashable, Sendable {
+  public enum Destination: Codable, Hashable, Sendable {
     case space(SpaceID)
     case littleArkt
     case mostRecentSpace
   }
 
-  public struct Route: Hashable, Sendable {
+  public struct Route: Codable, Hashable, Sendable {
     public var condition: Condition
     public var destination: Destination
 
