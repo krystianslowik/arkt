@@ -3045,3 +3045,23 @@ remaining catalog audit, real system-warning source, RT-29/#78 and per-action pr
 
 Swift 6.4.1 with SDK 15.5 type-checked the actual model and catalog sources; the changed Settings sources parsed.
 These are not GUI execution or a full ShellKit compile. The type check emitted the libSwiftScan fallback warning.
+
+### Settings recorder review regression gate (#119)
+
+Source review of `d920c609` found stale shortcut-search bindings, recording that captures input after focus moves
+to Search, and a missing injected system warning after accepting an app conflict. Four new component tests use
+the real Settings window and editor. They inspect live filtered rows through edit, clear and reset, text-editor
+input and persisted bindings after a focus change, warning content after Keep and Use, and explicit focused Use
+activation with Space. Existing recorder, reset, conflict and key-window assertions are retained.
+
+The requested Return change is not adopted: the maintainer explicitly chose Keep Existing for Return, and Settings
+design section 7 records that behavior. Apple's
+[keyboard guidance](https://developer.apple.com/library/archive/documentation/Accessibility/Conceptual/AccessibilityMacOSX/OSXAXKeyboardShortcuts.html)
+assigns Return to the default button and Space to the focused control. The new scenario checks both choices through
+window events; it does not establish native keyboard delivery until executed.
+
+This stage changes tests and documentation only. Swift 6.2.4 source parsing, test import inspection and
+`git diff --check` passed. No new tests, GUI or app build ran locally; the expected assertion failures for the three
+defects are unobserved. CI must establish them before production fixes. The previous missing-control red does not
+prove these new regressions. App composition, the full catalog, real system-warning detection, VoiceOver and app
+dispatch remain outstanding.

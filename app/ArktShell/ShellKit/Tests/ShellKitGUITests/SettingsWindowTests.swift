@@ -447,6 +447,71 @@ final class SettingsWindowTests: XCTestCase {
     XCTAssertNil(model.binding(for: id))
   }
 
+  /// Search tracks both changed bindings and updates to an already-filtered list, including clears and resets.
+  func testShortcutSearchUsesLiveBindingsAfterEditClearAndReset() throws {
+    let menu = MainMenu.make(commands: AppCommands()).menu
+    let model = ShortcutEditorModel(catalog: ShortcutCatalog.definitions(from: menu), defaults: defaults)
+    ShortcutCatalog.bind(model: model, to: menu)
+    let controller = make(menu: menu, editor: model)
+    controller.show(pane: .shortcuts)
+    let window = try XCTUnwrap(controller.window)
+    let root = try XCTUnwrap(window.contentView)
+    let sidebar = ShortcutActionID("toggleSidebarVisibility")
+    let identifier = "settings.shortcuts.record.toggleSidebarVisibility"
+    let recorder = try find(identifier, in: controller, as: NSButton.self)
+    controller.setShortcutSearch("Command-S")
+    XCTAssertNotNil(Self.view(identifier, in: root))
+
+    recorder.performClick(nil)
+    window.sendEvent(try shortcutEvent("k", .command, code: 40, in: window))
+    XCTAssertEqual(model.binding(for: sidebar), ShortcutBinding(key: "k", modifiers: .command))
+    XCTAssertNil(Self.view(identifier, in: root), "the unchanged Command-S filter drops the edited binding")
+    controller.setShortcutSearch("Command-K")
+    XCTAssertNotNil(Self.view(identifier, in: root), "the new binding is searchable immediately")
+    let title = try XCTUnwrap(model.catalog.first { $0.id == sidebar }).title
+    XCTAssertTrue(controller.visibleShortcutTitles.contains(title))
+
+    recorder.performClick(nil)
+    window.sendEvent(try shortcutEvent("\u{7F}", [], code: 51, in: window))
+    XCTAssertNil(model.binding(for: sidebar))
+    XCTAssertNil(Self.view(identifier, in: root), "clearing removes the row from its old key search")
+    controller.setShortcutSearch("Sidebar")
+    XCTAssertNotNil(Self.view(identifier, in: root), "an unbound action remains searchable by title")
+    XCTAssertEqual(recorder.title, "None")
+
+    controller.setShortcutSearch("Command-S")
+    XCTAssertNil(Self.view(identifier, in: root), "a cleared action does not match its default")
+    try find(AXID.Settings.control("shortcuts", "resetAll"), in: controller, as: NSButton.self).performClick(nil)
+    XCTAssertEqual(model.binding(for: sidebar), ShortcutBinding(key: "s", modifiers: .command))
+    XCTAssertNotNil(Self.view(identifier, in: root), "reset refreshes the unchanged key search")
+    let reopened = ShortcutEditorModel(catalog: model.catalog, defaults: defaults)
+    XCTAssertEqual(reopened.binding(for: sidebar), ShortcutBinding(key: "s", modifiers: .command))
+  }
+
+  /// Moving focus to search must deliver its next key to the text editor, without saving it as a shortcut.
+  func testLeavingShortcutRecorderForSearchStopsCapture() throws {
+    let menu = MainMenu.make(commands: AppCommands()).menu
+    let model = ShortcutEditorModel(catalog: ShortcutCatalog.definitions(from: menu), defaults: defaults)
+    let controller = make(menu: menu, editor: model)
+    controller.show(pane: .shortcuts)
+    let window = try XCTUnwrap(controller.window)
+    let sidebar = ShortcutActionID("toggleSidebarVisibility")
+    let original = model.binding(for: sidebar)
+    let recorder = try find("settings.shortcuts.record.toggleSidebarVisibility", in: controller, as: NSButton.self)
+    let search = try find(AXID.Settings.shortcutsSearch, in: controller, as: NSSearchField.self)
+    recorder.performClick(nil)
+    XCTAssertTrue(window.firstResponder === recorder)
+    XCTAssertTrue(window.makeFirstResponder(search), "the search field accepts the focus change")
+    let textEditor = try XCTUnwrap(search.currentEditor())
+    XCTAssertTrue(window.firstResponder === textEditor)
+    window.sendEvent(try shortcutEvent("q", [], code: 12, in: window))
+    XCTAssertEqual(textEditor.string, "q", "typing reaches the focused search field")
+    XCTAssertNil(model.recordingAction)
+    XCTAssertEqual(model.binding(for: sidebar), original)
+    let reopened = ShortcutEditorModel(catalog: model.catalog, defaults: defaults)
+    XCTAssertEqual(reopened.binding(for: sidebar), original, "focus changes do not persist a stray key")
+  }
+
   /// Conflict choices leave persisted bindings alone until the user chooses, including reset conflicts.
   func testShortcutConflictChoicesAndResetConflict() throws {
     let menu = MainMenu.make(commands: AppCommands()).menu
@@ -519,6 +584,79 @@ final class SettingsWindowTests: XCTestCase {
     window.sendEvent(try shortcutEvent("k", [.control, .option], code: 40, in: window))
     XCTAssertNil(Self.view("settings.shortcuts.systemConflict", in: try XCTUnwrap(window.contentView)),
                  "ordinary bindings have no warning")
+  }
+
+  func testAcceptingAppConflictStillShowsSystemShortcutWarning() throws {
+    let menu = MainMenu.make(commands: AppCommands()).menu
+    let model = ShortcutEditorModel(catalog: ShortcutCatalog.definitions(from: menu), defaults: defaults)
+    let system = ShortcutBinding(key: " ", modifiers: .control)
+    let sidebar = ShortcutActionID("toggleSidebarVisibility")
+    let tab = ShortcutActionID("newTab")
+    model.setBinding(system, for: tab)
+    let controller = make(menu: menu, editor: model, isSystemShortcut: { $0 == system })
+    controller.show(pane: .shortcuts)
+    let window = try XCTUnwrap(controller.window)
+    let root = try XCTUnwrap(window.contentView)
+    let recorder = try find("settings.shortcuts.record.toggleSidebarVisibility", in: controller, as: NSButton.self)
+
+    recorder.performClick(nil)
+    window.sendEvent(try shortcutEvent(" ", .control, code: 49, in: window))
+    try find("settings.shortcuts.conflict.keep", in: controller, as: NSButton.self).performClick(nil)
+    XCTAssertEqual(model.binding(for: tab), system)
+    XCTAssertEqual(model.binding(for: sidebar), ShortcutBinding(key: "s", modifiers: .command))
+    XCTAssertNil(Self.view("settings.shortcuts.systemConflict", in: root), "Keep does not assign the candidate")
+
+    recorder.performClick(nil)
+    window.sendEvent(try shortcutEvent(" ", .control, code: 49, in: window))
+    try find("settings.shortcuts.conflict.use", in: controller, as: NSButton.self).performClick(nil)
+    XCTAssertNil(Self.view("settings.shortcuts.conflict.use", in: root))
+    XCTAssertEqual(model.binding(for: sidebar), system)
+    XCTAssertNil(model.binding(for: tab))
+    let warning = Self.view("settings.shortcuts.systemConflict", in: root)
+    XCTAssertNotNil(warning, "accepting an app conflict must also check the system-warning predicate")
+    XCTAssertTrue(warning?.accessibilityLabel()?.contains("System shortcuts may take priority") == true)
+    let reopened = ShortcutEditorModel(catalog: model.catalog, defaults: defaults)
+    XCTAssertEqual(reopened.binding(for: sidebar), system)
+    XCTAssertNil(reopened.binding(for: tab))
+
+    recorder.performClick(nil)
+    window.sendEvent(try shortcutEvent("k", [.control, .option], code: 40, in: window))
+    XCTAssertNil(Self.view("settings.shortcuts.systemConflict", in: root), "an ordinary replacement clears the warning")
+  }
+
+  /// Return keeps the default choice; Space activates an explicitly focused Use control.
+  func testConflictReturnDefaultAndFocusedUseSpaceActivation() throws {
+    let menu = MainMenu.make(commands: AppCommands()).menu
+    let model = ShortcutEditorModel(catalog: ShortcutCatalog.definitions(from: menu), defaults: defaults)
+    let controller = make(menu: menu, editor: model)
+    controller.show(pane: .shortcuts)
+    let window = try XCTUnwrap(controller.window)
+    let root = try XCTUnwrap(window.contentView)
+    let sidebar = ShortcutActionID("toggleSidebarVisibility")
+    let tab = ShortcutActionID("newTab")
+    let recorder = try find("settings.shortcuts.record.toggleSidebarVisibility", in: controller, as: NSButton.self)
+    recorder.performClick(nil)
+    window.sendEvent(try shortcutEvent("t", .command, code: 17, in: window))
+    let firstUse = try find("settings.shortcuts.conflict.use", in: controller, as: NSButton.self)
+    XCTAssertTrue(window.makeFirstResponder(firstUse))
+    XCTAssertTrue(window.firstResponder === firstUse)
+    window.sendEvent(try shortcutEvent("\r", [], code: 36, in: window))
+    XCTAssertNil(Self.view("settings.shortcuts.conflict.use", in: root))
+    XCTAssertEqual(model.binding(for: sidebar), ShortcutBinding(key: "s", modifiers: .command))
+    XCTAssertEqual(model.binding(for: tab), ShortcutBinding(key: "t", modifiers: .command))
+
+    recorder.performClick(nil)
+    window.sendEvent(try shortcutEvent("t", .command, code: 17, in: window))
+    let use = try find("settings.shortcuts.conflict.use", in: controller, as: NSButton.self)
+    XCTAssertTrue(window.makeFirstResponder(use))
+    XCTAssertTrue(window.firstResponder === use)
+    window.sendEvent(try shortcutEvent(" ", [], code: 49, in: window))
+    XCTAssertNil(Self.view("settings.shortcuts.conflict.use", in: root))
+    XCTAssertEqual(model.binding(for: sidebar), ShortcutBinding(key: "t", modifiers: .command))
+    XCTAssertNil(model.binding(for: tab))
+    let reopened = ShortcutEditorModel(catalog: model.catalog, defaults: defaults)
+    XCTAssertEqual(reopened.binding(for: sidebar), ShortcutBinding(key: "t", modifiers: .command))
+    XCTAssertNil(reopened.binding(for: tab))
   }
 
   func testResetAllRestoresMultipleOverridesAndRemovesSavedValues() throws {

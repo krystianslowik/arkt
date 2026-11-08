@@ -51,3 +51,24 @@ MainMenu composition remains a later stage. CI run 42481041992 at `993a386` fail
 the missing sidebar control, and the competing-key scenario also failed its initial key-window assertion. The
 latter remains an independent setup/focus question. The new Return assertion was not reached. New-head GUI CI is
 needed for the implemented controls and native event routing; source parsing does not establish either.
+
+## Recorder review regression gate
+
+The next test-only change targets three Settings component defects: search retains old bindings after edits,
+recording intercepts typing after focus leaves its button, and accepting an app conflict omits the injected system
+warning. The tests use the real Settings window, editor and menu binding; assertions inspect displayed controls,
+persisted bindings and warning content. Everything runs on the main actor, with synchronous event delivery and no
+new clocks or animations. The changed files are this note, the shared Track C results, and `SettingsWindowTests`;
+no production change is included. Existing GUI assertions and the separate key-window setup assertion stay intact.
+
+The approved Return behavior remains Keep Existing even when Use is focused. This follows the
+[maintainer decision](https://github.com/krystianslowik/arkt/pull/828#issuecomment-6721408776) and Settings design
+section 7. Apple's [accessibility keyboard guidance](https://developer.apple.com/library/archive/documentation/Accessibility/Conceptual/AccessibilityMacOSX/OSXAXKeyboardShortcuts.html)
+distinguishes Return for the default button from Space for the focused control. A separate component scenario
+checks both Return preserving bindings and explicit Use activation with Space. Native execution of these checks
+remains required; documentation does not prove the implementation's keyboard delivery.
+
+Expected red: the Settings GUI suite must reach the new assertions and demonstrate stale search, stolen search
+input, and the missing warning against the current component before their production fixes. Source parsing and
+`git diff --check` are preliminary checks, not that red. The later green must retain the existing recorder,
+conflict, reset and competing-key tests. Full local app/GUI execution remains unavailable; CI owns that gate.
