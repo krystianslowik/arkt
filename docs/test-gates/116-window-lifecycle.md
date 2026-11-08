@@ -17,3 +17,13 @@ Implement the WindowSet collection lifecycle and shared restore preference again
 ## Implementation validation
 
 The implementation adds collection capture and freeze/resume, ordered restoration, folder validation, and the shared preference. Unreadable collections are protected from automatic writes for the lifetime of the set. Swift frontend parsing and whitespace checks passed; no lifecycle tests were executed locally. Frame changes are captured at resize end, key resignation and termination; live window movement alone is not persisted until a subsequent capture. App lifecycle composition, the General row, recovery and relaunch remain unverified.
+
+## Empty-Space review regression
+
+Review of `de8df5b` found that switching to an empty Space leaves the collection at the previous Space until another
+capture. The focused test uses two real regular windows and two empty Spaces: switch one window to each empty
+Space and read the real UserDefaults collection immediately, without quit capture, focus changes or waits. It
+checks the empty current selection, retained per-Space history, collection order and the untouched second window.
+The second switch also protects the nil-to-nil tab transition. This is a synchronous main-actor GUI test, with no
+new clocks or animation. Only the test, this note and Track C results change; the production correction is pending
+the observed runtime red. Existing lifecycle assertions remain intact. Source parsing cannot establish that red.

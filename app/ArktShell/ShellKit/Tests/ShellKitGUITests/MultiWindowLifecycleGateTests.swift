@@ -83,6 +83,39 @@ final class MultiWindowLifecycleGateTests: XCTestCase {
     XCTAssertEqual(saved.map(\.currentTab), [firstTab])
   }
 
+  func testEmptySpaceChangesPersistImmediatelyWithoutAnotherCapture() throws {
+    let (set, _, store, sidebar) = try fixture()
+    let personal = sidebar.spaceOrder[0], work = sidebar.spaceOrder[1]
+    let empty = try sidebar.addSpace(title: "Empty")
+    let otherEmpty = try sidebar.addSpace(title: "Other Empty")
+    let firstNode = sidebar.children(of: .today(personal))[1]
+    let secondNode = sidebar.children(of: .today(work))[0]
+    let first = set.openWindow()
+    let second = set.openWindow(opensFirstTab: false)
+    first.activate(node: firstNode)
+    second.activate(node: secondNode)
+    let before = try XCTUnwrap(store.loadWindows())
+    XCTAssertEqual(before.count, 2)
+    guard before.count == 2 else { return }
+    XCTAssertEqual(before.map(\.space), [personal, work])
+    XCTAssertEqual(before.map(\.currentTab), [firstNode, secondNode])
+
+    for space in [empty, otherEmpty] {
+      first.sidebarController.showSpace(space)
+      XCTAssertEqual(first.currentSpace, space)
+      XCTAssertNil(first.currentNode)
+      XCTAssertNil(first.currentTab)
+      // No forced save, focus transition or termination capture between switching and reading.
+      let saved = try XCTUnwrap(store.loadWindows())
+      XCTAssertEqual(saved.count, 2)
+      guard saved.count == 2 else { return }
+      XCTAssertEqual(saved[0].space, space, "the empty Space must replace the previous saved Space immediately")
+      XCTAssertNil(saved[0].currentTab, "an empty Space cannot retain the previously shown tab")
+      XCTAssertEqual(saved[0].selectedTabs, before[0].selectedTabs, "other Spaces retain their selected tabs")
+      XCTAssertEqual(saved[1], before[1], "switching the first window leaves the second window unchanged")
+    }
+  }
+
   func testCancelledQuitRefreshesSurvivingWindowsAndResumesWrites() throws {
     let (set, engine, store, sidebar) = try fixture()
     let first = set.openWindow()

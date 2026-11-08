@@ -2969,3 +2969,16 @@ These are test-only corrections to two P2 review findings, not lifecycle impleme
 Implemented ordered regular-window collection capture, launch restoration, quit freeze and cancellation refresh, per-window folder state and the shared restore preference. The existing single-window store remains available; unreadable collections are protected from automatic replacement. The launch boundary does not create a default window for an empty or unavailable collection. Frame changes are captured at resize end, key resignation and termination, not on every movement event.
 
 The test-first gate at `ac7231d` failed compilation in CI run 42484606253, ShellKit job 128743709058, on missing launch and preference APIs and dependent inference diagnostics; zero tests ran. The implementation received Swift frontend parsing and whitespace checks only; no lifecycle tests, full ShellKit build, GUI run or app build ran locally. Backend tests at `a671d67` remain historical evidence, not validation of this implementation. App launch and termination composition, the General UI, full relaunch and #690 recovery composition remain to be gated and verified; navigation history is #612.
+
+### Empty-Space lifecycle review gate (#116)
+
+Source review of `de8df5b` found that an empty Space switch does not immediately save the new Space and empty
+selection. The new two-window regression switches the first window to two successive empty Spaces, reading the
+collection immediately after each switch. It checks persisted Space, nil current tab, retained per-Space selection
+history and an unchanged second window. No quit capture, focus transition, sleep or forced save can mask the bug.
+The second empty Space also covers a nil-to-nil current-tab transition. Production code is unchanged in this gate.
+
+Swift 6.2.4 frontend parsing, test import inspection and `git diff --check` passed. The new test has not compiled or
+executed locally; its expected runtime red remains unobserved. CI must establish the regression failure before the
+small persistence correction. The earlier missing-API red and historical backend passes do not establish this
+regression or a passing lifecycle implementation. The PR remains draft with the reviewed P2 open.
