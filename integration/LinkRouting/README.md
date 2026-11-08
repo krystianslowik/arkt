@@ -18,5 +18,4 @@ The probe also source-links the canonical Core matching, typed routing persisten
 editor tests. Together they verify case-insensitive contains, exact-string matches, and first-match precedence
 through stored list order without replacing the normal Core and ShellKit CI targets.
 
-The canonical external-open coordinator contract tests are also linked here. They deliberately fail to compile until
-`CoreBridge` supplies the coordinator; this probe exercises the actual editor and dependencies, not App composition.
+The canonical external-open coordinator contract tests are also linked here. The probe source-links the production coordinator and exercises the actual editor and dependencies, not App composition.

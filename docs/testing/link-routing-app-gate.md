@@ -31,8 +31,7 @@ these tests cannot force an event before session creation or during a routing re
 ## Local coordinator test-first contract
 
 The canonical `CoreBridgeTests/ExternalOpenCoordinatorTests.swift` specifies a main-actor, plain-value receiver,
-source-linked into the focused `integration/LinkRouting` probe. `ExternalOpenCoordinator<Outcome>` is intentionally
-absent until implementation. Its intended surface is `init()`, `receive([URL])`, `state` (`waiting`, `loading`,
+source-linked into the focused `integration/LinkRouting` probe. `ExternalOpenCoordinator<Outcome>` was absent at the test-first gate. Its surface is `init()`, `receive([URL])`, `state` (`waiting`, `loading`,
 `ready`, `failed`), `pendingCount`, and `start(read:deliver:onResult:) async -> Bool`. The first start attaches the
 session's read, synchronous per-URL delivery, and result callbacks; concurrent starts join that attempt. A start after
 failure is an explicit retry; a start while ready does not reload or replace callbacks. The Boolean and state expose
@@ -57,3 +56,28 @@ result must be observed before implementing App composition. The app still needs
 before asserting duplicate absence. Chromium's already-created engine windows use the separate `embedderReady` queue;
 these tests do not authorize replaying those tabs as new URL opens, and representative engine adoption needs its own
 integration coverage.
+
+### Pure implementation boundary and validation plan
+
+The receiver and its callbacks are main-actor isolated in a new CoreBridge source file. The injected async read owns
+its existing store I/O; CoreBridge does not import Persistence or GRDB. The focused package will source-link that
+same file beside the existing editor link. No App, session, delegate, window, or Chromium hot files need changes for
+this component. The queue uses an index and a guarded synchronous drain so callback arrivals join its tail.
+
+Validation is the supported Swift 6.4.1 actual-source probe with the macOS 15.5 SDK and two jobs, plus a Swift 6.2.4
+parser check. The canonical held-read helpers have unbounded waits and one continuation; an overwritten continuation
+could hang a broken coalescing implementation, so a hang is not a passing result. Native app execution and wiring
+remain separate gates.
+
+### Pure implementation result
+
+The actual-source probe passed 59 tests in 13 suites before the additional result-callback regression. The final
+rerun and parser result are recorded below. The build emitted linker warnings for missing Swift and Command Line
+Tools framework search directories and a missing Command Line Tools library search path; no coordinator source
+warning was reported. This result does not establish app forwarding or native app runtime behavior.
+
+The final supported probe run passed 60 tests in 13 suites, including the five original coordinator contracts and an
+additional result-callback reentrancy/ready-callback retention regression. Swift 6.2.4 frontend parsing of the new
+source and canonical test file also passed; this parser check is distinct from test execution. The held-read and
+signal helpers still have unbounded waits, and HeldRead holds only one continuation; bounded cleanup remains work for
+the gate owner before publication. The native app run remains unobserved here.

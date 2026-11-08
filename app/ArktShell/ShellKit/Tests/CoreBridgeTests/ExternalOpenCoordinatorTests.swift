@@ -4,7 +4,7 @@ import SidebarModel
 import ShellUI
 import Testing
 
-// Contract for the App-owned, main-actor receiver. This type does not exist yet.
+// Contract for the App-owned, main-actor receiver.
 @MainActor
 struct ExternalOpenCoordinatorTests {
   private let a = URL(string: "https://example.test/a")!
@@ -102,6 +102,21 @@ struct ExternalOpenCoordinatorTests {
     #expect(read.count == 1)
     coordinator.receive([b])
     #expect(delivered == [a, b, c, b])
+  }
+
+  @Test func resultCallbackArrivalsJoinTailAndReadyStartKeepsCallbacks() async {
+    let coordinator = ExternalOpenCoordinator<String>()
+    var results: [URL] = []
+    coordinator.receive([a, b])
+    #expect(await coordinator.start(read: {}, deliver: { $0.absoluteString }, onResult: { url, _ in
+      results.append(url)
+      if url == self.a { coordinator.receive([self.c]) }
+    }))
+    #expect(await coordinator.start(read: { throw ReadFailure.failed }, deliver: { _ in "replacement" },
+                                    onResult: { _, _ in Issue.record("ready start replaced callbacks") }))
+    coordinator.receive([a])
+    #expect(results == [a, b, c, a, c])
+    #expect(coordinator.pendingCount == 0)
   }
 
   @Test func deliveryUsesCurrentSharedEditorAndReportsEveryOutcome() async {
