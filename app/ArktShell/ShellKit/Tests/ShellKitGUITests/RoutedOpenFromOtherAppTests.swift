@@ -103,17 +103,17 @@ final class RoutedOpenFromOtherAppTests: XCTestCase {
       XCTAssertEqual(littleURLs(set, engine), [littleURL])
       XCTAssertEqual(records.pages, [old])
       XCTAssertEqual(engine.crashedSession.dismissals, 0)
-      records.isSuspended = true
+      // Leave the recorder writable so an incorrect production write cannot be masked.
       set.finishSessionRecovery(cleanQuit: true)
       let tab = try XCTUnwrap(set.littleArkts.first?.shownTab)
       let changed = URL(string: "https://example.invalid/changed")!
       engine.navigate(tab, to: changed)
       XCTAssertEqual(records.pages, [old])
-      records.isSuspended = false
       set.finishSessionRecovery(cleanQuit: false)
       XCTAssertEqual(records.pages, [old])
       if restore { panel.restorePressed() } else { panel.dismissPressed() }
       XCTAssertEqual(engine.crashedSession.dismissals, 1)
+      XCTAssertEqual(records.pages.count, restore ? 2 : 1)
       XCTAssertEqual(Set(records.pages.map(\.url)), Set(restore ? [changed, old.url] : [changed]))
       XCTAssertTrue(records.pages.allSatisfy { $0.kind == .littleArkt })
     }
