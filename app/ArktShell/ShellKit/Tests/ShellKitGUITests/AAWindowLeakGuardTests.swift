@@ -104,6 +104,13 @@ final class AAWindowLeakGuardTests: XCTestCase {
     XCTAssertEqual(recorded, [])
   }
 
+  func testAClassWhoseStartWasNotSeenIsNotJudged() {
+    let leakGuard = makeGuard()
+    kept.append(makeWindow())
+    leakGuard.classDidFinish("UnseenTests")
+    XCTAssertEqual(recorded, [])
+  }
+
   func testSystemWindowTypesAreAllowed() {
     XCTAssertTrue(WindowLeakGuard.systemWindowTypes.contains("TUINSWindow"))
     XCTAssertFalse(WindowLeakGuard.systemWindowTypes.contains("NSWindow"))

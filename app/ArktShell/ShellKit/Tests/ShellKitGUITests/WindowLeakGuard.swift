@@ -13,7 +13,7 @@ import XCTest
 ///
 /// The guard compares `NSApp.windows` when a class starts with the list when it finishes. A finished class's run takes
 /// no more issues, so the failure is recorded on the next test that starts (the next class's first test, or
-/// `ZZWindowLeakGuardEndTests` after the last class) and names the class that leaked. `AAWindowLeakGuardTests`
+/// `ZzzWindowLeakGuardEndTests` after the last class) and names the class that leaked. `AAWindowLeakGuardTests`
 /// installs it and runs first. A full GUI run (`--filter ShellKitGUITests`) selects both; a filter that leaves out
 /// `AAWindowLeakGuardTests` runs unguarded.
 @MainActor
@@ -54,8 +54,15 @@ final class WindowLeakGuard {
   }
 
   func classDidFinish(_ name: String, windows: [NSWindow] = NSApp?.windows ?? []) {
-    let left = Self.leftOpen(before: openAtStart.removeValue(forKey: name) ?? [], after: windows)
-    guard !left.isEmpty else { return }
+    // A class whose start the guard did not see (it ran before the guard was installed) is not judged.
+    guard let before = openAtStart.removeValue(forKey: name) else { return }
+    let left = Self.leftOpen(before: before, after: windows)
+    guard !left.isEmpty else {
+      if printsLeaks, let issue = Self.knownLeakyClasses[name] {
+        print("window.leak allowlisted class=\(name) left no windows this run; remove it from knownLeakyClasses (#\(issue))")
+      }
+      return
+    }
     if printsLeaks { print("window.leak class=\(name) windows=\(left.count) kinds=[\(Self.kinds(left))]") }
     guard Self.knownLeakyClasses[name] == nil else { return }
     record("\(name) left \(left.count) window(s) open after its last test: \(Self.kinds(left)). "
@@ -98,6 +105,12 @@ final class WindowLeakObserver: NSObject, @preconcurrency XCTestObservation {
 
   func testSuiteDidFinish(_ testSuite: XCTestSuite) {
     if let name = Self.className(of: testSuite) { leakGuard.classDidFinish(name) }
+  }
+
+  /// A leak that no later test could take (a filter without `ZzzWindowLeakGuardEndTests`) is printed, not lost.
+  func testBundleDidFinish(_ testBundle: Bundle) {
+    for message in pending { print("window.leak unrecorded (no test ran after the class): \(message)") }
+    pending.removeAll()
   }
 
   func testCaseWillStart(_ testCase: XCTestCase) {
