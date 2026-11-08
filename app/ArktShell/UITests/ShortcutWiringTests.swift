@@ -2,6 +2,48 @@ import XCTest
 
 /// Exercises the actual app composition root and regular window through Settings and keyboard dispatch.
 final class ShortcutWiringTests: ArktUITestCase {
+  /// OS keyboard delivery must be checked in the running app, whose activation is owned by the UI harness.
+  @MainActor
+  func testRecorderCapturesSettingsCommandKeysBeforePaneAndCloseRouting() throws {
+    let app = try launch(Sandbox())
+    try createFirstSpace(in: app)
+    app.typeKey(",", modifierFlags: .command)
+    let settings = app.windows[AXID.Settings.window]
+    guard waitFor(settings) else { return }
+    app.typeKey("4", modifierFlags: .command)
+    let recorderID = "settings.shortcuts.record.toggleSidebarVisibility"
+    let recorder = settings.buttons.matching(identifier: recorderID).firstMatch
+    guard waitFor(recorder) else { return }
+    let pane = settings.descendants(matching: .any).matching(identifier: AXID.Settings.tab("shortcuts")).firstMatch
+    let search = settings.searchFields.matching(identifier: AXID.Settings.shortcutsSearch).firstMatch
+    let newTab = settings.buttons.matching(identifier: "settings.shortcuts.record.newTab").firstMatch
+    guard waitFor(search), waitForSelected(pane), waitFor(newTab) else { return }
+
+    for key in ["w", "1", "2", "3", "4", "5", "6", "7"] {
+      recorder.click()
+      app.typeKey(key, modifierFlags: .command)
+      guard waitFor(settings), waitForSelected(pane) else { return }
+      let use = settings.buttons.matching(identifier: "settings.shortcuts.conflict.use").firstMatch
+      if use.exists { use.click() }
+      // The effective-binding search must retain this particular action. A different captured key cannot satisfy it.
+      search.click()
+      search.typeText("Command " + key.uppercased())
+      guard Waits.until("effective binding search applied for Command-" + key, {
+        recorder.exists && !newTab.exists
+      }) else { return }
+      search.typeKey("a", modifierFlags: .command)
+      search.typeKey(.delete, modifierFlags: [])
+      guard Waits.until("shortcut search cleared after recording Command-" + key, {
+        (search.value as? String) == "" && newTab.exists
+      }) else { return }
+    }
+    app.typeKey("1", modifierFlags: .command)
+    let general = settings.descendants(matching: .any).matching(identifier: AXID.Settings.tab("general")).firstMatch
+    guard waitForSelected(general) else { return }
+    app.typeKey("w", modifierFlags: .command)
+    XCTAssertTrue(waitUntilGone(settings))
+  }
+
   func testSettingsOverrideClearResetAndReloadDriveNewTabCommand() async throws {
     let sandbox = try Sandbox()
     addTeardownBlock { sandbox.remove() }

@@ -3128,3 +3128,24 @@ and existing-key-window state. This does not guarantee activation or establish a
 Swift 6.2.4 frontend parsing and whitespace/import checks passed. The asynchronous fixture has not run locally;
 CI must verify its behavior. No local full package/App build, GUI or app launch ran. App/menu composition, the
 remaining catalog audit, real system-warning detection, native accessibility and visual checks remain unfinished.
+
+
+### Application key-routing gate moved to the running app (#119)
+
+At `e638dfd150332f3660b65dd4e96257f076e9718b`, [GUI job 128791715128](https://github.com/krystianslowik/arkt/actions/runs/42500394665/job/128791715128)
+reported 2096 tests, 61 skipped and one failure. Activation remained refused (`active=false`, visible and key-capable
+window, no key window), so no competing application key was dispatched. The three recorder regressions and
+Return/Space conflict behavior passed. Repeating or extending the same activation wait is not justified.
+
+The component gate now calls the real Settings window key-equivalent boundary and retains binding, pane and close
+assertions. A separate real-app UI method sends Cmd-W and Cmd-1–7 through OS keyboard delivery, checks retained
+Settings and Shortcuts, verifies each effective binding via a filtered action row, and then checks ordinary pane
+and close behavior after recording. The original changed/cleared/reset/reloaded app-command test remains intact.
+This is a change of test boundary, not a passing application-routing result. The shared app editor composition
+remains absent. The optional focused UI workflow selector follows the contract already approved for #180.
+
+Swift 6.2.4 frontend parsing, the exact workflow import-layering and UI-source checks, actionlint, parity-report
+script tests and whitespace checks passed. An initial local invocation of the UI-source check used the repository
+root instead of its workflow working directory; the corrected invocation passed in `app/ArktShell/UITests`.
+No revised GUI/native test, App build or local app launch ran. CI must establish the component result and the native
+missing-composition red before the app wiring is implemented.

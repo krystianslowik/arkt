@@ -78,3 +78,25 @@ lint rejects the conflict panel's numeric assignment. The branch now merges main
 and type roles. The floating conflict panel uses `ShellRadius.popover` (12 pt) instead of its original 8 pt literal.
 Its visual appearance still needs review with the recorder component; the radius change is not GUI validation.
 The search, focus and system-warning regressions remain unchanged and their runtime outcomes are still required.
+
+## Application routing fixture correction
+
+Run [42500394665](https://github.com/krystianslowik/arkt/actions/runs/42500394665), head `e638dfd`,
+reported **2,096 GUI tests, 61 skipped and one failure**. The only failure was the application-dispatch setup:
+`active=false, visible=true, canBecomeKey=true, hasKeyWindow=false`. The bounded activation yields did not make
+the package test application active, and the guard sent no competing keys. The live-search, recorder focus-loss,
+app-conflict system-warning and existing Return/Space conflict checks passed. This is not a recorder behavior red.
+
+The in-process competing-key test now explicitly covers `SettingsWindow.performKeyEquivalent`: every recorded
+Cmd-W and Cmd-1–7 must update the model while the window stays visible in Shortcuts; after recording ends, Cmd-1
+must select General and Cmd-W must close. This is component coverage, with no dependency on runner activation.
+The application-dispatch obligation moves to a separate `ShortcutWiringTests` method in the real running app.
+It uses OS keyboard events, checks the Shortcuts pane and surviving Settings window, and checks each effective
+binding by filtering to that binding while requiring the unrelated New Tab recorder to disappear and reappear
+when search clears. It then checks normal pane and close routing after recording. The existing changed, cleared,
+reset and reload app-dispatch test remains intact.
+
+The optional workflow selector follows the already approved `ui_test_filter` contract: one quoted xcodebuild
+`-only-testing` argument, with an empty input retaining the full UI suite. Neither the revised component test nor
+the new native test has executed yet. AppSession still does not inject the shared editor; missing recorder controls
+through actual app composition are the expected initial native failure, subject to successful harness setup.

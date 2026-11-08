@@ -690,35 +690,18 @@ final class SettingsWindowTests: XCTestCase {
     XCTAssertEqual(reopened.binding(for: tab), ShortcutBinding(key: "t", modifiers: .command))
   }
 
-  func testRecorderBeatsSettingsWindowKeysUntilRecordingEnds() async throws {
+  /// Component coverage for SettingsWindow's key-equivalent boundary. Actual app dispatch lives in ShortcutWiringTests.
+  func testRecorderBeatsSettingsWindowKeyEquivalentsUntilRecordingEnds() throws {
     let menu = MainMenu.make(commands: AppCommands()).menu
     let model = ShortcutEditorModel(catalog: ShortcutCatalog.definitions(from: menu), defaults: defaults)
     let controller = make(menu: menu, editor: model)
     controller.show(pane: .shortcuts)
     let window = try XCTUnwrap(controller.window)
     let id = ShortcutActionID("toggleSidebarVisibility")
-    let savedMenu = NSApp.mainMenu
-    defer { NSApp.mainMenu = savedMenu }
-    NSApp.mainMenu = menu
-    NSApp.activate()
-    // AppKit activation is asynchronous and may be refused; give its callbacks finite actor turns, not a sleep.
-    for _ in 0..<10_000 {
-      if NSApp.isActive { break }
-      await Task.yield()
-    }
-    window.makeKeyAndOrderFront(nil)
-    for _ in 0..<10_000 {
-      if window.isKeyWindow { break }
-      await Task.yield()
-    }
-    XCTAssertTrue(window.isKeyWindow,
-                  "Application-dispatch setup: active=\(NSApp.isActive), visible=\(window.isVisible), "
-                    + "canBecomeKey=\(window.canBecomeKey), hasKeyWindow=\(NSApp.keyWindow != nil)")
-    guard window.isKeyWindow else { return } // Do not interpret undelivered application events as recorder failures.
     for (key, code) in [("w", UInt16(13)), ("1", 18), ("2", 19), ("3", 20), ("4", 21),
                         ("5", 23), ("6", 22), ("7", 26)] {
       try find("settings.shortcuts.record.toggleSidebarVisibility", in: controller, as: NSButton.self).performClick(nil)
-      NSApp.sendEvent(try shortcutEvent(key, .command, code: code, in: window))
+      XCTAssertTrue(window.performKeyEquivalent(with: try shortcutEvent(key, .command, code: code, in: window)), key)
       XCTAssertTrue(window.isVisible, key)
       XCTAssertEqual(controller.selectedPane, .shortcuts, key)
       // A conflict is also capture: it must refer to the attempted binding, not route to Settings.
@@ -727,9 +710,9 @@ final class SettingsWindowTests: XCTestCase {
       }
       XCTAssertEqual(model.binding(for: id), ShortcutBinding(key: key, modifiers: .command), key)
     }
-    NSApp.sendEvent(try shortcutEvent("1", .command, code: 18, in: window))
+    XCTAssertTrue(window.performKeyEquivalent(with: try shortcutEvent("1", .command, code: 18, in: window)))
     XCTAssertEqual(controller.selectedPane, .general)
-    NSApp.sendEvent(try shortcutEvent("w", .command, code: 13, in: window))
+    XCTAssertTrue(window.performKeyEquivalent(with: try shortcutEvent("w", .command, code: 13, in: window)))
     XCTAssertFalse(window.isVisible)
   }
 
