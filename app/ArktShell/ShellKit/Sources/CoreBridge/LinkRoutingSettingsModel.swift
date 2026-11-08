@@ -23,6 +23,7 @@ public final class LinkRoutingSettingsModel {
   private let flushTimeout: Duration?
   private var pendingRemovedSpaces: Set<UUID> = []
   private var removalGeneration = 0
+  private var removalHistory: [UUID: Int] = [:]
   private var loadInProgress = false
   private var loading: Task<Void, Never>?
 
@@ -38,10 +39,18 @@ public final class LinkRoutingSettingsModel {
     if let loading { await loading.value; return }
     guard revision == savedRevision, !writePending, !saveFailed else { return }
     loadInProgress = true
+    let readGeneration = removalGeneration
+    let pendingAtRead = pendingRemovedSpaces
     let task = Task { @MainActor in
       defer { self.loadInProgress = false }
       do {
-        let value = try await self.state.loadLinkRouting()
+        var value = try await self.state.loadLinkRouting()
+        // A read may return a snapshot taken before a cleanup completed.
+        let removedDuringRead = pendingAtRead.union(self.removalHistory.filter { $0.value > readGeneration }.map(\.key))
+        value.routes.removeAll { route in
+          if case .space(let id) = route.destination { return removedDuringRead.contains(id) }
+          return false
+        }
         self.settings = value
         self.isLoaded = true
         self.applyPendingRemovals()
@@ -59,12 +68,12 @@ public final class LinkRoutingSettingsModel {
   public func removeRoutes(to id: UUID) {
     removalGeneration += 1
     pendingRemovedSpaces.insert(id)
+    removalHistory[id] = removalGeneration
     if isLoaded && !loadInProgress { applyPendingRemovals() }
   }
 
   private func applyPendingRemovals() {
     let ids = pendingRemovedSpaces
-    pendingRemovedSpaces.removeAll()
     var updated = settings
     updated.routes.removeAll { route in
       if case .space(let id) = route.destination { return ids.contains(id) }
@@ -97,29 +106,39 @@ public final class LinkRoutingSettingsModel {
   private enum FlushError: Error { case timedOut }
 
   /// Each detached store call waits for the preceding call without requiring the main actor.
-  private func submit() -> (Task<Result<Void, any Error>, Never>, Int, Int) {
-    let (snapshot, version, state, date, previous) = (settings, revision, state, now(), storeCall)
+  private func submit() -> (Task<Result<Void, any Error>, Never>, Int, Int, Set<UUID>, Int) {
+    // Without a usable snapshot, prune only the current stored value in the atomic update.
+    let snapshot: LinkRouting? = isLoaded && !loadInProgress ? settings : nil
+    let (version, state, date, previous, removals) = (revision, state, now(), storeCall, pendingRemovedSpaces)
     let call = Task.detached { () -> Result<Void, any Error> in
       _ = await previous?.value
       do {
-        _ = try await state.updateLinkRouting(at: date) { $0 = snapshot }
+        _ = try await state.updateLinkRouting(at: date) { value in
+          if let snapshot { value = snapshot }
+          value.routes.removeAll { route in
+            if case .space(let id) = route.destination { return removals.contains(id) }
+            return false
+          }
+        }
         return .success(())
       } catch { return .failure(error) }
     }
     storeCall = call
     submissions += 1
     writePending = true
-    return (call, submissions, version)
+    return (call, submissions, version, removals, removalGeneration)
   }
 
-  private func finish(_ result: Result<Void, any Error>, submission: Int, version: Int) -> Bool {
+  private func finish(_ result: Result<Void, any Error>, submission: Int, version: Int,
+                      removals: Set<UUID>, generation: Int) -> Bool {
     guard submission == submissions else { return (try? result.get()) != nil }
     writePending = false
     switch result {
     case .success:
       savedRevision = version
+      pendingRemovedSpaces.subtract(removals.filter { (removalHistory[$0] ?? 0) <= generation })
       saveFailed = false
-      lastError = nil
+      if isLoaded { lastError = nil }
       return true
     case .failure(let error):
       saveFailed = true
@@ -132,18 +151,18 @@ public final class LinkRoutingSettingsModel {
   @discardableResult
   public func flush() async -> Bool {
     guard isLoaded, !loadInProgress else { return false }
-    let (call, number, version) = submit()
-    return finish(await call.value, submission: number, version: version)
+    let (call, number, version, removals, generation) = submit()
+    return finish(await call.value, submission: number, version: version, removals: removals, generation: generation)
   }
 
   /// Normal termination must also give up on a stalled store without marking its snapshot saved.
   @discardableResult
   public func flushForTermination() async -> Bool {
-    guard isLoaded, !loadInProgress else { return !needsFlush }
+    guard (isLoaded && !loadInProgress) || !pendingRemovedSpaces.isEmpty else { return !needsFlush }
     guard needsFlush else { return true }
-    let (call, number, version) = submit()
+    let (call, number, version, removals, generation) = submit()
     let attempt = Task { @MainActor in
-      self.finish(await call.value, submission: number, version: version)
+      self.finish(await call.value, submission: number, version: version, removals: removals, generation: generation)
     }
     guard let flushTimeout else { return await attempt.value }
     let result = await FlushRace.run(timeout: flushTimeout, sleep: { try await Task.sleep(for: $0) }, attempt: attempt)
@@ -157,15 +176,15 @@ public final class LinkRoutingSettingsModel {
   /// The SIGTERM caller blocks the main thread, so neither the write nor its ordering can depend on it.
   @discardableResult
   public func flushBlocking() -> Bool {
-    guard isLoaded, !loadInProgress else { return !needsFlush }
+    guard (isLoaded && !loadInProgress) || !pendingRemovedSpaces.isEmpty else { return !needsFlush }
     guard needsFlush else { return true }
-    let (call, number, version) = submit()
+    let (call, number, version, removals, generation) = submit()
     guard let result = BlockingFlush.run(timeout: flushTimeout, { await call.value }) else {
       saveFailed = true
       lastError = FlushError.timedOut
       return false
     }
-    return finish(result, submission: number, version: version)
+    return finish(result, submission: number, version: version, removals: removals, generation: generation)
   }
 
   private func edit(_ change: (inout LinkRouting) -> Void) {
@@ -187,7 +206,7 @@ public extension LinkRoutingSettingsModel {
         await self.load()
       },
       destination: { [weak self] in
-        guard let self, self.isLoaded else { return nil }
+        guard let self, self.isLoaded, !self.loadInProgress else { return nil }
         switch self.settings.defaultDestination {
         case .littleArkt: return .littleArkt
         case .mostRecentSpace: return .mostRecentSpace
@@ -198,7 +217,7 @@ public extension LinkRoutingSettingsModel {
       appendRoute: { [weak self] in self?.appendRoute($0.coreRoute) },
       replaceRoute: { [weak self] index, route in self?.replaceRoute(at: index, with: route.coreRoute) },
       replaceRouteIfUnchanged: { [weak self] index, expected, route in
-        guard let self, self.settings.routes.map(SettingsLinkRoute.init) == expected,
+        guard let self, self.isLoaded, !self.loadInProgress, self.settings.routes.map(SettingsLinkRoute.init) == expected,
               self.settings.routes.indices.contains(index) else { return false }
         self.replaceRoute(at: index, with: route.coreRoute)
         return true

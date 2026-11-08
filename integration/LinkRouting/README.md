@@ -11,3 +11,5 @@ This standalone package runs two termination cases and a Settings adapter value 
 The probe also includes the canonical CoreBridge Settings-readiness tests by source link. Those two tests run in normal ShellKit CI as well; the combined SQLite/model cases remain specific to this standalone probe.
 
 The Space-removal cases also run the canonical pure editor tests through a source link. The SQLite probe checks pruning across close and reopen. It does not compile or exercise AppSession, the source observer composition, or the Settings sheet; those remain separate CI coverage.
+
+The termination cases also hold or fail the initial read and reopen the typed database after normal and blocking cleanup. They exercise the production editor and store, but do not exercise the AppSession observer/termination composition or a live Settings window.

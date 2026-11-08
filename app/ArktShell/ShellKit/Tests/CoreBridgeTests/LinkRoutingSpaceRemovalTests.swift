@@ -23,7 +23,8 @@ struct LinkRoutingSpaceRemovalTests {
     #expect(model.settings.routes == [kept, kept])
     #expect(await model.flush())
     model.removeRoutes(to: removed)
-    #expect(!model.needsFlush)
+    #expect(model.needsFlush)
+    #expect(await model.flush())
     let reopened = LinkRoutingSettingsModel(state: store)
     await reopened.load()
     #expect(reopened.settings == model.settings)
@@ -58,12 +59,29 @@ struct LinkRoutingSpaceRemovalTests {
     await model.load()
     #expect(model.lastError != nil)
     #expect(model.needsFlush)
-    #expect(!(await model.flushForTermination()))
-    #expect(!model.flushBlocking())
+    #expect(await model.flushForTermination())
+    #expect(model.flushBlocking())
     await model.load()
     #expect(model.settings.routes.isEmpty)
     #expect(await model.flush())
     #expect(await store.value().routes.isEmpty)
+  }
+
+  @Test func guardedEditFailsWhileReloadIsInProgress() async {
+    let route = LinkRouting.Route(condition: .contains("original"), destination: .littleArkt)
+    let store = RemovalStore(LinkRouting(routes: [route]))
+    let model = LinkRoutingSettingsModel(state: store)
+    await model.load()
+    let rows = model.settingsRows
+    let displayed = rows.routes()
+    await store.pauseNextLoad()
+    let loading = Task { await model.load() }
+    await store.waitForLoad()
+    #expect(rows.destination() == nil)
+    #expect(!rows.replaceRouteIfUnchanged(0, displayed, displayed[0]))
+    await store.resumeLoad()
+    await loading.value
+    #expect(model.settings.routes == [route])
   }
 
   @Test func removalBeforeLoadCompletesIsApplied() async {

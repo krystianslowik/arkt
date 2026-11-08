@@ -39,6 +39,7 @@ final class LinkRoutingFormTests: XCTestCase {
   }
 
   private func withWindow(initial: LinkRouting, failFirst: Bool = false, holdReload: Bool = false,
+                          spaces: (@MainActor () -> [SettingsSpaceSummary])? = nil,
                           _ body: (NSWindow, LinkRoutingSettingsModel, FormRoutingStore) async throws -> Void) async throws {
     _ = NSApplication.shared
     let store = FormRoutingStore(initial: initial, failFirst: failFirst, holdReload: holdReload)
@@ -49,7 +50,7 @@ final class LinkRoutingFormTests: XCTestCase {
     defer { defaults.removePersistentDomain(forName: suite) }
     var services = SettingsServices()
     services.linkRoutingRows = model.settingsRows
-    services.spaces = { [self] in
+    services.spaces = spaces ?? { [self] in
       [first, second].map { SettingsSpaceSummary(id: $0, title: "Shared", profile: "default",
                                                    gradient: [], icon: nil, pinned: 0, today: 0) }
     }
@@ -154,6 +155,36 @@ final class LinkRoutingFormTests: XCTestCase {
       XCTAssertTrue(saved)
       let afterRetry = await store.snapshot()
       XCTAssertEqual(afterRetry.routes, [original, edited])
+    }
+  }
+
+  func testStaleRenderedEditRefreshesInsteadOfEditingAnotherRoute() async throws {
+    let deleted = LinkRouting.Route(condition: .contains("first"), destination: .space(first))
+    let kept = LinkRouting.Route(condition: .matches("second"), destination: .space(second))
+    try await withWindow(initial: LinkRouting(routes: [deleted, kept])) { window, model, _ in
+      let staleEdit = try find("settings.spaces.route.0.edit", in: window, as: NSButton.self)
+      model.removeRoutes(to: first)
+      staleEdit.performClick(nil)
+      XCTAssertNil(window.attachedSheet)
+      XCTAssertEqual(model.settings.routes, [kept])
+      try find("settings.spaces.route.0.edit", in: window, as: NSButton.self).performClick(nil)
+      let sheet = try XCTUnwrap(window.attachedSheet)
+      XCTAssertEqual(try find("settings.route.literal", in: sheet, as: NSTextField.self).stringValue, "second")
+    }
+  }
+
+  func testStaleAddUsesCurrentSpaces() async throws {
+    var available = [first, second]
+    try await withWindow(initial: LinkRouting(routes: []), spaces: {
+      available.map { SettingsSpaceSummary(id: $0, title: $0.uuidString, profile: "default",
+                                           gradient: [], icon: nil, pinned: 0, today: 0) }
+    }) { window, model, _ in
+      available.removeFirst()
+      model.removeRoutes(to: first)
+      let sheet = try openAdd(window)
+      let destination = try find("settings.route.destination", in: sheet, as: SettingsPopUpButton.self)
+      XCTAssertFalse(destination.items.contains(self.first.uuidString))
+      XCTAssertTrue(destination.items.contains(self.second.uuidString))
     }
   }
 

@@ -213,19 +213,22 @@ extension SettingsWindowController {
       section("Archive", archiveRows()),
       section("Profiles", profiles + [newProfile],
               note: "Each profile keeps its own Favorites, history, cookies, passwords and extensions."),
-      linkRoutingSection(spaces: spaces),
+      linkRoutingSection(),
     ]
     return blocks
   }
 
-  private func linkRoutingSection(spaces: [SettingsSpaceSummary]) -> SettingsBlockView {
+  private func linkRoutingSection() -> SettingsBlockView {
     let container = SettingsRouteSection()
     let rows = services.linkRoutingRows
     let refresh: @MainActor () -> Void = { [weak self, weak container] in
       guard let self, let container else { return }
+      let spaces = self.services.spaces()
+      let displayedRoutes = rows?.routes() ?? []
+      let generation = rows?.removalGeneration() ?? 0
       var blocks: [SettingsBlockView] = [self.linkRoutingRow(spaces: spaces)]
       if let rows, rows.destination() != nil {
-        for (index, route) in rows.routes().enumerated() {
+        for (index, route) in displayedRoutes.enumerated() {
           let literal: String
           let condition: String
           switch route.condition {
@@ -242,7 +245,9 @@ extension SettingsWindowController {
           }
           let edit = self.pill(.spaces, "route.\(index).edit", "Edit") { [weak self, weak container] in
             guard let self, let container else { return }
-            self.showRouteSheet(route: route, index: index, rows: rows, spaces: spaces) {
+            guard rows.destination() != nil, rows.routes() == displayedRoutes,
+                  rows.removalGeneration() == generation else { container.refresh?(); return }
+            self.showRouteSheet(route: route, index: index, rows: rows, spaces: self.services.spaces()) {
               container.refresh?()
             }
           }
@@ -262,7 +267,7 @@ extension SettingsWindowController {
       if let rows, rows.destination() != nil {
         let target = SettingsActionTarget { [weak self, weak container] in
           guard let self, let container else { return }
-          self.showRouteSheet(route: nil, index: nil, rows: rows, spaces: spaces) { container.refresh?() }
+          self.showRouteSheet(route: nil, index: nil, rows: rows, spaces: self.services.spaces()) { container.refresh?() }
         }
         self.actionTargets.append(target)
         add.button.target = target
@@ -291,7 +296,8 @@ extension SettingsWindowController {
     let originalRoutes = rows.routes()
     let generation = rows.removalGeneration()
     sheet.validate = { result in
-      guard rows.removalGeneration() == generation, rows.routes() == originalRoutes else { return false }
+      guard rows.destination() != nil, rows.removalGeneration() == generation,
+            rows.routes() == originalRoutes else { return false }
       if let index { return rows.replaceRouteIfUnchanged(index, originalRoutes, result) }
       rows.appendRoute(result)
       return true
