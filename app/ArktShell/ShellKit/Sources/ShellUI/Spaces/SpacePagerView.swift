@@ -404,7 +404,11 @@ public final class SpacePagerView: NSView {
     let clamped = min(max(target, 0), pages.count - 1)
     if isTracking { return }                               // the fingers own the strip
     frozenTarget = nil
-    if !driver.isRunning && clamped == index && offset == -CGFloat(index) * pageWidth { return }
+    if !driver.isRunning && clamped == index && offset == -CGFloat(index) * pageWidth {
+      // Cancelling a frozen settle at its original offset ends the interaction without a spring completion.
+      flushHoverResyncs()
+      return
+    }
     // The strip passes over every page between here and the target (and the settle's overshoot can show one
     // more): build their rows now, off the animation frames (#297). Already-built pages cost a lookup.
     for i in (min(index, clamped) - 1)...(max(index, clamped) + 1) { preparePageForDisplay(i) }
