@@ -20,11 +20,11 @@ final class SplitPageInfoTests: XCTestCase {
     let engine = InMemoryEngine()
     let controller: ShellWindowController
 
-    init(_ sidebar: SidebarModel.Sidebar) {
+    init(_ sidebar: SidebarModel.Sidebar, width: CGFloat = 1200) {
       let source = ModelSidebarSource(sidebar: sidebar, now: { SplitPageInfoTests.now })
       self.source = source
       controller = ShellWindowController(engine: engine, sidebar: source, toolbarSetting: .ephemeral())
-      controller.window?.setFrame(NSRect(x: 100, y: 100, width: 1200, height: 800), display: false)
+      controller.window?.setFrame(NSRect(x: 100, y: 100, width: width, height: 800), display: false)
       controller.showWindow(nil)
       controller.rootView.split.reduceMotion = { true }
       controller.rootView.reduceMotion = { true }
@@ -139,10 +139,42 @@ final class SplitPageInfoTests: XCTestCase {
     let barRect = parent.convertToScreen(bar.convert(bar.bounds, to: nil))
     let glyph = parent.convertToScreen(bar.convert(bar.siteGlyph.frame, to: nil))
     XCTAssertEqual(window.frame.maxY, barRect.minY - PageInfoMetrics.gap, accuracy: 0.5, "below that Toolbar")
-    XCTAssertEqual(window.frame.minX, glyph.minX - PageInfoMetrics.sideInset, accuracy: 0.5, "under its glyph")
-    let left = harness.bar(0)
-    let leftRect = parent.convertToScreen(left.convert(left.bounds, to: nil))
-    XCTAssertGreaterThan(window.frame.minX, leftRect.maxX, "not under the other pane's Toolbar")
+    // Under its glyph, as the main Toolbar's panel, unless the window's trailing edge holds it back (a runner's small
+    // screen shrinks the window).
+    let wanted = glyph.minX - PageInfoMetrics.sideInset
+    let rightmost = parent.frame.maxX - PageInfoMetrics.windowMargin - window.frame.width
+    XCTAssertEqual(window.frame.minX, min(wanted, rightmost), accuracy: 0.5, "under its glyph, inside the window")
+    XCTAssertLessThanOrEqual(window.frame.minX, glyph.minX, "the panel spans its glyph")
+    XCTAssertGreaterThanOrEqual(window.frame.maxX, glyph.maxX)
+    if wanted <= rightmost {
+      let left = harness.bar(0)
+      let leftRect = parent.convertToScreen(left.convert(left.bounds, to: nil))
+      XCTAssertGreaterThan(window.frame.minX, leftRect.maxX, "not under the other pane's Toolbar")
+    }
+    harness.close()
+  }
+
+  /// The smallest window: the panel under a trailing pane's glyph stays inside the window and still spans the glyph.
+  func testInANarrowWindowThePanelStaysInsideAndSpansThePanesGlyph() throws {
+    let world = try Self.makeWorld([Self.secure, Self.insecure])
+    let harness = Harness(world.sidebar, width: 760)
+    harness.controller.activate(node: world.panes[0])
+    harness.layout()
+    let bar = harness.bar(1)
+
+    bar.onPressSiteGlyph?()
+
+    let window = try XCTUnwrap(harness.panel.panel)
+    harness.layout()
+    let parent = try XCTUnwrap(bar.window)
+    let glyph = parent.convertToScreen(bar.convert(bar.siteGlyph.frame, to: nil))
+    XCTAssertGreaterThan(glyph.minX - PageInfoMetrics.sideInset,
+                         parent.frame.maxX - PageInfoMetrics.windowMargin - window.frame.width,
+                         "the glyph sits too far right for the panel to start under it: the clamp is what is tested")
+    XCTAssertLessThanOrEqual(window.frame.maxX, parent.frame.maxX - PageInfoMetrics.windowMargin + 0.5,
+                             "inside the window")
+    XCTAssertLessThanOrEqual(window.frame.minX, glyph.minX, "the panel spans its glyph")
+    XCTAssertGreaterThanOrEqual(window.frame.maxX, glyph.maxX)
     harness.close()
   }
 
