@@ -525,7 +525,7 @@ final class ArchiveEmptyStateView: NSView {
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
     wantsLayer = true
-    tile.cornerRadius = 12
+    tile.cornerRadius = ShellRadius.tile
     tile.cornerCurve = .continuous
     layer?.addSublayer(tile)
     glyph.imageScaling = .scaleNone

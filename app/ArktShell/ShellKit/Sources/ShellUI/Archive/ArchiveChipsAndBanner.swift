@@ -39,7 +39,7 @@ final class ArchiveChipView: NSView {
     removeButton.bezelStyle = .regularSquare
     removeButton.imagePosition = .imageOnly
     removeButton.wantsLayer = true
-    removeButton.layer?.cornerRadius = 8
+    removeButton.layer?.cornerRadius = ArchiveMetrics.chipRemoveRadius
     removeButton.target = self
     removeButton.action = #selector(removePressed(_:))
     removeButton.setArchiveAccessibilityLabel("Remove filter")
@@ -206,7 +206,7 @@ final class ArchiveBannerView: NSView {
   init(banner: ArchiveBanner, showsSettings: Bool) {
     super.init(frame: .zero)
     wantsLayer = true
-    layer?.cornerRadius = 12
+    layer?.cornerRadius = ArchiveMetrics.bannerRadius
     layer?.cornerCurve = .continuous
     tileLayer.cornerRadius = ArchiveMetrics.fieldRadius
     tileLayer.cornerCurve = .continuous

@@ -82,13 +82,13 @@ final class ExtensionsPanelView: NSView {
     hintView.setAccessibilityLabel(ExtensionsPanelCopy.hint)
     hintView.setAccessibilityIdentifier(AXID.Extensions.hint)
     insertionLine.wantsLayer = true
-    insertionLine.layer?.cornerRadius = 1
+    insertionLine.layer?.cornerRadius = ExtensionsPanelMetrics.insertionLineRadius
     insertionLine.isHidden = true
     insertionLine.setAccessibilityElement(false)
     list.addSubview(insertionLine)
 
     emptyView.wantsLayer = true
-    emptyTile.cornerRadius = 12
+    emptyTile.cornerRadius = ShellRadius.tile
     emptyTile.cornerCurve = .continuous
     emptyTile.addSublayer(emptyGlyph)
     emptyView.layer?.addSublayer(emptyTile)

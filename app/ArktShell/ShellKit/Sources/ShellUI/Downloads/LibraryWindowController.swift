@@ -352,7 +352,7 @@ public final class LibraryWindowController: NSWindowController, NSSearchFieldDel
     emptyDetail.font = ShellType.caption.font
     emptyDetail.alignment = .center
     emptyDetail.isSelectable = false
-    emptyTile.cornerRadius = 12
+    emptyTile.cornerRadius = ShellRadius.tile
     emptyTile.cornerCurve = .continuous
     emptyGlyph.imageScaling = .scaleNone
     openFolderPill.target = self

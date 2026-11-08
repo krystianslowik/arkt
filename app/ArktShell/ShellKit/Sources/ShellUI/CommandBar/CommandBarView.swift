@@ -116,7 +116,7 @@ final class CommandBarView: NSView {
     scopeChip.isHidden = true
     scopeChip.font = ShellType.rowTitle.font
     scopeChip.wantsLayer = true
-    scopeChip.layer?.cornerRadius = 6
+    scopeChip.layer?.cornerRadius = CommandBarGeometry.scopeChipRadius
     scopeChip.layer?.cornerCurve = .continuous
     scopeChip.setAccessibilityIdentifier(AXID.CommandBar.scope)
     addSubview(scopeChip)

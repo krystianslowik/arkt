@@ -344,9 +344,9 @@ final class SettingsSegmentedControl: NSControl {
     labels = segments.map { _ in CATextLayer() }
     super.init(frame: .zero)
     wantsLayer = true
-    layer?.cornerRadius = 9
+    layer?.cornerRadius = SettingsMetrics.segmentedRadius
     layer?.cornerCurve = .continuous
-    plate.cornerRadius = 7
+    plate.cornerRadius = SettingsMetrics.segmentedPlateRadius
     plate.cornerCurve = .continuous
     plate.anchorPoint = .zero
     plate.shadowOffset = SettingsTokens.segmentPlateShadow.flippedOffset   // a sublayer of this flipped view
@@ -440,7 +440,7 @@ final class SettingsKeycapsView: NSView {
     wantsLayer = true
     for _ in keys {
       let cap = CALayer()
-      cap.cornerRadius = 6 * height / SettingsMetrics.keycapHeight
+      cap.cornerRadius = SettingsMetrics.keycapRadius * height / SettingsMetrics.keycapHeight
       cap.cornerCurve = .continuous
       let text = CATextLayer()
       text.alignmentMode = .center
@@ -514,7 +514,7 @@ final class SettingsDefaultCapsule: NSView {
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
     wantsLayer = true
-    layer?.cornerRadius = 12
+    layer?.cornerRadius = ShellRadius.pill(height: SettingsMetrics.capsuleHeight)
     layer?.cornerCurve = .continuous
     label.font = ShellType.captionEmphasis.font
     addSubview(check)
@@ -531,7 +531,7 @@ final class SettingsDefaultCapsule: NSView {
   override var isFlipped: Bool { true }
 
   override var intrinsicContentSize: NSSize {
-    NSSize(width: 7 + 12 + 6 + ceil(label.intrinsicContentSize.width) + 10, height: 24)
+    NSSize(width: 7 + 12 + 6 + ceil(label.intrinsicContentSize.width) + 10, height: SettingsMetrics.capsuleHeight)
   }
 
   override func layout() {

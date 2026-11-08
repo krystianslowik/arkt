@@ -13,7 +13,7 @@ final class SettingsSpaceSwatch: NSView {
   init(colors: [RGBA], icon spaceIcon: SpaceIconInfo?) {
     super.init(frame: NSRect(x: 0, y: 0, width: 20, height: 20))
     wantsLayer = true
-    gradient.cornerRadius = 6
+    gradient.cornerRadius = SettingsMetrics.swatchRadius
     gradient.cornerCurve = .continuous
     gradient.borderWidth = 0.5
     let stops = colors.isEmpty ? [RGBA.white(1)] : colors
@@ -125,7 +125,7 @@ final class SettingsEmptyStateBlock: SettingsBlockView {
     self.action = action
     super.init(frame: .zero)
     wantsLayer = true
-    tile.cornerRadius = 12
+    tile.cornerRadius = ShellRadius.tile
     tile.cornerCurve = .continuous
     tile.addSublayer(glyph)
     layer?.addSublayer(tile)
@@ -193,6 +193,16 @@ final class SettingsEmptyStateBlock: SettingsBlockView {
 @MainActor
 final class SettingsAppearancePreview: NSView {
   static let size = NSSize(width: 236, height: 140)
+  /// The miniature's own radii, drawn at its scale rather than the chrome's.
+  private enum Radius {
+    static let window: CGFloat = 8
+    static let dot: CGFloat = 2
+    static let sidebarURL: CGFloat = 4
+    static let row: CGFloat = 3
+    static let card: CGFloat = 4
+    static let line: CGFloat = 2
+    static let stripURL: CGFloat = 2
+  }
   private let background = CAGradientLayer()
   private let sidebarURL = CALayer()
   private var sidebarRows: [CALayer] = []
@@ -209,7 +219,7 @@ final class SettingsAppearancePreview: NSView {
     self.gradient = gradient
     super.init(frame: NSRect(origin: .zero, size: Self.size))
     wantsLayer = true
-    layer?.cornerRadius = 8
+    layer?.cornerRadius = Radius.window
     layer?.cornerCurve = .continuous
     layer?.masksToBounds = true
     background.startPoint = CGPoint(x: 0.2, y: 0)
@@ -217,30 +227,30 @@ final class SettingsAppearancePreview: NSView {
     layer?.addSublayer(background)
     for _ in 0..<3 {
       let dot = CALayer()
-      dot.cornerRadius = 2
+      dot.cornerRadius = Radius.dot
       dots.append(dot)
       layer?.addSublayer(dot)
     }
-    sidebarURL.cornerRadius = 4
+    sidebarURL.cornerRadius = Radius.sidebarURL
     layer?.addSublayer(sidebarURL)
     for _ in 0..<4 {
       let row = CALayer()
-      row.cornerRadius = 3
+      row.cornerRadius = Radius.row
       sidebarRows.append(row)
       layer?.addSublayer(row)
     }
-    card.cornerRadius = 4
+    card.cornerRadius = Radius.card
     card.masksToBounds = true
     layer?.addSublayer(card)
     card.addSublayer(page)
     for _ in 0..<6 {
       let line = CALayer()
-      line.cornerRadius = 2
+      line.cornerRadius = Radius.line
       pageLines.append(line)
       page.addSublayer(line)
     }
     card.addSublayer(strip)
-    stripURL.cornerRadius = 2
+    stripURL.cornerRadius = Radius.stripURL
     strip.addSublayer(stripURL)
     setAccessibilityElement(false)
     layoutLayers()

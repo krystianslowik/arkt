@@ -6,7 +6,7 @@ import CoreGraphics
 /// bar shows, the pill sits 8 points below it. Y points up.
 enum ZoomPillLayout {
   static let height: CGFloat = 36
-  static let cornerRadius: CGFloat = 18
+  static let cornerRadius = ShellRadius.pill(height: height)
   /// From the top and trailing edges of the page.
   static let edgeInset: CGFloat = 12
   static let padding: CGFloat = 6
