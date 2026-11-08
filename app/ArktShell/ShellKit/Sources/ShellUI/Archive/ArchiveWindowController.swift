@@ -702,7 +702,7 @@ public final class ArchiveWindowController: NSWindowController, NSTableViewDataS
     NotificationCenter.default.addObserver(self, selector: #selector(listDidScroll(_:)),
                                            name: NSView.boundsDidChangeNotification, object: scrollView.contentView)
 
-    titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+    titleLabel.font = ShellType.bodyEmphasis.font
     titleLabel.setAccessibilityElement(false)
     titleLabel.cell?.setAccessibilityElement(false)
 

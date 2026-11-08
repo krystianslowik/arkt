@@ -38,7 +38,12 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   public var isShowingEmptyState: Bool { !isPrivateWindow && sidebarController.spaces.isEmpty }
   private var commandBarPrewarmed = false
   /// When each tab was last shown in this window, for the command bar's "12 min" (not persisted).
-  private var viewedAt: [NodeID: Date] = [:]
+  private var viewedAt: [NodeID: Date] = [:] {
+    didSet { openTabsCache = nil }
+  }
+  /// The command bar's open tabs for a Space order, kept between keystrokes (#606): with 2,000 tabs the walk cost
+  /// 3 ms of every keystroke. Any sidebar change and any newly viewed tab drop it.
+  private var openTabsCache: (spaces: [SpaceID], tabs: [CommandBarResults.OpenTab])?
   /// The focused tab: the shown plain tab, or the focused pane of a shown split (decision 7). The engine's active tab
   /// of this window follows it (week-3 Decision 6: extension `active` flags stay true).
   public internal(set) var currentTab: TabID? {
@@ -350,6 +355,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     wireThemeDrawing()
     // A removed Space's nodes emit no structure change, so `.spaceRemoved` checks too.
     sidebarObservation = sidebar.observe { [weak self] change in
+      self?.openTabsCache = nil                     // a title, an order or a Space changed what the bar lists
       switch change {
       case .structure, .spaceRemoved:
         self?.closeEngineTabsOfRemovedNodes()
@@ -734,7 +740,10 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// Space first like the suggestions (BH-111). Forgets the time of a tab that is gone.
   private func recentTabs() -> [CommandBarResults.OpenTab] {
     let open = openTabs()
-    viewedAt = viewedAt.filter { entry in open.contains { $0.node == entry.key } }
+    let openNodes = Set(open.map(\.node))
+    if viewedAt.keys.contains(where: { !openNodes.contains($0) }) {
+      viewedAt = viewedAt.filter { openNodes.contains($0.key) }
+    }
     let candidates = open.filter { $0.node != currentNode }
     let viewed = candidates.filter { $0.lastViewed != nil }
       .sorted { ($0.lastViewed ?? .distantPast) > ($1.lastViewed ?? .distantPast) }
@@ -750,10 +759,13 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     } else {
       ordered = spaces
     }
-    return CommandBarResults.openTabs(in: sidebar, spaces: ordered).map { tab in
+    if let cache = openTabsCache, cache.spaces == ordered { return cache.tabs }
+    let tabs = CommandBarResults.openTabs(in: sidebar, spaces: ordered).map { tab in
       CommandBarResults.OpenTab(node: tab.node, title: tab.title, url: tab.url, isSplitPane: tab.isSplitPane,
                                 lastViewed: viewedAt[tab.node], spaceTitle: tab.spaceTitle)
     }
+    openTabsCache = (ordered, tabs)
+    return tabs
   }
 
   /// The action search's verbs (BH-106); ids are handled in `runCommandBarAction`.
@@ -877,6 +889,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       return
     case .pageInfoChanged(let tab):
       if tab == currentTab { refreshPageInfo() }                    // #582: before the map, as a private page has no row
+      if let node = nodeByTab[tab] { refreshPaneToolbar(of: node) } // #698: a pane's own Toolbar glyph
       return
     default:
       break
