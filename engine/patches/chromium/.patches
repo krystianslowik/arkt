@@ -12,3 +12,4 @@
 0012-Arkt-find-a-non-BrowserView-window-for-a-WebContents.patch
 0013-Arkt-guard-lookups-that-crash-on-a-non-BrowserView-w.patch
 0014-Arkt-take-the-Close-Tab-shortcut-from-the-window-s-a.patch
+0015-Arkt-cancel-a-tab-modal-dialog-on-a-window-without-a.patch

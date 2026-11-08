@@ -28,9 +28,12 @@ final class CommandBarTests: XCTestCase {
     try await Task.sleep(for: .milliseconds(300))   // let the window server settle
   }
 
+  // XCTest keeps each test case object until the run ends: release the windows too, not only hide them (#805).
   override func tearDown() async throws {
     bar.invalidate()
     shell.close()
+    bar = nil
+    shell = nil
   }
 
   /// Shows the bar and waits for its first presented frame.

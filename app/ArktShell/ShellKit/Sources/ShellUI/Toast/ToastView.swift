@@ -15,14 +15,14 @@ final class ToastView: NSView {
   static let textColumnWidth: CGFloat = 300
   static let maximumLines = 3
   static let lineHeight: CGFloat = 18
-  static let multiLineRadius: CGFloat = 12
+  static let multiLineRadius = ShellRadius.popover
   private static let leadingPadding: CGFloat = 12
   private static let trailingPadding: CGFloat = 14
   private static let trailingPaddingWithAction: CGFloat = 6
   private static let glyphBox: CGFloat = 16
   private static let glyphGap: CGFloat = 8
   private static let actionGap: CGFloat = 8
-  private static let dismissSize: CGFloat = 24
+  static let dismissSize: CGFloat = 24
   private static let dismissGap: CGFloat = 4
   /// Persistent: padding 10 / 8 / 10 / 12.
   private static let multiLineInsets = NSEdgeInsets(top: 10, left: 12, bottom: 10, right: 8)
@@ -79,7 +79,7 @@ final class ToastView: NSView {
     glyphView.setAccessibilityElement(false)
     glyphView.cell?.setAccessibilityElement(false)        // decorative: the text says it
     addSubview(glyphView)
-    label.font = .systemFont(ofSize: 13, weight: .medium)
+    label.font = ShellType.rowTitle.font
     label.isSelectable = false
     label.setAccessibilityElement(false)
     label.cell?.setAccessibilityElement(false)      // AppKit exposes the cell, not the field
@@ -172,7 +172,7 @@ final class ToastView: NSView {
       paragraph.maximumLineHeight = Self.lineHeight
     }
     return NSAttributedString(string: text, attributes: [
-      .font: NSFont.systemFont(ofSize: 13, weight: .medium),
+      .font: ShellType.rowTitle.font,
       .foregroundColor: ShellTokens.toastText.resolve(flavor).nsColor(),
       .paragraphStyle: paragraph,
     ])
@@ -185,7 +185,7 @@ final class ToastView: NSView {
   /// The text's own one-line width, plus the field's insets.
   private var naturalTextWidth: CGFloat {
     ceil(NSAttributedString(string: label.stringValue, attributes: [
-      .font: NSFont.systemFont(ofSize: 13, weight: .medium),
+      .font: ShellType.rowTitle.font,
     ]).size().width) + 2 * Self.labelInset
   }
 
@@ -500,7 +500,7 @@ final class ToastDismissButton: NSButton {
     image = NSImage(systemSymbolName: "xmark", accessibilityDescription: "Dismiss")?
       .withSymbolConfiguration(.init(pointSize: 10, weight: .semibold))
     wantsLayer = true
-    layer?.cornerRadius = 12
+    layer?.cornerRadius = ShellRadius.pill(height: ToastView.dismissSize)
     layer?.cornerCurve = .continuous
     setAccessibilityLabel("Dismiss")
     cell?.setAccessibilityLabel("Dismiss")

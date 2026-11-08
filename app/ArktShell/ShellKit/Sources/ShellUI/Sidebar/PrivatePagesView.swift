@@ -35,7 +35,7 @@ final class PrivatePagesView: NSView {
 
   let titleLabel: NSTextField = {
     let label = NSTextField(labelWithString: "Pages")
-    label.font = .systemFont(ofSize: 11, weight: .semibold)
+    label.font = ShellType.sectionHeader.font
     label.setAccessibilityElement(false)            // the list carries the name
     return label
   }()

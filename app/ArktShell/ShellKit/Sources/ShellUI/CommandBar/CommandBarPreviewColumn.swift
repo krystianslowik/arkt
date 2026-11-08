@@ -16,6 +16,8 @@ enum CommandBarPreviewImage {
 /// out of the field's Tab order. VoiceOver reaches them as a group, "Preview, <title>".
 @MainActor
 final class CommandBarPreviewColumn: NSView {
+  /// The previewed page's title.
+  static let titleFontSize: CGFloat = 14
   enum Transition: Equatable { case appear, crossfade, hide }
 
   private(set) var content: CommandBarPreview.Content?
@@ -67,11 +69,11 @@ final class CommandBarPreviewColumn: NSView {
     well.addSubview(faviconView)
     well.addSubview(symbolView)
 
-    titleLabel.font = .systemFont(ofSize: 14, weight: .semibold)
+    titleLabel.font = .systemFont(ofSize: Self.titleFontSize, weight: .semibold)
     titleLabel.lineBreakMode = .byTruncatingTail
     titleLabel.cell?.usesSingleLineMode = true
     titleLabel.maximumNumberOfLines = 1
-    metaLabel.font = .systemFont(ofSize: 11.5)
+    metaLabel.font = ShellType.hint.font
     metaLabel.lineBreakMode = .byTruncatingTail
     metaLabel.cell?.usesSingleLineMode = true
     metaLabel.maximumNumberOfLines = 1
@@ -263,6 +265,8 @@ private final class CommandBarPreviewContentGroup: NSView {
 /// One preview button. Mustard is the primary fill; its label is graphite. Not in the key loop.
 @MainActor
 final class CommandBarPreviewButton: NSView {
+  /// The button's title.
+  static let titleFontSize: CGFloat = 12.5
   var onPress: (() -> Void)?
   private let titleLabel = NSTextField(labelWithString: "")
   private let keyCap = CommandBarKeyCapView(frame: .zero)
@@ -277,7 +281,7 @@ final class CommandBarPreviewButton: NSView {
     wantsLayer = true
     layer?.cornerRadius = CommandBarGeometry.previewButtonRadius
     layer?.cornerCurve = .continuous
-    titleLabel.font = .systemFont(ofSize: 12.5, weight: .semibold)
+    titleLabel.font = .systemFont(ofSize: Self.titleFontSize, weight: .semibold)
     titleLabel.lineBreakMode = .byTruncatingTail
     titleLabel.cell?.usesSingleLineMode = true
     titleLabel.maximumNumberOfLines = 1
