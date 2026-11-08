@@ -169,3 +169,32 @@ requested skip flag. SDK environment semantics and the discarded returned proces
 bundle/process or effective sandbox was used. They must not be rerun as routing evidence until a pre-disk Debug
 identity/isolation observation, returned bundle/PID correlation, and the persisted two-Space routing profile are
 established on a disposable runner. No cold-harness repair or native green is claimed by this source change.
+
+
+## Pre-migration UI-test requirement: first stage
+
+The Debug entry point now evaluates a pure `EnvironmentOverrides` startup policy before legacy-defaults migration,
+`NSApplication`, delegate, or session construction. A separate `ArktRequireUITestOverrides` Info value defaults to
+NO in the XcodeGen settings; only the UI workflow's xcodebuild passes YES. When required, the policy requires
+`ARKT_UITEST=1` and delegates the remaining checks to the existing strict validator. Explicit UI-test mode also
+validates with the flag off; ordinary launches with the flag off and no UI-test environment retain their behavior.
+Failure exits with status 64. This checks nonempty directory strings and a usable suite name, not directory
+confinement or effective profile identity. No reporter or acknowledgement path is introduced.
+
+The test-first focused actual-source probe linked the app's validator and canonical ShellUITests file, without an
+App or session substitute. Before the policy existed, the command below failed compilation with eight missing
+`uiTestStartupViolations` member errors; zero tests ran. After implementation it passed 22 tests in one suite,
+including five new policy tests. It emitted three linker warnings for missing toolchain/Command Line Tools library
+and framework search paths. A preliminary direct `swiftc -typecheck` attempt failed to find the Testing module and
+ran zero tests; the SwiftPM probe supplies it.
+
+```sh
+SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX15.5.sdk /opt/homebrew/opt/swift/bin/swift test --package-path integration/StartupPolicy -j 2
+```
+
+Swift 6.2.4 frontend parsing, workflow actionlint, source layering, UI-test source lint and whitespace checks passed.
+The six app test methods, routing expectations and cold helper are unchanged. Pure tests do not prove the entry
+point's call order; that order was reviewed in source. Static build-setting plumbing does not establish the generated
+Info value or compiled App behavior: neither XcodeGen output, App build nor native execution was observed. The cold
+gate remains held until actual PID, effective profile identity and persisted routing profile are observed and the
+remaining identity barrier is reviewed. No cold run or routing-green claim follows from this stage.

@@ -351,7 +351,7 @@ jobs:
           [[ -z "$UI_TEST_FILTER" ]] || test_filter=("-only-testing:$UI_TEST_FILTER")
           xcodebuild -project ArktShell.xcodeproj -scheme ArktShellUITests -derivedDataPath build \
             -clonedSourcePackagesDirPath build/SourcePackages -resultBundlePath $RUNNER_TEMP/ui.xcresult \
-            -parallel-testing-enabled NO -collect-test-diagnostics never "${test_filter[@]}" test
+            -parallel-testing-enabled NO -collect-test-diagnostics never ARKT_REQUIRE_UITEST_OVERRIDES=YES "${test_filter[@]}" test
       # Runs after a failed test step too. Failing rows do not fail the script; malformed input does, including a test
       # name that cites a row id missing from the spec (the report is still written first). The report goes to the
       # job summary, the artifact and the job log.

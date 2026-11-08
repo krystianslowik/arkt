@@ -26,6 +26,8 @@ settings:
     ENABLE_APP_SANDBOX: NO
     DEAD_CODE_STRIPPING: YES
     ARKT_PRINCIPAL_CLASS: NSApplication
+    # Independent opt-in for the CI UI-test app; ordinary configurations leave it off.
+    ARKT_REQUIRE_UITEST_OVERRIDES: "NO"
     # Info.plist `ArktEnvironmentOverrides`: YES only where the build reads the ARKT_* environment overrides (Debug,
     # Profile, Engine); NO in Release and any new config. The UI test harness refuses to launch a bundle without YES.
     ARKT_ENV_OVERRIDES: "NO"
@@ -77,6 +79,7 @@ targets:
         LSMinimumSystemVersion: "15.0"
         NSPrincipalClass: $(ARKT_PRINCIPAL_CLASS)
         ArktEnvironmentOverrides: $(ARKT_ENV_OVERRIDES)
+        ArktRequireUITestOverrides: $(ARKT_REQUIRE_UITEST_OVERRIDES)
         NSHighResolutionCapable: true
         LSApplicationCategoryType: public.app-category.productivity
         # macOS shows these in its own camera, microphone and location prompts when a site asks (#133). The
