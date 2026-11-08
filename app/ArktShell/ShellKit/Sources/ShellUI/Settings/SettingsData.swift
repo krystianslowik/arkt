@@ -27,6 +27,9 @@ public struct SettingsServices {
     ?? FileManager.default.temporaryDirectory
   /// The same action as Window > Show Library; the row is disabled while nil (#132).
   public var openLibrary: (@MainActor () -> Void)?
+  /// Shared command bar preference; both closures are needed to enable the control.
+  public var searchSuggestionsEnabled: (@MainActor () -> Bool)?
+  public var setSearchSuggestionsEnabled: (@MainActor (Bool) -> Void)?
   /// Settings > Spaces and Profiles > Archive (#448); both rows stay planned while nil.
   public var archiveRows: SettingsArchiveRows?
 

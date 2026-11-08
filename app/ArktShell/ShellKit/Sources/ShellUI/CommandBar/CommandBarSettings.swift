@@ -5,8 +5,7 @@ import Foundation
 /// names (`searchSuggestEnabled`, `commandBarSearchSuggestionsPrivacyHasBeenExplicitlyDismissed`), so they
 /// survive relaunch; `ephemeral()` keeps them in memory (tests, the scripted smoke), like `ToolbarSetting`.
 ///
-/// The Settings window (#307, waiting on the #305 design review) is the future editor; until it exists the
-/// notice's dismiss button is the only writer.
+/// Settings edits the shared value; open command bars observe changes.
 @MainActor
 public final class CommandBarSettings {
   /// Arc's "Include search engine suggestions" key (spec settings table: per-profile there, app-level here).
@@ -18,6 +17,19 @@ public final class CommandBarSettings {
   nonisolated public static let searchEngineName = "Google"
 
   private let defaults: UserDefaults?
+  private var observers: [UUID: @MainActor () -> Void] = [:]
+
+  func observe(_ action: @escaping @MainActor () -> Void) -> UUID {
+    let id = UUID()
+    observers[id] = action
+    return id
+  }
+
+  func removeObserver(_ id: UUID) { observers[id] = nil }
+
+  private func notifyObservers() {
+    for action in Array(observers.values) { action() }
+  }
 
   /// Whether the bar adds a "Search <engine>" row for typed queries. Defaults to true.
   public private(set) var searchSuggestionsEnabled: Bool
@@ -37,12 +49,14 @@ public final class CommandBarSettings {
     guard enabled != searchSuggestionsEnabled else { return }
     searchSuggestionsEnabled = enabled
     defaults?.set(enabled, forKey: Self.searchSuggestionsDefaultsKey)
+    notifyObservers()
   }
 
   public func dismissSearchSuggestionNotice() {
     guard !searchSuggestionNoticeDismissed else { return }
     searchSuggestionNoticeDismissed = true
     defaults?.set(true, forKey: Self.noticeDismissedDefaultsKey)
+    notifyObservers()
   }
 
   /// Suggestions on, notice not dismissed, and never touches user defaults.

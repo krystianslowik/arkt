@@ -38,7 +38,14 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   /// Enter on an archived match: restore it (BH-086).
   public var onRestoreArchived: ((UUID) -> Void)?
   /// Settings: search suggestions and the BH-113 notice dismissal.
-  public var settings: CommandBarSettings = .ephemeral()
+  public var settings: CommandBarSettings = .ephemeral() {
+    didSet {
+      if let settingsObserver { oldValue.removeObserver(settingsObserver) }
+      settingsObserver = nil
+      if !invalidated { observeSettings(); refreshForSettingsChange() }
+    }
+  }
+  private var settingsObserver: UUID?
   /// BH-108: the URL on the clipboard when the bar is open with an empty query (nil: no Paste and Go). The
   /// default reads nothing, so tests stay deterministic; the window wires the general pasteboard.
   public var clipboardURLProvider: () -> URL? = { nil }
@@ -145,6 +152,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   public init(parent: NSWindow) {
     self.parent = parent
     super.init()
+    observeSettings()
     panel.contentView = barView
     panel.delegate = self
     barView.field.delegate = self
@@ -208,12 +216,32 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   /// the controller does not show again afterwards.
   public func invalidate() {
     invalidated = true
+    if let settingsObserver { settings.removeObserver(settingsObserver) }
+    settingsObserver = nil
     NotificationCenter.default.removeObserver(self)
     firstFrameLink?.invalidate()
     firstFrameLink = nil
     hide(restoreFocus: false)
     scrim.removeFromSuperview()
     panel.orderOut(nil)
+  }
+
+  isolated deinit {
+    if let settingsObserver { settings.removeObserver(settingsObserver) }
+  }
+
+  private func observeSettings() {
+    settingsObserver = settings.observe { [weak self] in self?.refreshForSettingsChange() }
+  }
+
+  private func refreshForSettingsChange() {
+    guard isVisible else { return }
+    let selected = results.indices.contains(barView.table.selectedRow) ? results[barView.table.selectedRow] : nil
+    reloadResults()
+    if let selected, let index = results.firstIndex(of: selected) {
+      barView.table.selectRowIndexes([index], byExtendingSelection: false)
+    }
+    relayout()
   }
 
   var hasOpenSignpost: Bool { signpostState != nil }

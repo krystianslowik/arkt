@@ -502,6 +502,8 @@ final class AppSession {
     services.crashReportCount = { [weak self] in self?.crashCapture.storedCount ?? 0 }     // #129
     services.sendCrashReport = { [weak self] in self?.crashCapture.sendNewest() }
     services.spaces = { [weak self] in self.map { SettingsSpaceSummary.list(from: $0.source) } ?? [] }
+    services.searchSuggestionsEnabled = { [commandBarSettings] in commandBarSettings.searchSuggestionsEnabled }
+    services.setSearchSuggestionsEnabled = { [commandBarSettings] in commandBarSettings.setSearchSuggestionsEnabled($0) }
     services.archiveRows = archiveSettings.settingsRows                                // #448
     return services
   }

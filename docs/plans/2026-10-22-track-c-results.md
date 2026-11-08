@@ -2979,3 +2979,10 @@ gate does not change or assert reset semantics.
 The GUI gate was not compiled or run locally: the known ShellKit baseline compiler failure and unavailable full Xcode
 prevent a valid local result, and local GUI runs were excluded. CI must establish the intended red before production
 work. No passing or failing test count is claimed for this gate.
+
+### #562: shared search suggestions Settings
+
+- The test-first [GUI job 128673929031](https://github.com/krystianslowik/arkt/actions/runs/42462259000/job/128673929031) failed compilation at the two missing `SettingsServices` members in `SettingsSearchSuggestionsTests` lines 32–33. Zero tests ran; no unrelated source error was observed.
+- Settings now edits the existing `CommandBarSettings` through the app's shared instance. Open bars refresh the retained query and notice when it changes; observers are detached on replacement, invalidation and deallocation. The control is unavailable without both services. This gates the local Search Google row, with no network provider. The storage key, default, notice dismissal and reset policy remain unchanged.
+- A focused actual-source package using Swift 6.2.4 and the macOS 15.5 SDK passed 5 settings tests in 2 suites, including observer removal. Swift 6.2.4 frontend parsing passed for the five changed production files and three settings test files; `git diff --check` passed. These do not establish a GUI or app build. The existing GUI gate and the new replacement/invalidation GUI case were not run locally; CI is needed. No full ShellKit baseline retry, GUI launch or XCUITest was performed.
+- Folder/extension production forwarding, activation and presentation, search-engine selection and issue-wide checks remain open. Provider order is provisional and no new product policy is chosen.

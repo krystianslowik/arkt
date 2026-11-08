@@ -38,3 +38,20 @@ struct CommandBarSettingsTests {
     #expect(settings.searchSuggestionNoticeDismissed)
   }
 }
+
+@MainActor
+struct CommandBarSettingsObservationTests {
+  @Test func changesNotifyUntilObserverIsRemoved() {
+    let settings = CommandBarSettings.ephemeral()
+    var calls = 0
+    let token = settings.observe { calls += 1 }
+    settings.setSearchSuggestionsEnabled(false)
+    settings.setSearchSuggestionsEnabled(false)
+    settings.dismissSearchSuggestionNotice()
+    settings.dismissSearchSuggestionNotice()
+    #expect(calls == 2)
+    settings.removeObserver(token)
+    settings.setSearchSuggestionsEnabled(true)
+    #expect(calls == 2)
+  }
+}
