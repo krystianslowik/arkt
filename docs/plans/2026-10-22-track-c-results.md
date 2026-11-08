@@ -2958,3 +2958,21 @@ Written first. Each failed to compile before the code existed.
 - Added the plain-value source boundary, Core icon conversion, node notifications and no-op handling. Snapshot restamping and stub subtree and split duplication retain icon overrides. Added stub coverage for source dispatch, notifications, no-ops and subtree copies.
 - Swift 6.4.1 parsed the changed Swift sources and the boundary tests; import inspection and `git diff --check` passed. These checks do not compile or execute the contract tests. The local full ShellKit baseline is compiler-broken and full Xcode is unavailable; new CI validation is pending.
 - Picker and menu wiring, Favorite rendering and favicon reset fallback, expanded and collapsed folder rendering, GUI/UI and manual appearance, keyboard, accessibility and emoji Cancel checks remain. Follow the integration order in `docs/339-custom-icons-integration.md`.
+
+### Custom Favorite and folder icons: UI integration (#339)
+
+The Favorite and folder menus use the Space symbol catalog and emoji prompt, with checked selection and a Reset Icon
+item enabled only for the selected node's override. Node changes refresh the affected tile or row; the Favorite's
+favicon remains independently updated and is used again on reset. Folder overrides apply in both expansion states.
+The existing tile layout, media and close behavior remain in place. This is main-actor, event-driven work with cached
+glyphs and no per-frame work.
+
+The test-first ShellKit CI run 42436332236 at `cb1e891b516ddb1ea4c87ee8cfc76d3f4b750c43` ran 2509 tests in
+280 suites and reported 7 issues, all in SidebarContextMenuTests: one reset-enabled issue, three folder-menu issues,
+and three Favorite-menu issues. NodeIconContractTests and the stub node icon copies test passed. The aggregate failed;
+Core, app and lint passed. The GUI job was still running when observed and has no claimed result here.
+
+Swift 6.1.2 parsed the five changed UI sources and the three existing UI test files. `git diff --check` and the
+ShellUI forbidden-import scan passed. The changed paths have not been compiled or executed locally: the local
+ShellKit baseline is broken and full Xcode is unavailable. New-head CI, GUI and manual light/dark, keyboard,
+accessibility, emoji Cancel and screenshots remain required. No performance or runtime claim is made.

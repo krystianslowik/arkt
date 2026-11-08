@@ -556,6 +556,20 @@ enum SidebarGlyphs {
                  color: ShellTokens.sidebarForeground.resolve(flavor), scale: scale)
   }
 
+  static func customIcon(_ icon: SpaceIconInfo, flavor: ThemeFlavor, size: CGFloat, scale: CGFloat,
+                         cache: SymbolImageCache = .shared) -> NSImage {
+    switch icon {
+    case .symbol(let name):
+      return cache.symbol(name, box: size, color: ShellTokens.primaryText.resolve(flavor), scale: scale)
+    case .emoji(let emoji):
+      return cache.bitmap(key: "node-emoji-\(emoji)", size: size, scale: scale) { rect in
+        let text = NSAttributedString(string: emoji, attributes: [.font: NSFont.systemFont(ofSize: rect.height * 0.8)])
+        let measured = text.size()
+        text.draw(at: NSPoint(x: rect.midX - measured.width / 2, y: rect.midY - measured.height / 2))
+      }
+    }
+  }
+
   /// Row symbol in the row's text color for `flavor`.
   static func symbol(_ name: String, flavor: ThemeFlavor, scale: CGFloat,
                      cache: SymbolImageCache = .shared) -> NSImage {
