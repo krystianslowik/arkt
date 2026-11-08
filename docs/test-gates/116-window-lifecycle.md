@@ -67,6 +67,15 @@ The real-app test creates two regular windows with different selected Space/tab 
 reads the ordered collection before Cmd-Q, compares its selections after process exit, and identifies both restored
 selections in actual windows. Loopback request baselines are taken after shutdown. It uses existing UI and defaults
 facilities; it does not seed a session or call the WindowSet termination methods. Folder state is not asserted here.
+
+The review correction checks that the raw saved collection has exactly two entries before projecting selection
+identities, and uses a throwing map so an entry with a missing Space or tab cannot disappear. It repeats the raw
+count after quit. The third live window must carry the Incognito label within its own accessibility subtree.
+Setup identifies the new regular window by its absent selected beta tab rather than enumeration order. These checks
+close the private-entry false pass at the capture boundary; exact final restored count and order still require the
+launch-completion observation described below. The correction has not run and does not establish cross-process
+defaults visibility or native accessibility behavior.
+
 The test is a positive restoration gate, not proof that no extra window can appear. Neither new test has been
 executed or typechecked locally; its intended failure has not been observed. In particular, CI must establish that
 the sandboxed runner can observe the app's defaults suite and that the window-scoped accessibility queries work.

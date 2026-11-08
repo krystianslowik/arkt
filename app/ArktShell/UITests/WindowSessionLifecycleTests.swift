@@ -26,14 +26,20 @@ final class WindowSessionLifecycleTests: ArktUITestCase {
     app.typeKey("n", modifierFlags: .command)
     let windows = app.windows.matching(identifier: AXID.Shell.window)
     XCTAssertTrue(Waits.until("two regular windows") { windows.count == 2 })
-    // The new window is frontmost. Select Space 1 and its tab there; the other stays in Space 2.
-    let frontWindow = windows.element(boundBy: 0)
-    let dot = frontWindow.buttons.matching(identifier: AXID.Sidebar.spaceDot)
+    // Identify the new window by its absent selection rather than relying on accessibility enumeration order.
+    let newWindows = windows.allElementsBoundByIndex.filter { window in
+      let row = window.outlineRows.matching(identifier: AXID.Sidebar.rowToday)
+        .matching(NSPredicate(format: "label == %@", betaTitle)).firstMatch
+      return row.exists && !row.isSelected
+    }
+    XCTAssertEqual(newWindows.count, 1)
+    let newWindow = try XCTUnwrap(newWindows.first)
+    let dot = newWindow.buttons.matching(identifier: AXID.Sidebar.spaceDot)
       .matching(NSPredicate(format: "label == %@", "Space 1")).firstMatch
     XCTAssertTrue(waitFor(dot))
     dot.click()
     XCTAssertTrue(waitForSelected(dot))
-    let alphaRow = frontWindow.outlineRows.matching(identifier: AXID.Sidebar.rowToday)
+    let alphaRow = newWindow.outlineRows.matching(identifier: AXID.Sidebar.rowToday)
       .matching(NSPredicate(format: "label == %@", alphaTitle)).firstMatch
     XCTAssertTrue(waitFor(alphaRow))
     alphaRow.click()
@@ -44,15 +50,26 @@ final class WindowSessionLifecycleTests: ArktUITestCase {
     })
 
     app.typeKey("n", modifierFlags: [.command, .shift])
-    XCTAssertTrue(Waits.until("private window remains open at capture") { windows.count == 3 })
-    let defaults = try XCTUnwrap(UserDefaults(suiteName: sandbox.defaultsSuite))
-    var before: [String] = []
-    XCTAssertTrue(Waits.until("ordered regular-window state is captured with private window open") {
-      before = self.savedSelections(defaults)
-      return before.count == 2 && Set(before).count == 2
+    XCTAssertTrue(Waits.until("one identified Incognito window remains open at capture") {
+      windows.count == 3 && windows.allElementsBoundByIndex.filter { window in
+        let label = window.descendants(matching: .any).matching(identifier: AXID.Incognito.label).firstMatch
+        return label.exists && label.label == "Incognito"
+      }.count == 1
     })
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: sandbox.defaultsSuite))
+    var beforeWindows: [[String: Any]] = []
+    XCTAssertTrue(Waits.until("ordered regular-window state is captured with private window open") {
+      guard let saved = self.savedWindows(defaults) else { return false }
+      beforeWindows = saved
+      return saved.count == 2
+    })
+    XCTAssertEqual(beforeWindows.count, 2, "check raw entries before reading any selection fields")
+    let before = try selectedIdentities(beforeWindows)
+    XCTAssertEqual(Set(before).count, 2)
     quit(app)
-    XCTAssertEqual(savedSelections(defaults), before, "quit must preserve the final ordered selections")
+    let afterWindows = try XCTUnwrap(savedWindows(defaults))
+    XCTAssertEqual(afterWindows.count, 2, "quit cannot append an empty private-window entry")
+    XCTAssertEqual(try selectedIdentities(afterWindows), before, "quit must preserve the final ordered selections")
     let alphaRequests = server.requestedPaths.filter { $0 == "/p/session-alpha" }.count
     let betaRequests = server.requestedPaths.filter { $0 == "/p/session-beta" }.count
 
@@ -78,16 +95,20 @@ final class WindowSessionLifecycleTests: ArktUITestCase {
     }
   }
 
-  /// Read only the ordered selection identities, not frames that may change during termination.
-  private func savedSelections(_ defaults: UserDefaults) -> [String] {
+  private func savedWindows(_ defaults: UserDefaults) -> [[String: Any]]? {
     guard let data = defaults.data(forKey: "windowSessions"),
           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-          let windows = object["windows"] as? [[String: Any]] else { return [] }
-    return windows.compactMap { window in
-      guard let space = window["space"], let tab = window["currentTab"],
-            let data = try? JSONSerialization.data(withJSONObject: [space, tab], options: [.sortedKeys]),
-            let value = String(data: data, encoding: .utf8) else { return nil }
-      return value
+          let windows = object["windows"] as? [[String: Any]] else { return nil }
+    return windows
+  }
+
+  /// Every raw entry must have a selection; none may disappear when projecting the ordered identities.
+  private func selectedIdentities(_ windows: [[String: Any]]) throws -> [String] {
+    try windows.map { window in
+      let space = try XCTUnwrap(window["space"])
+      let tab = try XCTUnwrap(window["currentTab"])
+      let data = try JSONSerialization.data(withJSONObject: [space, tab], options: [.sortedKeys])
+      return try XCTUnwrap(String(data: data, encoding: .utf8))
     }
   }
 }
