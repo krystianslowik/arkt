@@ -52,6 +52,10 @@ final class ImportCheckRunner {
         try await importHistoryThenQuit(into: engine)
         return 0
       }
+      if phase == "history-retry" {
+        try await importSyntheticHistoryAgain(into: engine)
+        return 0
+      }
       if phase == "import" { try await importFixture(into: engine) }
       if phase == "verify" {
         // An empty batch writes nothing; the engine logs how many logins its store holds.
@@ -136,17 +140,23 @@ final class ImportCheckRunner {
     print("ARKT_IMPORT bookmarks again \(describe(await engine.importBookmarks(bookmarks.bookmarks)))")
   }
 
+  /// The synthetic batch of `=history-shutdown` and `=history-retry`: 4000 URLs with 10 visits each. The visit times
+  /// count back from the start of today, so every run on the same day sends the same visits.
+  private static func syntheticHistory() -> [ImportedHistoryEntry] {
+    let base = Calendar.current.startOfDay(for: Date())
+    return (0..<4_000).map { index in
+      ImportedHistoryEntry(
+        url: "https://shutdown-\(index).example/", title: "Shutdown \(index)", visitCount: 10, typedCount: 0,
+        lastVisit: nil,
+        visits: (0..<10).map { HistoryVisit(time: base.addingTimeInterval(-Double(index * 10 + $0 + 60)), transition: .link) })
+    }
+  }
+
   /// `=history-shutdown` (#531): queues a large synthetic history batch and quits while the history thread is still
   /// writing it, so the profile's history service is deleted before the import's barrier answers. The engine logs
   /// the visits that got no answer; the answer itself may arrive after the run loop has stopped.
   private static func importHistoryThenQuit(into engine: ChromiumEngine) async throws {
-    let now = Date()
-    let entries = (0..<4_000).map { index in
-      ImportedHistoryEntry(
-        url: "https://shutdown-\(index).example/", title: "Shutdown \(index)", visitCount: 10, typedCount: 0,
-        lastVisit: nil,
-        visits: (0..<10).map { HistoryVisit(time: now.addingTimeInterval(-Double(index * 10 + $0 + 60)), transition: .link) })
-    }
+    let entries = syntheticHistory()
     Task { @MainActor in
       let result = await engine.importHistory(entries, after: nil)
       print("ARKT_IMPORT history before quit \(describe(result))")
@@ -154,6 +164,14 @@ final class ImportCheckRunner {
     // Long enough for the batch to reach the history service, too short for the history thread to write 40000 visits.
     try await Task.sleep(for: .milliseconds(200))
     print("ARKT_IMPORT quitting with the history batch queued")
+  }
+
+  /// `=history-retry` (#754): sends the same synthetic batch with no watermark, as the coordinator does after a batch
+  /// that got no answer, and waits for the answer. Run after `=history-shutdown` (or after itself) on the same
+  /// profile: a visit the profile already holds is skipped, so the history ends with each visit once.
+  private static func importSyntheticHistoryAgain(into engine: ChromiumEngine) async throws {
+    let result = await engine.importHistory(syntheticHistory(), after: nil)
+    print("ARKT_IMPORT history retry \(describe(result)) latest=\(result.latestVisit.map { String($0.timeIntervalSince1970) } ?? "none")")
   }
 
   private static func installExtensions(through engine: ChromiumEngine) async throws {
