@@ -112,23 +112,14 @@ final class SplitViewTests: ArktUITestCase {
 
   func test_BH121_GS033_sidebarSplitRow() async throws {
     let (app, _, _) = try await startSplit()
-    let row = splitRow(app)
-    let before = Shell.todayRows(app).count
-    XCUIElement.perform(withKeyModifiers: .option) { row.click() }
-    XCTAssertTrue(Waits.until("option-click separates the split") {
-      !self.splitRow(app).exists && Shell.todayRows(app).count == before + 2
-    })
-    // Re-create a split from the current plain tab, then exercise its context menu.
-    let current = Shell.todayRows(app).allElementsBoundByIndex.first { $0.isSelected }
-    let tab = try XCTUnwrap(current)
-    XCUIElement.perform(withKeyModifiers: .option) { tab.click() }
-    XCTAssertTrue(waitFor(splitRow(app)))
-    let count = Shell.todayRows(app).count
+    // Probe both menus before either separation assertion can fail. Escape dismisses each real menu.
     let control = try XCTUnwrap(Shell.todayRows(app).allElementsBoundByIndex.first)
     let splitItem = app.menuItems["Separate All Tabs"]
     let controlItem = app.menuItems["Archive Below"]
     var snapshots = ""
+    var controlOpened = [Bool]()
     var splitOpened = [Bool]()
+    var dismissed = [Bool]()
     for controlClick in [false, true] {
       let method = controlClick ? "control-click" : "right-click"
       func click(_ target: XCUIElement) {
@@ -136,30 +127,47 @@ final class SplitViewTests: ArktUITestCase {
         else { target.rightClick() }
       }
       click(control)
-      let controlOpened = controlItem.waitForExistence(timeout: Waits.scaled(3))
-      snapshots += "\n\(method) regular row menu=\(controlOpened):\n" + app.debugDescription
+      controlOpened.append(controlItem.waitForExistence(timeout: Waits.scaled(3)))
+      snapshots += "\n\(method) regular row menu=\(controlOpened.last!):\n" + app.debugDescription
       app.typeKey(.escape, modifierFlags: [])
-      XCTAssertTrue(Waits.until("regular menu dismissed") { !controlItem.exists })
+      dismissed.append(Waits.until("regular menu dismissed") { !controlItem.exists })
       click(splitRow(app))
-      let opened = splitItem.waitForExistence(timeout: Waits.scaled(3))
-      splitOpened.append(opened)
-      snapshots += "\n\(method) split row menu=\(opened):\n" + app.debugDescription
+      splitOpened.append(splitItem.waitForExistence(timeout: Waits.scaled(3)))
+      snapshots += "\n\(method) split row menu=\(splitOpened.last!):\n" + app.debugDescription
       app.typeKey(.escape, modifierFlags: [])
-      XCTAssertTrue(Waits.until("split menu dismissed") { !splitItem.exists })
+      dismissed.append(Waits.until("split menu dismissed") { !splitItem.exists })
     }
     let probe = XCTAttachment(string: snapshots)
     probe.name = "regular and split row context menu accessibility probes"
     probe.lifetime = .deleteOnSuccess
     add(probe)
+
+    // The imported split is pinned: its two panes replace the split as pinned rows, not Today rows.
+    let pinned = app.outlineRows.matching(identifier: AXID.Sidebar.rowPinned)
+    let before = pinned.count
+    let todayBefore = Shell.todayRows(app).count
+    XCUIElement.perform(withKeyModifiers: .option) { self.splitRow(app).click() }
+    XCTAssertTrue(Waits.until("option-click separates the pinned split") {
+      !self.splitRow(app).exists && pinned.count == before + 2 && Shell.todayRows(app).count == todayBefore
+        && pinned.matching(NSPredicate(format: "label == %@", "Fixture /docs/left")).count == 1
+        && pinned.matching(NSPredicate(format: "label == %@", "Fixture /docs/right")).count == 1
+    })
+    XCTAssertTrue(controlOpened.contains(true), "regular row menu missing; inspect the paired probes")
     XCTAssertTrue(splitOpened.contains(true), "split menu missing; inspect the paired control probes")
+    XCTAssertTrue(dismissed.allSatisfy { $0 }, "a context menu did not dismiss")
+
+    // Re-create the split from its focused pinned page to exercise the menu action independently of its probes.
+    let current = try XCTUnwrap(pinned.allElementsBoundByIndex.first { $0.isSelected })
+    XCUIElement.perform(withKeyModifiers: .option) { current.click() }
+    XCTAssertTrue(waitFor(splitRow(app)))
+    let count = pinned.count
     guard let method = splitOpened.firstIndex(of: true) else { return }
     if method == 0 { splitRow(app).rightClick() }
     else { XCUIElement.perform(withKeyModifiers: .control) { self.splitRow(app).click() } }
     XCTAssertTrue(splitItem.waitForExistence(timeout: Waits.scaled(3)))
-    let item = splitItem
-    item.click()
-    XCTAssertTrue(Waits.until("context menu separates the split") {
-      !self.splitRow(app).exists && Shell.todayRows(app).count == count + 2
+    splitItem.click()
+    XCTAssertTrue(Waits.until("context menu separates the pinned split") {
+      !self.splitRow(app).exists && pinned.count == count + 2
     })
   }
 

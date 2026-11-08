@@ -1288,3 +1288,22 @@ Static checks on the review revision: Swift 6.2.4 frontend parse passed (syntax 
 checks passed, and `scripts/ui-tests/parity-report-test.sh` passed. The existing synthetic xcresult fixture, with test
 names mapped to BH-087, BH-115 and BH-125, was also run against the real spec and deferred file: search remained
 deferred to #827 and both split partials remained visible with a passing fixture result. These are not runtime tests.
+
+#### U15 first focused run and diagnosis
+
+Manual run [42427657005](https://github.com/krystianslowik/arkt/actions/runs/42427657005), UI job
+[128569375004](https://github.com/krystianslowik/arkt/actions/runs/42427657005/job/128569375004), built and
+executed six methods: five passed; `test_BH121_GS033_sidebarSplitRow` timed out on the Option-click condition.
+The exported failure accessibility tree shows no split row, the two `/docs/left` and `/docs/right` fixture pages as
+pinned rows, and the original Today row still present. `rowIdentifier(for:)` assigns split rows their own identifier
+and assigns tabs according to their section; `separateAllTabs` puts panes in the split's place. The test incorrectly
+expected two additional Today rows for this imported pinned split. It now checks both named pinned rows, the pinned
+count increase and unchanged Today count. This evidence supports an assertion defect, not a product bug.
+
+Both regular-row and split-row menu probes now run and attach their AX snapshots before the Option-click assertion;
+menus are dismissed through Escape and missing controls or split menus still fail. The action then recreates a split
+from the focused pinned page and tests the menu separation. A missing input or menu remains a failure, not a skip;
+the cause of a missing menu would remain unknown until the paired probes are inspected. The earlier five passes were
+on remote `eb8d4f3`, before the review follow-up above. The corrected sidebar test and review additions, including
+previous wrap and the BH-122 URL and Archive checks, are **not yet runtime verified**. A fresh focused class run is
+required. No production code changed.
