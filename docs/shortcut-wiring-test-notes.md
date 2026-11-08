@@ -45,3 +45,9 @@ Next Tab and Previous Tab each have a visible arrow binding and a hidden, separa
 both to one binding would erase an existing default. Other selector-based App, File, Edit, View, Spaces, Tabs,
 Window and Help commands remain read-only pending their own identity, alias and routing audit. Visible keyed rows
 remain listed by the existing read-only sections; unbound and hidden rows are not shown there.
+
+The Settings component now provides the six audited recorder controls through the injected editor; AppSession and
+MainMenu composition remains a later stage. CI run 42481041992 at `993a386` failed all five recorder scenarios on
+the missing sidebar control, and the competing-key scenario also failed its initial key-window assertion. The
+latter remains an independent setup/focus question. The new Return assertion was not reached. New-head GUI CI is
+needed for the implemented controls and native event routing; source parsing does not establish either.

@@ -3027,3 +3027,21 @@ RT-29/#78, with per-action priority deferred to #441.
 
 `xcrun swiftc -frontend -parse app/ArktShell/ShellKit/Tests/ShellKitGUITests/SettingsWindowTests.swift` and
 `git diff --check` passed; parsing is not compilation or execution. Full local builds and app/GUI tests were not run.
+
+### Settings shortcut recorder component (#119)
+
+The existing injected editor now drives recorder buttons for the six audited actions, per-row reset and Reset All.
+Recording captures Settings window keys before its pane and close shortcuts; Tab leaves, Escape cancels, and Delete
+clears. Conflicts offer Keep Existing with initial focus and Return as the default, or an explicit Use Shortcut.
+The warning uses the injected predicate only. Controls are retained across model notifications; the component does
+not compose the editor into the app or detect macOS system shortcuts.
+
+At `993a386`, GUI CI run 42481041992, job 128732861365, reported 2072 tests, 54 skipped, and six failures in five
+SettingsWindowTests. All five failed to find the sidebar recorder; the competing-key test also failed its initial
+`isKeyWindow` assertion. The Return assertion was not reached. The key-window setup failure remains separate and
+undiagnosed; it has not been weakened. No GUI or app was launched locally. New-head CI must establish compilation,
+focus, event delivery and the component result. Actual app composition and dispatch, live ShortcutWiringTests,
+remaining catalog audit, real system-warning source, RT-29/#78 and per-action priority #441 remain open.
+
+Swift 6.4.1 with SDK 15.5 type-checked the actual model and catalog sources; the changed Settings sources parsed.
+These are not GUI execution or a full ShellKit compile. The type check emitted the libSwiftScan fallback warning.

@@ -86,6 +86,7 @@ public enum ShortcutCatalog {
 
   public struct Entry: Equatable, Sendable {
     public var title: String
+    public var actionID: ShortcutActionID? = nil
     /// Keycaps in AppKit's order: Control, Option, Shift, Command, then the key.
     public var keys: [String]
     /// The keys as VoiceOver reads them: "Shift Command D".
@@ -105,21 +106,23 @@ public enum ShortcutCatalog {
 
   /// Every visible item with a key equivalent, submenus included, grouped by top-level menu; menus without one are
   /// left out.
-  public static func sections(from menu: NSMenu) -> [Section] {
+  public static func sections(from menu: NSMenu, includeEditableWithoutBindings: Bool = false) -> [Section] {
     menu.items.compactMap { top in
       guard let submenu = top.submenu, !top.isHidden else { return nil }
       var entries: [Entry] = []
-      collect(submenu, into: &entries)
+      collect(submenu, into: &entries, includeEditableWithoutBindings: includeEditableWithoutBindings)
       return entries.isEmpty ? nil : Section(title: top.title, entries: entries)
     }
   }
 
-  private static func collect(_ menu: NSMenu, into entries: inout [Entry]) {
+  private static func collect(_ menu: NSMenu, into entries: inout [Entry], includeEditableWithoutBindings: Bool) {
     for item in menu.items where !item.isHidden && !item.isSeparatorItem && !item.isAlternate {
       if let submenu = item.submenu {
-        collect(submenu, into: &entries)
+        collect(submenu, into: &entries, includeEditableWithoutBindings: includeEditableWithoutBindings)
       } else if let entry = entry(for: item) {
         entries.append(entry)
+      } else if includeEditableWithoutBindings, let id = actionID(item) {
+        entries.append(Entry(title: item.title, actionID: id, keys: [], spoken: "None"))
       }
     }
   }
@@ -142,7 +145,7 @@ public enum ShortcutCatalog {
     let (glyph, word) = name(of: key)
     keys.append(glyph)
     words.append(word)
-    return Entry(title: item.title, keys: keys, spoken: words.joined(separator: " "))
+    return Entry(title: item.title, actionID: actionID(item), keys: keys, spoken: words.joined(separator: " "))
   }
 
   private static func name(of key: String) -> (glyph: String, word: String) {

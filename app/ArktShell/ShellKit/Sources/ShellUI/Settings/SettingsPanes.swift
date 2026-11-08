@@ -308,7 +308,9 @@ extension SettingsWindowController {
   // MARK: Shortcuts
 
   private func shortcutsBlocks() -> [SettingsBlockView] {
-    shortcutSections = services.shortcutsMenu().map(ShortcutCatalog.sections(from:)) ?? []
+    shortcutSections = services.shortcutsMenu().map {
+      ShortcutCatalog.sections(from: $0, includeEditableWithoutBindings: services.shortcutEditor != nil)
+    } ?? []
     let search = SettingsFixedBlock(shortcutsSearch, height: SettingsMetrics.searchHeight)
     return [search] + shortcutSectionBlocks(ShortcutCatalog.filter(shortcutSections, query: shortcutsSearch.stringValue))
       + [shortcutsFooter()]
@@ -317,6 +319,11 @@ extension SettingsWindowController {
   private func shortcutSectionBlocks(_ sections: [ShortcutCatalog.Section]) -> [SettingsBlockView] {
     sections.map { section in
       self.section(section.title, section.entries.map { entry in
+        if let id = entry.actionID, let editor = services.shortcutEditor,
+           editor.catalog.contains(where: { $0.id == id }) {
+          let button = shortcutRecorder(for: id, title: entry.displayTitle)
+          return SettingsRowView(label: entry.title, trailing: [button])
+        }
         let keys = SettingsKeycapsView(keys: entry.keys, spoken: entry.spoken)
         let row = SettingsRowView(label: entry.title, trailing: [keys])
         row.setAccessibilityElement(true)
@@ -328,13 +335,15 @@ extension SettingsWindowController {
   }
 
   private func shortcutsFooter() -> SettingsBlockView {
-    let note = settingsLabel("Changing a shortcut, and choosing whether Arkt or the website gets it first, is "
-                               + "not available yet.", size: 12)
+    let note = settingsLabel("App shortcuts take priority over page shortcuts.", size: 12)
     note.textColor = ShellTokens.secondaryText.resolve(window?.contentView?.archiveFlavor ?? .light).nsColor()
-    let reset = destructiveLink(.shortcuts, "resetAll", "Reset All Shortcuts...")
-    reset.isEnabled = false
+    let reset = destructiveLink(.shortcuts, "resetAll", "Reset All Shortcuts...") { [weak self] in
+      self?.services.shortcutEditor?.resetAll()
+      self?.cancelShortcutRecording()
+    }
+    reset.isEnabled = !(services.shortcutEditor?.overrides.isEmpty ?? true)
     reset.disabledOpacity = Float(SettingsTokens.disabledControlAlpha)
-    reset.setAccessibilityHelp(SettingsRowView.notAvailable)
+    shortcutResetAll = reset
     let holder = NSView()
     holder.addSubview(note)
     holder.addSubview(reset)

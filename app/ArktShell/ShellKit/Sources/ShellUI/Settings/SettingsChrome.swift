@@ -310,11 +310,18 @@ final class SettingsRootView: NSView {
 @MainActor
 final class SettingsWindow: NSWindow {
   var onCommandNumber: (@MainActor (Int) -> Bool)?
+  var onShortcutKey: (@MainActor (NSEvent) -> Bool)?
+
+  override func sendEvent(_ event: NSEvent) {
+    if event.type == .keyDown, onShortcutKey?(event) == true { return }
+    super.sendEvent(event)
+  }
   var paneTitle = "General"
 
   override func accessibilityTitle() -> String? { "Settings, \(paneTitle)" }
 
   override func performKeyEquivalent(with event: NSEvent) -> Bool {
+    if event.type == .keyDown, onShortcutKey?(event) == true { return true }
     let flags = event.modifierFlags.intersection([.command, .option, .control, .shift])
     if flags == .command, event.type == .keyDown, let characters = event.charactersIgnoringModifiers {
       if characters == "w" {
