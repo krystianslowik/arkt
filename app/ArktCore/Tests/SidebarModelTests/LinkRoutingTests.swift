@@ -10,15 +10,38 @@ struct LinkRoutingTests {
   @Test func matchesRequiresAnEqualURL() {
     let route = LinkRouting.Route(condition: .matches("https://example.com/docs"), destination: .littleArkt)
 
-    #expect(route.matches(url))
-    #expect(!route.matches(URL(string: "https://example.com/docs/other")!))
+    #expect(route.applies(to: url))
+    #expect(!route.applies(to: URL(string: "https://example.com/docs/other")!))
   }
 
   @Test func containsMatchesTextWithinTheURL() {
     let route = LinkRouting.Route(condition: .contains("example.com"), destination: .littleArkt)
 
-    #expect(route.matches(url))
-    #expect(!route.matches(URL(string: "https://other.example/docs")!))
+    #expect(route.applies(to: url))
+    #expect(!route.applies(to: URL(string: "https://other.example/docs")!))
+  }
+
+  @Test func equalityDoesNotNormalizeCaseSlashQueryOrFragment() {
+    let route = LinkRouting.Route(condition: .matches("https://example.com/docs"), destination: .littleArkt)
+
+    for text in [
+      "https://Example.com/docs", "https://example.com/docs/",
+      "https://example.com/docs?q=1", "https://example.com/docs#top",
+    ] {
+      #expect(!route.applies(to: URL(string: text)!))
+    }
+  }
+
+  @Test func containsIsCaseSensitive() {
+    let route = LinkRouting.Route(condition: .contains("example.com"), destination: .littleArkt)
+
+    #expect(!route.applies(to: URL(string: "https://EXAMPLE.com/docs")!))
+  }
+
+  @Test func unmatchedLinkCanDefaultToMostRecentSpace() {
+    let routing = LinkRouting(routes: [], defaultDestination: .mostRecentSpace)
+
+    #expect(routing.destination(for: url) == .mostRecentSpace)
   }
 
   @Test func matchingRouteResolvesToItsSpace() {

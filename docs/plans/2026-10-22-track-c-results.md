@@ -2913,3 +2913,10 @@ Written first. Each failed to compile before the code existed.
   actual model and test files and the existing `SpaceID = UUID` alias compiled and passed 9 tests in 1 suite;
   this is not a full ArktCore package run. The initial isolated attempt used the package's implicit macOS 10.13
   target and failed to import Testing; setting the repository's macOS 15 target fixed the harness.
+- Review follow-up: `Condition.applies(to:)` and `Route.applies(to:)` avoid overloading the `.matches` case name.
+  Equality uses the exact `URL.absoluteString`, including case, trailing slash, query and fragment; contains is
+  case-sensitive. These are interim characterizations pending the maintainer's normalization decision.
+  Added three tests for those boundaries and the most-recent-Space default. Repeating `swift test --jobs 2`
+  in the isolated package with the updated actual model and tests passed 12 tests in 1 suite: the original 7,
+  2 ambiguity cases and 3 review cases. Full-package baseline-plus-7 evidence still needs CI; these isolated
+  counts do not establish a full ArktCore pass.

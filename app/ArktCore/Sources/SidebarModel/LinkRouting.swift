@@ -6,7 +6,8 @@ public struct LinkRouting: Hashable, Sendable {
     case contains(String)
     case matches(String)
 
-    public func matches(_ url: URL) -> Bool {
+    /// Compares the URL's absolute string without normalization or case folding.
+    public func applies(to url: URL) -> Bool {
       switch self {
       case .contains(let text): url.absoluteString.contains(text)
       case .matches(let text): url.absoluteString == text
@@ -29,7 +30,7 @@ public struct LinkRouting: Hashable, Sendable {
       self.destination = destination
     }
 
-    public func matches(_ url: URL) -> Bool { condition.matches(url) }
+    public func applies(to url: URL) -> Bool { condition.applies(to: url) }
   }
 
   public enum Resolution: Hashable, Sendable {
@@ -45,7 +46,7 @@ public struct LinkRouting: Hashable, Sendable {
     self.defaultDestination = defaultDestination
   }
 
-  public func matchingRoutes(for url: URL) -> [Route] { routes.filter { $0.matches(url) } }
+  public func matchingRoutes(for url: URL) -> [Route] { routes.filter { $0.applies(to: url) } }
 
   public func resolution(for url: URL) -> Resolution {
     let matches = matchingRoutes(for: url)
