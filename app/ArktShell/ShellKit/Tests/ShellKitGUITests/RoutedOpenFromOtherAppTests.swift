@@ -161,6 +161,36 @@ final class RoutedOpenFromOtherAppTests: XCTestCase {
     XCTAssertEqual(urls(set, in: first), before)
     XCTAssertEqual(littleURLs(set, engine), [little])
   }
+
+  func testRefusedProfileSelectionDoesNotDispatchIntoTheUnchangedSpace() throws {
+    for mostRecent in [false, true] {
+      var sidebar = Sidebar()
+      let otherProfile = sidebar.addSpace(title: "Other profile", profile: "other")
+      let local = sidebar.addSpace(title: "Regular", profile: "default")
+      let source = ModelSidebarSource(sidebar: sidebar, now: { EngineWorld.now })
+      let set = ShellWindowSet(engine: InMemoryEngine(), sidebar: source)
+      sets.append(set)
+      if !mostRecent {
+        let regular = set.openWindow(opensFirstTab: false)
+        XCTAssertEqual(regular.currentSpace, local)
+      }
+      // The cold Most Recent path chooses the first Space, which is also in the other profile.
+      set.externalLinkDestination = { _ in mostRecent ? .mostRecentSpace : .space(otherProfile) }
+      let before = urls(set, in: local)
+      let target = URL(string: "https://example.com/profile-selection")!
+      let result = set.openFromOtherApp([target])
+      if result == [.dispatched(target)] {
+        // A future profile-capable host can dispatch, but it must actually reach the requested Space.
+        XCTAssertTrue(set.controllers.contains { $0.currentSpace == otherProfile })
+        XCTAssertEqual(urls(set, in: otherProfile), [target.absoluteString])
+      } else {
+        XCTAssertEqual(result, [.unresolved(target)])
+        XCTAssertTrue(urls(set, in: otherProfile).isEmpty)
+      }
+      XCTAssertEqual(urls(set, in: local), before, "a refused Space selection must not open in the old Space")
+      XCTAssertTrue(set.littleArkts.isEmpty)
+    }
+  }
 }
 
 private actor RoutingOpenStore: LinkRoutingSettingsStoring {

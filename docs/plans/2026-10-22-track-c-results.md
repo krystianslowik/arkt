@@ -3076,3 +3076,10 @@ whitespace checks passed; parsing is not compilation or behavioral validation.
 The real window-set GUI tests, full ShellKit and App builds, GUI and XCUITest were not run locally. Normal CI must
 validate window behavior. AppDelegate early URL forwarding, AppSession readiness, retry and resolver injection, and
 Chromium startup window requests remain a later composition stage; no persisted startup routing is wired here.
+
+
+### #113: refused profile selection regression gate
+
+Review found that an existing target Space can belong to another profile: SidebarController.showSpace refuses it, but the dispatcher then opens in the unchanged Space and reports success. A new real-window-set regression uses a ModelSidebarSource containing two profiles. It covers an explicit other-profile destination and cold Most Recent with the other-profile Space first. It requires either genuine delivery into that requested Space or an unresolved result with no URL added elsewhere; this does not prescribe future profile routing or a fallback.
+
+The test was written before the dispatch fix. Swift 6.2.4 frontend parsing and whitespace checks passed. Its runtime red is unobserved: the local full GUI baseline cannot build and full Xcode is unavailable, so normal GUI CI must execute this gate before the production correction. No production code changes in this gate; the P2 remains open until corrected and verified. The prior 54-test actual-source result exercises mapping/persistence, not this real-window profile case.
