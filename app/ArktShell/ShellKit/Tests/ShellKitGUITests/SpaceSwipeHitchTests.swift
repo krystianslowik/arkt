@@ -465,11 +465,20 @@ final class SpaceSwipeHitchTests: XCTestCase {
     return data as Data
   }
 
-  /// The sample sidebar with an imported Space of `tabs` Today tabs (each with its own favicon) right after Personal,
-  /// shown in a fresh window with every favicon handed to the sidebar the way the app does after an import.
-  private func showImportedProfile(tabs: Int, pixels: Int) async {
+  /// The sample sidebar with an imported Space of `tabs` Today tabs (each with its own favicon unless `pixels` is 0)
+  /// right after Personal, with every favicon handed to the sidebar the way the app does after an import. By default
+  /// the Space is there when a fresh window opens (a relaunch after the import); `intoOpenWindow` imports it into a
+  /// window already on screen instead, so its page is created mid-session.
+  private func showImportedProfile(tabs: Int, pixels: Int, intoOpenWindow: Bool = false) async {
     controller.close()
     sidebar = StubSidebar.sample()
+    func makeWindow() async {
+      controller = ShellWindowController(engine: InMemoryEngine(), sidebar: sidebar)
+      controller.showWindow(nil)
+      controller.window?.contentView?.layoutSubtreeIfNeeded()
+      await finishPendingPasses()
+    }
+    if intoOpenWindow { await makeWindow() }
     let imported = sidebar.addSpace(title: "Imported", after: sidebar.spaceOrder[0])
     var favicons: [NodeID: Data] = [:]
     for index in 0..<tabs {
@@ -477,21 +486,113 @@ final class SpaceSwipeHitchTests: XCTestCase {
                                 title: "Imported tab \(index) with a fairly long page title", in: .today(imported))
       if pixels > 0 { favicons[node] = Self.importedFaviconPNG(index, pixels: pixels) }
     }
-    controller = ShellWindowController(engine: InMemoryEngine(), sidebar: sidebar)
-    controller.showWindow(nil)
-    controller.window?.contentView?.layoutSubtreeIfNeeded()
+    if !intoOpenWindow { await makeWindow() }
     controller.sidebarController.setFavicons(favicons)
     await controller.sidebarController.settleFaviconDecodes()
+    await finishPendingPasses()
+  }
+
+  /// Turns the main run loop until two passes have finished, so the work the fixture queued (a window it just showed,
+  /// a Space it just imported) is done before a measured interaction starts. The first pass after a window is shown
+  /// draws and commits the whole window for the first time: about 70 ms of main-thread CPU in Debug, the same with an
+  /// empty Space as with 300 tabs (#676). In the app that pass is over long before a swipe can start; a swipe begun
+  /// inside it would be charged for it. Bounded by turns, not by time.
+  private func finishPendingPasses(maxTurns: Int = 10) async {
+    let probe = MainThreadBusyProbe(capacity: 8)
+    probe.start()
+    for _ in 0..<maxTurns where probe.spans.count < 2 {
+      let turned = expectation(description: "a main run loop turn")
+      RunLoop.main.perform { turned.fulfill() }
+      await fulfillment(of: [turned], timeout: 5)
+    }
+    probe.stop()
+    XCTAssertGreaterThanOrEqual(probe.spans.count, 2, "the fixture's pending passes finished")
   }
 
   /// #605: the first swipe into a Space of 300 imported tabs draws every visible favicon for the first time inside
-  /// the swipe's frames. Main-thread CPU of each pass from the first frame on stays under one 120 Hz frame; the pass
-  /// that begins the gesture (before any frame, where the page is first shown and laid out) is reported. Before the
-  /// fix the favicons were `NSImage(data:)`, decoded lazily on the main thread at first draw.
+  /// the swipe's frames. Main-thread CPU of each pass from the first frame on stays under one 120 Hz frame, and so
+  /// does the pass that begins the gesture (before any frame; #676). Before the fix the favicons were
+  /// `NSImage(data:)`, decoded lazily on the main thread at first draw.
   func testFirstSwipeIntoAnImportedSpaceStaysUnderOneFrameOfMainThreadCPU() async throws {
     try PacingEnvironment.skipIfScreenBelow120Hz(fps: controller.window?.screen?.maximumFramesPerSecond ?? 0)
     let pixels = Int(ProcessInfo.processInfo.environment["ARKT_IMPORTED_FAVICON_PIXELS"] ?? "") ?? 256
-    await showImportedProfile(tabs: 300, pixels: pixels)
+    await checkFirstSwipeIntoImportedSpace(tabs: 300, pixels: pixels)
+  }
+
+  /// #676: the same first swipe with no favicons at all (an import whose icons have not loaded): nothing in the
+  /// fixture waits on a decode, so the swipe starts right after the window opened. The pass that begins the gesture
+  /// and every frame after it stay under one 120 Hz frame of main-thread CPU.
+  func testFirstSwipeIntoAnImportedSpaceWithoutFaviconsStaysUnderOneFrameOfMainThreadCPU() async throws {
+    try PacingEnvironment.skipIfScreenBelow120Hz(fps: controller.window?.screen?.maximumFramesPerSecond ?? 0)
+    await checkFirstSwipeIntoImportedSpace(tabs: 300, pixels: 0)
+  }
+
+  /// #676: the same Space imported into a window already on screen: its page is created and its visible rows built
+  /// when the import lands (#297), so the first swipe into it does not show and lay it out for the first time.
+  func testFirstSwipeIntoASpaceImportedIntoAnOpenWindowStaysUnderOneFrameOfMainThreadCPU() async throws {
+    try PacingEnvironment.skipIfScreenBelow120Hz(fps: controller.window?.screen?.maximumFramesPerSecond ?? 0)
+    await checkFirstSwipeIntoImportedSpace(tabs: 300, pixels: 0, intoOpenWindow: true)
+  }
+
+  /// Row views the page has built (realized), visible or not.
+  private func realizedRows(_ page: NSView) throws -> Int {
+    let outline = try XCTUnwrap(page as? SpacePageView, "a Space page").outlineView
+    var count = 0
+    outline.enumerateAvailableRowViews { _, _ in count += 1 }
+    return count
+  }
+
+  /// #676: tabs imported into a Space whose page is hidden get their row views when the import lands, in that pass's
+  /// layout, not on the first frame that shows the page. One build however many tabs arrive in the pass. Runs on any
+  /// screen (no frame timing).
+  func testRowsImportedIntoAHiddenPageAreBuiltBeforeItIsShown() throws {
+    let pager = controller.pager
+    let imported = sidebar.addSpace(title: "Imported", after: sidebar.spaceOrder[0])
+    let page = pager.pages[1]
+    XCTAssertTrue(page.isHidden)
+    let empty = try realizedRows(page)
+    for index in 0..<300 {
+      _ = sidebar.addTab(url: URL(string: "https://site\(index).example/page")!, title: "Imported tab \(index)",
+                         in: .today(imported))
+    }
+    controller.window?.contentView?.layoutSubtreeIfNeeded()
+    XCTAssertTrue(page.isHidden, "the page stays hidden")
+    let visibleRows = Int(pager.bounds.height / SidebarMetrics.rowPitch)
+    XCTAssertGreaterThan(try realizedRows(page), empty + visibleRows / 2, "the hidden page built its visible rows")
+    XCTAssertLessThan(try realizedRows(page), 150, "only the rows around the scrolled position, not all 300")
+  }
+
+  /// A hidden page whose rows change while the strip moves is not built mid-motion (that would sync the strip
+  /// geometry inside a frame); it is built when the settle comes to rest.
+  func testRowsChangedInAHiddenPageWhileTheStripMovesAreBuiltAtRest() async throws {
+    let pager = controller.pager
+    let dev = sidebar.spaceOrder[2]
+    let page = pager.pages[2]
+    let before = try realizedRows(page)
+    pager.reduceMotionForTesting = true
+    pager.beginTracking()
+    pager.track(delta: 20, at: 0.01)
+    XCTAssertTrue(page.isHidden, "the strip rubber-bands before page 0; page 2 stays hidden")
+    let syncs = pager.stripFrameSyncsForTesting
+    for index in 0..<40 {
+      _ = sidebar.addTab(url: URL(string: "https://dev\(index).example/")!, title: "Dev tab \(index)", in: .today(dev),
+                         at: 0)
+    }
+    controller.window?.contentView?.layoutSubtreeIfNeeded()
+    XCTAssertEqual(pager.stripFrameSyncsForTesting, syncs, "no strip sync inside the motion")
+    XCTAssertEqual(try realizedRows(page), before, "not built while the strip moves")
+    let settled = expectation(description: "settled")
+    pager.onSettleForTesting = { _ in settled.fulfill() }
+    pager.endTracking()
+    await fulfillment(of: [settled], timeout: 5)
+    pager.onSettleForTesting = nil
+    XCTAssertEqual(pager.index, 0)
+    XCTAssertTrue(page.isHidden)
+    XCTAssertGreaterThan(try realizedRows(page), before, "built at rest, before a switch shows it")
+  }
+
+  private func checkFirstSwipeIntoImportedSpace(tabs: Int, pixels: Int, intoOpenWindow: Bool = false) async {
+    await showImportedProfile(tabs: tabs, pixels: pixels, intoOpenWindow: intoOpenWindow)
     let cold = await swipe(delta: -9)
     XCTAssertEqual(controller.pager.index, 1, "the swipe landed on the imported Space")
     _ = await swipe(delta: 9)
@@ -503,10 +604,14 @@ final class SpaceSwipeHitchTests: XCTestCase {
     }
     func worst(_ passes: [Pass]) -> Double { (passes.map(\.cpu).max() ?? 0) * 1000 }
     func frame0(_ passes: [Pass]) -> Double { (passes.filter { $0.frame == 0 }.map(\.cpu).max() ?? 0) * 1000 }
-    print(String(format: "importedswipe.cost pixels=%d coldBeginMs=%.2f coldFramesMaxMs=%.2f coldFrame0Ms=%.2f "
-                 + "warmBeginMs=%.2f warmFramesMaxMs=%.2f warmFrame0Ms=%.2f", pixels, worst(split(cold).begin),
-                 worst(split(cold).frames), frame0(cold), worst(split(warm).begin), worst(split(warm).frames),
-                 frame0(warm)))
+    print(String(format: "importedswipe.cost tabs=%d pixels=%d live=%d coldBeginMs=%.2f coldFramesMaxMs=%.2f "
+                 + "coldFrame0Ms=%.2f warmBeginMs=%.2f warmFramesMaxMs=%.2f warmFrame0Ms=%.2f", tabs, pixels, intoOpenWindow ? 1 : 0,
+                 worst(split(cold).begin), worst(split(cold).frames), frame0(cold), worst(split(warm).begin),
+                 worst(split(warm).frames), frame0(warm)))
+    XCTAssertFalse(split(cold).begin.isEmpty, "the probe saw the pass that begins the first swipe")
+    XCTAssertLessThan(worst(split(cold).begin) / 1000, FrameStats().designBudget,
+                      "the pass that begins the first swipe into the imported Space took a whole 120 Hz frame of "
+                      + "main-thread CPU")
     XCTAssertLessThan(worst(split(cold).frames) / 1000, FrameStats().designBudget,
                       "a frame of the first swipe into the imported Space took a whole 120 Hz frame of main-thread CPU")
   }

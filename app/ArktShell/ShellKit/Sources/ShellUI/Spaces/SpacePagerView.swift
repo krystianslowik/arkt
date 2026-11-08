@@ -102,6 +102,7 @@ public final class SpacePagerView: NSView {
     pages = newPages
     // A removed page leaves the set, so a new page that reuses its address is still prepared (#297).
     preparedPages.formIntersection(newPages.map(ObjectIdentifier.init))
+    changedHiddenPages.formIntersection(newPages.map(ObjectIdentifier.init))
     needsLayout = true
     jump(to: newIndex)
     // A page added mid-session (a new Space) gets its rows now, in this pass; the window-open case has no
@@ -141,6 +142,7 @@ public final class SpacePagerView: NSView {
       // switch's frames (#297). Pages with rows already are a cheap check.
       for i in pages.indices { preparePageForDisplay(i) }
     }
+    prepareChangedPagesAtRest()
   }
 
   private func apply(offset newOffset: CGFloat) {
@@ -244,8 +246,33 @@ public final class SpacePagerView: NSView {
   }
 
   /// Pages whose visible rows were built already. Legitimately tiled rows survive being parked again; a page
-  /// leaves the set only by leaving `pages` (#297).
+  /// leaves the set by leaving `pages` (#297) or when its rows change while it is hidden (#676).
   private var preparedPages: Set<ObjectIdentifier> = []
+
+  /// Hidden pages whose rows changed since they were prepared, waiting for the pager to rest (#676).
+  private var changedHiddenPages: Set<ObjectIdentifier> = []
+
+  /// The rows of `page` changed (inserted, removed, moved, reloaded, expanded or collapsed). A hidden page builds the
+  /// rows that are now in its visible range again before a switch shows it (#676): an import fills a new Space's page
+  /// after `setPages` prepared it empty, and without this the first frame that shows the page would build every
+  /// visible row (about 25 ms of main-thread CPU for a 300-tab Space in Debug). Coalesced: any number of changes in
+  /// one pass cost one build, in the pass's layout, and only while the strip rests; a moving strip leaves it to the
+  /// settle's end, or to the next switch's preparation off its frames.
+  public func pageRowsChanged(_ page: NSView) {
+    guard page.isHidden, pages.contains(where: { $0 === page }) else { return }
+    let id = ObjectIdentifier(page)
+    preparedPages.remove(id)
+    guard changedHiddenPages.insert(id).inserted else { return }
+    needsLayout = true
+  }
+
+  /// Builds the visible rows of the hidden pages whose rows changed, when nothing moves.
+  private func prepareChangedPagesAtRest() {
+    guard !changedHiddenPages.isEmpty, !(isTracking || driver.isRunning) else { return }
+    let changed = changedHiddenPages
+    changedHiddenPages.removeAll()
+    for (i, page) in pages.enumerated() where changed.contains(ObjectIdentifier(page)) { preparePageForDisplay(i) }
+  }
 
   /// Builds a hidden page's visible rows before a switch shows it (#297), off the frame that shows it: the strip
   /// is slid so the page intersects the visible area, the page tiles its table, and everything is put back, all
@@ -419,6 +446,7 @@ public final class SpacePagerView: NSView {
     targetIndex = index
     syncStripFrame()
     updatePageVisibility()
+    if !changedHiddenPages.isEmpty { needsLayout = true }   // built at rest, in the next layout (#676)
   }
 
   private func settle(to target: Int, velocity: CGFloat) {
@@ -436,6 +464,7 @@ public final class SpacePagerView: NSView {
                      self.index = target
                      self.syncStripFrame()
                      self.updatePageVisibility()
+                     self.prepareChangedPagesAtRest()
                      self.settled(target)
                    })
   }
