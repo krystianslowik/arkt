@@ -3108,3 +3108,23 @@ Swift 6.2.4 frontend parsing of the three changed Swift files and `git diff --ch
 GUI, app launch or full package build ran locally. This repair has no new-head executable result yet. App/menu
 composition, real-app dispatch, the remaining catalog audit, macOS system-warning detection, VoiceOver and visual
 review remain outstanding; the PR stays draft.
+
+
+### Recorder regressions green; application activation fixture remains (#119)
+
+At `079ae3ae52c6d8896bbbc7fb3b06d57e15a655af`, [GUI job 128770392288](https://github.com/krystianslowik/arkt/actions/runs/42493380660/job/128770392288)
+reported 2087 tests, 60 skipped and one failed assertion. The live-binding search, focus-leaving recorder and
+app-conflict system warning regressions all passed, as did Return-default/focused-Use Space activation and the
+existing recorder component scenario. The sole failure was `isKeyWindow` before application-level key dispatch;
+no competing Cmd-W/number event was sent in that failed method. Other required checks and the App build passed.
+
+The SDK declaration of NSApplication.activate states that activation need not be immediate or succeed. The test
+now awaits activation over finite main-actor turns, requests its key window, then awaits key status over finite
+turns. It retains the key-window failure, early exit on invalid setup, and every application-dispatch, captured
+binding, pane and visibility assertion. No sleep, wall-clock deadline, skip, direct-window event substitution or
+production change is included. If the runner refuses activation, the failure now records active/visible/key-capable
+and existing-key-window state. This does not guarantee activation or establish a passing application-routing test.
+
+Swift 6.2.4 frontend parsing and whitespace/import checks passed. The asynchronous fixture has not run locally;
+CI must verify its behavior. No local full package/App build, GUI or app launch ran. App/menu composition, the
+remaining catalog audit, real system-warning detection, native accessibility and visual checks remain unfinished.

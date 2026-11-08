@@ -690,7 +690,7 @@ final class SettingsWindowTests: XCTestCase {
     XCTAssertEqual(reopened.binding(for: tab), ShortcutBinding(key: "t", modifiers: .command))
   }
 
-  func testRecorderBeatsSettingsWindowKeysUntilRecordingEnds() throws {
+  func testRecorderBeatsSettingsWindowKeysUntilRecordingEnds() async throws {
     let menu = MainMenu.make(commands: AppCommands()).menu
     let model = ShortcutEditorModel(catalog: ShortcutCatalog.definitions(from: menu), defaults: defaults)
     let controller = make(menu: menu, editor: model)
@@ -701,8 +701,19 @@ final class SettingsWindowTests: XCTestCase {
     defer { NSApp.mainMenu = savedMenu }
     NSApp.mainMenu = menu
     NSApp.activate()
+    // AppKit activation is asynchronous and may be refused; give its callbacks finite actor turns, not a sleep.
+    for _ in 0..<10_000 {
+      if NSApp.isActive { break }
+      await Task.yield()
+    }
     window.makeKeyAndOrderFront(nil)
-    XCTAssertTrue(window.isKeyWindow)
+    for _ in 0..<10_000 {
+      if window.isKeyWindow { break }
+      await Task.yield()
+    }
+    XCTAssertTrue(window.isKeyWindow,
+                  "Application-dispatch setup: active=\(NSApp.isActive), visible=\(window.isVisible), "
+                    + "canBecomeKey=\(window.canBecomeKey), hasKeyWindow=\(NSApp.keyWindow != nil)")
     guard window.isKeyWindow else { return } // Do not interpret undelivered application events as recorder failures.
     for (key, code) in [("w", UInt16(13)), ("1", 18), ("2", 19), ("3", 20), ("4", 21),
                         ("5", 23), ("6", 22), ("7", 26)] {
