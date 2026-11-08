@@ -355,7 +355,7 @@ final class ThemeColourCountButton: ThemeFocusableView {
     }
     plus.string = "+"
     plus.fontSize = 12
-    plus.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+    plus.font = ShellType.captionEmphasis.font
     plus.alignmentMode = .center
     plus.contentsScale = 2
     layer?.addSublayer(plus)

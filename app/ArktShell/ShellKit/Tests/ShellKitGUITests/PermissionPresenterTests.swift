@@ -45,10 +45,16 @@ final class PermissionPresenterTests: XCTestCase {
     observation = engine.observe { [unowned self] in presenter.handle($0) }
   }
 
+  // XCTest keeps each test case object until the run ends: release the windows too, not only hide them (#805).
   override func tearDown() async throws {
     observation?.cancel()
     presenter.closeAll()
-    window.orderOut(nil)
+    window.isReleasedWhenClosed = false
+    window.close()
+    presenter = nil
+    page = nil
+    window = nil
+    engine = nil
   }
 
   private func panel() throws -> DialogPanel { try XCTUnwrap(presenter.panel(for: tab)) }

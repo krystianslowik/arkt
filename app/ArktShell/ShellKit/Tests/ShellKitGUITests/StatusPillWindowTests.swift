@@ -77,8 +77,11 @@ final class StatusPillWindowTests: XCTestCase {
     controller.rootView.layoutSubtreeIfNeeded()
   }
 
+  // XCTest keeps each test case object until the run ends: release the windows too, not only hide them (#805).
   override func tearDown() async throws {
     controller.close()
+    controller = nil
+    engine = nil
   }
 
   private var card: ContentCardView { controller.rootView.card }
