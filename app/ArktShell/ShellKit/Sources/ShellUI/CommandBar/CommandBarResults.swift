@@ -346,7 +346,8 @@ public enum CommandBarResults {
 
   /// `localizedStandardContains` with the current locale fetched once per pass: that call bridges `Locale.current`
   /// for every string, which was most of the cost of matching 2,000 titles (#606). The same search (case- and
-  /// diacritic-insensitive, in the current locale) through the CoreFoundation call NSString makes, so the same answers.
+  /// diacritic-insensitive and nonliteral, so decomposed text such as Hangul jamo finds its precomposed form, in the
+  /// current locale) through the CoreFoundation call NSString makes, so the same answers.
   struct StandardMatch {
     private let query: CFString
     private let locale = CFLocaleCopyCurrent()
@@ -354,7 +355,8 @@ public enum CommandBarResults {
     func found(in text: String) -> Bool {
       let text = text as CFString
       return CFStringFindWithOptionsAndLocale(text, query, CFRange(location: 0, length: CFStringGetLength(text)),
-                                              [.compareCaseInsensitive, .compareDiacriticInsensitive], locale, nil)
+                                              [.compareCaseInsensitive, .compareDiacriticInsensitive, .compareNonliteral],
+                                              locale, nil)
     }
   }
 

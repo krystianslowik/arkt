@@ -13,8 +13,8 @@ import XCTest
 ///
 /// CPU time, not wall time, so no clock decides the result. It still depends on the machine: a run under `nice` or
 /// with the cores saturated lands on slower cores and reads high. The gate follows `CONTRIBUTING.md` section 7: it
-/// asserts when its class runs alone or with `ARKT_PACING_GATE=1`, on a machine below its core count in load and not
-/// deprioritized; otherwise it prints and attaches its numbers.
+/// asserts when its class runs alone (`ARKT_PACING_GATE=1` lifts only this rule), on a machine below its core count
+/// in load and not deprioritized; otherwise it prints and attaches its numbers.
 @MainActor
 final class CommandBarKeystrokeBudgetTests: XCTestCase {
   static let spaceCount = 10
@@ -95,8 +95,8 @@ final class CommandBarKeystrokeBudgetTests: XCTestCase {
     CATransaction.flush()
   }
 
-  /// Every row the table holds has its own cell, showing that row's result: rows refreshed in place and cells taken
-  /// from the pool never leave a row empty or showing another row's result.
+  /// Every row the table holds has its own cell, showing that row's result: rows refreshed in place never leave a row
+  /// empty or showing another row's result.
   private func assertRowsShowTheResults(file: StaticString = #filePath, line: UInt = #line) {
     let table = bar.barView.table
     var seen = Set<ObjectIdentifier>()
@@ -116,7 +116,6 @@ final class CommandBarKeystrokeBudgetTests: XCTestCase {
     guard environment["ARKT_PACING_GATE"] == "1" || PacingEnvironment.gateAsserts(for: Self.self) else {
       return "run in a batch"
     }
-    if environment["ARKT_PACING_GATE"] == "1" { return nil }
     var load = [0.0]
     let cores = ProcessInfo.processInfo.activeProcessorCount
     if getloadavg(&load, 1) != 1 || load[0] >= Double(cores) {
@@ -127,7 +126,7 @@ final class CommandBarKeystrokeBudgetTests: XCTestCase {
     return nil
   }
 
-  func testEachKeystrokeOfATwelveCharacterQueryStaysUnderEightMilliseconds() throws {
+  func testTypedKeystrokesTwoToTwelveOfATwelveCharacterQueryStayUnderEightMilliseconds() throws {
     XCTAssertEqual(Self.query.count, 12)
     let openTabs = bar.openTabsProvider()
     XCTAssertEqual(openTabs.count, Self.spaceCount * Self.tabsPerSpace)
@@ -162,7 +161,7 @@ final class CommandBarKeystrokeBudgetTests: XCTestCase {
     print(summary)
     let attachment = XCTAttachment(string: summary)
     attachment.name = "commandbar.keystroke"
-    attachment.lifetime = .deleteOnSuccess
+    attachment.lifetime = .keepAlways
     add(attachment)
     guard reportsOnly == nil else { return }
     for (index, median) in typed.enumerated() {

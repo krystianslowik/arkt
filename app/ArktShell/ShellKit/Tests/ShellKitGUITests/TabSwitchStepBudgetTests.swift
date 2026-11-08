@@ -75,7 +75,7 @@ final class TabSwitchStepBudgetTests: XCTestCase {
     print(summary)
     let attachment = XCTAttachment(string: summary)
     attachment.name = "tabswitch.step"
-    attachment.lifetime = .deleteOnSuccess
+    attachment.lifetime = .keepAlways
     add(attachment)
   }
 

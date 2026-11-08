@@ -64,4 +64,17 @@ struct CommandBarStandardMatchTests {
       #expect(match.found(in: text) == text.localizedStandardContains(query), "\(text) / \(query)")
     }
   }
+
+  /// Precomposed and decomposed forms (titles from NFD files and pages) find each other, as they do for
+  /// `localizedStandardContains`. The Hangul pairs need the nonliteral search.
+  @Test(arguments: [
+    ("\u{1112}\u{1161}\u{11AB}\u{1100}\u{116E}\u{11A8}\u{110B}\u{1165} \u{BB38}\u{C11C}", "\u{D55C}\u{AD6D}"),
+    ("\u{D55C}\u{AD6D}\u{C5B4} \u{BB38}\u{C11C}", "\u{1112}\u{1161}\u{11AB}\u{1100}\u{116E}\u{11A8}"),
+    ("Cafe\u{0301} noir", "caf\u{E9}"),
+    ("Caf\u{E9} noir", "cafe\u{0301}"),
+  ])
+  func `decomposed and precomposed text match`(text: String, query: String) {
+    #expect(text.localizedStandardContains(query))
+    #expect(CommandBarResults.StandardMatch(query).found(in: text))
+  }
 }
