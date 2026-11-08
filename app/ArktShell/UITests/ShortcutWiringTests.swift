@@ -17,12 +17,35 @@ final class ShortcutWiringTests: ArktUITestCase {
     let pane = settings.descendants(matching: .any).matching(identifier: AXID.Settings.tab("shortcuts")).firstMatch
     let search = settings.searchFields.matching(identifier: AXID.Settings.shortcutsSearch).firstMatch
     let newTab = settings.buttons.matching(identifier: "settings.shortcuts.record.newTab").firstMatch
-    guard waitFor(search), waitForSelected(pane), waitFor(newTab) else { return }
+    func selectedPane(_ element: XCUIElement) -> Bool {
+      Waits.until("Settings pane radio value is 1") {
+        guard element.exists else { return false }
+        let value = element.value
+        return (value as? NSNumber)?.intValue == 1 || (value as? String) == "1"
+      }
+    }
+    guard waitFor(search), selectedPane(pane), waitFor(newTab) else { return }
+
+    func clearSearch() -> Bool {
+      search.click()
+      search.typeKey("a", modifierFlags: .command)
+      search.typeKey(.delete, modifierFlags: [])
+      return Waits.until("shortcut search cleared", { (search.value as? String) == "" && newTab.exists })
+    }
+    func startRecorder() -> Bool {
+      guard clearSearch() else { return false }
+      search.typeText("Sidebar")
+      guard Waits.until("sidebar recorder visible in filtered results", {
+        recorder.exists && recorder.isHittable && !newTab.exists
+      }) else { return false }
+      recorder.click()
+      return true
+    }
 
     for key in ["w", "1", "2", "3", "4", "5", "6", "7"] {
-      recorder.click()
+      guard startRecorder() else { return }
       app.typeKey(key, modifierFlags: .command)
-      guard waitFor(settings), waitForSelected(pane) else { return }
+      guard waitFor(settings), selectedPane(pane) else { return }
       let notice = settings.descendants(matching: .any).matching(identifier: "settings.shortcuts.conflict.message").firstMatch
       let expectedOwner = key == "w" ? "Archive Tab" : "Go to Sidebar Item " + key
       guard waitFor(notice) else { return }
@@ -32,7 +55,7 @@ final class ShortcutWiringTests: ArktUITestCase {
       let use = settings.buttons.matching(identifier: "settings.shortcuts.conflict.use").firstMatch
       XCTAssertFalse(use.isEnabled)
       settings.buttons.matching(identifier: "settings.shortcuts.conflict.keep").firstMatch.click()
-      guard waitFor(settings), waitForSelected(pane) else { return }
+      guard waitFor(settings), selectedPane(pane), clearSearch() else { return }
       // The original binding remains searchable after declining a protected conflict.
       search.click()
       search.typeText("Command S")
@@ -41,9 +64,9 @@ final class ShortcutWiringTests: ArktUITestCase {
       search.typeKey(.delete, modifierFlags: [])
       guard Waits.until("shortcut search cleared", { (search.value as? String) == "" && newTab.exists }) else { return }
     }
-    recorder.click()
+    guard startRecorder() else { return }
     app.typeKey("y", modifierFlags: [.control, .option])
-    guard waitFor(settings), waitForSelected(pane) else { return }
+    guard waitFor(settings), selectedPane(pane), clearSearch() else { return }
     do {
       let key = "y"
       // The effective-binding search must retain this particular action. A different captured key cannot satisfy it.
@@ -60,7 +83,7 @@ final class ShortcutWiringTests: ArktUITestCase {
     }
     app.typeKey("1", modifierFlags: .command)
     let general = settings.descendants(matching: .any).matching(identifier: AXID.Settings.tab("general")).firstMatch
-    guard waitForSelected(general) else { return }
+    guard selectedPane(general) else { return }
     app.typeKey("w", modifierFlags: .command)
     XCTAssertTrue(waitUntilGone(settings))
   }
