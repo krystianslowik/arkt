@@ -32,7 +32,7 @@ final class ChromiumShell: ChromiumEmbedderDelegate {
   private func installMenu() {
     if let launchObserver { NotificationCenter.default.removeObserver(launchObserver) }
     launchObserver = nil
-    MainMenu.install(commands: composition.commands)
+    composition.installMenu()
     shellLog("main menu installed")
   }
 

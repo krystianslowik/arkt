@@ -38,8 +38,10 @@ enum MainMenu {
   /// its own menu after the swap, so all three are set on every install. AppKit keeps the first Services menu it was
   /// given (a later `servicesMenu` assignment is ignored), so a Services menu that exists already is moved into
   /// Arkt's App menu instead of replaced.
-  static func install(commands: AppCommands) {
+  static func install(commands: AppCommands, shortcutEditor: ShortcutEditorModel? = nil) {
     let built = make(commands: commands)
+    if let previous = NSApp.mainMenu { ShortcutCatalog.unbind(from: previous) }
+    if let shortcutEditor { ShortcutCatalog.bind(model: shortcutEditor, to: built.menu) }
     if let current = NSApp.servicesMenu, current !== built.services,
        let holder = built.menu.items.first?.submenu?.items.first(where: { $0.submenu === built.services }) {
       current.supermenu?.items.first { $0.submenu === current }?.submenu = nil

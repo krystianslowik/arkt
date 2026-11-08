@@ -536,6 +536,44 @@ final class MainMenuInventoryTests: XCTestCase {
     }
   }
 
+  func testReinstallBindsSharedEditorAndDisconnectsReplacedMenu() throws {
+    let saved = (NSApp.mainMenu, NSApp.servicesMenu, NSApp.windowsMenu, NSApp.helpMenu)
+    let suite = "dev.arkt.tests.menuInstall.\(UUID().uuidString)"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+    defer {
+      if let menu = NSApp.mainMenu { ShortcutCatalog.unbind(from: menu) }
+      NSApp.mainMenu = saved.0
+      NSApp.servicesMenu = saved.1
+      NSApp.windowsMenu = saved.2
+      NSApp.helpMenu = saved.3
+      defaults.removePersistentDomain(forName: suite)
+    }
+    let definitions = ShortcutCatalog.definitions(from: MainMenu.make(commands: commands).menu)
+    XCTAssertEqual(definitions.count, 6)
+    let id = ShortcutActionID("newTab")
+    let editor = ShortcutEditorModel(catalog: definitions, defaults: defaults)
+    let override = ShortcutBinding(key: "y", modifiers: .command)
+    editor.setBinding(override, for: id)
+    MainMenu.install(commands: commands, shortcutEditor: editor)
+    let first = try XCTUnwrap(NSApp.mainMenu)
+    let oldItem = try XCTUnwrap(allItems(first).first { $0.action == #selector(ShellWindowController.newTab(_:)) })
+    XCTAssertEqual(oldItem.keyEquivalent, "y")
+    MainMenu.install(commands: commands, shortcutEditor: editor)
+    let second = try XCTUnwrap(NSApp.mainMenu)
+    let current = try XCTUnwrap(allItems(second).first { $0.action == #selector(ShellWindowController.newTab(_:)) })
+    XCTAssertEqual(current.keyEquivalent, "y")
+    editor.setBinding(nil, for: id)
+    XCTAssertEqual(current.keyEquivalent, "")
+    XCTAssertEqual(oldItem.keyEquivalent, "y")
+    XCTAssertEqual(ShortcutCatalog.definitions(from: second).first { $0.id == id }?.defaultBinding,
+                   ShortcutBinding(key: "t", modifiers: .command))
+    let reopened = ShortcutEditorModel(catalog: definitions, defaults: defaults)
+    XCTAssertNil(reopened.binding(for: id))
+    editor.reset(id)
+    XCTAssertEqual(current.keyEquivalent, "t")
+    XCTAssertNil(current.target)
+  }
+
   /// Onboarding spec, section 12: "Welcome to Arkt" is the first Help item, with no shortcut and an explicit target.
   func testHelpMenuStartsWithWelcomeToArkt() throws {
     let commands = AppCommands()

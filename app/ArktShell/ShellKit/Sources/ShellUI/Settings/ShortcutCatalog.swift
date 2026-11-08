@@ -36,12 +36,18 @@ public enum ShortcutCatalog {
 
   /// Replacing a binding disconnects the previous model before applying the new one.
   public static func bind(model: ShortcutEditorModel, to menu: NSMenu) {
-    if let previous = objc_getAssociatedObject(menu, &bindingKey) as? MenuBinding {
-      previous.model.removeObserver(previous.observer)
-    }
+    unbind(from: menu)
     let binding = MenuBinding(model: model, menu: menu)
     objc_setAssociatedObject(menu, &bindingKey, binding, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
     binding.start()
+  }
+
+  /// Disconnect a menu being replaced, even if another owner still retains it.
+  public static func unbind(from menu: NSMenu) {
+    if let previous = objc_getAssociatedObject(menu, &bindingKey) as? MenuBinding {
+      previous.model.removeObserver(previous.observer)
+      objc_setAssociatedObject(menu, &bindingKey, nil, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
+    }
   }
 
   private static var bindingKey: UInt8 = 0
