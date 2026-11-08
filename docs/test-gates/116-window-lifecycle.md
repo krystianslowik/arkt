@@ -121,3 +121,40 @@ never ran a test: its source closure omitted the shared Incognito AXID declarati
 project.yml now includes that existing file alongside AXID, Peek and LittleArkt. A focused Swift 6.4.1 typecheck
 passes for all four declarations (libSwiftScan fallback warning), but native relaunch and XCUITest compilation remain
 for CI. No AppSession launch/restoration wiring is changed by this repair.
+
+## Native observation boundary at b2d2efc
+
+Run 42498813013, UI job 128786898768, compiled and ran the focused method. It stopped at the pre-quit wait for
+two raw entries, not at restoration. Attachment 13624967395's accessibility tree shows the identified Incognito
+window and the two regular windows with their distinct selected Space and loaded fixture tab. The test does not
+report whether its defaults object saw no object, a non-Data value, invalid JSON, a missing `windows` array, or an
+array of another count. It therefore proves neither successful app capture nor a capture defect.
+
+The measurement crosses processes: the main-actor `ShellWindowSet` captures non-private controllers into the
+injected `WindowSessionStore`, which encodes a version 1 JSON envelope as Data in the app's defaults; the
+main-actor UI test reads a separately constructed `UserDefaults(suiteName:)`. AppSession supplies
+`AppEnvironment.userDefaults`, which selects the test suite in Debug. The project disables App Sandbox globally for
+the app, while the UI-test target describes an Xcode-sandboxed runner with a network-server entitlement and no
+declared App Groups entitlement. The actual signed runner entitlements have not been inspected in this run.
+Apple's [UserDefaults documentation](https://developer.apple.com/documentation/foundation/userdefaults?changes=l__4_5&language=objc)
+states that a sandboxed app cannot access another process's settings except in the documented cases and that suite
+access requires the App Groups entitlement. The SDK header also describes interprocess availability and asynchronous
+persistence, but these do not establish access across this sandbox boundary. Same suite spelling is not evidence
+that the runner observes the app's domain. The precise value seen in this run and the app's actual snapshot remain
+unknown. Increasing the wait or adding synchronize would not establish the missing access contract.
+
+Before changing the test, a native probe needs a supported, read-only observation from the app's own injected
+defaults, gated to strict Debug UI-test mode. It must distinguish absent, wrong type, malformed envelope and raw
+entry count, exposing the actual stored bytes or an equivalent lossless representation without capturing live
+controllers or writing defaults. Observe that value while the private window is open. For the post-quit comparison,
+the next process must expose a snapshot read from the same store before any launch-time write can replace it;
+that snapshot needs a launch-specific identity and must remain available until observed. This is a proposed contract,
+not an implemented seam. Its placement and accessibility transport still need review and native verification.
+
+The probe must retain exact two-entry checks, private exclusion, throwing selection projection, ordered pre/post-quit
+comparison and fresh fixture requests after relaunch. A stale pre-quit value reused as the post-quit result, a
+snapshot taken after startup overwrites the store, or a value synthesized from live windows could falsely pass;
+the probe must rule each out. Deliberately breaking collection writes and quit capture should fail their respective
+checks. A native run must first establish that the observation itself is available; only a representative runtime
+failure after that boundary can justify app launch/restoration changes. This is not a complete acceptance gate:
+launch completion, disabled restore, cancellation, exact final window count/order, and folder state remain separate.
