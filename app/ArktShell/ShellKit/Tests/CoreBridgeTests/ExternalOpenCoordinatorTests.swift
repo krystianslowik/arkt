@@ -113,15 +113,18 @@ struct ExternalOpenCoordinatorTests {
   @Test func resultCallbackArrivalsJoinTailAndReadyStartKeepsCallbacks() async throws {
     let coordinator = ExternalOpenCoordinator<String>()
     var results: [URL] = []
+    var values: [String] = []
     coordinator.receive([a, b])
-    #expect(try await completed { await coordinator.start(read: {}, deliver: { $0.absoluteString }, onResult: { url, _ in
+    #expect(try await completed { await coordinator.start(read: {}, deliver: { $0.absoluteString }, onResult: { url, value in
       results.append(url)
+      values.append(value)
       if url == self.a { coordinator.receive([self.c]) }
     }) })
     #expect(try await completed { await coordinator.start(read: { throw ReadFailure.failed }, deliver: { _ in "replacement" },
                                     onResult: { _, _ in Issue.record("ready start replaced callbacks") }) })
     coordinator.receive([a])
     #expect(results == [a, b, c, a, c])
+    #expect(values == [a, b, c, a, c].map(\.absoluteString))
     #expect(coordinator.pendingCount == 0)
   }
 
@@ -179,7 +182,7 @@ private final class StartAttempt {
 
   func result() async throws -> Bool {
     try #require(await advanceUntil { self.value != nil }, "coordinator start did not finish within actor turns")
-    return try #require(value)
+    return try #require(value as Bool?)
   }
 
   func cancel() { task?.cancel() }

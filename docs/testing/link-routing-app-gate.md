@@ -108,3 +108,22 @@ Swift 6.2.4 parsing and whitespace checks passed. The focused build still emits 
 framework/library search-path linker warnings, with no coordinator source warning. The standalone probe is not
 currently a CI job and does not establish AppSession, AppDelegate, Chromium, GUI or app behavior. Focused native run
 42491702781 remained queued at the latest inspection; no native runtime red is claimed.
+
+
+### Independent component review
+
+Independent review of `8bcb01e3c2d387867fdc7464e6c00d3eab2397ea` found no P1/P2 issue within the pure
+component boundary and independently executed the six-test coordinator filter successfully. A fresh build exposed
+a Swift Testing optional-Bool ambiguity warning in the harness. Explicitly unwrapping `value as Bool?` removes that
+warning while preserving false as a valid completed result.
+
+The ready-start regression now also checks each delivered String value, so replacing only the delivery callback
+cannot escape its callback-retention assertion. Deliberately assigning a replacement delivery callback in the ready
+branch made this assertion fail; the production ready branch was restored before the final full probe. The final
+probe again passed 60 tests in 13 suites with no ambiguity warning; the recorded linker search-path warnings remain.
+
+Integration constraints remain: cancelling one start waiter does not cancel the shared read, and a suspended read's
+unstructured task retains the coordinator until completion. The queue has no size cap and retains its peak array
+capacity after a drain. During callbacks, pendingCount includes the current input until reporting returns. Direct
+cancellation/lifetime and in-callback pendingCount tests are not present. These constraints require deliberate App
+ownership and recovery handling; the pure component's tests do not establish those future composition behaviors.

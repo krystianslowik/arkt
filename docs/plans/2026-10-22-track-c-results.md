@@ -3150,3 +3150,11 @@ remain. This focused package is not run by CI, and no local full ShellKit, GUI o
 warm/cold tests have not executed yet: focused run 42491702781 was queued at the latest read. AppComposition ownership,
 AppDelegate early-event retention, session readiness and retry wiring, Chromium engine-window adoption, and native
 runtime validation remain separate gates. The PR stays draft.
+
+
+Independent review of local coordinator revision `8bcb01e` found no P1/P2 blockers and independently passed the
+six-test filter. The follow-up makes the harness's optional Bool unwrap explicit to remove a Swift Testing warning
+and asserts retained delivery callback values. Replacing only that callback deliberately fails the strengthened
+assertion; the final restored full probe passes 60 tests in 13 suites. Existing linker search-path warnings remain.
+Cancellation/lifetime behavior and the uncapped queue's retained peak capacity are documented integration constraints,
+not verified App behavior. The native app gate still has no observed runtime result here.
