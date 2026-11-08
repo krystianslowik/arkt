@@ -11,6 +11,9 @@ import EngineAPI
 /// accessibility actions and context menu items.
 @MainActor
 final class ExtensionsPanelView: NSView {
+  /// The empty state's title and body.
+  static let emptyTitleFontSize: CGFloat = 14
+  static let emptyBodyFontSize: CGFloat = 12.5
   let scrollView = NSScrollView(frame: .zero)
   let list = ExtensionsListView(frame: .zero)
   private let pinnedHeader = ExtensionsPanelView.header("Pinned")
@@ -70,7 +73,7 @@ final class ExtensionsPanelView: NSView {
     hintView.layer?.cornerRadius = ExtensionsPanelMetrics.rowCorner
     hintView.layer?.cornerCurve = .continuous
     hintView.layer?.borderWidth = 1
-    hintLabel.font = .systemFont(ofSize: 12)
+    hintLabel.font = ShellType.caption.font
     hintLabel.setAccessibilityElement(false)
     hintView.addSubview(hintGlyph)
     hintView.addSubview(hintLabel)
@@ -89,9 +92,9 @@ final class ExtensionsPanelView: NSView {
     emptyTile.cornerCurve = .continuous
     emptyTile.addSublayer(emptyGlyph)
     emptyView.layer?.addSublayer(emptyTile)
-    emptyTitle.font = .systemFont(ofSize: 14, weight: .semibold)
+    emptyTitle.font = .systemFont(ofSize: Self.emptyTitleFontSize, weight: .semibold)
     emptyTitle.alignment = .center
-    emptyBody.font = .systemFont(ofSize: 12.5)
+    emptyBody.font = .systemFont(ofSize: Self.emptyBodyFontSize)
     emptyBody.alignment = .center
     for view in [emptyTitle, emptyBody, browseButton] as [NSView] { emptyView.addSubview(view) }
     emptyView.setAccessibilityElement(true)
@@ -123,7 +126,7 @@ final class ExtensionsPanelView: NSView {
 
   private static func header(_ title: String) -> NSTextField {
     let label = NSTextField(labelWithString: title)
-    label.font = .systemFont(ofSize: 12, weight: .semibold)
+    label.font = ShellType.captionEmphasis.font
     label.setAccessibilityRole(.staticText)
     return label
   }

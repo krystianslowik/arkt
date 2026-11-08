@@ -114,7 +114,7 @@ final class CommandBarView: NSView {
     addSubview(magnifier)
 
     scopeChip.isHidden = true
-    scopeChip.font = .systemFont(ofSize: 13, weight: .medium)
+    scopeChip.font = ShellType.rowTitle.font
     scopeChip.wantsLayer = true
     scopeChip.layer?.cornerRadius = CommandBarGeometry.scopeChipRadius
     scopeChip.layer?.cornerCurve = .continuous
@@ -126,7 +126,7 @@ final class CommandBarView: NSView {
     field.drawsBackground = false
     field.wantsLayer = true
     field.focusRingType = .none
-    field.font = .systemFont(ofSize: 22)
+    field.font = ShellType.commandInput.font
     field.cell?.isScrollable = true
     field.cell?.wraps = false
     field.cell?.usesSingleLineMode = true
@@ -142,7 +142,7 @@ final class CommandBarView: NSView {
 
     noticeView.isHidden = true
     noticeLabel.stringValue = CommandBarView.noticeText
-    noticeLabel.font = .systemFont(ofSize: 12)
+    noticeLabel.font = ShellType.caption.font
     noticeLabel.lineBreakMode = .byTruncatingTail
     noticeLabel.cell?.usesSingleLineMode = true
     noticeLabel.setAccessibilityIdentifier(AXID.CommandBar.notice)
@@ -262,7 +262,7 @@ final class CommandBarView: NSView {
     shownPlaceholder = (text, flavor)
     scopePlaceholder = text == Self.placeholder ? nil : text
     field.placeholderAttributedString = NSAttributedString(string: text, attributes: [
-      .font: NSFont.systemFont(ofSize: 22),
+      .font: ShellType.commandInput.font,
       .foregroundColor: ShellTokens.commandBarTertiaryText.resolve(flavor).nsColor(),
     ])
   }

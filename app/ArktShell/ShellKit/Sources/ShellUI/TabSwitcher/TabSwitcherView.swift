@@ -405,11 +405,11 @@ public final class TabSwitcherRowView: NSView {
     super.init(frame: frameRect)
     wantsLayer = true
     faviconView.imageScaling = .scaleProportionallyUpOrDown
-    titleField.font = .systemFont(ofSize: 13, weight: .medium)
+    titleField.font = ShellType.rowTitle.font
     titleField.lineBreakMode = .byTruncatingTail
     titleField.maximumNumberOfLines = 1
     titleField.cell?.truncatesLastVisibleLine = true
-    spaceField.font = .systemFont(ofSize: 11, weight: .regular)
+    spaceField.font = ShellType.footnote.font
     spaceField.lineBreakMode = .byTruncatingTail
     spaceField.maximumNumberOfLines = 1
     splitView.imageScaling = .scaleProportionallyUpOrDown

@@ -47,6 +47,8 @@ final class SettingsSpaceSwatch: NSView {
 /// A profile's monogram: 20 x 20, radius 5, its first letter in white on a color picked from its name.
 @MainActor
 final class SettingsMonogram: NSView {
+  /// The monogram letter.
+  static let letterFontSize: CGFloat = 11
   private static let fills: [RGBA] = [.srgb(hex: 0x7C8A6E), .srgb(hex: 0x5B7AA6), .srgb(hex: 0x8A6E7C),
                                       .srgb(hex: 0x6E7C8A), .srgb(hex: 0xA6845B)]
   private let letter: String
@@ -68,7 +70,7 @@ final class SettingsMonogram: NSView {
   override func draw(_ dirtyRect: NSRect) {
     fill.nsColor().setFill()
     NSBezierPath(roundedRect: bounds, xRadius: 5, yRadius: 5).fill()
-    let font = NSFont.systemFont(ofSize: 11, weight: .bold)
+    let font = NSFont.systemFont(ofSize: Self.letterFontSize, weight: .bold)
     let text = NSAttributedString(string: letter, attributes: [.font: font, .foregroundColor: NSColor.white])
     let size = text.size()
     text.draw(at: NSPoint(x: ((bounds.width - size.width) / 2).rounded(), y: ((bounds.height - size.height) / 2).rounded()))

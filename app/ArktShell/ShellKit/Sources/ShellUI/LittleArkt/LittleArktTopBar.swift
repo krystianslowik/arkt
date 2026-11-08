@@ -29,13 +29,13 @@ final class LittleArktTopBar: WindowDragView {
     lockView.image = NSImage(systemSymbolName: "lock.fill", accessibilityDescription: nil)
     lockView.symbolConfiguration = .init(pointSize: 10, weight: .semibold)
     lockView.setAccessibilityElement(false)
-    hostLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+    hostLabel.font = ShellType.bodyEmphasis.font
     hostLabel.lineBreakMode = .byTruncatingMiddle
     hostLabel.cell?.truncatesLastVisibleLine = true
     hostLabel.setAccessibilityIdentifier(AXID.LittleArkt.host)
     copyButton.setAccessibilityIdentifier(AXID.LittleArkt.copyLink)
     copyButton.toolTip = LittleArktCopy.copyLink
-    openButton.font = .systemFont(ofSize: 12, weight: .semibold)
+    openButton.font = ShellType.captionEmphasis.font
     openButton.imagePosition = .imageLeading
     openButton.setAccessibilityIdentifier(AXID.LittleArkt.open)
     chooserButton.image = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: nil)?
@@ -208,7 +208,7 @@ final class LittleArktSegmentButton: NSButton {
     contentTintColor = textColor
     guard !title.isEmpty else { return }
     attributedTitle = NSAttributedString(string: title, attributes: [
-      .font: font ?? .systemFont(ofSize: 12, weight: .semibold), .foregroundColor: textColor,
+      .font: font ?? ShellType.captionEmphasis.font, .foregroundColor: textColor,
     ])
   }
 

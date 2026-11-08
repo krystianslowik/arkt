@@ -54,7 +54,7 @@ final class PrivatePageRowView: NSView {
   let faviconView = NSImageView()
   let titleLabel: NSTextField = {
     let label = NSTextField(labelWithString: "")
-    label.font = .systemFont(ofSize: 13)
+    label.font = ShellType.body.font
     label.lineBreakMode = .byTruncatingTail
     label.usesSingleLineMode = true
     label.cell?.truncatesLastVisibleLine = true

@@ -56,8 +56,8 @@ final class ExtensionsPanelRow: ExtensionContextMenuView {
       label.cell?.truncatesLastVisibleLine = true
       label.setAccessibilityElement(false)
     }
-    nameLabel.font = .systemFont(ofSize: 13)
-    statusLabel.font = .systemFont(ofSize: 12)
+    nameLabel.font = ShellType.body.font
+    statusLabel.font = ShellType.caption.font
     runButton.target = self
     runButton.action = #selector(runPressed(_:))
     pinToggle.target = self

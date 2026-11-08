@@ -160,11 +160,11 @@ final class ImportText: NSView {
 
   private func systemFont() -> NSFont {
     switch role {
-    case .title: .systemFont(ofSize: 15, weight: .semibold)
-    case .subtitle, .detail, .note, .progressTrail, .eyebrow: .systemFont(ofSize: 12)
-    case .heading: .systemFont(ofSize: 12, weight: .semibold)
-    case .name: .systemFont(ofSize: 13, weight: .medium)
-    case .progressLead: .systemFont(ofSize: 13, weight: .semibold)
+    case .title: ShellType.dialogTitle.font
+    case .subtitle, .detail, .note, .progressTrail, .eyebrow: ShellType.caption.font
+    case .heading: ShellType.captionEmphasis.font
+    case .name: ShellType.rowTitle.font
+    case .progressLead: ShellType.bodyEmphasis.font
     case .count, .status: .monospacedDigitSystemFont(ofSize: 13, weight: .regular)
     }
   }
