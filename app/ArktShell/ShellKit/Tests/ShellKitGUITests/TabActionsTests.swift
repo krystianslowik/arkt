@@ -982,13 +982,39 @@ final class TabActionsTests: XCTestCase {
                                                  context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
     let menu = try XCTUnwrap(grid.collectionView.menu(for: event), "the tile has a menu")
     XCTAssertEqual(menu.items.filter { !$0.isAlternate }.map(\.title),
-                   ["Rename\u{2026}", "Change Icon", "", "Back to Pinned URL", "Edit Pinned URL\u{2026}", "",
+                   ["Rename\u{2026}", "Change Icon", "Reset Icon", "", "Back to Pinned URL", "Edit Pinned URL\u{2026}", "",
                     "Copy Link", "", "Remove from Favorites", "Close and Keep Favorite"])
 
     menu.performActionForItem(at: menu.indexOfItem(withTitle: "Remove from Favorites"))
 
     XCTAssertEqual(harness.children(.favorites(profile: "default")), [])
     XCTAssertEqual(harness.children(.today(world.work)).first, favorite)
+    harness.controller.close()
+  }
+
+  func testFavoriteIconMenuSelectionAndReset() throws {
+    var world = try Self.makeWorld()
+    let favorite = try world.sidebar.addTab(url: Self.url("fav"), title: "Fav", in: .favorites(profile: "default"))
+    let harness = Harness(world.sidebar)
+    let grid = harness.controller.sidebarController.view.favorites
+    grid.layoutSubtreeIfNeeded()
+    let tile = try XCTUnwrap(grid.tile(for: favorite))
+    let center = tile.convert(NSPoint(x: tile.bounds.midX, y: tile.bounds.midY), to: nil)
+    let event = try XCTUnwrap(NSEvent.mouseEvent(with: .rightMouseDown, location: center, modifierFlags: [],
+                                                 timestamp: 0, windowNumber: grid.window?.windowNumber ?? 0,
+                                                 context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+    let menu = try XCTUnwrap(grid.collectionView.menu(for: event))
+    let picker = try XCTUnwrap(menu.item(withTitle: "Change Icon")?.submenu)
+    XCTAssertNil(harness.source.sidebar.nodes[favorite]?.customIcon, "opening the picker changes nothing")
+    let star = picker.indexOfItem(withTitle: "Star")
+    XCTAssertGreaterThanOrEqual(star, 0)
+    if star >= 0 { picker.performActionForItem(at: star) }
+    XCTAssertEqual(harness.source.sidebar.nodes[favorite]?.customIcon, .symbol("star"))
+    let resetMenu = try XCTUnwrap(grid.collectionView.menu(for: event))
+    let reset = resetMenu.indexOfItem(withTitle: "Reset Icon")
+    XCTAssertGreaterThanOrEqual(reset, 0)
+    if reset >= 0 { resetMenu.performActionForItem(at: reset) }
+    XCTAssertNil(harness.source.sidebar.nodes[favorite]?.customIcon)
     harness.controller.close()
   }
 

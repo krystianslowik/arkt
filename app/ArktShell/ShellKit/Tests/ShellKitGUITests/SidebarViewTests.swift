@@ -416,6 +416,50 @@ final class SidebarViewTests: XCTestCase {
     XCTAssertTrue(try cell(controller, tab).faviconView.image === placeholder, "nil restores the cached placeholder")
   }
 
+  func testFavoriteOverrideKeepsLatestFaviconForReset() async throws {
+    let sidebar = StubSidebar.sample()
+    let controller = makeSidebar(sidebar)
+    let favorite = try XCTUnwrap(sidebar.children(of: .favorites(profile: "default")).first)
+    let tile = try XCTUnwrap(controller.view.favorites.tile(for: favorite))
+    func data(_ size: CGFloat) throws -> Data {
+      let image = NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
+        NSColor.red.setFill(); rect.fill(); return true
+      }
+      return try XCTUnwrap(image.tiffRepresentation)
+    }
+    controller.setFavicon(try data(8), for: favorite)
+    await controller.settleFaviconDecodes()
+    let first = try XCTUnwrap(tile.faviconView.image)
+    sidebar.setNodeIcon(favorite, to: .symbol("star"))
+    let custom = try XCTUnwrap(tile.faviconView.image)
+    XCTAssertFalse(custom === first)
+    controller.setFavicon(try data(16), for: favorite)
+    await controller.settleFaviconDecodes()
+    XCTAssertEqual(tile.faviconView.image?.tiffRepresentation, custom.tiffRepresentation)
+    XCTAssertEqual(controller.favicons[favorite]?.size, NSSize(width: 16, height: 16))
+    sidebar.setNodeIcon(favorite, to: nil)
+    XCTAssertTrue(tile.faviconView.image === controller.favicons[favorite])
+  }
+
+  func testFolderOverrideSurvivesExpansionAndResetRestoresBothFallbacks() throws {
+    let sidebar = StubSidebar.sample()
+    let controller = makeSidebar(sidebar)
+    let space = sidebar.spaceOrder[0]
+    let folder = try XCTUnwrap(sidebar.children(of: .pinned(space)).first { !isTab(sidebar, $0) })
+    let outline = try XCTUnwrap(controller.currentPage?.outlineController)
+    let expanded = SidebarGlyphs.symbol("folder.fill", flavor: .light, scale: outline.outlineView.shellBackingScale)
+    let collapsed = SidebarGlyphs.symbol("folder", flavor: .light, scale: outline.outlineView.shellBackingScale)
+    sidebar.setNodeIcon(folder, to: .symbol("star"))
+    let custom = try XCTUnwrap(try cell(controller, folder).faviconView.image)
+    XCTAssertFalse(custom === expanded)
+    outline.handleClick(row: outline.row(for: folder), modifiers: [])
+    XCTAssertEqual(try cell(controller, folder).faviconView.image?.tiffRepresentation, custom.tiffRepresentation)
+    sidebar.setNodeIcon(folder, to: nil)
+    XCTAssertTrue(try cell(controller, folder).faviconView.image === collapsed)
+    outline.handleClick(row: outline.row(for: folder), modifiers: [])
+    XCTAssertTrue(try cell(controller, folder).faviconView.image === expanded)
+  }
+
   func testDeactivateClearsStates() throws {
     let sidebar = StubSidebar.sample()
     let controller = makeSidebar(sidebar)
