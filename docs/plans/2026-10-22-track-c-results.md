@@ -2896,3 +2896,18 @@ Written first. Each failed to compile before the code existed.
 - `LittleArktTests` (XCUITest, 4): Opt-Cmd-click opens Little Arkt, Open in, Cmd-W and the chooser's Open in New Window.
   The app and test bundle build (`xcodebuild ... build-for-testing`: TEST BUILD SUCCEEDED). Not run: the suite needs
   the real pointer and keyboard, and the Mac was in use.
+
+## Command bar folder and extension result tests (#562, draft)
+
+- Added two test-first cases against `CommandBarResults.make`: nested synthetic sidebar folders and synthetic engine
+  extension actions, with an existing open-tab match retained. The proposed folder collection and extension-action
+  inputs do not exist yet; this is a test-only draft, not a shipped provider or UI feature.
+- Local red: not observed. The ShellKit baseline cannot compile with the available Swift 6.1.2 toolchain because of
+  `isolated deinit`; the known Swift 6.2 / SDK 15.5 baseline also has unrelated IR and actor failures. No full baseline
+  retry was run. CI must establish that the missing result APIs are the actual compilation failure before production
+  work starts. Parse: `swiftc -frontend -parse` on the new test file passed; `git diff --check` passed.
+- Green: not run; production implementation has not started. CI and full suites are pending. GUI, accessibility and
+  worst-case visual checks were not run.
+- Remaining: connect eligible production folder and extension data, result presentation and activation; closed-folder
+  peek; search engine and suggestions Settings; tests and integration checks for the complete issue. Search engine
+  defaults and URL routing are unchanged. No sidebar model storage format changed.
