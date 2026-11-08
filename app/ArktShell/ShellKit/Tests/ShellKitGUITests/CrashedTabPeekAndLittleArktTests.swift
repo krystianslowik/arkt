@@ -44,8 +44,11 @@ final class CrashedPeekTests: XCTestCase {
     controller.crashedTabs.announce = { [unowned self] text, _ in spoken.append(text) }
   }
 
+  // XCTest keeps each test case object until the run ends: release the windows too, not only hide them (#805).
   override func tearDown() async throws {
     controller.close()
+    controller = nil
+    engine = nil
   }
 
   private var window: NSWindow { controller.window! }
@@ -306,10 +309,13 @@ final class CrashedLittleArktTests: XCTestCase {
     spoken = []
   }
 
+  // XCTest keeps each test case object until the run ends: release the windows too, not only hide them (#805).
   override func tearDown() async throws {
-    for controller in set.controllers { controller.window?.orderOut(nil) }
-    for little in set.littleArkts { little.window.orderOut(nil) }
+    for controller in set.controllers { controller.close() }
+    for little in set.littleArkts { little.window.close() }
+    set.closeAllForTesting()
     set = nil
+    engine = nil
   }
 
   private func openPopup() throws -> (LittleArktWindowController, EngineWindowID, TabID) {

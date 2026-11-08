@@ -809,6 +809,66 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
                }];
 }
 
+// #846: Chromium's New Incognito Window command, sent through the host as a
+// menu item would send it, makes a window on the off-the-record profile (the
+// facade's createBrowser(host:) always uses the profile the engine started
+// with, #705). Its tab then loads `url`; the tab's state, its page title and
+// the HTTPS-First interstitial's primary button are logged after `delayMs`.
+- (void)openPrivateWindowFrom:(id<ArktTabHandle>)tab
+                          url:(const std::string&)url
+                      delayMs:(int)delayMs {
+  NSMutableSet<NSNumber*>* before = [NSMutableSet set];
+  for (id<ArktBrowserHandle> browser in _engine.browsers) {
+    [before addObject:@(browser.windowId)];
+  }
+  id<ArktWindowHost> host = tab.browser.host;
+  BOOL enabled =
+      host.validateCommand && host.validateCommand(IDC_NEW_INCOGNITO_WINDOW);
+  LOG(WARNING) << "ARKT selftest private-window enabled="
+               << (enabled ? "yes" : "no")
+               << " from window=" << (tab.browser ? tab.browser.windowId : -1);
+  if (!enabled || !host.executeCommand) {
+    return;
+  }
+  host.executeCommand(
+      IDC_NEW_INCOGNITO_WINDOW,
+      static_cast<NSInteger>(WindowOpenDisposition::CURRENT_TAB));
+  id<ArktBrowserHandle> privateBrowser = nil;
+  for (id<ArktBrowserHandle> browser in _engine.browsers) {
+    if (![before containsObject:@(browser.windowId)]) {
+      privateBrowser = browser;
+    }
+  }
+  id<ArktTabHandle> privateTab =
+      privateBrowser.activeTab ?: privateBrowser.tabs.firstObject;
+  LOG(WARNING) << "ARKT selftest private-window window="
+               << (privateBrowser ? privateBrowser.windowId : -1)
+               << " tabs=" << privateBrowser.tabs.count
+               << " tab=" << (privateTab ? privateTab.sessionId : -1);
+  if (!privateTab) {
+    return;
+  }
+  [privateTab navigateToURL:[NSURL URLWithString:base::SysUTF8ToNSString(url)]];
+  const int32_t sessionId = privateTab.sessionId;
+  dispatch_after(
+      dispatch_time(DISPATCH_TIME_NOW, int64_t{delayMs} * NSEC_PER_MSEC),
+      dispatch_get_main_queue(), ^{
+        id<ArktTabHandle> target = [self tabWithSessionId:sessionId];
+        if (!target) {
+          LOG(WARNING) << "ARKT selftest private-window tab=" << sessionId
+                       << " gone";
+          return;
+        }
+        [self logStateOf:target];
+        [self evaluate:@"document.title + ' | ' + "
+                       @"(document.getElementById('primary-button')"
+                       @"?.innerText ?? 'no interstitial button')"
+                  inTab:target
+            userGesture:NO
+                  label:"private-window page"];
+      });
+}
+
 - (id<ArktTabHandle>)tabWithSessionId:(int32_t)sessionId {
   for (id<ArktBrowserHandle> browser in _engine.browsers) {
     for (id<ArktTabHandle> tab in browser.tabs) {
@@ -1170,6 +1230,10 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
                    << base::SysNSStringToUTF8(origin);
       [self logPageInfoOf:tab];
     }
+  } else if (command == "pageinfo-open") {
+    // #782: the panel opened, so the tab's reads count site data.
+    [tab pageInfoDidOpen];
+    LOG(WARNING) << "ARKT selftest pageinfo-open tab=" << tab.sessionId;
   } else if (command == "pageinfo-close") {
     [tab pageInfoDidClose];
     LOG(WARNING) << "ARKT selftest pageinfo-close tab=" << tab.sessionId;
@@ -1223,6 +1287,15 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
       host.executeCommand(IDC_DEV_TOOLS, static_cast<NSInteger>(
                                              WindowOpenDisposition::CURRENT_TAB));
     }
+  } else if (command == "private-window") {
+    // #846: "private-window <url> [ms]" opens a window on the off-the-record
+    // profile, loads `url` in its tab and logs that tab after `ms` (3000 by
+    // default).
+    int delay_ms = 3000;
+    if (words.size() > 2 && !base::StringToInt(words[2], &delay_ms)) {
+      delay_ms = 3000;
+    }
+    [self openPrivateWindowFrom:tab url:argument delayMs:delay_ms];
   } else {
     LOG(WARNING) << "ARKT selftest unknown command " << command;
   }

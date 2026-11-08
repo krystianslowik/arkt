@@ -29,6 +29,8 @@
 #include "base/check.h"
 #include "base/command_line.h"
 #include "base/check_op.h"
+#include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/functional/bind.h"
 #include "base/logging.h"
 #include "base/memory/raw_ptr.h"
@@ -1253,12 +1255,18 @@ class Facade : public BrowserCollectionObserver,
       // The previous run's exit type is fixed when the profile's service is
       // made (#577); Chromium's own acknowledgement (the first tab of a window
       // made outside the startup flow, which every shell window is) does not
-      // change it.
-      last_session_crashed_ = ExitTypeService::GetInstanceForProfile(profile) &&
-                              ExitTypeService::GetLastSessionExitType(
-                                  profile) == ExitType::kCrashed;
+      // change it for this run, but it lets a clean quit record a clean exit.
+      // The unanswered marker (#785) keeps the prompt across such quits. A
+      // profile without an exit type service and no marker reads clean.
+      bool crashed = ExitTypeService::GetInstanceForProfile(profile) &&
+                     ExitTypeService::GetLastSessionExitType(profile) ==
+                         ExitType::kCrashed;
+      ReadUnansweredMarker(profile->GetPath(), crashed);
       LOG(WARNING) << "ARKT: facade last session "
-                   << (last_session_crashed_ ? "crashed" : "clean");
+                   << (last_session_crashed_ ? "crashed" : "clean")
+                   << (last_session_crashed_ && !crashed
+                           ? " (unanswered from an earlier run)"
+                           : "");
     }
   }
 
@@ -1272,10 +1280,25 @@ class Facade : public BrowserCollectionObserver,
   // has not dismissed it yet.
   bool last_session_crashed() const { return last_session_crashed_; }
   void DismissLastSession() {
-    if (last_session_crashed_) {
-      LOG(WARNING) << "ARKT: facade crashed session dismissed";
+    if (!last_session_crashed_) {
+      return;
     }
+    LOG(WARNING) << "ARKT: facade crashed session dismissed";
     last_session_crashed_ = false;
+    // The answer outlives the run: the marker goes, and the next run asks
+    // only after a new crash. BLOCK_SHUTDOWN, so an answer followed at once by
+    // Quit is not asked again.
+    base::ThreadPool::PostTask(
+        FROM_HERE,
+        {base::MayBlock(), base::TaskPriority::USER_VISIBLE,
+         base::TaskShutdownBehavior::BLOCK_SHUTDOWN},
+        base::BindOnce(
+            [](const base::FilePath& marker) {
+              if (!base::DeleteFile(marker)) {
+                LOG(ERROR) << "ARKT: could not remove " << marker.value();
+              }
+            },
+            unanswered_marker_));
   }
 
   // DownloadWatcherDelegate, called from Chromium's download notifications.
@@ -2047,10 +2070,32 @@ class Facade : public BrowserCollectionObserver,
     }
   }
 
+  // The unanswered crashed-session prompt (#785). Chromium acknowledges a
+  // crash when the shell's first window gets its tab, so a quit before the
+  // shell's prompt is answered records a clean exit and the next run would not
+  // ask. A file in the profile folder, written as soon as a crashed last
+  // session is seen and removed only by DismissLastSession, keeps the prompt
+  // until it is answered, as Chrome's bubble does. Read and written here, in
+  // PostBrowserStart, before the UI thread disallows blocking
+  // (BrowserMainLoop::PreMainMessageLoopRun ends with
+  // DisallowUnresponsiveTasks); written at once, so a kill right after a
+  // relaunch keeps it.
+  void ReadUnansweredMarker(const base::FilePath& profile_path, bool crashed) {
+    unanswered_marker_ = profile_path.Append(kUnansweredMarkerName);
+    bool marked = base::PathExists(unanswered_marker_);
+    last_session_crashed_ = crashed || marked;
+    if (crashed && !marked && !base::WriteFile(unanswered_marker_, "")) {
+      LOG(ERROR) << "ARKT: could not write " << unanswered_marker_.value();
+    }
+  }
+
+  static constexpr char kUnansweredMarkerName[] = "Arkt Unanswered Crash";
+
   const raw_ptr<FacadeDelegate> delegate_;
   std::unique_ptr<DownloadWatcher> downloads_;
   std::unique_ptr<PageInfoHub> page_info_;
   bool last_session_crashed_ = false;
+  base::FilePath unanswered_marker_;
   int in_notification_ = 0;
   bool posted_ = false;
   bool terminating_ = false;
@@ -3354,6 +3399,18 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
                          }
                        },
                        self, base::SysNSStringToUTF8(origin))];
+}
+
+- (void)pageInfoDidOpen {
+  [self runOrQueue:"pageInfoDidOpen"
+              work:base::BindOnce(
+                       [](ArktFacadeTab* that) {
+                         if (that.contents && arkt::g_facade->page_info()) {
+                           arkt::g_facade->page_info()->PageInfoOpened(
+                               that.contents);
+                         }
+                       },
+                       self)];
 }
 
 - (void)pageInfoDidClose {
