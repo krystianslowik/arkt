@@ -22,7 +22,7 @@ final class PageInfoSystemPermissionTests: XCTestCase {
     controller.window?.contentView?.layoutSubtreeIfNeeded()
     controller.pageInfo.reduceMotion = { true }
     controller.pageInfo.increaseContrast = { false }
-    controller.pageInfo.deniedInMacOS = { [unowned self] in denied }
+    controller.pageInfo.deniedInMacOS = { [weak self] in self?.denied ?? [] }
   }
 
   override func tearDown() async throws {
@@ -94,5 +94,21 @@ final class PageInfoSystemPermissionTests: XCTestCase {
     XCTAssertLessThanOrEqual(location.title.frame.maxX, location.popUp.frame.minX)
     XCTAssertLessThanOrEqual(location.note.frame.maxX, location.popUp.frame.minX)
     XCTAssertGreaterThan(location.note.frame.width, 0)
+  }
+
+  /// A very long engine title at the narrowest width: title and note truncate before the pop-up.
+  func testLongTitleTruncatesBeforeThePopUp() {
+    let title = String(repeating: "Precise location for this site ", count: 4)
+    let permission = SitePermission(kind: .location, title: title, setting: .allow, isDefault: false)
+    let row = PageInfoPermissionRow(PageInfoModel.Row(permission, deniedInMacOS: true))
+    row.frame = NSRect(x: 0, y: 0, width: PageInfoMetrics.minWidth, height: row.height)
+    row.layoutSubtreeIfNeeded()
+    XCTAssertEqual(row.height, PageInfoMetrics.notedRowHeight)
+    XCTAssertGreaterThan(row.title.frame.width, 0)
+    XCTAssertLessThanOrEqual(row.title.frame.maxX, row.popUp.frame.minX)
+    XCTAssertLessThanOrEqual(row.note.frame.maxX, row.popUp.frame.minX)
+    XCTAssertLessThan(row.title.frame.width, row.title.attributedStringValue.size().width, "the title truncates")
+    XCTAssertEqual(row.title.lineBreakMode, .byTruncatingTail)
+    XCTAssertEqual(row.note.lineBreakMode, .byTruncatingTail)
   }
 }
