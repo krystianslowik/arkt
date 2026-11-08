@@ -190,6 +190,31 @@ final class LittleArktFlightTests: XCTestCase {
     XCTAssertTrue(scene.set.littleArkts.isEmpty)
   }
 
+  /// The snapshot task waits on the engine without holding the controller: a small window closed while its snapshot
+  /// is still on the way goes away at once, not when the engine answers (#817).
+  func testASmallWindowClosedWhileItsSnapshotIsPendingIsReleased() async throws {
+    weak var weakLittle: LittleArktWindowController?
+    weak var weakWindow: NSWindow?
+    let gate: SnapshotGate
+    do {
+      let scene = try makeScene()
+      gate = scene.gate
+      weakLittle = scene.little
+      weakWindow = scene.little.window
+      scene.little.openIn()
+      for _ in 0..<200 where scene.gate.asked == 0 { await Task.yield() }
+      XCTAssertEqual(scene.gate.asked, 1, "the snapshot was asked for and is still pending")
+      scene.little.flight?.abort(.closeRequested)
+      scene.little.window.close()
+      scene.main.close()
+      for id in scene.engine.windowIDs { scene.engine.closeWindow(id) }
+    }
+    for _ in 0..<200 where weakLittle != nil || weakWindow != nil { await Task.yield() }
+    XCTAssertNil(weakLittle, "the controller outlived its window")
+    XCTAssertNil(weakWindow, "the window outlived its close")
+    gate.deliver(nil)                                       // the suspended task ends and lets go of the engine
+  }
+
   /// No snapshot within one frame: the card flies as its plate (the page's background), and the snapshot fades in on
   /// it when it arrives.
   func testThePlateFliesWhenTheSnapshotIsNotReadyWithinOneFrame() async throws {

@@ -23,29 +23,20 @@ final class WindowLeakGuard {
 
   /// Test classes whose windows outlive the test although `tearDown` closes them and clears its properties: something
   /// outside the test still holds them. Each entry names the issue that tracks its fix. Keep it short.
-  static let knownLeakyClasses: [String: Int] = [
-    "CrashedLittleArktTests": 817,
-    "DownloadsWindowTests": 817,
-    "LeaveSiteDialogWindowTests": 817,
-    "LittleArktArchiveTests": 817,
-    "LittleArktDialogTests": 817,
-    "LittleArktEscapeStopTests": 817,
-    "LittleArktFlightTests": 817,
-    "LittleArktLookupBarTests": 817,
-    "LittleArktMenusTests": 817,
-    "LittleArktWindowTests": 817,
-    "PermissionPresenterTests": 817,
-    "WindowLifecycleTests": 817,
-  ]
+  static let knownLeakyClasses: [String: Int] = [:]
 
   private let record: (String) -> Void
   private let printsLeaks: Bool
+  private let allowlist: [String: Int]
   private var openAtStart: [String: Set<ObjectIdentifier>] = [:]
 
   /// `record` receives the failure message for a class that left windows open. `printsLeaks` prints a
-  /// `window.leak class=... windows=N kinds=[...]` line for every leak, allowed classes included.
-  init(printsLeaks: Bool = false, record: @escaping (String) -> Void) {
+  /// `window.leak class=... windows=N kinds=[...]` line for every leak, allowed classes included. `allowlist` names
+  /// the classes whose leaks are reported but do not fail, each with its tracking issue.
+  init(printsLeaks: Bool = false, allowlist: [String: Int] = WindowLeakGuard.knownLeakyClasses,
+       record: @escaping (String) -> Void) {
     self.printsLeaks = printsLeaks
+    self.allowlist = allowlist
     self.record = record
   }
 
@@ -58,13 +49,13 @@ final class WindowLeakGuard {
     guard let before = openAtStart.removeValue(forKey: name) else { return }
     let left = Self.leftOpen(before: before, after: windows)
     guard !left.isEmpty else {
-      if printsLeaks, let issue = Self.knownLeakyClasses[name] {
+      if printsLeaks, let issue = allowlist[name] {
         print("window.leak allowlisted class=\(name) left no windows this run; remove it from knownLeakyClasses (#\(issue))")
       }
       return
     }
     if printsLeaks { print("window.leak class=\(name) windows=\(left.count) kinds=[\(Self.kinds(left))]") }
-    guard Self.knownLeakyClasses[name] == nil else { return }
+    guard allowlist[name] == nil else { return }
     record("\(name) left \(left.count) window(s) open after its last test: \(Self.kinds(left)). "
       + "Close them and clear the properties that hold them in tearDown (#805).")
   }
