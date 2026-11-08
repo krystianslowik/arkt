@@ -373,6 +373,58 @@ final class FolderTests: XCTestCase {
     XCTAssertEqual(try harness.row(world.pinnedTab), try harness.row(world.folder) + 1)
   }
 
+  /// A real command-bar switch reaches the window and the outline without opening either closed folder.
+  func testCommandBarSwitchShowsOnlyTheChosenTabInClosedFolders() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
+    let title = "Needle " + String(repeating: "long title ", count: 30)
+    let target = try harness.source.addTab(url: Self.url("needle"), title: title, in: .folder(world.inner))
+    try harness.show(current: world.today[0])
+    let outline = try harness.outline()
+    outline.toggleFolder(world.inner, animated: false)
+    outline.toggleFolder(world.folder, animated: false)
+    XCTAssertEqual(try harness.row(target), -1)
+
+    let bar = harness.controller.commandBar
+    bar.show(.newTab)
+    bar.setQueryForTesting("Needle")
+    let index = try XCTUnwrap(bar.results.firstIndex { $0.kind == .switchTo(target) })
+    bar.barView.table.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false)
+    bar.commit()
+
+    XCTAssertEqual(harness.controller.sidebarController.current, target)
+    XCTAssertFalse(outline.isFolderOpen(world.folder))
+    XCTAssertFalse(outline.isFolderOpen(world.inner))
+    XCTAssertEqual(try harness.row(world.inner), try harness.row(world.folder) + 1)
+    XCTAssertEqual(try harness.row(target), try harness.row(world.inner) + 1)
+    XCTAssertEqual(try harness.row(world.innerTab), -1)
+    XCTAssertEqual(try harness.row(world.folderTabs[0]), -1)
+    XCTAssertEqual(try harness.row(world.folderTabs[1]), -1)
+    XCTAssertEqual(try harness.row(world.pinnedTab), try harness.row(target) + 1)
+
+    bar.show(.newTab)
+    bar.setQueryForTesting("T1")
+    let away = try XCTUnwrap(bar.results.firstIndex { $0.kind == .switchTo(world.today[1]) })
+    bar.barView.table.selectRowIndexes(IndexSet(integer: away), byExtendingSelection: false)
+    bar.commit()
+    XCTAssertEqual(harness.controller.sidebarController.current, world.today[1])
+    XCTAssertEqual(try harness.row(target), -1)
+    XCTAssertEqual(try harness.row(world.inner), -1)
+    XCTAssertFalse(outline.isFolderOpen(world.folder))
+    XCTAssertFalse(outline.isFolderOpen(world.inner))
+    XCTAssertEqual(try harness.row(world.pinnedTab), try harness.row(world.folder) + 1)
+
+    _ = harness.source.archive([target], reason: .manual, at: Self.now)
+    bar.show(.newTab)
+    bar.setQueryForTesting("Needle")
+    XCTAssertFalse(bar.results.contains { $0.kind == .switchTo(target) }, "archived tabs are not open-tab switches")
+    XCTAssertEqual(harness.controller.sidebarController.current, world.today[1])
+    XCTAssertEqual(try harness.row(world.inner), -1, "searching an archived tab does not reveal its former path")
+    XCTAssertFalse(outline.isFolderOpen(world.folder))
+    bar.hide()
+  }
+
   /// BH-092, BH-091 (the model side; the drag itself is #104): a tab moved into a closed folder peeks out under it
   /// and the folder stays closed.
   func testATabMovedIntoAClosedFolderPeeksAndTheFolderStaysClosed() throws {

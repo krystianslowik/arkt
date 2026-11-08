@@ -2947,3 +2947,10 @@ extensions, real data refresh, activation, closed-folder peek or Settings accept
 - Remaining for the full issue: production data forwarding and refresh, folder selection and extension action
   activation with working presentation, closed-folder peek, search-engine choice and suggestions Settings, and
   complete integration and UI checks. No production UI entry point is enabled by this stage.
+
+### Command-bar closed-folder integration gate (#562)
+
+- Provider CI at `5c75c8c2193f739421bce646c7ad2a164674998d`: [run 42439504550, pure ShellKit job](https://github.com/krystianslowik/arkt/actions/runs/42439504550/job/128605615252) passed 2509 tests in 280 suites, including `CommandBarFolderExtensionResultsTests`. App build, isolation/lint and the required Swift gate passed; Core and UI tests were skipped. The informative GUI job was still running when checked.
+- The existing command-bar switch callback calls window activation, which updates the sidebar's current tab; the outline already recalculates its transient peek on that change. A GUI regression now selects an actual open-tab result and commits it through the bar, checking a long-titled tab in nested closed folders, hidden siblings, both closed states, switching away and an archived target. The test uses the existing main-actor window/model harness; it adds no production API or behavior.
+- `swiftc -frontend -parse app/ArktShell/ShellKit/Tests/ShellKitGUITests/FolderTests.swift` and `git diff --check` passed. Parsing is not a test run or an observed red. The GUI test and full suites were not run locally: the local ShellKit baseline is compiler-broken and full Xcode is unavailable. CI must execute the gate before any production change or BH-105 completion claim. Missing-source and private-node stale-result cases remain unverified, as do accessibility and visual layout for the long title.
+- This is a test-only gate; it does not establish a new folder or extension selection policy. The provider remains non-actionable and unforwarded. Keep #562 open for its remaining integration and Settings work.
