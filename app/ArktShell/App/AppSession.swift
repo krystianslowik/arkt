@@ -197,7 +197,13 @@ final class AppSession {
   /// the shown tab. The Chromium engine passes false when the windows it queued before ready (a startup URL, an
   /// extension's `chrome.windows.create`) opened one already.
   func finishLaunch(opensWindow: Bool) {
-    let window = opensWindow ? windows.openWindow() : windows.primary
+    let window: ShellWindowController?
+    if opensWindow {
+      windows.restoreWindowsAtLaunch(settings: settings)
+      window = windows.primary ?? windows.openWindow()
+    } else {
+      window = windows.primary
+    }
     if let window { presentOnboardingIfNeeded(on: window) }
     askAboutCrashIfNeeded()
     if let notice = launchNotice, let window {

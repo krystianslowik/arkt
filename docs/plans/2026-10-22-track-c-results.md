@@ -3061,3 +3061,18 @@ Independent source review supports a focused native observation experiment, but 
 cannot prove quit-time capture if ordinary writes already saved the correct value. The test and notes now state
 that boundary explicitly. A separate distinguishable-state capture mutation remains required before claiming
 native quit-capture coverage. No local App build, full ShellKit/GUI build, launch, XCUITest or capture mutation ran.
+
+
+### Actual App collection restoration runtime red (#116)
+
+Native [run 42504717042](https://github.com/krystianslowik/arkt/actions/runs/42504717042) at `ce5ba72` passed the new
+store observation boundary, including raw count, per-launch identity/latch and matching initial selections. It
+failed at the missing two-window restore assertion; the AX attachment shows only Space 2/session-beta restored.
+This is the intended App behavior red, distinct from the prior unsupported runner-side defaults read. The focused
+workflow's GUI suite passed 2058 reported tests, 54 skipped, zero failures; Core, pure ShellKit, App build, lint and
+aggregate passed. It does not prove native quit-capture timing or complete issue acceptance.
+
+The next bounded App change invokes the existing collection restore through the shared setting before deciding
+whether to create a default launch window. The existing engine-startup `opensWindow: false` behavior and subsequent
+onboarding, crash/recovery notices, auto-archive and observation completion order are retained. Parser, source and
+whitespace checks do not establish App behavior; new-head review and native execution remain necessary.

@@ -201,3 +201,25 @@ is not that termination mutation.
 The current raw count also does not map each stored ID to a live AX row. The later restored Space/tab labels and
 fresh page requests are the behavior checks; a failure before that point must be interpreted at the observation
 boundary first. No production restoration call is added by this publication.
+
+
+## Native observation established; App restoration red
+
+[Run 42504717042](https://github.com/krystianslowik/arkt/actions/runs/42504717042) at `ce5ba72` compiled and executed
+the repaired native case. Its first assertion failure was line 95, waiting for both distinct window selections
+to restore. The preceding store observation, raw two-entry count, private-window setup, distinct per-launch ID,
+completion latch and ordered initial snapshot comparison succeeded. The failure AX attachment shows one regular
+window selected in Space 2 on Fixture session-beta, with the observation element present. Thus the previous
+runner-side observation barrier is passed and the missing App collection restoration now has a runtime red.
+This does not establish quit-capture timing, disabled restore or every native lifecycle criterion.
+
+The same focused workflow's GUI job passed: 2058 reported tests, 54 skipped and zero failures. Core, pure ShellKit,
+App build, lint and the aggregate also passed; the native test remained red. Normal PR GUI was still running at
+the status read. Those are `ce5ba72` results, not validation of the following implementation.
+
+The bounded App change calls the existing once-at-launch collection restore with the shared `AppSettings` when
+launch requests a window, then creates a default window only if no regular window exists. When Chromium reports
+that its queued startup requests already opened a window, the existing `opensWindow: false` path continues to
+use the primary window. Onboarding, crash prompts, recovery notice, auto-archive and the observation latch retain
+their order after that launch decision. This has been parsed and source-inspected only; independent review and
+a fresh native run must establish behavior before claiming green. #690 recovery composition remains separate.
