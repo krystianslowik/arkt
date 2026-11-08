@@ -939,6 +939,19 @@ NS_SWIFT_UI_ACTOR
 @property(nonatomic, readonly) BOOL isTabFullscreen;
 
 - (void)navigateToURL:(NSURL*)url;
+// A navigation the user typed in the shell's address field (#784), with the
+// transition Chrome's omnibox sends (PAGE_TRANSITION_TYPED |
+// PAGE_TRANSITION_FROM_ADDRESS_BAR) where navigateToURL: sends TYPED alone.
+// The differences: the same URL as the page on screen loads again as a new
+// navigation that replaces the entry, not as a reload (the back list does not
+// grow either way); the history records the visit with the FROM_ADDRESS_BAR
+// qualifier (both calls count it as typed). Browser debug URLs
+// (chrome://gpucrash, chrome://inducebrowsercrashforrealz, the hang and
+// memory-pressure URLs, chrome://crash/browser/... and chrome://crash/gpu/...)
+// only run with --arkt-engine-test-api; without it they load as
+// navigateToURL: does, which does nothing.
+- (void)navigateFromAddressBarToURL:(NSURL*)url
+    NS_SWIFT_NAME(navigate(fromAddressBarTo:));
 - (void)reload;
 // No-ops when the tab cannot go back or forward.
 - (void)goBack;

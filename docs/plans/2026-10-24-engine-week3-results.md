@@ -6257,3 +6257,136 @@ Unchanged: 14 patch files, 14 `arkt` commits, in sync. No upstream file touched.
 
 Every Chromium run stopped by exact PID (`ps -p` prints nothing for each) and the loopback server by its PID. The
 throwaway profiles under `profiles/755-20261108/` and the build logs were deleted. The runs did not use the clipboard.
+
+## #784: a dedicated address-bar navigation call
+
+Date 2026-11-08. Branch `engine/784-address-bar-navigation` from `origin/main` (`e8380ee`). Follow-up of #577 / #770
+(the maintainer decision of 2026-11-07 on `chrome://gpucrash`). Facade, overlay and shell only; no patch.
+
+### Gate
+
+- Seam: the facade's tab handle. Chromium takes the transition from `LoadURLParams`; no patch is needed.
+- Facade header: additive. One new `ArktTabHandle` method, `navigateFromAddressBarToURL:`
+  (`navigate(fromAddressBarTo:)` in Swift), next to `navigateToURL:`. Both copies `cmp` identical.
+- `.patches`: unchanged, 14 lines, 14 `arkt` commits above `156.0.8078.48`, in sync before and after.
+- Overlay link checked before every build: `$CR/arkt` points at this worktree's `engine/arkt`.
+- Build: `nice -n 15 autoninja -j 4 -C out/Spike chrome`. Chromium disk 1.9 TB free, internal 49 GB, swap 5.6 of
+  7 GB used, load average 6 to 10 from other lanes (nothing added).
+
+### What landed
+
+- `arkt_engine_facade.mm`: `navigateToURL:` and the new call share one `loadURL:transition:call:` (same queueing,
+  unparking and closed-tab handling). The new call sends `PAGE_TRANSITION_TYPED | PAGE_TRANSITION_FROM_ADDRESS_BAR`,
+  as Chrome's omnibox does.
+- Browser debug URLs: `IsBrowserDebugURL` mirrors content's `IsDebugURL` and `IsAsanDebugURL`
+  (`content/browser/renderer_host/debug_urls.cc`, not exported): `chrome://inducebrowsercrashforrealz`,
+  `chrome://inducebrowserdcheckforrealz`, `chrome://uithreadhang`, `chrome://delayeduithreadhang`, `chrome://gpuclean`,
+  `chrome://gpucrash`, `chrome://gpuhang`, the two memory-pressure URLs, and `chrome://crash/browser/...` and
+  `chrome://crash/gpu/...` (`blink::ParseCrashURL`). Without `--arkt-engine-test-api` such a URL keeps `TYPED` alone,
+  which is what `navigateToURL:` sends: Chromium's `HandleDebugURL` returns without running it, and no navigation
+  starts. The constants come from `third_party/blink/public/common/chrome_debug_urls.h`, a public dependency of
+  `//content/public/common`, so `BUILD.gn` is unchanged.
+- Renderer debug URLs (`chrome://crash`, `chrome://kill`, `chrome://hang`) are not gated: Chromium runs them for any
+  transition, and the contract runner already reaches `chrome://crash` through `navigateToURL:`. Nothing changes there.
+- `EngineClient.navigateFromAddressBar(_:to:)`, with a default that calls `navigate(_:to:)`. ChromiumEngine calls the
+  facade; InMemoryEngine records each call in `addressBarNavigations` and loads as `navigate` does; FakeEngine loads as
+  `navigate` does (WebKit has no address-bar transition).
+- Shell: `ShellWindowController.open(_:inNewTab:)`, the Cmd-L branch, and the private-window path
+  (`openPrivately(_:fromAddressBar:)`, set by the command bar's `onOpen` in a blank or incognito window) use the new
+  call. Every other navigation keeps `navigate` (pinned reset, Peek, reopened private pages, Paste and Go).
+- Self-test (test-only): `arkt-selftest navigate-typed <url>`.
+
+### What the transition changes (measured on `out/Spike`)
+
+The issue expected typed-visit counting to differ. It does not: Chromium records the converted reload with core type
+`TYPED` too, so `typed_count` grows by one for every visit, whichever call made it.
+
+| Navigation | Page's navigation type | `history.length` | History visit (core, qualifier) | `typed_count` of `p.html` after |
+|---|---|---|---|---|
+| `navigate` to `p.html` from `start` | `navigate` | 2 | TYPED, none | 1 |
+| `navigate` to `p.html` again | `reload` | 2 | TYPED, none | 2 |
+| `navigate-typed` to `p.html` again | `navigate` | 2 | TYPED, `FROM_ADDRESS_BAR` (`0x32000001`) | 3 |
+| `navigate-typed` to `q.html` | `navigate` | 3 | TYPED, `FROM_ADDRESS_BAR` | (q: 1) |
+
+So the differences are: the same URL loads as a new navigation that replaces the entry instead of a reload; the visit
+carries `FROM_ADDRESS_BAR` (which Chromium's history sync, the webNavigation API's `transitionQualifiers` and a few
+other observers read); and browser debug URLs.
+
+### Tests first
+
+- `ChromiumAddressBarTests` (8, ChromiumEngineKitTests) against the scripted facade, whose model
+  (`ScriptedAddressBar.swift`) follows the table above: the transition each call sends, same-URL reload against a new
+  navigation, typed counts, the back list, the debug URL gate with and without the test API, which URLs count as
+  browser debug URLs, and a call queued behind a deferred insert. Red first, before ChromiumEngine called the
+  facade (the default sent plain `navigate`): 4 of the first 7 failed with 5 issues. The smoke then showed that a
+  converted reload counts as typed too; the model and two tests were corrected to that (8 tests now).
+- `ConformanceTests.addressBarNavigationIsItsOwnSelector` (ArktEngineABITests): the Objective-C name the facade
+  implements, and the Swift name.
+- `AddressBarNavigationTests` (6, ShellKitGUITests, InMemoryEngine): Cmd-L typed text, the URL on screen retyped, the
+  untouched prefill (reload, no navigation), Cmd-T, a private window's Cmd-L, private pages opened in code. Before the
+  shell change: compile error (no `addressBarNavigations`); with the two call sites put back to `navigate`: 3 of 6
+  failed (5 assertions); restored, 6 of 6 pass.
+
+### Swift tests (`nice -n 20`, `-j 2`, in `app/ArktShell/ShellKit`)
+
+`swift test --filter "ChromiumEngineKitTests|ArktEngineABITests|EngineAPITests|FakeEngineKitTests|ShellUITests"`: all
+passed. ChromiumEngineKitTests 178 (170 + 8), ArktEngineABITests 34 (33 + 1), EngineAPITests 285, FakeEngineKitTests
+29, ShellUITests 1493. GUI, filtered to the new tests and the suites that reach the changed call sites
+(`AddressBarNavigationTests`, `CommandBar*`, `PrivatePages*`, `PrivateReopenTests`, `EmptySpaceContentTests`,
+`EmptyStateTests`, `SplitShortcutTests`, `SplitWindowTests`, `URLBarTests`): 275 executed, 3 skipped, 0 failures. The
+full suite is left to CI.
+
+### Build
+
+| Step | Result | Time |
+|---|---|---|
+| The facade call, the gate and the self-test command | `The build has finished successfully.`, `FAILED:` 0 | 46 s |
+| Break: the gate's condition made always false (`&& url.is_empty()`, working tree only) | finished, `FAILED:` 0 (a first try with `false &&` failed on `-Wunreachable-code`) | 34 s |
+| Restored | finished, `FAILED:` 0 | 33 s |
+| Final (header and doc comments) | finished, `FAILED:` 0; `git status` in `$CR` shows only the `build/util/MINIBRANCH` that was there before | 38 s |
+
+`gn check out/Spike //arkt/api:embedder`: the 4 errors that were already there (the `find_in_page` includes, lines
+71 to 74); none for the two new includes.
+
+### Smoke (`out/Spike/Chromium.app`, `--no-startup-window --arkt-facade-selftest`, fresh profiles under `profiles/784-20261108/`, `--use-mock-keychain`, pages from a loopback server on `127.0.0.1:8784` that drive themselves: each load writes its `performance` navigation type and `history.length` into the title, then sets the next `arkt-selftest` command; the visits read afterwards from the run's own `Default/History` with `sqlite3` in read-only mode)
+
+| Run | Check | Result |
+|---|---|---|
+| A (`--arkt-engine-test-api`) | the four navigations of the table above | as in the table: `reload` for plain `navigate`, `navigate` for the address bar, back list `[start]` after both same-URL loads |
+| A | History | `p.html` visit_count 3, typed_count 3; visits `0x30000001`, `0x30000001`, `0x32000001`; `q.html` `0x32000001` |
+| A | `navigate chrome://gpucrash` | nothing: no GPU exit, URL stays `q.html` |
+| A | `navigate-typed chrome://gpucrash` | `GPU process exited unexpectedly: exit_code=11`, then `Reinitialized the GPU process after a crash`; the tab stays on `q.html`, its back list unchanged |
+| B (no test API) | the same four navigations | the same types, lengths and History rows as A |
+| B | `navigate-typed` `chrome://gpucrash`, `chrome://gpuhang`, `chrome://inducebrowsercrashforrealz`, `chrome://uithreadhang`, `chrome://crash/browser/use-after-free`, 1.5 s apart | none ran: 0 GPU exits, 0 `Received signal`, the browser kept answering (each next command arrived on time), then `close` |
+| C (break, no test API) | `navigate-typed chrome://gpucrash` | `GPU process exited unexpectedly: exit_code=11`: the gate is what stops it |
+| final A and B (restored build) | everything of A and B again, fresh profiles | identical results |
+| D (no test API) | `navigate-typed chrome://crash` (a renderer debug URL, not gated) | the page's renderer crashed (`tabCrashed status=1 listed=yes`), the browser stayed up, as with `navigate` |
+
+Not driven: `chrome://inducebrowsercrashforrealz` and the hang URLs with the test API (they would end or freeze the
+run). Their gate is the same check as `chrome://gpucrash`'s.
+
+### Patch budget
+
+| Source | Count |
+|---|---|
+| `.patches` lines | 14 |
+| `arkt` commits above `156.0.8078.48` | 14 |
+
+In sync; no patch file changed. Facade header copies `cmp` identical.
+
+### Left open
+
+- Cmd-T and the new-tab path create the tab with its URL (`createTab(url:in:)`); Chromium loads that with its own
+  transition, not `FROM_ADDRESS_BAR`. Typing in a new tab therefore still does not run a browser debug URL and does not
+  carry the qualifier. Follow-up if wanted.
+- A search, a history suggestion or a site search committed with Cmd-L uses the new call too (the field is the address
+  field). Chrome's omnibox sends `GENERATED | FROM_ADDRESS_BAR` for a search; the facade offers only `TYPED`, which
+  `navigate` already sent for searches before this change.
+
+### Cleanup
+
+Every Chromium run stopped by exact PID (`ps -p` prints nothing for each); the loopback server stopped by PID; the
+profiles under `profiles/784-20261108/` deleted. The three GPU crashes (runs A, C and final A) and run D's renderer
+crash wrote their dumps to Chromium's shared `Crashpad/pending` folder, not to the profile; those four files (matched
+by time) were deleted, nothing else there. Nothing touched the clipboard (no copy or
+paste command was sent). Nothing under `~/Applications/ArktTest` or `/Applications/Arkt.app` was touched.

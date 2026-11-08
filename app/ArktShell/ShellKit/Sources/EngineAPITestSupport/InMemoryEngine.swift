@@ -150,6 +150,18 @@ public final class InMemoryEngine: EngineClient, EngineExtensions, EngineImporti
     load(id, url, title: nil, previous: previous)
   }
 
+  /// Address-bar navigations (#784), in order.
+  public private(set) var addressBarNavigations: [(tab: TabID, url: URL)] = []
+
+  /// Loads as `navigate(_:to:)` does and records the call in `addressBarNavigations`. This engine has no history
+  /// service and no debug URLs, so the transition changes nothing else: the same URL leaves the history alone either
+  /// way (Chromium replaces the entry), a new one drops the forward list.
+  public func navigateFromAddressBar(_ id: TabID, to url: URL) {
+    guard snapshots[id] != nil else { return }
+    addressBarNavigations.append((id, url))
+    navigate(id, to: url)
+  }
+
   public func goBack(_ id: TabID) { goToHistory(id, offset: -1) }
 
   public func goForward(_ id: TabID) { goToHistory(id, offset: 1) }
