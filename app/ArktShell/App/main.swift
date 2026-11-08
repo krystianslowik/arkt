@@ -10,6 +10,18 @@ let startupViolations = startupOverrides.uiTestStartupViolations(
 if !startupViolations.isEmpty {
   exit(64)
 }
+// Capture the effective environment before app settings can be composed.
+let startupIdentity: TestIdentity.Request?
+do {
+  startupIdentity = try TestIdentity.request(environment: ProcessInfo.processInfo.environment,
+                                             required: uiTestRequired, pid: ProcessInfo.processInfo.processIdentifier)
+  #if ARKT_CHROMIUM_ENGINE
+  // This barrier is implemented for the FakeEngine UI-test app only.
+  if startupIdentity != nil { exit(64) }
+  #endif
+} catch {
+  exit(64)
+}
 #endif
 
 // Before anything reads a default: the delegate, the engine and the settings objects all start after this line.

@@ -114,6 +114,7 @@ class ArktUITestCase: XCTestCase {
     "ARKT_DATA_DIR",
     "ARKT_ARC_DIR",
     "ARKT_DEFAULTS_SUITE",
+    "ARKT_TEST_IDENTITY_ENDPOINT",
   ]
 
   /// Merges `extraEnv` into `sandbox.environment`, refusing any key that `Sandbox` owns or already sets (#199).

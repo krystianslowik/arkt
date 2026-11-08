@@ -60,7 +60,7 @@ final class LinkRoutingAppTests: ArktUITestCase {
 
   /// Target the same validated bundle used by `launch`; never consult or modify the default browser.
   @MainActor
-  private func open(_ address: String, sandbox: Sandbox, cold: Bool) async throws -> NSRunningApplication {
+  private func open(_ address: String, sandbox: Sandbox, server: FixtureServer, cold: Bool) async throws -> NSRunningApplication {
     let url = try XCTUnwrap(URL(string: address))
     let applicationURL = Self.appURL().standardizedFileURL.resolvingSymlinksInPath()
     if cold {
@@ -73,7 +73,13 @@ final class LinkRoutingAppTests: ArktUITestCase {
     let configuration = NSWorkspace.OpenConfiguration()
     configuration.allowsRunningApplicationSubstitution = false
     configuration.createsNewApplicationInstance = cold
-    configuration.environment = try Self.mergedEnvironment(sandbox: sandbox, extraEnv: [:])
+    var environment = try Self.mergedEnvironment(sandbox: sandbox, extraEnv: [:])
+    if cold {
+      let nonce = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+      server.armIdentity(nonce: nonce, digest: try TestIdentity.digest(environment))
+      environment[TestIdentity.endpointKey] = "\(server.base)/identity/\(nonce)"
+    }
+    configuration.environment = environment
     configuration.arguments = Self.launchArguments
     let opened = try await NSWorkspace.shared.open([url], withApplicationAt: applicationURL,
                                                    configuration: configuration)
@@ -81,7 +87,52 @@ final class LinkRoutingAppTests: ArktUITestCase {
           opened.processIdentifier > 0 else {
       throw HarnessError("OS open returned an unexpected application identity")
     }
+    if cold {
+      guard Waits.until("cold process identity report", { server.acceptedIdentity != nil }),
+            let report = server.acceptedIdentity, report.pid == opened.processIdentifier,
+            let bundleID = opened.bundleIdentifier else {
+        throw HarnessError("cold process identity was not established")
+      }
+      let instances = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+      guard instances.count == 1, instances[0].processIdentifier == report.pid,
+            instances[0].bundleURL?.standardizedFileURL.resolvingSymlinksInPath() == applicationURL else {
+        throw HarnessError("cold process is not the sole instance of the validated bundle")
+      }
+    }
     return opened
+  }
+
+  /// Observe the loaded app profile without editing it or changing the active Space.
+  @MainActor
+  private func verifyPersistedProfile(_ app: XCUIApplication) throws {
+    guard Waits.until("cold profile: two Spaces", { Shell.spaceDots(app).count == 2 }) else {
+      throw HarnessError("cold profile does not contain the configured Spaces")
+    }
+    app.typeKey(",", modifierFlags: .command)
+    let settings = app.windows[AXID.Settings.window]
+    guard waitFor(settings) else { throw HarnessError("cold profile Settings unavailable") }
+    app.typeKey("2", modifierFlags: .command)
+    let control = Shell.element(app, AXID.Settings.control("spaces", "linksFromOtherApps"))
+    guard Waits.until("cold profile: routing settings", {
+      control.value as? String == "Space 2"
+        && Shell.element(app, "settings.spaces.route.0.edit").exists
+        && Shell.element(app, "settings.spaces.route.1.edit").exists
+    }) else { throw HarnessError("cold profile routing settings differ from configured profile") }
+    for (index, literal, destination) in [(0, "/routing/routed-", "Space 1"),
+                                           (1, "/routing/little-", "Little Arkt")] {
+      Shell.element(app, "settings.spaces.route.\(index).edit").click()
+      let field = app.textFields["settings.route.literal"]
+      let condition = Shell.element(app, "settings.route.condition")
+      let target = Shell.element(app, "settings.route.destination")
+      guard waitFor(field), field.value as? String == literal,
+            condition.value as? String == "Contains", target.value as? String == destination else {
+        throw HarnessError("cold profile route \(index) differs from configured profile")
+      }
+      Shell.element(app, "settings.route.cancel").click()
+      guard waitUntilGone(field) else { throw HarnessError("cold profile route inspection did not close") }
+    }
+    app.typeKey(.escape, modifierFlags: [])
+    guard waitUntilGone(settings) else { throw HarnessError("cold profile Settings did not close") }
   }
 
   @MainActor
@@ -118,7 +169,11 @@ final class LinkRoutingAppTests: ArktUITestCase {
     let name = "\(destination.rawValue)-\(cold ? "cold" : "warm")"
     let address = "\(server.base)/routing/\(name)"
     // Cold opens start the validated bundle with the same sandbox, without an XCUIApplication launch first.
-    _ = try await open(address, sandbox: sandbox, cold: cold)
+    let opened = try await open(address, sandbox: sandbox, server: server, cold: cold)
+    if cold {
+      try verifyPersistedProfile(app)
+      guard !opened.isTerminated else { throw HarnessError("cold process exited during profile inspection") }
+    }
     switch destination {
     case .routed: expectSpacePage(name, index: 0, server: server, app: app)
     case .little: expectLittlePage(name, server: server, app: app)

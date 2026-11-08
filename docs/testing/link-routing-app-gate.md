@@ -215,3 +215,49 @@ the specified installation. The six route/default cases and destination assertio
 These checks are prerequisites, not effective sandbox or persisted-profile evidence. No native run is dispatched:
 exact per-test environment identity, sole-instance correlation and persisted configured Spaces/routes still need
 a supported observation barrier. This stage adds no acknowledgement/report path and establishes no path confinement.
+
+### Cold identity and profile barrier (local stage)
+
+The intended cold observation is a Debug-only handshake with the existing per-test loopback fixture server, before
+`AppComposition.start` opens the database or constructs `AppSession`. The main entry point captures a request from
+its actual environment after the mandatory startup guard and before defaults migration. With a valid suite override,
+migration returns before touching legacy app defaults. AppKit, menu setup and other system code may read system
+defaults before acknowledgement; this barrier makes no claim about those reads. The asynchronous delegate task waits
+for acknowledgement without blocking the main thread. The existing composition-owned external-open coordinator can
+retain URLs delivered while it waits. Engine builds reject this optional request; normal launches without it retain
+their normal startup behavior.
+
+The runner arms the existing server with a fresh nonce and a SHA-256 digest independently calculated from the six
+whitelisted sandbox environment values. The app calculates its own digest from `ProcessInfo`, sends only the nonce,
+digest, PID and mandatory-guard Boolean, and does not transmit paths or the full environment. The only accepted
+endpoint is the exact literal HTTP loopback address, a valid port and nonce path, without credentials, escaping,
+query or fragment. The ephemeral session disables cookies, cache and proxies and declines redirects. The server
+accepts one bounded, exact-field report matching its current nonce and digest and returns HTTP 204; any failure or
+other status prevents session composition. The server state is mutex-protected and connection handling stays on its
+existing serial queue. No filesystem acknowledgement, path-confinement authority or new service is involved.
+
+The cold harness checks the built String guard before OS open, disables substitution, requests a new instance, and
+compares the accepted PID with the returned running application and the sole running instance of that bundle. It
+then checks two Spaces, the default and both route conditions, literals and destinations through the app's Settings UI, cancelling
+each read-only route inspection. These are setup/profile failures, separate from the original destination assertions.
+The public process and bundle checks are an observed proxy association, not an API exposing XCUIApplication's PID.
+The existing page identity and destination checks still provide delivery evidence; no queue-drained claim is added.
+
+Test-first: the new codec contracts initially failed compilation because `TestIdentity` did not exist (zero tests
+ran); the actual-fixture contract then failed compilation because `armIdentity` and `acceptedIdentity` did not exist
+(zero tests ran). The final focused actual-source command below passed 26 tests in three suites, including four new
+tests. It exercised matching and mismatched identities, ordinary 200 versus 204, replay and re-arming over the real
+loopback fixture transport. The pure checks cover invalid endpoint forms, report fields and response policy; redirect
+refusal is additionally source-inspected, not exercised by a redirecting server. The build emitted the three existing
+missing toolchain/Command Line Tools search-path linker warnings. Swift 6.2.4 frontend parsing, UI source lint,
+import-layer check, actionlint and whitespace checks passed separately.
+
+```sh
+SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX15.5.sdk /opt/homebrew/opt/swift/bin/swift test --package-path integration/StartupPolicy -j 2
+```
+
+The focused probe compiles the actual codec and fixture server but not the App delegate or XCUITest target. The
+built Info value, compiled startup wiring, AppKit delivery timing, proxy association, Settings accessibility and
+persisted profile are unobserved. After root review and publication, the safest next observation is a focused manual
+FakeEngine UI workflow on a disposable CI runner, with the mandatory build flag and all six cases; inspect setup
+failures separately before interpreting routing results. No such run or local app launch was performed here.

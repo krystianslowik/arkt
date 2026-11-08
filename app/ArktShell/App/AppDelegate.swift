@@ -28,18 +28,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     #endif
     NSApp.activate()
-    #if DEBUG || ARKT_SMOKE_BUILD
-    // Only the command line counts (`-ArktSmoke YES`), never a persisted default.
-    if SmokeArguments.isEnabled {
-      startSmoke()
-      return
-    }
-    #endif
     Task { [composition] in
+      #if DEBUG
+      if let identity = startupIdentity {
+        do { try await TestIdentity.send(identity) } catch { exit(64) }
+      }
+      #endif
+      #if DEBUG || ARKT_SMOKE_BUILD
+      // Only the command line counts (`-ArktSmoke YES`), never a persisted default.
+      if SmokeArguments.isEnabled {
+        startSmoke()
+        return
+      }
+      #endif
       do {
-        try await composition.start(engine: FakeEngine())        // FakeEngine: composition root only
+        try await composition.start(engine: FakeEngine())
       } catch {
-        composition.quit()                                       // Quit in the launch-failure alert
+        composition.quit()
       }
     }
   }
