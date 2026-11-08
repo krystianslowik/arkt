@@ -261,10 +261,26 @@ extension ShellWindowController {
   private func refreshToolbar(_ toolbar: ContentToolbarView, tab: TabID?) {
     let snapshot = tab.flatMap { engine.snapshot(of: $0) }
     toolbar.urlBar.url = snapshot?.url
-    let pill = PageInfoModel.pill(for: tab.flatMap { engine.siteSettings?.pageInfo(of: $0) })    // #698
-    toolbar.urlBar.siteDescription = pill?.description
-    toolbar.urlBar.siteSymbol = pill?.symbol
+    refreshSiteGlyph(of: toolbar.urlBar, tab: tab)
     toolbar.setHistory(canGoBack: snapshot?.canGoBack ?? false, canGoForward: snapshot?.canGoForward ?? false)
+  }
+
+  /// Every pane Toolbar's site glyph again, for a Peek opening or closing (`refreshPageInfo()`).
+  func refreshPaneSiteGlyphs() {
+    guard splitState.split != nil else { return }
+    for (index, card) in rootView.split.paneCards.enumerated() {
+      let pane = splitState.panes.indices.contains(index) ? splitState.panes[index] : nil
+      refreshSiteGlyph(of: card.toolbar.urlBar, tab: pane.flatMap { engineTab(of: $0) })
+    }
+  }
+
+  /// A pane Toolbar's site glyph shows its pane's page info (#698). While a Peek shows its own address it is inert, as
+  /// the main bars are: the panel follows the window's current page, which the Peek's address stands in for.
+  private func refreshSiteGlyph(of bar: URLBarView, tab: TabID?) {
+    let info = peek.addressOverride == nil ? tab.flatMap { engine.siteSettings?.pageInfo(of: $0) } : nil
+    let pill = PageInfoModel.pill(for: info)
+    bar.siteDescription = pill?.description
+    bar.siteSymbol = pill?.symbol
   }
 
   /// Focuses pane `index` when it is not focused yet and returns its tab (nil: no page).

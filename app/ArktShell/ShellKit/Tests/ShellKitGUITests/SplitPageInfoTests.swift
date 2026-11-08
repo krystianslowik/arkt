@@ -209,6 +209,51 @@ final class SplitPageInfoTests: XCTestCase {
     harness.close()
   }
 
+  /// A Peek over one wide pane leaves the other panes' Toolbars clickable and in the accessibility tree, but the panel
+  /// follows the window's current page, which the Peek's address stands in for: every pane glyph is inert while the
+  /// Peek shows, as the main bars are, and comes back when it closes.
+  func testPaneGlyphsAreInertWhileAPeekShows() throws {
+    let world = try Self.makeWorld([Self.secure, Self.insecure])
+    let harness = Harness(world.sidebar, width: 1720)      // each pane at least 600 pt: the Peek covers one pane
+    let peek = harness.controller.peek
+    peek.reduceMotion = { true }
+    peek.animator.drivesDisplayLink = false
+    peek.linkSettings = { PeekLinkSettings() }
+    harness.controller.activate(node: world.panes[0])
+    harness.layout()
+    let left = try XCTUnwrap(harness.tab(world.panes[0]))
+    XCTAssertEqual(harness.bar(1).siteSymbol, "exclamationmark.triangle")
+
+    // Shift-click a link in the left pane: a Peek over that pane (as PeekWindowTests opens one).
+    let link = try XCTUnwrap(URL(string: "https://atlas.example/"))
+    let decision = harness.engine.simulateLinkActivation(in: left, url: link, modifiers: .shift,
+                                                         disposition: .newWindow)
+    XCTAssertEqual(decision, .cancel)
+    waitUntil("the Peek opens") { peek.session != nil }
+    peek.animator.settleNow()
+    harness.layout()
+
+    XCTAssertTrue(peek.isOpen)
+    let root = harness.controller.rootView
+    let scrim = try XCTUnwrap(peek.overlay?.scrim.frame)
+    let rightBar = root.convert(harness.bar(1).bounds, from: harness.bar(1))
+    XCTAssertFalse(scrim.intersects(rightBar), "the scrim leaves the other pane's Toolbar reachable")
+    XCTAssertNil(peek.overlay?.hitTest(CGPoint(x: rightBar.midX, y: rightBar.midY)), "clicks reach it")
+    XCTAssertNil(harness.bar(0).siteSymbol)
+    XCTAssertNil(harness.bar(1).siteSymbol, "the uncovered pane's glyph is inert too")
+    XCTAssertNil(harness.bar(1).accessibilityCustomActions(), "no Show Site Controls for VoiceOver")
+    harness.bar(1).onPressSiteGlyph?()
+    XCTAssertFalse(harness.panel.isShown)
+
+    peek.close(.control)
+    peek.animator.settleNow()
+    waitUntil("the Peek closes") { !peek.isOpen }
+
+    XCTAssertEqual(harness.bar(0).siteSymbol, "lock")
+    XCTAssertEqual(harness.bar(1).siteSymbol, "exclamationmark.triangle", "back when the Peek closes")
+    harness.close()
+  }
+
   // MARK: Closing
 
   /// Focusing another pane closes it.

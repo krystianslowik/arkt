@@ -21,6 +21,7 @@ extension ShellWindowController {
       bar.siteDescription = pill?.description
       bar.siteSymbol = pill?.symbol
     }
+    refreshPaneSiteGlyphs()                                         // #698: inert while a Peek shows, as these are
     pageInfo.pageDidChange(currentTab: info == nil ? nil : currentTab)
   }
 
