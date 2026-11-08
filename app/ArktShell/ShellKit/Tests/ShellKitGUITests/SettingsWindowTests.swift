@@ -395,7 +395,10 @@ final class SettingsWindowTests: XCTestCase {
     XCTAssertEqual(settings.tabNavigation.ninthOpensNinth, true)
     let haptics = try find(AXID.Settings.control("appearance", "reorderHaptics"), in: controller,
                            as: SettingsSwitch.self)
-    XCTAssertFalse(haptics.isEnabled)
+    XCTAssertTrue(haptics.isEnabled)
+    XCTAssertTrue(haptics.isOn)
+    haptics.performClick(nil)
+    XCTAssertFalse(settings.playsReorderHaptics)
   }
 
   // MARK: - Shortcuts, Spaces, Advanced

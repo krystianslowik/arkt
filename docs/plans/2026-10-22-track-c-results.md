@@ -3363,3 +3363,18 @@ The actual-source ArchiveRouting probe passed **6 tests in 2 suites** on Swift 6
 At `5006b7e`, run 42528538251 / ShellKit job 128877432002 compiled the new archive path and ran 2,612 tests / 300 suites, reporting 14 issues exclusively at new routing fixtures' termination `flush()` assertions. App build, Core and lint passed. Ordinary fake-store persistence is now awaited through finite writer/store state barriers, retaining placement, identity, row-retention and persisted-removal assertions. Production deadlines and termination tests are unchanged. The actual-source probe passed **6 tests in 2 suites** after this fixture correction; full-suite validation is pending.
 
 Main `a47246b` is integrated. The incoming AddressBarNavigationTests fixture also uses the existing closeAllForTesting helper rather than ordering controllers out; this is the same bounded teardown repair prompted by #828's observed panel leak, with the guard and feature assertions retained. Source checks are recorded in the PR. No local full ShellKit/App build or GUI/native launch ran. SwiftPM cleaned only this session's generated Core probe build outputs to recover disk; source and test logs were retained.
+
+
+### #113 main integration after archive-routing green
+
+Parent `d16a3ed` passed run `42530705642`: Core 598 tests / 50 suites, pure ShellKit 2,612 / 300, GUI 2,189 reported /
+64 skipped / zero failures, App build, lint and required aggregate. Archive explicit-match, unavailable/retry,
+unmatched-placement, loaded-snapshot and list-model cases passed. Normal XCUITest was skipped; no cold green is claimed.
+
+Merged main `ff5bb59`, retaining the landed haptics Appearance row, inverted reset key, observer and AppSession gate
+binding. The sole conflict was the equivalent AddressBarNavigationTests array-release spellings; main's `sets = []`
+and explanatory comment are retained with the already-added `closeAllForTesting()` call. Routing source behavior and
+all guards/assertions are unchanged. Fresh merged-head CI remains necessary; parent passes do not validate this merge.
+Parsing of all 12 incoming/resolved Swift files, workflow import/UI-source checks, parity-script tests, actionlint,
+ABI header comparison and staged whitespace checks passed. No local merged-head App/ShellKit/GUI build or native
+launch ran; the previous archive-routing probe and full CI remain parent-head evidence.
