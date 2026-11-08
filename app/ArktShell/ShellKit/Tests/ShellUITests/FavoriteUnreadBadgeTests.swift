@@ -49,4 +49,23 @@ struct FavoriteUnreadBadgeTests {
     #expect(badge("https://web.whatsapp.com/", "(1) Inbox", twitter: false) == "1")
     #expect(badge("https://mail.google.com/", "(1) Inbox", twitter: false, whatsApp: false) == "1")
   }
+
+  @Test func hostsAreCaseInsensitiveButMustMatchExactly() {
+    #expect(badge("https://MAIL.GOOGLE.COM/", "(1) Inbox") == "1")
+    for address in ["https://slack.com/", "https://team.slack.com/", "https://foo.x.com/",
+                    "https://whatsapp.com/", "https://sub.mail.google.com/", "https://x.com.example.org/"] {
+      #expect(badge(address, "(1) Inbox") == nil)
+    }
+  }
+
+  @Test func onlyWellFormedLeadingAsciiCountsAreAccepted() {
+    let address = "https://mail.google.com/"
+    for title in ["Inbox (1)", " (1) Inbox", "(1 Inbox", "(+1) Inbox", "(１) Inbox", "(1 2) Inbox"] {
+      #expect(badge(address, title) == nil)
+    }
+    #expect(badge(address, "(01) Inbox") == "1")
+    #expect(badge(address, "(9223372036854775807) Inbox") == "99+")
+    #expect(badge(address, "(9223372036854775808) Inbox") == nil)
+  }
+
 }
