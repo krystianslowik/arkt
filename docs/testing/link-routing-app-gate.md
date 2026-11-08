@@ -340,3 +340,22 @@ fixture. The regular-window leak is gone and all seven routing methods passed th
 Little Arkt residue is consistent with the external-retention symptoms tracked in existing #817, but identical
 ownership has not been proven. No class was added to the lifetime allowlist and no guard was weakened. Resolving
 #817 itself is outside this work's owned issue scope.
+
+
+## Landed recovery and retained-window integration
+
+Main `a9457aa` was merged locally in `863e60c`, resolving AppSession and ShellWindowSet while retaining routing and
+recovery in dirty/normal/blocking flush decisions, routing pause before capture and resume after cancellation, and
+the unanswered recovery safeguards. Independent source review found no P1/P2 integration defect, with moderate
+confidence and no runtime claim. Main's #833 weak Little Arkt anchors remain intact; the prior retained-window
+failure requires a new full GUI run before it can be called fixed on this branch.
+
+The subsequent main `859c4ce` theme update needed only append-only results history resolution. AppSession,
+AppComposition and ShellWindowSet are byte-identical to the reviewed merge. Both result histories remain. Source
+parsing, import/UI-source checks, actionlint, headers and resolution whitespace checks passed. No merged-head build,
+focused probes, GUI or native test ran locally; disk space was insufficient for heavier validation and no suitable
+external scratch volume was mounted. Inherited main README/patch-context whitespace was preserved as-is.
+
+Combined external-open/crashed-recovery presentation and quit/cancellation still need representative executable
+coverage. Existing warm passes and old cold failures remain attributed to their original heads. No cold harness
+identity check, lifetime allowlist or routing policy was relaxed by the integration.
