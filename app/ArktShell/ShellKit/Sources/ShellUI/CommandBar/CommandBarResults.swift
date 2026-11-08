@@ -1,9 +1,8 @@
 import Foundation
+import EngineAPI
 
-/// Placeholder suggestion provider: URL, matching open tabs and Spaces, Paste and Go, search. Real providers
-/// (Chromium autocomplete, history, archived tabs, extensions) replace parts of `make` later behind the same
-/// `Result` type; the BH-104 sources with no store yet (archived tabs, history, extensions, folders) are
-/// deferred in #112.
+/// Builds command-bar results from caller-supplied sources. Folder and extension-action inputs are provider-only
+/// until their production data and activation handlers are connected (#562).
 public enum CommandBarResults {
   /// An open tab the bar can switch to; `node` is its sidebar node. `isSplitPane`: it is a pane of a split, so its
   /// result says "Switch to Split View" (BH-104).
@@ -48,6 +47,13 @@ public enum CommandBarResults {
     }
   }
 
+  /// Sidebar folder identity and title for provider matching.
+  public struct Folder: Sendable, Equatable {
+    public let node: NodeID
+    public let title: String
+    public init(node: NodeID, title: String) { self.node = node; self.title = title }
+  }
+
   /// A Space the bar can switch to (BH-104).
   public struct Space: Sendable, Equatable {
     public let id: SpaceID
@@ -84,6 +90,9 @@ public enum CommandBarResults {
   public struct Input: Sendable, Equatable {
     public var openTabs: [OpenTab] = []
     public var spaces: [Space] = []
+    public var folders: [Folder] = []
+    /// Actions supplied by the engine, not a catalog of installed extensions.
+    public var extensionActions: [ExtensionAction] = []
     public var actions: [CommandBarAction] = []
     /// BH-108: a URL read from the clipboard when the bar opened; nil adds no "Paste and Go".
     public var clipboardURL: URL?
@@ -130,6 +139,9 @@ public enum CommandBarResults {
     case history(URL)
     /// A filter that matches nothing: one row that says so (design/command-bar/README.md, Filters). Not actionable.
     case noMatch
+    /// Provider-only identities; activation is not implemented.
+    case folder(NodeID)
+    case extensionAction(String)
 
     public var name: String {
       switch self {
@@ -143,6 +155,8 @@ public enum CommandBarResults {
       case .switchSpace: "switchSpace"
       case .history: "history"
       case .noMatch: "noMatch"
+      case .folder: "folder"
+      case .extensionAction: "extensionAction"
       }
     }
   }
@@ -179,13 +193,17 @@ public enum CommandBarResults {
       case .switchSpace: "Switch to Space"
       case .history: previewFacts?.isAlsoOpen == true ? CommandBarResults.switchHint : "Open"
       case .noMatch: title
+      case .folder: "Folder"
+      case .extensionAction: "Extension action"
       }
     }
 
-    /// Whether Return does anything on the row; the empty row is the only one that does not.
+    /// Whether Return does anything on the row.
     public var isActionable: Bool {
-      if case .noMatch = kind { return false }
-      return true
+      switch kind {
+      case .noMatch, .folder, .extensionAction: false
+      default: true
+      }
     }
   }
 
@@ -303,6 +321,15 @@ public enum CommandBarResults {
       .prefix(input.isCountingAllMatches ? .max : maxMatchingActions) {
       results.append(actionRow(action, group: nil))
     }
+    // Provisional provider-only placement; this does not establish a ranking policy.
+    for folder in input.folders where folder.title.localizedStandardContains(query) {
+      results.append(Result(kind: .folder(folder.node), title: folder.title, subtitle: "Folder",
+                            trailingHint: nil, removalID: nil))
+    }
+    for action in input.extensionActions where action.isEnabled && action.name.localizedStandardContains(query) {
+      results.append(Result(kind: .extensionAction(action.id), title: action.name, subtitle: "Extension action",
+                            trailingHint: nil, removalID: nil))
+    }
     return results.filter { result in
       result.removalID.map { !input.excluded.contains($0) } ?? true
     }
@@ -406,6 +433,26 @@ public enum CommandBarResults {
 }
 
 extension CommandBarResults {
+  /// Collect each folder once, in caller Space and sidebar order, including closed nested folders.
+  @MainActor
+  public static func folders(in source: any SidebarSource, spaces: [SpaceID]) -> [Folder] {
+    var folders: [Folder] = []
+    var visited: Set<NodeID> = []
+    func visit(_ id: NodeID, depth: Int) {
+      guard depth < 64, visited.insert(id).inserted, let info = source.node(id) else { return }
+      if case .folder(let node, let title) = info {
+        folders.append(Folder(node: node, title: title))
+        for child in source.children(of: .folder(node)) { visit(child, depth: depth + 1) }
+      }
+    }
+    for space in spaces {
+      for id in source.children(of: .pinned(space)) + source.children(of: .today(space)) {
+        visit(id, depth: 0)
+      }
+    }
+    return folders
+  }
+
   /// Every open tab of a Space for "Switch to Tab": pinned, then Today, depth-first through folders.
   /// A split contributes its first pane, marked as a split pane (activating it shows the split).
   @MainActor

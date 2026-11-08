@@ -49,6 +49,18 @@ struct CommandBarFolderExtensionResultsTests {
     #expect(!rows.contains { $0.kind == .extensionAction("synthetic-other") })
   }
 
+  @Test func disabledActionsAreExcludedAndProviderRowsAreNotActionable() {
+    var input = CommandBarResults.Input()
+    let node = UUID()
+    input.folders = [.init(node: node, title: "Notes folder")]
+    input.extensionActions = [.init(id: "enabled", name: "Notes enabled"),
+                              .init(id: "disabled", name: "Notes disabled", isEnabled: false)]
+    let rows = CommandBarResults.make(query: "notes", input: input)
+    #expect(rows.first { $0.kind == .folder(node) }?.isActionable == false)
+    #expect(rows.first { $0.kind == .extensionAction("enabled") }?.isActionable == false)
+    #expect(!rows.contains { $0.kind == .extensionAction("disabled") })
+  }
+
   @Test func newSourcesPreserveExistingMixedResultKindsAndRelativeOrder() {
     let sidebar = StubSidebar()
     let space = sidebar.addSpace(title: "Notes space")

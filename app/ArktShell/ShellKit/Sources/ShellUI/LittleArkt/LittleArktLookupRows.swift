@@ -117,7 +117,7 @@ final class LittleArktLookupCellView: NSTableCellView {
     case .action: "bolt"
     case .switchSpace: "square.grid.2x2"
     case .history: "clock"
-    case .noMatch: "magnifyingglass"
+    case .noMatch, .folder, .extensionAction: "magnifyingglass"
     }
     icon.image = SymbolImageCache.shared.symbol(symbol, box: Self.iconSize, color: ShellTokens.lookupText,
                                                 scale: scale)

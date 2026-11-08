@@ -657,7 +657,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     case .restore(let id): onRestoreArchived?(id)
     case .action(let id): onAction?(id)
     case .switchSpace(let space): onSwitchSpace?(space)
-    case .noMatch: break
+    case .noMatch, .folder, .extensionAction: break
     }
   }
 

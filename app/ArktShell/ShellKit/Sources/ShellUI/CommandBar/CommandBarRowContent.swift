@@ -36,7 +36,7 @@ extension CommandBarResults.Result {
     case .open: .address
     case .switchSpace: .space
     case .history: .history
-    case .noMatch: .noMatch
+    case .noMatch, .folder, .extensionAction: .noMatch
     }
   }
 

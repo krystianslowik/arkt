@@ -2925,3 +2925,25 @@ the already-proposed inputs and collector. The new revision passed Swift 6.2.4 f
 not compilation or execution. The intended missing-API red remains unobserved, with production implementation and
 forwarding absent. These three tests are a bounded action-list/provider gate; they do not establish all installed
 extensions, real data refresh, activation, closed-folder peek or Settings acceptance for #562.
+
+### Command-bar folder and extension provider stage (#562)
+
+- CI established the test-first red at `ce842c57423c196084211a7f0017eae155a964a8`:
+  [ShellKit job](https://github.com/krystianslowik/arkt/actions/runs/42437914963/job/128600743297) reported
+  18 distinct source errors in the new tests for the missing folder and extension APIs and dependent key-path
+  inference. Zero tests ran; no unrelated error was observed in that job.
+- Added typed folder metadata and a main-actor sidebar collector for requested Spaces, pinned and Today trees,
+  with a depth limit and visited IDs. The result builder matches folder titles and enabled engine action names,
+  retaining IDs. Engine actions are an action list, not an installed-extension catalog. New kinds are
+  non-actionable and are not forwarded by production windows. Their appended order is provisional provider-only
+  behavior, not a ranking decision. Existing sources keep their relative order and behavior.
+- Added a boundary case for disabled actions and the non-actionable contract. The three existing identity and
+  mixed-order tests remain intact. With Swift 6.2.4 and the macOS 15.5 SDK, `swift build --target EngineAPI -j 2`
+  passed against actual sources. Frontend parsing passed for the five changed source files and the test file;
+  `git diff --check` passed. A focused builder typecheck against an existing unrelated module could not import
+  EngineAPI before the separate target build; it is not a valid builder test. No builder tests were run locally.
+  The known full ShellKit baseline was not retried; CI on this revision is pending. GUI, accessibility and
+  worst-case visual checks were not run.
+- Remaining for the full issue: production data forwarding and refresh, folder selection and extension action
+  activation with working presentation, closed-folder peek, search-engine choice and suggestions Settings, and
+  complete integration and UI checks. No production UI entry point is enabled by this stage.
