@@ -118,6 +118,8 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
   NSWindow* _window;
   NSView* _cardView;
   NSView* _anchorView;
+  // The tab whose container the card shows (#755).
+  __weak id<ArktTabHandle> _mountedTab;
 }
 
 @synthesize closeRequested = _closeRequested;
@@ -168,6 +170,7 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
 
 - (void)mountTab:(id<ArktTabHandle>)tab {
   NSView* container = tab.containerView;
+  _mountedTab = tab;
   if (container.superview == _cardView) {
     return;
   }
@@ -191,6 +194,34 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
     _closeRequested();
   }
   return NO;
+}
+
+// #755: an Esc the page did not use, handled as ShellEngineHost does: the
+// shell stops the active tab while it loads and its page has the keyboard
+// (the engine names no tab), through IDC_STOP when the engine enables it.
+- (void)unhandledKeyDown:(NSEvent*)event inTab:(id<ArktTabHandle>)tab {
+  id<ArktTabHandle> shown = _mountedTab;
+  NSResponder* responder = _window.firstResponder;
+  const bool in_page =
+      shown && [responder isKindOfClass:[NSView class]] &&
+      [static_cast<NSView*>(responder) isDescendantOf:shown.containerView];
+  const bool enabled = _validateCommand && _validateCommand(IDC_STOP);
+  LOG(WARNING) << "ARKT selftest unhandledKeyDown key=" << event.keyCode
+               << " tab=" << (tab ? tab.sessionId : -1)
+               << " shown=" << (shown ? shown.sessionId : -1)
+               << " inPage=" << (in_page ? "yes" : "no")
+               << " loading=" << (shown.isLoading ? "yes" : "no")
+               << " stopEnabled=" << (enabled ? "yes" : "no");
+  constexpr unsigned short kEscapeKeyCode = 53;
+  if (event.keyCode != kEscapeKeyCode ||
+      (event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask) ||
+      !in_page || !shown.isLoading || !enabled || !_executeCommand) {
+    return;
+  }
+  _executeCommand(IDC_STOP,
+                  static_cast<NSInteger>(WindowOpenDisposition::CURRENT_TAB));
+  LOG(WARNING) << "ARKT selftest stop sent tab=" << shown.sessionId
+               << " loading=" << (shown.isLoading ? "yes" : "no");
 }
 
 @end
@@ -748,6 +779,44 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
                << " inWindow=" << (container.window ? "yes" : "no");
 }
 
+// #755: a bare Esc key down and key up for `tab`'s page, handed to its own
+// window's sendEvent: in this process. It never enters the system event
+// queue, so no other window or app can receive it.
+- (void)sendEscapeToTab:(id<ArktTabHandle>)tab {
+  NSWindow* window = tab.browser.host.window;
+  NSResponder* responder = window.firstResponder;
+  const bool in_page =
+      [responder isKindOfClass:[NSView class]] &&
+      [static_cast<NSView*>(responder) isDescendantOf:tab.containerView];
+  LOG(WARNING) << "ARKT selftest esc send tab=" << tab.sessionId
+               << " loading=" << (tab.isLoading ? "yes" : "no")
+               << " appActive=" << (NSApp.isActive ? "yes" : "no")
+               << " key=" << (window.isKeyWindow ? "yes" : "no")
+               << " responder="
+               << base::SysNSStringToUTF8(
+                      responder ? NSStringFromClass([responder class])
+                                : @"none")
+               << " inPage=" << (in_page ? "yes" : "no");
+  if (!window) {
+    return;
+  }
+  const NSEventType types[] = {NSEventTypeKeyDown, NSEventTypeKeyUp};
+  for (NSEventType type : types) {
+    NSEvent* event =
+        [NSEvent keyEventWithType:type
+                               location:NSZeroPoint
+                          modifierFlags:0
+                              timestamp:NSProcessInfo.processInfo.systemUptime
+                           windowNumber:window.windowNumber
+                                context:nil
+                             characters:@"\x1b"
+            charactersIgnoringModifiers:@"\x1b"
+                              isARepeat:NO
+                                keyCode:53];
+    [window sendEvent:event];
+  }
+}
+
 - (void)logActionsOf:(id<ArktBrowserHandle>)browser {
   NSArray<id<ArktExtensionAction>>* actions =
       [_engine extensionActionsForBrowser:browser];
@@ -1120,6 +1189,17 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
                               WindowOpenDisposition::CURRENT_TAB));
     }
     LOG(WARNING) << "ARKT selftest chrome-command " << argument << " done";
+  } else if (command == "esc") {
+    // #755: focuses the page, then sends it an Esc after `argument` ms (0 by
+    // default: the next turn, after this title change is handled).
+    int delay_ms = 0;
+    if (!argument.empty() && !base::StringToInt(argument, &delay_ms)) {
+      delay_ms = 0;
+    }
+    [tab focus];
+    [self performSelector:@selector(sendEscapeToTab:)
+               withObject:tab
+               afterDelay:delay_ms / 1000.0];
   } else if (command == "fullscreen") {
     // #577: HTML fullscreen of the page's body, with a user gesture as a
     // click gives it; "exit" leaves it from script.

@@ -5445,3 +5445,80 @@ it was cleared afterwards. Nothing under `~/Applications/ArktTest` or `/Applicat
 - Cleanup: both runs and the loopback server stopped by exact PID; profiles and build log deleted; no crash report.
   The clipboard held text this time and the run replaced it with the page URL; it was cleared afterwards and the
   earlier text was not restored.
+
+## #755: an Esc the page did not use reaches the host and stops loading
+
+Date 2026-11-08. Branch `engine/755-escape-stop` from `origin/main` (`e8380ee`). Follow-up of #614 (shell side, PRs
+#756 and #760), which could not be checked on an engine build at the time.
+
+### Gate
+
+- Seam: no patch. The overlay already hands an Esc the page did not handle to the host
+  (`ArktBrowserWindow::HandleKeyboardEvent` -> `ForwardUnhandledKeyDown` -> `unhandledKeyDown:inTab:` from a posted
+  task, #313). The check adds test-only code to the self-test embedder.
+- Facade header: unchanged (`cmp` identical). `.patches`: unchanged, 14 lines, 14 `arkt` commits above
+  `156.0.8078.48`; the 14 exported patches match the repo files apart from `From:` lines.
+- Overlay link checked before every build: `$CR/arkt` points at this worktree's `engine/arkt`.
+- Build: `nice -n 15 autoninja -j 4 -C out/Spike chrome`. Chromium disk 1.9 TB free, internal 47 GB. Load average 7
+  to 13 from other lanes' work; nothing added.
+
+### Answer to the issue's open question
+
+The week-3 note that Chromium's delayed shortcuts do not run in Arkt windows is about Cmd key equivalents (the
+Views focus manager path). A bare Esc never takes that path: the overlay takes it in `HandleKeyboardEvent` once the
+renderer reports it unhandled. #313's Engine app check already showed it reaching the shell (`peek unhandled Esc`).
+What was not checked was the loading half: `IDC_STOP` being enabled on an Arkt window while a page loads, and the
+stop taking effect. This run checks both. No key-routing fix is needed.
+
+### What landed (self-test embedder only)
+
+- `ArktSelfTestWindowHost` implements the optional `unhandledKeyDown:inTab:` as `ShellEngineHost` does for a tab
+  that is not in a Peek: a bare Esc, the shown tab loading, the window's first responder inside that tab's container
+  (the overlay names no tab, so the shell checks this too), and `validateCommand(IDC_STOP)`; then
+  `executeCommand(IDC_STOP, CURRENT_TAB)`, as the shell's `.stop` reaches the engine. It logs
+  `unhandledKeyDown ... inPage loading stopEnabled` and `stop sent`.
+- `arkt-selftest esc [ms]`: focuses the tab's page (`-focus`), then on a later turn builds an Esc key down and key up
+  and hands them to the tab's own window with `-[NSWindow sendEvent:]`, in process. The events never enter the system
+  event queue, so no other window or app can receive them; the test window did not need to be key or frontmost
+  (every run logged `appActive=no key=no`, with the page's `RenderWidgetHostViewCocoa` as first responder). This is
+  the real AppKit key path (the page's view, the renderer, the unhandled-key return), not DevTools input.
+
+### Smoke (`out/Spike/Chromium.app`, `--no-startup-window --arkt-facade-selftest --arkt-facade-selftest-url=<page>`, the shell's `--disable-features` list, fresh profiles under `profiles/755-20261108/`, `--use-mock-keychain`, loopback pages on `127.0.0.1:8795`)
+
+Each page drives itself by setting its title (`state`, then `esc`, then `state`), so one launch per page runs the
+check with no DevTools session. `/slow` and `/hang` answer after 30 s.
+
+| Page | Check | Result |
+|---|---|---|
+| `/loading`: an `<img src=/slow>` keeps the page loading | Esc stops it | PASS: `state ... loading=yes`, `unhandledKeyDown key=53 tab=-1 inPage=yes loading=yes stopEnabled=yes`, `stop sent`, `loadingChanged loading=no`, `state ... loading=no` |
+| `/uses-esc`: the same image, a focused field whose `keydown` calls `preventDefault()` on Escape | the page keeps the Esc | PASS: title `#used=1 #focus=1`, no `unhandledKeyDown` line, `state ... loading=yes` afterwards |
+| `/idle`: loaded page | nothing new | PASS: `unhandledKeyDown ... loading=no stopEnabled=no`, no `stop sent`, no navigation |
+| `/nav`: loaded page navigates to `/hang` (no response yet) | Esc cancels the pending navigation | PASS: `state url=.../hang loading=yes`, `unhandledKeyDown ... stopEnabled=yes`, `stop sent`, `state url=.../nav loading=no` |
+| break: `ForwardUnhandledKeyDown`'s key code changed (working tree only) | `/loading` | the check fails: `esc send ... inPage=yes`, no `unhandledKeyDown`, `state ... loading=yes` afterwards |
+| restored | `/loading`, `/uses-esc` | PASS again, the same lines as the first rows |
+
+No `FATAL`, `Check failed` or `Received signal` lines in any run.
+
+| Step | Result |
+|---|---|
+| Build with the self-test changes | `The build has finished successfully.`, `FAILED:` 0, 38 s |
+| Break build, restore build, format-only rebuild | each finished, `FAILED:` 0; `git status` in `$CR` clean apart from the untracked `build/util/MINIBRANCH` |
+| `gn check out/Spike '//arkt/*'` | fails on `main` with the include errors #759 fixes (PR #820); none in the self-test embedder |
+
+### Not checked here
+
+- **Peek closes on Esc on the Engine app.** The self-test host has no Peek. #313 recorded it as PASS on the Engine
+  app (`peek unhandled Esc`, `peek close keyboard`), and #614 left the order unchanged: `handleUnhandledKeyDown`
+  asks `peek.handleEscape` before `stopLoadingOnEscape`, and `escapeStopsLoading(peekOpen:)` yields while a Peek is
+  open (InMemoryEngine tests). Not re-run on the Engine app, because that needs an app build and input into the app
+  window, while this check has the same overlay path end to end.
+- The shell's own `stopLoadingOnEscape` on the Engine app; the self-test host repeats its conditions.
+
+### Patch budget
+
+Unchanged: 14 patch files, 14 `arkt` commits, in sync. No upstream file touched.
+
+### Cleanup
+
+Every Chromium run stopped by exact PID (`ps -p` prints nothing for each) and the loopback server by its PID. The
+throwaway profiles under `profiles/755-20261108/` and the build logs were deleted. The runs did not use the clipboard.
