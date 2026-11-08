@@ -161,7 +161,7 @@ final class SidebarBannerPopoverView: NSView {
     dismissButton.isBordered = false
     dismissButton.bezelStyle = .regularSquare
     dismissButton.attributedTitle = NSAttributedString(string: "Dismiss", attributes: [
-      .font: NSFont.systemFont(ofSize: 13),
+      .font: ShellType.body.font,
       .foregroundColor: ShellTokens.secondaryText.resolve(flavor).nsColor(),
     ])
     dismissButton.setAccessibilityLabel("Dismiss notice")

@@ -56,8 +56,8 @@ final class ExtensionsPanelRow: ExtensionContextMenuView {
       label.cell?.truncatesLastVisibleLine = true
       label.setAccessibilityElement(false)
     }
-    nameLabel.font = .systemFont(ofSize: 13)
-    statusLabel.font = .systemFont(ofSize: 12)
+    nameLabel.font = ShellType.body.font
+    statusLabel.font = ShellType.caption.font
     runButton.target = self
     runButton.action = #selector(runPressed(_:))
     pinToggle.target = self
@@ -186,7 +186,7 @@ final class ExtensionsPanelRow: ExtensionContextMenuView {
       tile.frame = CGRect(x: iconX, y: iconY, width: m.iconSize, height: m.iconSize)
       glyph.frame = CGRect(x: (m.iconSize - 16) / 2, y: (m.iconSize - 16) / 2, width: 16, height: 16)
       dot.frame = CGRect(x: iconX + m.iconSize - 6, y: iconY - 2, width: 8, height: 8)
-      dot.cornerRadius = 4
+      dot.cornerRadius = ExtensionsPanelMetrics.dotRadius
     }
   }
 

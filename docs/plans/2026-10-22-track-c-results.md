@@ -3065,3 +3065,19 @@ This stage changes tests and documentation only. Swift 6.2.4 source parsing, tes
 defects are unobserved. CI must establish them before production fixes. The previous missing-control red does not
 prove these new regressions. App composition, the full catalog, real system-warning detection, VoiceOver and app
 dispatch remain outstanding.
+
+### Shortcut conflict panel radius lint repair (#119)
+
+At `86bcd965683c68891c146b94571bf99105bf1db5`, pure ShellKit job 128748523909 in run 42486183358
+executed 2528 tests in 284 suites and failed with one issue: `CornerRadiusLintTests.noCornerRadiusIsALiteral`
+reported `panel.layer?.cornerRadius = 8` in `SettingsPanes+Shortcuts.swift`. This is an executed source-lint failure,
+not a recorder GUI regression result. The app build passed; GUI was still running at the inspection.
+
+Merged main `3bd3271`, including the radius scale, type roles, Favorite split behavior and shared pacing rules.
+The floating conflict panel now uses the role-based `ShellRadius.popover` (12 pt), replacing its 8 pt literal. All
+recorder regressions are unchanged; search, focus and warning defects remain open pending their runtime gate.
+A source scan using the existing lint's regex and exemptions found that one offending assignment before the
+correction and zero afterward. This scan is separate from executing the Swift Testing suite. Swift 6.2.4 parsing of
+changed Swift files, actionlint and whitespace checks passed. No full local package, GUI or app build ran; current-head
+CI and visual review of the panel remain required. App composition, the remaining catalog and real system-warning
+detection are still unfinished; the PR remains draft.

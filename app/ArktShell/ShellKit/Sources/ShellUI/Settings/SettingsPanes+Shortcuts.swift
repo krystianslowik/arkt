@@ -121,7 +121,7 @@ extension SettingsWindowController {
     let panel = NSView(frame: NSRect(x: 40, y: 105, width: max(300, root.bounds.width - 80), height: 104))
     panel.wantsLayer = true
     panel.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
-    panel.layer?.cornerRadius = 8
+    panel.layer?.cornerRadius = ShellRadius.popover
     panel.autoresizingMask = [.width]
     let message = settingsLabel("\(shortcutDescription(binding)) is already used by \(definition.title).", size: 13)
     message.setAccessibilityIdentifier("settings.shortcuts.conflict.message")

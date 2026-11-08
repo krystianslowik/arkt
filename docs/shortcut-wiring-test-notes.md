@@ -72,3 +72,9 @@ Expected red: the Settings GUI suite must reach the new assertions and demonstra
 input, and the missing warning against the current component before their production fixes. Source parsing and
 `git diff --check` are preliminary checks, not that red. The later green must retain the existing recorder,
 conflict, reset and competing-key tests. Full local app/GUI execution remains unavailable; CI owns that gate.
+
+The pure test failure at `86bcd96` is separate from the recorder regressions: the new main-branch corner-radius
+lint rejects the conflict panel's numeric assignment. The branch now merges main `3bd3271`, including the radius
+and type roles. The floating conflict panel uses `ShellRadius.popover` (12 pt) instead of its original 8 pt literal.
+Its visual appearance still needs review with the recorder component; the radius change is not GUI validation.
+The search, focus and system-warning regressions remain unchanged and their runtime outcomes are still required.
