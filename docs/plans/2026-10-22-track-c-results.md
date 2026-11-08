@@ -2971,3 +2971,17 @@ three suites using Swift 6.2.4, macOS 15 target and SDK 15.5: eight model tests,
 ten parameterized search cases, and three menu-binding tests including this two-case regression. The unrelated
 Space summary suite is excluded. Source parsing and diff checks passed. Full ShellKit, actual app dispatch and GUI
 checks remain unverified locally; new-head CI is required. The pending Settings and conflict-default work is unchanged.
+
+
+### Settings shortcut services injection (#119)
+
+At `06c9499`, CI run 42438466896 failed compilation in both ShellKit job 128602456213 and GUI job
+128602456256: `SettingsWindowTests.swift` lines 50–51 required `SettingsServices.shortcutEditor` and
+`isSystemShortcut`. No tests ran; there were no catalog or default compiler errors. The 16 focused passes above
+belong to `06c9499`, not this stage.
+
+Settings services now expose an optional editor and an injected system-shortcut predicate, defaulting to nil and
+false. No Settings controls or app composition are wired; the read-only pane remains in use. The actual system
+warning source, catalog audit, app dispatch and page priority (#441) remain future work. Initial conflict focus and
+Return's default remain with the maintainer. New-head CI must compile and run the existing GUI tests; parsing is not
+a test pass. Full ShellKit, GUI and app tests were not run locally.

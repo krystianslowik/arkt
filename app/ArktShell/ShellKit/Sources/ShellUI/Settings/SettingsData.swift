@@ -20,6 +20,10 @@ public struct SettingsServices {
   public var sendCrashReport: @MainActor () -> Void = {}
   /// The menu Settings > Shortcuts lists.
   public var shortcutsMenu: @MainActor () -> NSMenu? = { NSApp.mainMenu }
+  /// Optional editor supplied by the app for shortcut changes.
+  public var shortcutEditor: ShortcutEditorModel?
+  /// Whether a binding conflicts with a system shortcut.
+  public var isSystemShortcut: @MainActor (ShortcutBinding) -> Bool = { _ in false }
   /// The Spaces, in sidebar order.
   public var spaces: @MainActor () -> [SettingsSpaceSummary] = { [] }
   /// The system Downloads folder, what the Downloads pop-up calls "Downloads" (#132).
