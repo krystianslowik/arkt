@@ -19,6 +19,8 @@ struct FavoriteBadgeSettingsTests {
     #expect(reopened.favoriteBadges == changed)
     reopened.favoriteBadges = inverse
     #expect(AppSettings(defaults: defaults).favoriteBadges == inverse)
+    reopened.favoriteBadges = changed
+    #expect(AppSettings(defaults: defaults).favoriteBadges == changed)
     reopened.resetToDefaults()
     #expect(reopened.favoriteBadges == original)
     #expect(AppSettings(defaults: defaults).favoriteBadges == original)
