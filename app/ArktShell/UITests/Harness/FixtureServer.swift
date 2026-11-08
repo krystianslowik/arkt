@@ -6,6 +6,7 @@ import Synchronization
 /// network. It listens on `127.0.0.1` only, on an ephemeral port, and answers one request per connection
 /// (`Connection: close`):
 /// - `/p/<name>`: a page titled `Fixture <name>` with a link to `/p/<name>-next`;
+/// - `/routing/<name>`: a page with its fixture title also visible in its body;
 /// - `/x/<name>`: the same page, but its link goes to `localhost` instead of `127.0.0.1`, so it is a link to another
 ///   site and the Peek rules apply (BH-144, #348);
 /// - `/favicon.ico`: 404, so the engine's favicon fetch stays on loopback and finds nothing;
@@ -131,6 +132,11 @@ final class FixtureServer: Sendable {
   private static func response(for path: String, crossSiteBase: String) -> Response {
     if path == "/favicon.ico" {
       return Response(status: 404, mime: "text/plain", body: Data("not found".utf8))
+    }
+    if path.hasPrefix("/routing/"), path.count > 9 {
+      let title = title(ofPage: String(path.dropFirst(9)))
+      return Response(body: Data("<!doctype html><html><head><title>\(escaped(title))</title></head>"
+        .appending("<body><p>\(escaped(title))</p></body></html>").utf8))
     }
     if path.hasPrefix("/x/"), path.count > 3 {
       let name = String(path.dropFirst(3))
