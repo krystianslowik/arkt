@@ -100,6 +100,7 @@ final class ChromiumShell: ChromiumEmbedderDelegate {
   /// The engine waits for the return (at most 5 s); the flush is bounded by its own timeouts.
   func engineWillTerminate() async {
     shellLog("engineWillTerminate")
+    composition.finishSessionRecovery(cleanQuit: true)
     let flushed = await composition.flush()
     shellLog("termination flush succeeded \(flushed)")
   }

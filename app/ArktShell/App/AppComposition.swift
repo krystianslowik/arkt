@@ -42,9 +42,10 @@ final class AppComposition {
       do {
         let location = try await AppEnvironment.databaseLocation()
         let state = try await ArktLaunch.openAndLoad(location, now: .now)
+        let recoveryPages = try await SettingsStore(database: state.database).load(RecoveryPageState.self)
         let favicons = await AppEnvironment.faviconStore(in: location)
-        let session = AppSession(state: state, location: location, engine: engine, faviconStore: favicons,
-                                 hostLookup: hostLookup)
+        let session = AppSession(state: state, recoveryState: recoveryPages, location: location, engine: engine,
+                                 faviconStore: favicons, hostLookup: hostLookup)
         self.session = session
         // The first run's record decides whether the launch window opens on it; loaded before the window exists.
         session.onboardingRecord = (try? await session.settingsStore.load(OnboardingRecord.self)) ?? .defaultValue
@@ -95,6 +96,9 @@ final class AppComposition {
 
   /// Quit started: stop auto-archive and stamp the visible tabs (decision 10), while the windows still exist.
   func prepareForTermination() { session?.prepareForTermination() }
+
+  /// Finalize recovery only once quit can no longer be cancelled.
+  func finishSessionRecovery(cleanQuit: Bool) { session?.finishSessionRecovery(cleanQuit: cleanQuit) }
 
   /// The quit was cancelled: auto-archive runs again.
   func terminationCancelled() { session?.terminationCancelled() }

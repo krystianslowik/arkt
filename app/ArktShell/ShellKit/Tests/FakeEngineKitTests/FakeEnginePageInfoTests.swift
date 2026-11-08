@@ -87,6 +87,7 @@ struct FakeEnginePageInfoTests {
     site.setPermission(.camera, to: .block, forOrigin: "https://alpha.example", from: blank)
     #expect(site.sitesWithPermissions().map(\.origin) == ["https://alpha.example"])
     site.resetPermissions(forOrigin: "https://alpha.example", from: blank)
+    site.pageInfoDidOpen(tab: blank)                  // WebKit counts nothing, so an open panel changes nothing
     site.pageInfoDidClose(tab: blank)
     #expect(site.sitesWithPermissions().isEmpty)
     engine.closeTab(blank)

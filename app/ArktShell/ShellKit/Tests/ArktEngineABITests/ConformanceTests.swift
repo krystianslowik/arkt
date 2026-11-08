@@ -231,6 +231,7 @@ final class TestTab: NSObject, ArktTabHandle {
   }
   /// Page info (#583): one site permission whose setting the calls change; a close records itself.
   var permissionSetting: ArktPermissionSetting = .ask
+  private(set) var pageInfoOpens = 0
   private(set) var pageInfoCloses = 0
   private(set) var openedSiteSettings: [String] = []
   var pageInfo: (any ArktPageInfo)? {
@@ -245,6 +246,7 @@ final class TestTab: NSObject, ArktTabHandle {
     owner?.engine.record(TestEvent(.pageInfoChanged, tab: self, browser: owner))
   }
   func resetPermissions(forOrigin origin: String) { setPermission(.camera, to: .ask, forOrigin: origin) }
+  func pageInfoDidOpen() { pageInfoOpens += 1 }
   func pageInfoDidClose() { pageInfoCloses += 1 }
   func openSiteSettings(forOrigin origin: String) { openedSiteSettings.append(origin) }
   func duplicate() -> (any ArktTabHandle)? {
@@ -954,6 +956,7 @@ struct PageInfoABITests {
 
     tab.setPermission(.camera, to: .block, forOrigin: info.origin)
     tab.setPermission(.camera, to: .block, forOrigin: info.origin)
+    tab.pageInfoDidOpen()
     tab.pageInfoDidClose()
     tab.openSiteSettings(forOrigin: info.origin)
     engine.flush()

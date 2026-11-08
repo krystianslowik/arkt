@@ -377,7 +377,7 @@ final class CountsView: NSView {
   private static func tickLayer(appearance: OnboardingAppearance) -> CALayer {
     let tick = CALayer()
     tick.bounds = CGRect(x: 0, y: 0, width: 12, height: 12)
-    tick.cornerRadius = 6
+    tick.cornerRadius = ShellRadius.pill(height: tick.bounds.height)
     tick.backgroundColor = appearance.accent.cgColor
     let mark = CAShapeLayer()
     let path = CGMutablePath()
