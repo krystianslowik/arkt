@@ -133,6 +133,8 @@ final class AppSession {
     let pageImageCache = AppEnvironment.pageImageCache(in: location)
     self.pageImageCache = pageImageCache
     self.pageThumbnails = PageThumbnails(engine: engine, cache: pageImageCache)
+    // Archive restores share the session editor; an unloaded or reloading snapshot defers the action for retry.
+    archive.linkRoutingProvider = { [weak linkRoutingSettings] in linkRoutingSettings?.loadedSettings }
     source.onDidChange = { [weak self] sidebar in
       guard let self else { return }
       autosaver.scheduleSave(sidebar)                 // every model change

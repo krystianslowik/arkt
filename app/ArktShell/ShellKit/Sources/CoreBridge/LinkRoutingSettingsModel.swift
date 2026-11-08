@@ -11,6 +11,9 @@ public final class LinkRoutingSettingsModel {
   /// The most recent load or flush error; cleared by a successful operation.
   public private(set) var lastError: (any Error)?
   public private(set) var isLoaded = false
+  /// The current editable snapshot, including unsaved edits; nil until loaded or while a read is in flight.
+  public var loadedSettings: LinkRouting? { isLoaded && !loadInProgress ? settings : nil }
+
   /// A successful shared read finished; the App can retry inputs retained while routing was unavailable.
   public var onDidLoad: (@MainActor () -> Void)?
 

@@ -70,10 +70,16 @@ struct ArchiveListModelTests {
       .init(condition: .matches("https://unrelated.example.test/"), destination: .space(original)),
       .init(condition: .contains("DOCS.EXAMPLE.TEST"), destination: .space(destination)),
       .init(condition: .matches("https://status.example.test/Case?literal=%2F"), destination: .space(current)),
+      .init(condition: .contains("example.test"), destination: .space(original)),
     ])
     // Proposed production seam: provide the shared, already-loaded routing value, not a test-side match.
     harness.coordinator.linkRoutingProvider = { routing }
     harness.model.currentSpaceProvider = { current }
+    var appearedAt: [SidebarLocation] = []
+    harness.source.onDidChange = { _ in
+      if let parent = harness.source.parent(of: item.id) { appearedAt.append(parent) }
+    }
+    defer { harness.source.onDidChange = nil }
 
     let page = await harness.model.loadPage()
     #expect(page.rows.map(\.id).contains(item.id))
@@ -82,6 +88,7 @@ struct ArchiveListModelTests {
     #expect(restored.nodeID == item.id)
     #expect(restored.space == target)
     #expect(restored.location == .today(target))
+    #expect(appearedAt == [.today(target)], "the row first appears in its routed destination in one mutation")
     #expect(harness.source.sidebar.snapshot(of: item.id) == item.snapshot)
     #expect(harness.source.children(of: .today(original)) == [originalNeighbor])
     let currentChildren = harness.source.children(of: .today(current))
@@ -133,6 +140,52 @@ struct ArchiveListModelTests {
     #expect(failures.count == 1)
     #expect(await harness.coordinator.flush())
     #expect(await harness.store.removed == [[item.id]])
+  }
+
+  @Test func unavailableExplicitDestinationsDoNotRemoveTheArchiveEntry() async throws {
+    for targetKind in 0..<4 {
+      let harness = try Harness()
+      let original = try #require(harness.space)
+      let foreign = harness.source.mutate { $0.addSpace(title: "Other profile", profile: "other") }
+      let item = Self.tab("Retained", ago: 10, source: .space(original))
+      await harness.store.seed([item])
+      let destinations: [LinkRouting.Destination] = [.littleArkt, .mostRecentSpace, .space(UUID()), .space(foreign)]
+      let routing = LinkRouting(routes: [.init(condition: .contains("news.example.com"),
+                                               destination: destinations[targetKind])])
+      harness.coordinator.linkRoutingProvider = { routing }
+      _ = await harness.model.loadPage()
+      var failures: [String] = []
+      harness.model.onRestoreFailed = { failures.append($0) }
+
+      #expect(!harness.model.restore(item.id))
+      #expect(failures.count == 1)
+      #expect(harness.model.rows.map(\.id) == [item.id])
+      #expect(harness.source.sidebar.snapshot(of: item.id) == nil)
+      #expect(harness.restored.isEmpty)
+      #expect(await harness.coordinator.flush())
+      #expect(await harness.store.removed.isEmpty)
+      let retained = try await harness.store.items(matching: ArchiveFilter(), limit: nil)
+      #expect(retained.items == [item])
+    }
+  }
+
+  @Test func unmatchedArchiveRestoreKeepsExistingPlacementWithoutUsingTheExternalDefault() async throws {
+    let harness = try Harness()
+    let original = try #require(harness.space)
+    let current = try harness.source.addSpace(title: "Current")
+    let item = Self.tab("Original", ago: 10, source: .space(original))
+    await harness.store.seed([item])
+    let routing = LinkRouting(routes: [.init(condition: .matches("https://unrelated.example.test/"),
+                                             destination: .space(current))], defaultDestination: .littleArkt)
+    harness.coordinator.linkRoutingProvider = { routing }
+    harness.model.currentSpaceProvider = { current }
+    _ = await harness.model.loadPage()
+
+    #expect(harness.model.restore(item.id))
+    #expect(harness.restored.first?.0.space == original)
+    #expect(harness.source.children(of: .today(original)) == [item.id])
+    #expect(harness.source.children(of: .today(current)).isEmpty)
+    #expect(await harness.coordinator.flush())
   }
 
   private static let urlForRoutingNeighbor = URL(string: "https://neighbor.example.test/")!
