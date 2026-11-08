@@ -2924,3 +2924,8 @@ Written first. Each failed to compile before the code existed.
   SidebarModel import checks passed. Core and ShellKit suites were not run; CI must run them.
 - This is a Core-only draft. Picker and menu wiring, Favorite favicon fallback, folder expanded/collapsed rendering,
   integration and UI checks remain. No UI, performance or animation behavior was checked in this slice.
+- Core review found no P1/P2 blocker. Added an ArchiveStore regression that inserts a frozen format-1 folder/tab
+  payload emitted by the actual encoder at e8380ee, before custom icons existed, and checks a readable snapshot
+  with nil overrides without rewriting its version. Swift 6.2.4 compiled the seven prior model sources to generate
+  that synthetic payload, and parsed the added test. The ArchiveStore regression itself remains unrun locally;
+  database and full-suite validation require CI.

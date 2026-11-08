@@ -195,6 +195,42 @@ struct ArchiveStoreTests {
     #expect(try await store.items().items == [item])
   }
 
+  /// Frozen payload emitted by the format-1 encoder at e8380ee, before node icon overrides existed.
+  /// Insert the old bytes directly so this test cannot silently adopt the current snapshot encoding.
+  @Test func formatOneSnapshotWithoutCustomIconsRemainsReadable() async throws {
+    let database = try ArktDatabase.inMemory()
+    let store = ArchiveStore(database: database)
+    let rootID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+    let childID = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+    let body = Data(#"""
+      {"children":[{"children":[],"createdAt":800000000.25,
+      "id":"00000000-0000-0000-0000-000000000002",
+      "kind":{"tab":{"title":"Legacy tab","url":"https://example.com/legacy"},"type":"tab"}}],
+      "createdAt":800000000,"id":"00000000-0000-0000-0000-000000000001",
+      "kind":{"folder":{"title":"Legacy folder"},"type":"folder"}}
+      """#.utf8)
+    try await database.writer.write { db in
+      try db.execute(
+        sql: """
+          INSERT INTO archived_item (id, format_version, reason, archived_at, source_kind, title, snapshot)
+          VALUES (?, 1, 'manual', 800000001, 'unknown', 'Legacy folder', ?)
+          """,
+        arguments: [rootID.uuidString, body])
+    }
+    let child = NodeSnapshot(
+      id: childID, kind: .tab(TabItem(url: URL(string: "https://example.com/legacy")!, title: "Legacy tab")),
+      createdAt: Self.at(0.25))
+    let snapshot = NodeSnapshot(
+      id: rootID, kind: .folder(FolderItem(title: "Legacy folder")), createdAt: Self.at(0), children: [child])
+    let expected = ArchivedItem(reason: .manual, archivedAt: Self.at(1), source: .unknown, snapshot: snapshot)
+
+    #expect(try await store.items() == ArchivePage(items: [expected], unreadable: 0))
+    let version = try await database.writer.read { db in
+      try Int.fetchOne(db, sql: "SELECT format_version FROM archived_item WHERE id = ?", arguments: [rootID.uuidString])
+    }
+    #expect(version == 1)
+  }
+
   @Test func unreadableRowsAreSkipped() async throws {
     let database = try ArktDatabase.inMemory()
     let store = ArchiveStore(database: database)
