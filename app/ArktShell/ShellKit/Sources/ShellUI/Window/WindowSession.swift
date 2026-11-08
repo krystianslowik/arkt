@@ -14,10 +14,14 @@ public struct WindowSessionState: Codable, Equatable, Sendable {
   public var selectedTabs: [SpaceID: NodeID]
   /// The window was in full screen; `frame` is then the windowed frame from before. Not re-entered at launch.
   public var isFullScreen: Bool
+  /// Folders collapsed in this window.
+  public var collapsedFolderIDs: Set<NodeID>
 
   public init(frame: CGRect, screenFrame: CGRect? = nil, space: SpaceID? = nil, currentTab: NodeID? = nil,
-              selectedTabs: [SpaceID: NodeID] = [:], isFullScreen: Bool = false) {
+              selectedTabs: [SpaceID: NodeID] = [:], isFullScreen: Bool = false,
+              collapsedFolderIDs: Set<NodeID> = []) {
     self.isFullScreen = isFullScreen
+    self.collapsedFolderIDs = collapsedFolderIDs
     self.frame = frame
     self.screenFrame = screenFrame
     self.space = space
@@ -36,6 +40,7 @@ extension WindowSessionState {
     currentTab = try values.decodeIfPresent(NodeID.self, forKey: .currentTab)
     selectedTabs = try values.decodeIfPresent([SpaceID: NodeID].self, forKey: .selectedTabs) ?? [:]
     isFullScreen = try values.decodeIfPresent(Bool.self, forKey: .isFullScreen) ?? false
+    collapsedFolderIDs = try values.decodeIfPresent(Set<NodeID>.self, forKey: .collapsedFolderIDs) ?? []
   }
 
   /// The state of a window now. In full screen the window's own frame is the whole screen, so the frame from before
@@ -77,6 +82,13 @@ enum SessionWindowPolicy {
 @MainActor
 public final class WindowSessionStore {
   public static let defaultsKey = "windowSession"
+  public static let windowsDefaultsKey = "windowSessions"
+
+  private struct Collection: Codable {
+    let version: Int
+    let windows: [WindowSessionState]
+  }
+  private static let collectionVersion = 1
 
   private let defaults: UserDefaults?
 
@@ -92,6 +104,23 @@ public final class WindowSessionStore {
           let state = try? JSONDecoder().decode(WindowSessionState.self, from: data),
           WindowFramePlacement.isUsable(state.frame) else { return nil }
     return state
+  }
+
+  /// A missing collection falls back to the legacy single window. An unreadable collection does not.
+  public func loadWindows() -> [WindowSessionState]? {
+    guard let defaults else { return nil }
+    guard defaults.object(forKey: Self.windowsDefaultsKey) != nil else { return load().map { [$0] } }
+    guard let data = defaults.data(forKey: Self.windowsDefaultsKey),
+          let collection = try? JSONDecoder().decode(Collection.self, from: data),
+          collection.version == Self.collectionVersion,
+          collection.windows.allSatisfy({ WindowFramePlacement.isUsable($0.frame) }) else { return nil }
+    return collection.windows
+  }
+
+  public func saveWindows(_ windows: [WindowSessionState]) {
+    guard let data = try? JSONEncoder().encode(Collection(version: Self.collectionVersion, windows: windows))
+    else { return }
+    defaults?.set(data, forKey: Self.windowsDefaultsKey)
   }
 
   public func save(_ state: WindowSessionState) {
