@@ -1307,3 +1307,33 @@ the cause of a missing menu would remain unknown until the paired probes are ins
 on remote `eb8d4f3`, before the review follow-up above. The corrected sidebar test and review additions, including
 previous wrap and the BH-122 URL and Archive checks, are **not yet runtime verified**. A fresh focused class run is
 required. No production code changed.
+
+#### U15 second focused run and diagnosis
+
+Manual run [42429649248](https://github.com/krystianslowik/arkt/actions/runs/42429649248), on `833a6b5`,
+built and executed six methods in [UI job 128575643478](https://github.com/krystianslowik/arkt/actions/runs/42429649248/job/128575643478):
+four passed and two failed. The workflow's aggregate success does not mean the informative UI job passed. Normal PR
+run [42429639908](https://github.com/krystianslowik/arkt/actions/runs/42429639908) succeeded with its UI job skipped.
+
+The sidebar Option-click did separate the split. The paired AX attachment shows four pinned tab rows before the
+click, including the two visible split children; the failure tree shows the same four after it, with the split row
+gone and both named pages now plain pinned rows. The earlier `before + 2` diagnosis above overlooked those visible
+children. The test now checks an unchanged count, both named rows, the vanished split and unchanged Today count; the
+menu action's count uses the same correction. This is an assertion defect, not evidence of a product failure.
+
+The pane-key test separated a pane and reduced the pane count to three. Its failure tree shows `/docs/right` as a
+plain pinned row and `fourth` still in the split. New panes are inserted after the focused pane, so after wrap to
+index 3 the focused pane was the original right page, not `fourth`. The test now selects index 2 and checks its
+web view title before the shortcut, then looks for `fourth` among pinned rows. URL and Archive checks remain.
+
+All four paired context-menu probes returned false: neither right-click nor Control-click exposed the regular Today
+row's `Archive Below` item or the split row's `Separate All Tabs` item in the app AX tree. Both target rows had
+nonzero frames; the split menu is constructed in `SidebarContextMenu` and the outline routes secondary input to a
+row menu. The regular control was disabled for this last Today row, so it was a poor positive control. The probe now
+looks for the enabled `Rename` item. These observations do not distinguish input delivery, menu presentation or AX
+exposure from a product defect, and do not prove a split-specific bug. Missing control and split menus remain failures;
+a successful control paired with a missing split menu is needed to diagnose that path. No product issue or production
+change is justified by these observations alone.
+
+The repairs above have not been compiled or executed in XCUITest. Full suites, 20 iterations, deliberate-break and
+worst-case/Reduce Motion checks remain unrun. The manual workflow selector remains pending maintainer ownership.

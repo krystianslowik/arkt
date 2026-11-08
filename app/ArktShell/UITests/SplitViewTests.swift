@@ -86,6 +86,11 @@ final class SplitViewTests: ArktUITestCase {
     XCTAssertTrue(Waits.until("focus wraps to first pane") { self.panes(app).element(boundBy: 0).isSelected })
     app.typeKey("[", modifierFlags: modifiers)
     XCTAssertTrue(Waits.until("previous focus wraps to fourth pane") { self.panes(app).element(boundBy: 3).isSelected })
+    // Added panes are inserted after the focused pane, before the original right pane.
+    select(2, in: app)
+    XCTAssertTrue(Waits.until("fourth fixture selected") {
+      self.panes(app).element(boundBy: 2).webViews.firstMatch.label == FixtureServer.title(ofPage: "fourth")
+    })
     // The close shortcut separates the focused page; it must not add an Archive entry.
     app.menuBars.menuBarItems["Window"].click()
     app.menuBars.menuItems["Show Archive"].click()
@@ -95,7 +100,8 @@ final class SplitViewTests: ArktUITestCase {
     archive.typeKey("w", modifierFlags: .command)
     app.typeKey("-", modifierFlags: modifiers)
     XCTAssertTrue(Waits.until("three panes after separating") { self.panes(app).count == 3 })
-    let separated = Shell.todayRow(app, label: FixtureServer.title(ofPage: "fourth"))
+    let separated = app.outlineRows.matching(identifier: AXID.Sidebar.rowPinned)
+      .element(matching: NSPredicate(format: "label == %@", FixtureServer.title(ofPage: "fourth")))
     XCTAssertTrue(waitFor(separated))
     separated.click()
     app.typeKey("d", modifierFlags: [.command, .shift])
@@ -115,7 +121,7 @@ final class SplitViewTests: ArktUITestCase {
     // Probe both menus before either separation assertion can fail. Escape dismisses each real menu.
     let control = try XCTUnwrap(Shell.todayRows(app).allElementsBoundByIndex.first)
     let splitItem = app.menuItems["Separate All Tabs"]
-    let controlItem = app.menuItems["Archive Below"]
+    let controlItem = app.menuItems["Rename"]
     var snapshots = ""
     var controlOpened = [Bool]()
     var splitOpened = [Bool]()
@@ -148,7 +154,7 @@ final class SplitViewTests: ArktUITestCase {
     let todayBefore = Shell.todayRows(app).count
     XCUIElement.perform(withKeyModifiers: .option) { self.splitRow(app).click() }
     XCTAssertTrue(Waits.until("option-click separates the pinned split") {
-      !self.splitRow(app).exists && pinned.count == before + 2 && Shell.todayRows(app).count == todayBefore
+      !self.splitRow(app).exists && pinned.count == before && Shell.todayRows(app).count == todayBefore
         && pinned.matching(NSPredicate(format: "label == %@", "Fixture /docs/left")).count == 1
         && pinned.matching(NSPredicate(format: "label == %@", "Fixture /docs/right")).count == 1
     })
@@ -167,7 +173,7 @@ final class SplitViewTests: ArktUITestCase {
     XCTAssertTrue(splitItem.waitForExistence(timeout: Waits.scaled(3)))
     splitItem.click()
     XCTAssertTrue(Waits.until("context menu separates the pinned split") {
-      !self.splitRow(app).exists && pinned.count == count + 2
+      !self.splitRow(app).exists && pinned.count == count
     })
   }
 
