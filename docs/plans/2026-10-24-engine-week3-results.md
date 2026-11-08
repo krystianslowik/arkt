@@ -5445,3 +5445,95 @@ it was cleared afterwards. Nothing under `~/Applications/ArktTest` or `/Applicat
 - Cleanup: both runs and the loopback server stopped by exact PID; profiles and build log deleted; no crash report.
   The clipboard held text this time and the run replaced it with the page URL; it was cleared afterwards and the
   earlier text was not restored.
+
+## #846: an HTTP-only site crashes the engine at `TabDialogManager`'s `CHECK(host)`
+
+Date 2026-11-08. Branch `engine/846-https-first-dialog` from `origin/main` (`3a0263c`). Found while reviewing #795.
+
+### Gate
+
+- Seam: no patch. The mitigation is one more name in the shell's `--disable-features` list
+  (`EngineLaunchArguments.requiredDisabledFeatures`, where `MediaRouter`, `Glic` and the others are switched off).
+  The check adds test-only code to the self-test embedder.
+- Facade header: unchanged (`cmp` identical). `.patches`: unchanged, 14 lines, 14 `arkt` commits above
+  `156.0.8078.48` (`in sync`).
+- Overlay link checked before each build: `$CR/arkt` points at this worktree's `engine/arkt`.
+- Build: `nice -n 10 autoninja -j 4 -C out/Arkt chrome`, incremental. Chromium disk 1.9 TB free, internal 73 GB,
+  swap 5.5 to 5.7 GB of 7 GB (under the 6.5 GB stop line), load average 4 to 7 from other lanes' work.
+- Test bundle: `out/Arkt/Arkt.app` (`dev.arkt.Arkt`), launched by path; the installed app is `com.arkt.Arkt` and the
+  ArktTest copies are `dev.arkt.ArktShell`. Nothing under `/Applications` or `~/Applications/ArktTest` was touched.
+
+### What triggers it
+
+`HttpsOnlyModeTabHelper::DidFinishNavigation` shows the ask-before-HTTP dialog when an HTTPS-First navigation falls
+back to HTTP and `HttpsFirstDialogUi` is on (on by default). The dialog goes through
+`TabDialogManager::CreateAndShowDialog`, whose `CreateTabScopedDialog` checks the host widget, which an Arkt window
+does not have. Loopback hosts never reach it: `HttpsUpgradesInterceptor` exempts `localhost` and loopback addresses by
+name, non-strict modes exempt non-unique hostnames and URLs with a port. So the page is served on `127.0.0.1:8846` but
+loaded as `http://http-only.example.com/`, with
+`--host-resolver-rules=MAP http-only.example.com:80 127.0.0.1:8846, MAP http-only.example.com:443 127.0.0.1:8846`.
+The HTTPS attempt reaches the plain HTTP server, fails the TLS handshake (the server logged three `400` client
+hellos), and the navigation falls back to HTTP.
+
+An off-the-record Arkt window comes from Chromium's New Incognito Window command sent through the host (the facade's
+`createBrowser(host:)` always uses the profile the engine started with, #705); the shell's private windows run on
+that regular profile today.
+
+### What landed
+
+- `HttpsFirstDialogUi` joins the shell's `--disable-features` list, with its reason in the doc comment, and
+  `EngineLaunchArgumentsTests` follows (`keepsTheHttpsFirstDialogOff`, the expected lists).
+- Self-test embedder: `arkt-selftest private-window <url> [ms]` sends `IDC_NEW_INCOGNITO_WINDOW` through the host,
+  loads `url` in the new window's tab and, after `ms` (3000 by default), logs the tab's `state` and evaluates
+  `document.title` plus the interstitial's `#primary-button` text.
+
+### Smoke (`out/Arkt/Arkt.app`, `--no-startup-window --arkt-facade-selftest --arkt-engine-test-api`, fresh profiles in a scratch folder, `--use-mock-keychain`, the host rules above)
+
+"Old list" is the shell's list before this change (`DestroyProfileOnBrowserClose,WebAuthenticationAmbientSignin,
+MediaRouter,Glic`); "new list" adds `HttpsFirstDialogUi`. Each run lasted 20 s unless it crashed first.
+
+| Run | Window | List | Result |
+|---|---|---|---|
+| a-repro | off the record (`private-window`, driver page on `127.0.0.1:8846/private`) | old | CRASH: `FATAL:chrome/browser/ui/tabs/tab_dialog_manager.cc:307] Check failed: host.`, `Received signal 6`, exit 134, 0.36 s after `urlChanged ... url=http://http-only.example.com/` |
+| a-mitigated | off the record | new | PASS: `titleChanged ... title=Site is not secure`, `state ... url=http://http-only.example.com/ title=Site is not secure loading=no crash=0`, `eval private-window page ... result=Site is not secure \| Go back`; process alive, stopped by PID |
+| b-repro | regular, `https_only_mode_enabled: true` written into the fresh profile ("Always use secure connections") | old | CRASH: the same `Check failed: host.`, exit 134 |
+| b-mitigated | the same | new | PASS: `title=Site is not secure`, alive |
+| c-control | regular, fresh profile, default settings | old | CRASH: the same `Check failed: host.`, exit 134 |
+| c-mitigated | the same | new | PASS: `title=Site is not secure`, alive |
+
+The crash report's crashing thread (symbolized from the framework):
+`HttpsOnlyModeTabHelper::DidFinishNavigation` -> `AskBeforeHttpDialogController::ShowDialog` ->
+`TabDialogManager::CreateAndShowDialog` -> `TabDialogManager::CreateTabScopedDialog` -> `CheckLogMessage` -> `abort`.
+
+The control was meant to load the HTTP page quietly; instead a fresh regular profile also gets the HTTPS-First warning
+on this host, so the crash is not limited to private windows: any HTTP-only site with a public hostname took down the
+engine in a normal window with default settings. No Arkt patch or overlay file touches HTTPS-First, and the
+profile held no HTTPS-First pref, so this is stock 156 behaviour; which heuristic turns the warning on for a fresh
+profile was not traced. With the dialog off, every case shows the interstitial in the tab and the engine stays up.
+
+The old/new pairs are the deliberate break: the same build and page, with and without the one feature name.
+
+| Step | Result |
+|---|---|
+| Build with the self-test command | `The build has finished successfully.`, `FAILED:` 0, under 2 min |
+| Format-only rebuild (clang-format on the added lines) | finished, `FAILED:` 0, 71 s; `git status` in `$CR` clean apart from the untracked `build/util/MINIBRANCH` |
+| `swift test --filter EngineLaunchArgumentsTests` (ShellKit, `nice -n 20 -j 2`) | 10 tests passed |
+
+### Not done here
+
+- The guard before `CHECK(host)` (acceptance 4): left to the maintainer. It would be E3b's choke-point guard landing
+  early and costs one upstream file (`tab_dialog_manager.cc`); with the dialog off, nothing in these runs reaches it.
+- The #795 doc's E3b inventory row for ask-before-HTTP (acceptance 5) lives on the open #795 branch; it should say
+  "switched off by #846" when that doc lands.
+- The Engine app itself was not launched: it builds the same `--disable-features` value through
+  `EngineLaunchArguments`, which the Swift tests cover; the self-test runs pass the list by hand.
+
+### Patch budget
+
+Unchanged: 14 patch files, 14 `arkt` commits, in sync. No upstream file touched.
+
+### Cleanup
+
+Every engine run and the loopback server stopped by exact PID (`ps -p` prints nothing for each). The throwaway
+profiles were deleted. The two macOS crash reports the crashing runs wrote (bundle `dev.arkt.Arkt`) were copied to the
+artifacts folder and removed from `DiagnosticReports`. The runs did not use the clipboard.
