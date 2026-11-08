@@ -298,6 +298,30 @@ Run the GUI tests (`swift test --filter ShellKitGUITests`, logged-in GUI session
 build the app (`xcodegen generate`, then `xcodebuild`, see `README.md`) when you touch `app/ArktShell/App` or
 `project.yml`.
 
+Frame-time gates (no frame over 8.6 ms at 120 Hz: Space pager, split divider and reflow, sidebar reveal, Peek) share
+one rule in `PacingEnvironment.checkFrameGate`. Every run measures and prints a `<name>.pacing` summary line per
+interaction, with `asserted=yes` or `asserted=no`. The test is skipped as NOT-MEASURABLE on a screen below 120 Hz or
+at a 1-minute load at or above the core count, and the hitch count is reported but not asserted when the load read
+after measuring reaches the core count. Inside a longer GUI batch a gate only reports, because the tests before it
+leave main-thread work in its frames; it asserts when its class runs alone or when `ARKT_PACING_GATE=1` is set. On a
+quiet 120 Hz machine, check the gates one class at a time; each run is its class alone, so it asserts without the
+switch:
+
+```zsh
+cd app/ArktShell/ShellKit
+for c in SpacePagerTests SplitPacingTests SplitReflowPacingTests SidebarHideTests PeekMotionOnScreenTests; do
+  swift test --filter "ShellKitGUITests.$c" || break
+done
+```
+
+`ARKT_PACING_GATE=1` over a batch of classes in one process is a diagnostic for the work earlier tests leave behind,
+not a gate check. It is expected to fail until #275 (the light/dark flip) and #805 (leftover windows in a GUI batch)
+are fixed:
+
+```zsh
+ARKT_PACING_GATE=1 swift test --filter '(SpacePager|SplitPacing|SplitReflowPacing|SidebarHide|PeekMotionOnScreen)Tests'
+```
+
 Run the UI tests (XCUITest, scheme `ArktShellUITests`) when you touch `app/ArktShell/App`, `ShellUI` accessibility
 identifiers or a flow they cover. CI runs them only nightly and by hand (section 12), so on a pull request your local
 run is the check; report its counts in the pull request. They launch the Debug app into a throwaway data folder and defaults suite and drive
@@ -306,9 +330,14 @@ and keep your hands off the keyboard and mouse until they finish:
 
 ```zsh
 cd app/ArktShell && xcodegen generate
+ARTIFACTS="${ARTIFACTS:-$TMPDIR/arkt-ui}"; mkdir -p "$ARTIFACTS"
 xcodebuild -project ArktShell.xcodeproj -scheme ArktShellUITests -derivedDataPath build \
-  -resultBundlePath build/ui-$(date +%s).xcresult -collect-test-diagnostics never test
+  -resultBundlePath "$ARTIFACTS/ui-$(date +%s).xcresult" -collect-test-diagnostics never test
 ```
+
+Result bundles are large. Set `ARTIFACTS` to your artifacts folder if you have one (one subfolder per issue);
+otherwise it falls back to `$TMPDIR/arkt-ui`. Check its free space, and delete the bundle once its counts are in the
+pull request (`.claude/skills/arkt-local-app-safety/SKILL.md`, section 2).
 
 Add `-only-testing:ArktShellUITests/<Class>/<test>` for one test. To scale the harness wait timeouts (default 10 s),
 set `TEST_RUNNER_ARKT_UITEST_TIMEOUT_SCALE=3` in the environment of `xcodebuild`; as a build setting argument it does
@@ -456,10 +485,11 @@ Recommendations only; repository settings are changed by the maintainer.
   supersedes; a cancelled `main` run leaves its areas to the next push that touches them and to the nightly run.
 
   "ShellKit GUI tests (informative)" runs the GUI suite on the runner's virtual display and may fail without
-  blocking; its frame-timing gates (command bar latency, Space swipe pacing) and the two tests that catch a Space
-  settle mid-flight skip themselves as NOT-MEASURABLE on a screen below 120 Hz or a load at or above the core count
-  (the rule of the app's SmokeRunner), which shared runners always meet, and assert on a developer machine. GUI tests
-  and timing gates stay a local check (section 7).
+  blocking; its frame-timing gates (command bar latency and the frame-time gates of section 7) and the two tests
+  that catch a Space settle mid-flight skip themselves as NOT-MEASURABLE on a screen below 120 Hz or a load at or
+  above the core count (the rule of the app's SmokeRunner), which shared runners always meet, and assert on a
+  developer machine (a frame-time gate only when run alone or with `ARKT_PACING_GATE=1`). GUI tests and timing gates
+  stay a local check (section 7).
 
   "UI tests (informative)" builds the Debug app and runs the XCUITest scheme `ArktShellUITests` with wait timeouts
   scaled by 3. It takes about 20 minutes of a macOS runner, so it runs nightly on `main` (02:23 UTC) and by hand, not

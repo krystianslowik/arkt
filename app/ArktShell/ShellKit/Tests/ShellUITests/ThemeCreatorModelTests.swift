@@ -135,4 +135,31 @@ struct ThemeCreatorOverlayTests {
     model.setOpacity(0.5)
     #expect(model.theme.overlayColors == stored.overlayColors)
   }
+
+  @Test func selectingAPresetReplacesThePreviousOverlay() {
+    let original = SpaceThemeInfo(baseColors: [.white(1)], overlayColors: [.black(0.7)], isDark: false)
+    let preset = SpaceThemeInfo(baseColors: [.srgb(hex: 0x336699), .white(1)],
+                                overlayColors: [.white(0.2), .black(0.4)], opacity: 0.6, isDark: true)
+    var model = ThemeCreatorModel(theme: original, isNew: false)
+    model.replace(with: preset)
+    #expect(model.theme == preset)
+    #expect(model.dots.map(\.color) == preset.baseColors)
+  }
+
+  @Test func addingAndRemovingBaseColorsKeepsTheOverlay() {
+    let original = SpaceThemeInfo(baseColors: [ThemePad.color(ThemeCreatorModelTests.blue)],
+                                  overlayColors: [.black(0.2), .white(0.1)], opacity: 0.8, isDark: false)
+    var model = ThemeCreatorModel(theme: original, isNew: false)
+    let added = model.addSecondColour(at: ThemeCreatorModelTests.copper)
+    #expect(added)
+    #expect(model.theme.baseColors == [original.baseColors[0], ThemePad.color(ThemeCreatorModelTests.copper)])
+    #expect(model.theme.overlayColors == original.overlayColors && model.theme.opacity == original.opacity)
+    let removed = model.removeDot(0)
+    #expect(removed)
+    #expect(model.theme.baseColors == [ThemePad.color(ThemeCreatorModelTests.copper)])
+    #expect(model.theme.overlayColors == original.overlayColors && model.theme.opacity == original.opacity)
+    let removedLast = model.removeDot(0)
+    #expect(!removedLast)
+    #expect(model.theme.overlayColors == original.overlayColors)
+  }
 }

@@ -186,8 +186,8 @@ final class URLBarTests: XCTestCase {
     XCTAssertEqual(bar.label.frame, empty)
     let probe = NSTextField(labelWithString: "example.org")
     probe.font = bar.label.font
-    XCTAssertEqual(URLBarView.labelHeight, ceil(probe.intrinsicContentSize.height))
-    XCTAssertEqual(bar.label.frame.height, URLBarView.labelHeight)
+    XCTAssertEqual(URLBarView.labelHeight(showsPill: false), ceil(probe.intrinsicContentSize.height))
+    XCTAssertEqual(bar.label.frame.height, URLBarView.labelHeight(showsPill: false))
   }
 
   func testContextMenuTogglesTheToolbar() throws {

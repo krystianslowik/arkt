@@ -6,7 +6,7 @@ import CoreGraphics
 enum FindBarLayout {
   static let preferredWidth: CGFloat = 372
   static let height: CGFloat = 36
-  static let cornerRadius: CGFloat = 18
+  static let cornerRadius = ShellRadius.pill(height: height)
   /// From the top and trailing edges of the page.
   static let edgeInset: CGFloat = 12
   static let leadingPadding: CGFloat = 13
