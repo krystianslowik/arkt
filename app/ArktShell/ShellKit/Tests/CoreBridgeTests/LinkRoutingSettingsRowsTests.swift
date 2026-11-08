@@ -150,3 +150,31 @@ private actor RetryRowsStore: LinkRoutingSettingsStoring {
     return value
   }
 }
+
+/// The dispatch adapter returns ShellUI values while Core remains the only matcher.
+@MainActor
+struct LinkRoutingDestinationBoundaryTests {
+  @Test func loadedModelMapsOrderedMatchesAndDefaultToPlainDestinations() async {
+    let space = UUID(uuidString: "00000000-0000-0000-0000-000000000101")!
+    let target = URL(string: "https://example.com/Path?q=One")!
+    let first = LinkRouting.Route(condition: .contains("EXAMPLE.COM/path"), destination: .space(space))
+    let second = LinkRouting.Route(condition: .matches(target.absoluteString), destination: .mostRecentSpace)
+    let store = RoutingRowsStore(initial: LinkRouting(routes: [
+      .init(condition: .contains("absent"), destination: .littleArkt), first, second,
+    ]))
+    let model = LinkRoutingSettingsModel(state: store)
+    await model.load()
+    #expect(model.destination(for: target) == .space(space))
+    model.replaceRoute(at: 1, with: second)
+    model.replaceRoute(at: 2, with: first)
+    #expect(model.destination(for: target) == .mostRecentSpace)
+    #expect(model.destination(for: URL(string: "https://example.org/other")!) == .littleArkt)
+    model.setDefaultDestination(.space(space))
+    #expect(model.destination(for: URL(string: "https://example.org/other")!) == .space(space))
+    // Matches does not normalize case or ignore the query.
+    model.removeRoute(at: 2)
+    model.setDefaultDestination(.littleArkt)
+    #expect(model.destination(for: URL(string: "https://example.com/path?q=One")!) == .littleArkt)
+    #expect(model.destination(for: URL(string: "https://example.com/Path")!) == .littleArkt)
+  }
+}

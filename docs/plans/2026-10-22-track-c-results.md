@@ -3041,3 +3041,19 @@ The [maintainer decision](https://github.com/krystianslowik/arkt/pull/825#issuec
 Tests were updated before implementation. The actual-source probe executed 47 tests in 10 suites and failed with 20 expectations under the old case-sensitive/unresolved policy. After implementation, Swift 6.4.1 / macOS 15.5 SDK, `swift test --package-path integration/LinkRouting -j 2`, passed **47 tests in 10 suites**. The probe now source-links the canonical Core matching, typed Persistence and atomic store, and CoreBridge editor suites as well as the existing termination cases. Coverage includes upper/lower case host, path, query and fragment, unchanged exact-string boundaries, reversed conflicting routes, a nonmatching first rule, specificity not overriding list order, and precedence after typed SQLite reopen. These links run actual source and store dependencies; they do not add a CI job or substitute for full suites. Toolchain linker warnings report missing developer framework search paths. Swift parsing, import inspection and whitespace checks passed. Full Core/ShellKit, app, GUI, XCUITest and actual AppSession dispatch were not run locally; new-head CI remains required.
 
 The earlier Core red at `773c9ad` was inspected directly in [job 128571317717](https://github.com/krystianslowik/arkt/actions/runs/42428288297/job/128571317717): compilation failed because the test-first slice referenced the missing LinkRouting type, with dependent case-inference errors; no tests ran. Commit `0cd92289556491509334db188b9b4a9bf127bd84` added the production type, rather than rerunning that failing code. The later actual Core run at `b3ca41c` passed 594 tests in 48 suites. This is the identified root cause and implementation fix for that historical red, not a claim that new policy CI has passed.
+
+### #113 external-link window-set test gate
+
+Added a test-only component gate at the existing `ShellWindowSet.openFromOtherApp` entry point. The proposed optional
+`externalLinkDestination` resolver returns the existing plain `SettingsLinkDestination`; the proposed
+`LinkRoutingSettingsModel.destination(for:)` maps the canonical Core matcher to that value. An absent resolver keeps
+the historical #446 unconfigured path. Tests use the real model, sidebar and in-memory engine, and inspect Today rows,
+selected Space and Little Arkt engine URLs, including a nonmatching rule, competing rules in both orders, batch schemes,
+and both Blank and Incognito primary windows. The mapping boundary also checks exact-string matching and the configured
+default. These proposed names are test contracts, not production APIs. The fallback for a missing Space is unsettled and
+is not asserted.
+
+This gate does not exercise `AppDelegate.application(_:open:)`, the early-URL queue, AppSession's persisted settings load
+and resolver injection, or Chromium's engine window requests; those require a later composition gate. Source parsing and
+whitespace checks are not a test red. Full ShellKit and the app cannot be compiled locally on this baseline; GUI and
+XCUITest were not run. The focused actual-source probe stopped in the existing Motion dependency: the local compiler rejected `isolated deinit` without its experimental feature flag, before reaching the new tests. Zero tests ran. The intended missing-API red is **UNOBSERVED**; CI must establish it before implementation.
