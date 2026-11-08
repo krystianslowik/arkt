@@ -3083,3 +3083,20 @@ Chromium startup window requests remain a later composition stage; no persisted 
 Review found that an existing target Space can belong to another profile: SidebarController.showSpace refuses it, but the dispatcher then opens in the unchanged Space and reports success. A new real-window-set regression uses a ModelSidebarSource containing two profiles. It covers an explicit other-profile destination and cold Most Recent with the other-profile Space first. It requires either genuine delivery into that requested Space or an unresolved result with no URL added elsewhere; this does not prescribe future profile routing or a fallback.
 
 The test was written before the dispatch fix. Swift 6.2.4 frontend parsing and whitespace checks passed. Its runtime red is unobserved: the local full GUI baseline cannot build and full Xcode is unavailable, so normal GUI CI must execute this gate before the production correction. No production code changes in this gate; the P2 remains open until corrected and verified. The prior 54-test actual-source result exercises mapping/persistence, not this real-window profile case.
+
+### #113: refused Space selection correction
+
+The runtime red is now observed at `d32aecbf0d8fe7a639426689723dbbca38062ef2`: GUI run 42483560826,
+job 128740543078, reported 2082 tests, 56 skipped and six failed assertions, all in
+`testRefusedProfileSelectionDoesNotDispatchIntoTheUnchangedSpace`. Both the explicit and cold Most Recent cases
+opened the URL in the unchanged local Space while reporting dispatch; the other six routed-opening methods passed.
+
+The smallest correction checks the host's actual current Space immediately after `showSpace` in both configured
+Space branches. A refused selection returns the existing unresolved result before the URL-open call. No cross-profile
+host policy or missing-Space fallback is added; the regression and existing component tests are unchanged. This is
+synchronous main-actor dispatch, with no new animation, I/O or hot-path polling.
+
+Swift 6.2.4 frontend parsing, changed-source import inspection and `git diff --check` passed. No local GUI, full
+ShellKit or App build ran; CI must establish green for the unchanged real-window regression. The historical
+54-test mapping/persistence run is not validation of this correction. App readiness, early URLs, persisted resolver
+injection and Chromium startup requests remain separate unfinished integration work; the PR stays draft.

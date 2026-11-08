@@ -31,6 +31,7 @@ extension ShellWindowSet {
         guard sidebar.space(id) != nil else { return .missingSpace(url, id) }
         let window = externalLinkHost ?? openWindow(opensFirstTab: false)
         window.sidebarController.showSpace(id)
+        guard window.currentSpace == id else { return .unresolved(url) }
         window.showWindow(nil)
         window.openFromOtherApp(url)
       case .mostRecentSpace:
@@ -40,6 +41,7 @@ extension ShellWindowSet {
         }
         let window = host ?? openWindow(opensFirstTab: false)
         window.sidebarController.showSpace(id)
+        guard window.currentSpace == id else { return .unresolved(url) }
         window.showWindow(nil)
         window.openFromOtherApp(url)
       }
