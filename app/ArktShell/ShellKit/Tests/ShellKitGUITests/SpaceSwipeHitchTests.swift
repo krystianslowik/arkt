@@ -45,7 +45,12 @@ final class SpaceSwipeHitchTests: XCTestCase {
     controller.window?.contentView?.layoutSubtreeIfNeeded()
   }
 
-  override func tearDown() async throws { controller.close() }
+  // XCTest keeps each test case object until the run ends: release the windows too, not only hide them (#805).
+  override func tearDown() async throws {
+    controller.close()
+    controller = nil
+    sidebar = nil
+  }
 
   /// One main run loop pass of an interaction; `frame` is the scripted step it ran, if any.
   struct Pass { var cpu: Double; var wall: Double; var frame: Int? }

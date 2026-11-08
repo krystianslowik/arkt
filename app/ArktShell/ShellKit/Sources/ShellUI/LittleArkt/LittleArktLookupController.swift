@@ -271,6 +271,8 @@ final class LittleArktLookupPanel: NSPanel {
 /// like the command bar's.
 @MainActor
 final class LittleArktLookupView: NSView {
+  /// The lookup field and its placeholder.
+  static let fieldFontSize: CGFloat = 18
   let tagView = LittleArktLookupTagView()
   let field = NSTextField()
   let divider = NSView()
@@ -299,13 +301,13 @@ final class LittleArktLookupView: NSView {
     field.isBezeled = false
     field.drawsBackground = false
     field.focusRingType = .none
-    field.font = .systemFont(ofSize: 18)
+    field.font = .systemFont(ofSize: Self.fieldFontSize)
     field.textColor = ShellTokens.lookupText.nsColor()
     field.cell?.isScrollable = true
     field.cell?.wraps = false
     field.cell?.usesSingleLineMode = true
     field.placeholderAttributedString = NSAttributedString(string: LittleArktLookup.placeholder, attributes: [
-      .font: NSFont.systemFont(ofSize: 18),
+      .font: NSFont.systemFont(ofSize: Self.fieldFontSize),
       .foregroundColor: ShellTokens.lookupSecondaryText.nsColor(),
     ])
     field.setAccessibilityIdentifierWithCell(AXID.LittleArktLookup.field)
@@ -400,7 +402,7 @@ final class LittleArktLookupTagView: NSView {
     layer?.cornerRadius = Self.cornerRadius
     layer?.cornerCurve = .continuous
     layer?.backgroundColor = BrandTokens.accent.resolve(.dark).cgColor
-    label.font = .systemFont(ofSize: 12, weight: .semibold)
+    label.font = ShellType.captionEmphasis.font
     label.textColor = BrandTokens.onAccent.resolve(.dark).nsColor()
     label.lineBreakMode = .byTruncatingTail
     addSubview(label)
