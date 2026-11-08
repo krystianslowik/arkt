@@ -562,9 +562,9 @@ public final class SidebarContainerView: NSView {
   public func setPages(_ pages: [SpacePageView], index: Int) {
     for (pageIndex, page) in pages.enumerated() {
       page.scrollView.horizontalGestureTarget = pager
-      page.outlineView.onRowsChanged = { [weak self, unowned page] in
+      page.outlineView.onRowsChanged = { [weak self, weak page] in
         self?.bannerRowsChanged()
-        self?.pager.pageRowsChanged(page)
+        if let page { self?.pager.pageRowsChanged(page) }
       }
       page.setAccessibilitySelected(pageIndex == index)
     }

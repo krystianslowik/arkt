@@ -256,14 +256,16 @@ public final class SpacePagerView: NSView {
   /// rows that are now in its visible range again before a switch shows it (#676): an import fills a new Space's page
   /// after `setPages` prepared it empty, and without this the first frame that shows the page would build every
   /// visible row (about 25 ms of main-thread CPU for a 300-tab Space in Debug). Coalesced: any number of changes in
-  /// one pass cost one build, in the pass's layout, and only while the strip rests; a moving strip leaves it to the
-  /// settle's end, or to the next switch's preparation off its frames.
+  /// one pass cost one build, in the pass's layout, and only while the strip rests; a change while the strip moves
+  /// asks for no layout and leaves the build to the settle's end, or to the next switch's preparation off its frames.
   public func pageRowsChanged(_ page: NSView) {
     guard page.isHidden, pages.contains(where: { $0 === page }) else { return }
     let id = ObjectIdentifier(page)
     preparedPages.remove(id)
-    guard changedHiddenPages.insert(id).inserted else { return }
-    needsLayout = true
+    changedHiddenPages.insert(id)
+    // Not mid-motion: `layout()` puts the strip frame where the strip shows and unparks the pages shown mid-motion.
+    // The settle's completion, or the layout after `stopInteraction()`, builds the page instead.
+    if !(isTracking || driver.isRunning) { needsLayout = true }
   }
 
   /// Builds the visible rows of the hidden pages whose rows changed, when nothing moves.

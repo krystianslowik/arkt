@@ -569,6 +569,7 @@ final class SpaceSwipeHitchTests: XCTestCase {
     let dev = sidebar.spaceOrder[2]
     let page = pager.pages[2]
     let before = try realizedRows(page)
+    let restFrame = pager.strip.frame
     pager.reduceMotionForTesting = true
     pager.beginTracking()
     pager.track(delta: 20, at: 0.01)
@@ -580,6 +581,8 @@ final class SpaceSwipeHitchTests: XCTestCase {
     }
     controller.window?.contentView?.layoutSubtreeIfNeeded()
     XCTAssertEqual(pager.stripFrameSyncsForTesting, syncs, "no strip sync inside the motion")
+    XCTAssertEqual(pager.strip.frame, restFrame, "no strip frame move inside the motion")
+    XCTAssertNotEqual(pager.stripLayerShiftForTesting, 0, "the strip still moves on its layer translation")
     XCTAssertEqual(try realizedRows(page), before, "not built while the strip moves")
     let settled = expectation(description: "settled")
     pager.onSettleForTesting = { _ in settled.fulfill() }
