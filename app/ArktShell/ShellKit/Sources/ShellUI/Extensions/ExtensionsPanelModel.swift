@@ -91,6 +91,8 @@ struct ExtensionsPanelModel: Equatable {
 
 /// Geometry of the Extensions panel, in points (design/extensions, direction C).
 enum ExtensionsPanelMetrics {
+  static let dotRadius: CGFloat = 4
+  static let insertionLineRadius: CGFloat = 1
   static let width: CGFloat = 316
   static let padding: CGFloat = 6
   static let corner: CGFloat = 14

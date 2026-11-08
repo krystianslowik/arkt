@@ -24,16 +24,18 @@ final class LittleArktFlightTests: XCTestCase {
     NSApp.setActivationPolicy(.accessory)
   }
 
+  // XCTest keeps each test case object until the run ends: release the windows too, not only hide them (#805).
   override func tearDown() async throws {
     for gate in gates { gate.deliver(nil) }
     gates = []
     for set in sets {
-      for controller in set.controllers { controller.window?.orderOut(nil) }
+      for controller in set.controllers { controller.close() }
       for little in set.littleArkts {
         little.flight?.abort(.closeRequested)
-        little.window.orderOut(nil)
+        little.window.close()
       }
     }
+    for set in sets { set.closeAllForTesting() }
     sets = []
   }
 
@@ -186,6 +188,31 @@ final class LittleArktFlightTests: XCTestCase {
     XCTAssertNil(flight.snapshotLayer.contents, "and lets go of the image")
     waitUntil("the emptied Little Arkt window closes") { !scene.little.window.isVisible }
     XCTAssertTrue(scene.set.littleArkts.isEmpty)
+  }
+
+  /// The snapshot task waits on the engine without holding the controller: a small window closed while its snapshot
+  /// is still on the way goes away at once, not when the engine answers (#817).
+  func testASmallWindowClosedWhileItsSnapshotIsPendingIsReleased() async throws {
+    weak var weakLittle: LittleArktWindowController?
+    weak var weakWindow: NSWindow?
+    let gate: SnapshotGate
+    do {
+      let scene = try makeScene()
+      gate = scene.gate
+      weakLittle = scene.little
+      weakWindow = scene.little.window
+      scene.little.openIn()
+      for _ in 0..<200 where scene.gate.asked == 0 { await Task.yield() }
+      XCTAssertEqual(scene.gate.asked, 1, "the snapshot was asked for and is still pending")
+      scene.little.flight?.abort(.closeRequested)
+      scene.little.window.close()
+      scene.main.close()
+      for id in scene.engine.windowIDs { scene.engine.closeWindow(id) }
+    }
+    for _ in 0..<200 where weakLittle != nil || weakWindow != nil { await Task.yield() }
+    XCTAssertNil(weakLittle, "the controller outlived its window")
+    XCTAssertNil(weakWindow, "the window outlived its close")
+    gate.deliver(nil)                                       // the suspended task ends and lets go of the engine
   }
 
   /// No snapshot within one frame: the card flies as its plate (the page's background), and the snapshot fades in on
