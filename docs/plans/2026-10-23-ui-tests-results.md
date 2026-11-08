@@ -1337,3 +1337,25 @@ change is justified by these observations alone.
 
 The repairs above have not been compiled or executed in XCUITest. Full suites, 20 iterations, deliberate-break and
 worst-case/Reduce Motion checks remain unrun. The manual workflow selector remains pending maintainer ownership.
+
+#### U15 third focused run and remaining diagnosis
+
+Manual run [42435965453](https://github.com/krystianslowik/arkt/actions/runs/42435965453), on `97486f0`,
+built and executed six methods in [UI job 128594784427](https://github.com/krystianslowik/arkt/actions/runs/42435965453/job/128594784427):
+five passed and `test_BH121_GS033_sidebarSplitRow` failed at the regular-row menu assertion. The corrected pane-key
+scenario passed, and the sidebar Option-click assertion was reached and passed. The normal PR gate passed with its
+UI job skipped; it does not establish a passing focused UI run.
+
+All four paired probes returned false: neither `Rename` on the Today row nor `Separate All Tabs` on the split row
+was found after right-click or Control-click. The attached app accessibility snapshots show the app disabled after
+these inputs, but neither item appears in the app tree. That state alone does not establish whether a popup opened,
+whether the query has the right scope, or whether input reached the intended row. Source constructs an enabled Today
+`Rename` and split `Separate All Tabs`, but construction does not prove presentation. The existing toolbar URL bar
+context-menu test uses a real right-click and selects a hittable menu item; it is a candidate independent positive
+control, but was not run in this focused class and does not prove the sidebar input path works.
+
+The harness stops after the first failed assertion. The subsequent split-menu assertion and menu action therefore
+cannot be claimed as executed or passing; menu separation remains unverified. A paired run with a known-working
+real menu control and evidence of the popup's actual accessibility scope or input delivery is needed before choosing
+a repair or filing a product bug. No timeout, menu assertion, workflow selector, or production behavior was changed
+on this evidence. The selector's ownership decision remains pending; partial parity deferrals and #827 remain open.
