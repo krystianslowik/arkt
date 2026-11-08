@@ -2998,3 +2998,16 @@ Two GUI regressions drive keyboard selection through the existing preview harnes
 through notice dismissal and suggestions changes, and retain a site-search row with its Search site hint through
 notice dismissal. Source parsing and diff checks passed; no GUI test ran locally. The expected stale-preview/hint
 runtime failure remains unobserved and must be established in CI before the small production correction.
+
+
+### Retained command-bar preview and hint correction (#562)
+
+The review gate at `1574bac` produced the intended runtime red in run 42463489777, GUI job 128677738621:
+2050 tests, 54 skipped, three failed assertions, all in the two new selection tests. Notice dismissal and a
+suggestions change retained the second tab but displayed the first tab's preview; the site-search selection
+retained the first tab's hint instead of Search site. No unrelated GUI failure was observed.
+
+Settings refresh now restores the row through the existing selection helper, which refreshes hints and preview
+without keyboard scrolling or selection announcements. The two regression tests are unchanged. Swift 6.2.4 source
+parsing and diff checks passed; no local GUI suite ran. Current-head CI must establish green. The broader issue's
+folder/extension activation, forwarding and presentation and search-engine choice remain incomplete.

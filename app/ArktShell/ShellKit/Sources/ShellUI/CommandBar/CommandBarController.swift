@@ -239,7 +239,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     let selected = results.indices.contains(barView.table.selectedRow) ? results[barView.table.selectedRow] : nil
     reloadResults()
     if let selected, let index = results.firstIndex(of: selected) {
-      barView.table.selectRowIndexes([index], byExtendingSelection: false)
+      select(index, byKeyboard: false)
     }
     relayout()
   }
