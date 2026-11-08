@@ -261,3 +261,17 @@ built Info value, compiled startup wiring, AppKit delivery timing, proxy associa
 persisted profile are unobserved. After root review and publication, the safest next observation is a focused manual
 FakeEngine UI workflow on a disposable CI runner, with the mandatory build flag and all six cases; inspect setup
 failures separately before interpreting routing results. No such run or local app launch was performed here.
+
+
+### Publication review and supported configuration
+
+Independent source review of `f43075b` found no concrete P1/P2 blockers for publication followed by a disposable
+CI probe. The final focused package source-links the actual HarnessError as well as the actual identity codec and
+fixture server; the small error declaration was moved out of ArktUITestCase without changing its behavior.
+The focused probe passes 26 tests in three suites. It still does not compile the App delegate or XCUITest target.
+
+This identity gate supports the checked-in Debug FakeEngine UI-test scheme. The shared helper is Debug-gated;
+Profile/Release UI-test target closure and a Chromium identity handshake are not supported or claimed. Normal
+Profile/Release/Distribution app behavior is unchanged. Redirect refusal has source and response-policy coverage;
+no actual redirecting-server test was run. Generated Info metadata, native handshake, Settings accessibility,
+persisted profile and the public process-to-proxy association require the next native observation.

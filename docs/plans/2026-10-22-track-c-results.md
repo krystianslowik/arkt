@@ -3212,3 +3212,25 @@ returned bundle URL and nonzero PID. All six route/default cases and assertions 
 layering/UI lint, actionlint, startup-order inspection and whitespace checks passed. No local full App/GUI build or
 launch ran. Generated flag values, compiled startup behavior, effective sandbox/process correlation and persisted
 profile identity are not established. No cold native run is dispatched by this stage.
+
+
+### #113 loopback process and profile identity barrier
+
+The Debug FakeEngine app captures a digest of a fixed effective-environment whitelist and its PID, then awaits an
+exact one-shot nonce/digest acknowledgement from the existing test fixture before session composition. The endpoint
+accepts literal loopback HTTP only, uses ephemeral transport and refuses redirects. It sends neither raw paths nor
+a full environment. Invalid or rejected identity cannot fall through to AppSession startup. Early URLs remain in
+the existing receiver. The cold harness correlates the report with the returned PID and sole validated bundle
+instance, then inspects the persisted Spaces/default/routes without editing them.
+
+Codec and fixture contracts each first failed compilation on missing APIs with zero tests run. The final supported
+`integration/StartupPolicy` actual-source probe passed 26 tests in three suites, including its existing 22 policy
+tests. It source-links the real codec, fixture server and harness error. Three existing linker search-path warnings
+remain. Independent source review found no P1/P2 blocker; it did not execute the probe. Swift parsing, source-layer
+and UI lint, actionlint and whitespace checks passed separately. No local App/GUI build or launch ran.
+
+This supports the checked-in Debug FakeEngine UI-test scheme; Profile/Release test-target closure and Chromium
+identity reporting are not claimed. Native metadata, handshake, Settings/profile accessibility, process-to-proxy
+association and routing results remain unobserved. One focused disposable-CI run is the next observation; any
+identity/profile setup failure must remain separate from a routing failure. The known cold onboarding failures at
+`0f2f480` are not upgraded to routing evidence by this source change.

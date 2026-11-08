@@ -1,9 +1,6 @@
 import Foundation
 import Testing
 
-// The actual UI harness error is otherwise coupled to XCTest and AppKit.
-struct HarnessError: Error { init(_ message: String) {} }
-
 @Suite struct FixtureIdentityTests {
   @Test func acceptsOnlyTheArmedIdentity() async throws {
     let server = try await FixtureServer.start()
