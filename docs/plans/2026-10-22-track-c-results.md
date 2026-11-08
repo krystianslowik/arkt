@@ -3106,3 +3106,18 @@ A component gate uses that complete entry point with seeded collection and legac
 no duplicate forwarding and a later ordinary selection saved normally. Existing native assertions remain intact.
 Parsing and whitespace checks passed; no component/GUI/App or native fixed-head execution is claimed. Independent
 review and supported CI remain outstanding. Other native lifecycle/cancellation and #690 recovery boundaries remain.
+
+
+### Both native launch cases green; integrate landed recovery (#116)
+
+Head `6c5946b` passed both real-app cases in run 42513197636: enabled restore 52.943 seconds and disabled-launch
+preservation 54.519 seconds, two tests with zero failures. Normal PR CI passed all executed checks; GUI reported
+2136 tests, 63 skipped, zero failures. The same-head complete-boundary component regression passed. These results
+do not establish necessary quit-capture timing or native cancellation.
+
+The local merge of main `a9457aa` resolves AppSession, ShellWindowSet, ShellWindowController and its Incognito
+extension. It retains shared-store observation and recovery persistence, explicit per-window restore and early
+private classification, both close/private event callbacks, and the existing recovery presentation sequence after
+collection restoration. Main's retention and GUI cleanup fixes remain intact. Four resolved sources parsed;
+source/lint/header and resolution whitespace checks passed. The full staged whitespace findings are inherited,
+byte-identical main README/patch context. No merged-head runtime test or build ran; review and CI remain required.

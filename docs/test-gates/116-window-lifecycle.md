@@ -264,3 +264,25 @@ legacy state in another Space, requires one fresh window and preserved collectio
 creates no duplicate, then changes the selected tab and requires the collection to update. Native tests retain
 their assertions. The new production/component sources parsed and passed whitespace checks only; the component
 test, complete App build and native fix have not run locally. Source review and new-head CI remain required.
+
+
+## Fixed native launch cases green; main integration pending
+
+At `6c5946b`, [run 42513197636](https://github.com/krystianslowik/arkt/actions/runs/42513197636) passed both native
+cases: enabled restore in 52.943 seconds and disabled-launch preservation in 54.519 seconds (two tests, zero
+failures). The normal PR run passed all executed checks, including GUI 2136 reported, 63 skipped, zero failures;
+the complete-boundary component test passed. This validates the bounded fallback fix on that head, not a future
+merge or necessary quit-capture timing.
+
+Main `a9457aa` now includes #690 recovery and #833 retained-window fixes. The local integration resolves four
+files: AppSession retains the exact injected store observation plus RecoveryPages, invokes collection restoration
+before beginning engine recovery, and keeps the recovery notice sequence; WindowSet retains both unreadable-store
+protection and unanswered-recovery protection. The factory accepts both explicit window-session state and early
+regular/private kind classification. Close and private-transition events invoke both recovery and collection
+callbacks, after their closed/private flags change. Main's weak Little Arkt anchors and other landed changes remain.
+
+The four resolved Swift files parsed; the import/UI-source workflow checks, actionlint, engine-header comparison
+and resolution-specific whitespace checks passed. No merged-head build or tests ran. The full staged whitespace
+check includes four inherited findings in main's extensions directions README and Chromium patch context; both
+files are byte-identical to main and were not rewritten. Recovery-with-multiple-window/crash interaction and native
+cancellation remain verification boundaries for the merged head. Independent review precedes publication.
