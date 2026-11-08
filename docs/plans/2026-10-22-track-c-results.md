@@ -2929,3 +2929,24 @@ Written first. Each failed to compile before the code existed.
   with nil overrides without rewriting its version. Swift 6.2.4 compiled the seven prior model sources to generate
   that synthetic payload, and parsed the added test. The ArchiveStore regression itself remains unrun locally;
   database and full-suite validation require CI.
+
+### Custom Favorite and folder icons (#339): launch and Shell test-first gates
+
+- The previous Core head `821480a78a0ddd9005e30e122b58de1b3b75fe42` passed CI run 42431293793: Core job
+  128580619267 passed 582 tests in 46 suites, including node icons and legacy archive coverage; pure ShellKit job
+  128580619085 passed 2505 tests in 279 suites. App build, lint and required gate passed; GUI and UI were skipped.
+  These counts predate the gates below.
+- Added Shell boundary, notification, no-op, copied subtree, Favorite fallback and reset, folder state, picker and menu
+  selection tests. They have not been compiled or run; the anticipated missing `nodeIcon` / `setNodeIcon` boundary
+  failure is unobserved. No new Shell test count is claimed.
+- Added a launch-level regression using the existing frozen synthetic sidebar format 3 fixture in a real temporary
+  SQLite database. It opens through `ArktLaunch.openAndLoad`, verifies the loaded values and nil node icons, saves
+  through `SidebarStore`, checks the row and document format 4 and payload, and reopens the saved sidebar. Sidebar
+  format 3 is independent of SQL schema migration versions. Launch does not save on its own; the normal save is explicit.
+- Picker and menu implementation, Favorite favicon fallback with latest favicon after reset, expanded and collapsed
+  folder rendering, GUI/UI tests and manual appearance, accessibility, keyboard and emoji Cancel checks remain.
+  Integrate the overlapping Favorite and menu work described in `docs/339-custom-icons-integration.md` first.
+- Swift 6.4.1: an isolated test package depending on the actual ArktCore `Persistence` and `SidebarModel` products
+  and GRDB 7.11.1 ran `swift test -j 2 --filter SidebarV3LaunchTests`: 1 test in 1 suite passed. The focused run
+  does not include the other Core tests. Swift parsing of the new test and Shell gate files, import inspection and
+  `git diff --check` passed. No GUI, app launch or ShellKit baseline build was run locally.
