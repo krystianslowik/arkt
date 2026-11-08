@@ -5445,3 +5445,16 @@ it was cleared afterwards. Nothing under `~/Applications/ArktTest` or `/Applicat
 - Cleanup: both runs and the loopback server stopped by exact PID; profiles and build log deleted; no crash report.
   The clipboard held text this time and the run replaced it with the page URL; it was cleared afterwards and the
   earlier text was not restored.
+
+### #338 Favorite unread badges: test-first stage
+
+- Added five pure ShellUI test cases for synthetic page-title counts, clearing, malformed counts, lookalike hosts,
+  display boundaries and the two service settings. The synthetic titles are parser contracts, not evidence of live
+  site formats. Formatting in this stage displays 1 through 99 and caps larger counts at `99+`; zero hides the badge.
+- The proposed `FavoriteUnreadBadge.text` seam does not yet exist. CI must first show the intended missing-API red;
+  implementation and a green run remain. No production badge code or engine change is included.
+- Local full suites and GUI checks were not run: this environment lacks Xcode and the baseline ShellKit build cannot
+  compile. Source parsing and diff checks do not establish a test count or a CI red. No visual placement or clipping
+  has been checked. Preserve the music indicator from #117.
+- Future grid changes overlap #822 and #802; follow the approved-first/smaller-first merge order, rebase later work,
+  and retain both hover and split-Favorite callbacks. This test file is independent of #824 layout math.
