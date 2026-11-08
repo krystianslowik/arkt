@@ -88,3 +88,108 @@ private actor EditorStore: LinkRoutingSettingsStoring {
     return value
   }
 }
+
+@MainActor
+struct LinkRoutingEditorFailureTests {
+  private let route = LinkRouting.Route(condition: .contains("literal"), destination: .littleArkt)
+  private let other = LinkRouting.Route(condition: .matches("OTHER"), destination: .mostRecentSpace)
+
+  @Test func failedFlushRetainsOrderedDuplicatesAndRetries() async {
+    let store = ControlledEditorStore()
+    let model = LinkRoutingSettingsModel(state: store)
+    await model.load()
+    model.appendRoute(route)
+    model.appendRoute(route)
+    model.appendRoute(other)
+    await store.failNextWrite()
+    #expect(await model.flush() == false)
+    #expect(model.lastError != nil)
+    #expect(model.settings.routes == [route, route, other])
+    #expect(await model.flush() == true)
+    #expect(model.lastError == nil)
+    let reopened = LinkRoutingSettingsModel(state: store)
+    await reopened.load()
+    #expect(reopened.settings.routes == [route, route, other])
+  }
+
+  @Test func inFlightEditsAndConcurrentFlushesAreSerialized() async {
+    let store = ControlledEditorStore()
+    let model = LinkRoutingSettingsModel(state: store)
+    await model.load()
+    model.appendRoute(route)
+    await store.pauseNextWrite()
+    let first = Task { await model.flush() }
+    await store.waitForPausedWrite()
+    model.appendRoute(route)
+    model.appendRoute(other)
+    let second = Task { await model.flush() }
+    await store.resumeWrite()
+    #expect(await first.value)
+    #expect(await second.value)
+    #expect(model.settings.routes == [route, route, other])
+    let reopened = LinkRoutingSettingsModel(state: store)
+    await reopened.load()
+    #expect(reopened.settings.routes == [route, route, other])
+    #expect(await store.maximumConcurrentWrites() == 1)
+  }
+
+  @Test func failedLoadCannotFlushDefaultsAndInvalidIndicesAreSafe() async {
+    let store = ControlledEditorStore(initial: LinkRouting(routes: [route]))
+    await store.failNextLoad()
+    let model = LinkRoutingSettingsModel(state: store)
+    await model.load()
+    #expect(model.lastError != nil)
+    model.appendRoute(other)
+    #expect(await model.flush() == false)
+    #expect(await store.stored().routes == [route])
+    await model.load()
+    #expect(model.lastError == nil)
+    model.replaceRoute(at: -1, with: other)
+    model.removeRoute(at: 1)
+    #expect(model.settings.routes == [route])
+  }
+}
+
+private actor ControlledEditorStore: LinkRoutingSettingsStoring {
+  enum Failure: Error { case requested }
+  private var value: LinkRouting
+  private var failLoad = false
+  private var failWrite = false
+  private var pauseWrite = false
+  private var paused: CheckedContinuation<Void, Never>?
+  private var started: CheckedContinuation<Void, Never>?
+  private var active = 0
+  private var maximum = 0
+
+  init(initial: LinkRouting = LinkRouting(routes: [])) { value = initial }
+  func failNextLoad() { failLoad = true }
+  func failNextWrite() { failWrite = true }
+  func pauseNextWrite() { pauseWrite = true }
+  func waitForPausedWrite() async {
+    if paused != nil { return }
+    await withCheckedContinuation { started = $0 }
+  }
+  func resumeWrite() { paused?.resume(); paused = nil }
+  func stored() -> LinkRouting { value }
+  func maximumConcurrentWrites() -> Int { maximum }
+  func loadLinkRouting() async throws -> LinkRouting {
+    if failLoad { failLoad = false; throw Failure.requested }
+    return value
+  }
+  func updateLinkRouting(at date: Date, _ change: @escaping @Sendable (inout LinkRouting) -> Void) async throws -> LinkRouting {
+    active += 1
+    maximum = max(maximum, active)
+    defer { active -= 1 }
+    if pauseWrite {
+      pauseWrite = false
+      await withCheckedContinuation { continuation in
+        paused = continuation
+        started?.resume()
+        started = nil
+      }
+    }
+    if failWrite { failWrite = false; throw Failure.requested }
+    change(&value)
+    return value
+  }
+}
