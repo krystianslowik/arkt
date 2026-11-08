@@ -980,7 +980,8 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   public func numberOfRows(in tableView: NSTableView) -> Int { results.count }
 
   public func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-    let cell = barView.table.reusableCell()
+    let cell = tableView.makeView(withIdentifier: CommandBarCellView.identifier, owner: nil) as? CommandBarCellView
+      ?? CommandBarCellView(frame: .zero)
     configure(cell, row: row)
     return cell
   }
