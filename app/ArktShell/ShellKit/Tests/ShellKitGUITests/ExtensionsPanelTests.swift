@@ -22,9 +22,16 @@ final class ExtensionsPanelTests: XCTestCase {
     panel.reduceMotion = { false }
   }
 
-  override func tearDown() async throws {
+  // Synchronous: `waitUntil` turns the main run loop, and from inside an async tearDown (itself a job on the main
+  // queue) those turns never run the fade's completion.
+  override func tearDown() {
     panel.hide(keyboard: true)
-    harness.controller.window?.orderOut(nil)
+    // A click, the sidebar hiding or full screen closes the panel with a fade. Its completion takes the panel off the
+    // window and releases it, but it runs on turns of the run loop, which nothing turns between tests, so the last
+    // fading panels outlived the class (#868). Wait for the fades to end; the panel leaves its window when they do.
+    let parent = harness.controller.window
+    waitUntil("the panel faded out") { !(parent?.childWindows ?? []).contains { $0 is DialogWindow } }
+    parent?.orderOut(nil)
     harness = nil
   }
 
