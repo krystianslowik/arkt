@@ -84,6 +84,7 @@ extension EngineContract {
     let changes = info.permissions.compactMap { p in p.options.first { $0 != p.setting }.map { (p.kind, $0) } }
     try require(changes.count >= 2, "two permissions to change")
 
+    site.pageInfoDidOpen(tab: a)                      // as the panel does (#782)
     site.pageInfoDidClose(tab: b)                     // nothing changed there
     site.setPermission(changes[0].0, to: changes[0].1, forOrigin: info.origin, from: a)
     site.setPermission(changes[1].0, to: changes[1].1, forOrigin: info.origin, from: a)

@@ -295,6 +295,9 @@ public final class FakeEngine: EngineClient, EngineImporting, EngineDownloads, E
     loadURL(url, in: entry.webView)
   }
 
+  /// #784: WebKit has no address-bar transition, typed-visit count or debug URLs; this loads as `navigate(_:to:)`.
+  public func navigateFromAddressBar(_ id: TabID, to url: URL) { navigate(id, to: url) }
+
   private func loadURL(_ url: URL, in web: WKWebView) {
     if url.isFileURL {
       web.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
@@ -642,6 +645,9 @@ public final class FakeEngine: EngineClient, EngineImporting, EngineDownloads, E
   public func resetPermissions(forOrigin origin: String, from tab: TabID) {
     if sitePermissions.reset(forOrigin: origin) { announcePageInfo(forOrigin: origin) }
   }
+
+  /// WebKit's site data is not counted (`FakeSitePermissions`), so an open panel changes nothing.
+  public func pageInfoDidOpen(tab: TabID) {}
 
   public func pageInfoDidClose(tab: TabID) {}
 

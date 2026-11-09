@@ -73,6 +73,7 @@ final class SettingsResetTests: XCTestCase {
   private func changeEveryPreference(_ settings: AppSettings) {
     settings.tabNavigation.countsFavorites = false
     settings.tabNavigation.ninthOpensNinth = true
+    settings.playsReorderHaptics = false
     settings.peekLinks.opensCrossSiteLinks = false
     settings.peekLinks.opensShiftClickedLinks = false
     settings.opensLittleArktOnOptionCommandClick = false
@@ -210,6 +211,26 @@ final class SettingsResetTests: XCTestCase {
     XCTAssertTrue(controller.peekCrossSiteSwitch?.isOn == true)
     XCTAssertTrue(controller.countFavoritesSwitch?.isOn == true)
     XCTAssertEqual(controller.selectedPane, .advanced, "the window stays where it was")
+  }
+
+  /// BH-024: Reset turns the reorder haptics back on, and the Appearance switch shows it and keeps following the
+  /// setting afterwards.
+  func testTheReorderHapticsSwitchFollowsTheReset() throws {
+    let settings = AppSettings(defaults: defaults)
+    settings.playsReorderHaptics = false
+    let controller = make(settings: settings)
+    controller.show(pane: .appearance)
+    let haptics = try find(AXID.Settings.control("appearance", "reorderHaptics"), in: controller,
+                           as: SettingsSwitch.self)
+    XCTAssertFalse(haptics.isOn)
+
+    try openSheet(controller).view.primaryButton.performClick(nil)
+    XCTAssertTrue(settings.playsReorderHaptics)
+    XCTAssertNil(defaults.object(forKey: AppSettings.Key.tabReorderingHapticsDisabled))
+    XCTAssertTrue(haptics.isOn)
+
+    settings.playsReorderHaptics = false
+    XCTAssertFalse(haptics.isOn)
   }
 
   /// Without the archive rows (the app gave none), the reset still covers the store.

@@ -196,6 +196,8 @@ public final class ChromiumEngine: EngineClient, EngineExtensions, EngineDownloa
   }
 
   public func navigate(_ id: TabID, to url: URL) { tabs[id]?.handle.navigate(to: url) }
+  /// #784: TYPED | FROM_ADDRESS_BAR (`navigateFromAddressBarToURL:` in the facade header).
+  public func navigateFromAddressBar(_ id: TabID, to url: URL) { tabs[id]?.handle.navigate(fromAddressBarTo: url) }
   public func reload(_ id: TabID) { tabs[id]?.handle.reload() }
   public func goBack(_ id: TabID) { tabs[id]?.handle.goBack() }
   public func goForward(_ id: TabID) { tabs[id]?.handle.goForward() }

@@ -448,6 +448,11 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
       item.tileView.syncHover(pointerInWindow: pointer)
     }
   }
+  public override func viewWillMove(toWindow newWindow: NSWindow?) {
+    if window !== newWindow { hoverResync.cancel() }
+    super.viewWillMove(toWindow: newWindow)
+  }
+
   /// Where hover resyncs read the pointer; tests replace it.
   var hoverPointerLookup: HoverPointerLookup {
     get { hoverResync.lookup }
@@ -607,7 +612,7 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
   private func configure(_ item: FavoriteTileItem, id: NodeID) {
     let tile = item.tileView
     tile.flavor = flavor
-    tile.isCurrent = resolver.state(for: id) == .current
+    tile.isCurrent = state(for: id) == .current
     tile.selectionAlpha = selectionFade?.node == id ? (selectionFade?.alpha ?? 1) : 1
     tile.isKeyboardFocused = keyboardFocusID == id
     var title = "", url: URL?
@@ -615,11 +620,11 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
     tile.faviconView.image = faviconProvider?(id)
       ?? SidebarGlyphs.letter(for: title, url: url, flavor: flavor, size: SidebarMetrics.favoriteFaviconSize,
                               scale: collectionView.shellBackingScale)
-    let shown = url.map { HostDisplay.title(title, for: $0) } ?? title
+    let shown = label(of: id)
     tile.toolTip = shown
     tile.setAccessibilityLabel(shown)
     tile.nodeID = id
-    let isLoaded = pageLoadedProvider?(id) == true
+    let isLoaded = hasLoadedPage(id)
     tile.isLoaded = isLoaded
     tile.setAccessibilityValue(isLoaded ? AXID.Favorites.loaded : AXID.Favorites.unloaded)
     let action = isLoaded ? RowCloseAction.resolve(id, in: source) : nil
@@ -632,6 +637,37 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
       guard let self, let tile else { return }
       self.accessibilityShowMenu(id, on: tile)
     }
+  }
+
+  /// A tile's tooltip and VoiceOver label: the tab's title, or a split's pane titles joined as its outline row has
+  /// them (#801). The split's own tile look is #788.
+  private func label(of id: NodeID) -> String {
+    switch source.node(id) {
+    case .tab(_, let url, let title)?:
+      return HostDisplay.title(title, for: url)
+    case .split?:
+      return source.children(of: .split(id)).compactMap { pane -> String? in
+        if case .tab(_, let url, let title)? = source.node(pane) { return HostDisplay.title(title, for: url) }
+        return nil
+      }.joined(separator: " | ")
+    case .folder?, nil:
+      return ""
+    }
+  }
+
+  /// Whether the tile has a page to close: a split while one of its panes has one, as the outline's pinned split row
+  /// (#601, #801).
+  private func hasLoadedPage(_ id: NodeID) -> Bool {
+    guard let pageLoadedProvider else { return false }
+    if case .split? = source.node(id) { return source.children(of: .split(id)).contains { pageLoadedProvider($0) } }
+    return pageLoadedProvider(id)
+  }
+
+  /// A tile's row state: a split takes the strongest state among its panes, as its outline row does (#801).
+  private func state(for id: NodeID) -> TabRowState {
+    guard case .split? = source.node(id) else { return resolver.state(for: id) }
+    let states = source.children(of: .split(id)).map { resolver.state(for: $0) }
+    return [TabRowState.current, .contentVisible, .previous].first(where: states.contains) ?? .normal
   }
 
   /// VoiceOver's press on a tile: the Favorite activates, as a click on it does (#607).
@@ -672,10 +708,11 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
 
   // MARK: Drag source (#214)
 
-  /// Only tab tiles (not folders) write their node id under the private `.sidebarNode` type.
+  /// Tab and split tiles (not folders) write their node id under the private `.sidebarNode` type; a split is dragged
+  /// whole, as its outline row is (#801).
   public func collectionView(_ collectionView: NSCollectionView,
                              pasteboardWriterForItemAt indexPath: IndexPath) -> (any NSPasteboardWriting)? {
-    guard let id = nodeID(at: indexPath), isTab(id) else { return nil }
+    guard let id = nodeID(at: indexPath), isDraggable(id) else { return nil }
     let pasteboardItem = NSPasteboardItem()
     pasteboardItem.setString(id.uuidString, forType: .sidebarNode)
     return pasteboardItem
@@ -695,7 +732,7 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
     didDragInMouseDown = true
     isDragging = true
     collectionView.deselectItems(at: collectionView.selectionIndexPaths)
-    guard let id = indexPaths.sorted().compactMap({ nodeID(at: $0) }).first(where: isTab) else { return }
+    guard let id = indexPaths.sorted().compactMap({ nodeID(at: $0) }).first(where: isDraggable) else { return }
     onNodeDragBegan?(id)
   }
 
@@ -711,6 +748,13 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
 
   private func isTab(_ id: NodeID) -> Bool {
     if case .tab? = source.node(id) { true } else { false }
+  }
+
+  private func isDraggable(_ id: NodeID) -> Bool {
+    switch source.node(id) {
+    case .tab?, .split?: true
+    case .folder?, nil: false
+    }
   }
 
   // MARK: Delegate
@@ -836,11 +880,13 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
     }
   }
 
-  /// Refreshes one tile (favicon, title or whether its page is loaded).
+  /// Refreshes one tile (favicon, title or whether its page is loaded). A pane of a Favorite split refreshes its
+  /// split's tile, which shows the X while a pane has a page (#801).
   public func reload(node id: NodeID) {
-    guard let index = nodeIDs.firstIndex(of: id),
+    let tileID = if case .split(let split)? = source.parent(of: id), nodeIDs.contains(split) { split } else { id }
+    guard let index = nodeIDs.firstIndex(of: tileID),
           let item = collectionView.item(at: IndexPath(item: index, section: 0)) as? FavoriteTileItem else { return }
-    configure(item, id: id)
+    configure(item, id: tileID)
   }
 
   /// Targeted update for a `.favorites` structure change. Returns true when the grid height changed. The columns

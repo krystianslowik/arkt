@@ -117,7 +117,15 @@ extension InMemoryEngine: EngineSiteSettings {
     changed(origin, from: tab)
   }
 
+  /// Records the open panel (`openPageInfoPanels`). Site data comes from `setSiteData(_:forOrigin:)` and costs
+  /// nothing to read, so it is reported whether a panel is open or not.
+  public func pageInfoDidOpen(tab: TabID) {
+    guard snapshots[tab] != nil else { return }
+    openPageInfoPanels.insert(tab)
+  }
+
   public func pageInfoDidClose(tab: TabID) {
+    openPageInfoPanels.remove(tab)
     guard pendingReloads.remove(tab) != nil, snapshots[tab] != nil,
           infobars[tab]?.contains(where: { $0.kind == .reload }) != true else { return }
     _ = raiseInfobar(in: tab, message: Self.reloadMessage, kind: .reload, okTitle: "Reload", cancelTitle: nil)

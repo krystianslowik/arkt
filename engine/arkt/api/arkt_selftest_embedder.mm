@@ -118,6 +118,8 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
   NSWindow* _window;
   NSView* _cardView;
   NSView* _anchorView;
+  // The tab whose container the card shows (#755).
+  __weak id<ArktTabHandle> _mountedTab;
 }
 
 @synthesize closeRequested = _closeRequested;
@@ -168,6 +170,7 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
 
 - (void)mountTab:(id<ArktTabHandle>)tab {
   NSView* container = tab.containerView;
+  _mountedTab = tab;
   if (container.superview == _cardView) {
     return;
   }
@@ -191,6 +194,34 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
     _closeRequested();
   }
   return NO;
+}
+
+// #755: an Esc the page did not use, handled as ShellEngineHost does: the
+// shell stops the active tab while it loads and its page has the keyboard
+// (the engine names no tab), through IDC_STOP when the engine enables it.
+- (void)unhandledKeyDown:(NSEvent*)event inTab:(id<ArktTabHandle>)tab {
+  id<ArktTabHandle> shown = _mountedTab;
+  NSResponder* responder = _window.firstResponder;
+  const bool in_page =
+      shown && [responder isKindOfClass:[NSView class]] &&
+      [static_cast<NSView*>(responder) isDescendantOf:shown.containerView];
+  const bool enabled = _validateCommand && _validateCommand(IDC_STOP);
+  LOG(WARNING) << "ARKT selftest unhandledKeyDown key=" << event.keyCode
+               << " tab=" << (tab ? tab.sessionId : -1)
+               << " shown=" << (shown ? shown.sessionId : -1)
+               << " inPage=" << (in_page ? "yes" : "no")
+               << " loading=" << (shown.isLoading ? "yes" : "no")
+               << " stopEnabled=" << (enabled ? "yes" : "no");
+  constexpr unsigned short kEscapeKeyCode = 53;
+  if (event.keyCode != kEscapeKeyCode ||
+      (event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask) ||
+      !in_page || !shown.isLoading || !enabled || !_executeCommand) {
+    return;
+  }
+  _executeCommand(IDC_STOP,
+                  static_cast<NSInteger>(WindowOpenDisposition::CURRENT_TAB));
+  LOG(WARNING) << "ARKT selftest stop sent tab=" << shown.sessionId
+               << " loading=" << (shown.isLoading ? "yes" : "no");
 }
 
 @end
@@ -748,6 +779,44 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
                << " inWindow=" << (container.window ? "yes" : "no");
 }
 
+// #755: a bare Esc key down and key up for `tab`'s page, handed to its own
+// window's sendEvent: in this process. It never enters the system event
+// queue, so no other window or app can receive it.
+- (void)sendEscapeToTab:(id<ArktTabHandle>)tab {
+  NSWindow* window = tab.browser.host.window;
+  NSResponder* responder = window.firstResponder;
+  const bool in_page =
+      [responder isKindOfClass:[NSView class]] &&
+      [static_cast<NSView*>(responder) isDescendantOf:tab.containerView];
+  LOG(WARNING) << "ARKT selftest esc send tab=" << tab.sessionId
+               << " loading=" << (tab.isLoading ? "yes" : "no")
+               << " appActive=" << (NSApp.isActive ? "yes" : "no")
+               << " key=" << (window.isKeyWindow ? "yes" : "no")
+               << " responder="
+               << base::SysNSStringToUTF8(
+                      responder ? NSStringFromClass([responder class])
+                                : @"none")
+               << " inPage=" << (in_page ? "yes" : "no");
+  if (!window) {
+    return;
+  }
+  const NSEventType types[] = {NSEventTypeKeyDown, NSEventTypeKeyUp};
+  for (NSEventType type : types) {
+    NSEvent* event =
+        [NSEvent keyEventWithType:type
+                               location:NSZeroPoint
+                          modifierFlags:0
+                              timestamp:NSProcessInfo.processInfo.systemUptime
+                           windowNumber:window.windowNumber
+                                context:nil
+                             characters:@"\x1b"
+            charactersIgnoringModifiers:@"\x1b"
+                              isARepeat:NO
+                                keyCode:53];
+    [window sendEvent:event];
+  }
+}
+
 - (void)logActionsOf:(id<ArktBrowserHandle>)browser {
   NSArray<id<ArktExtensionAction>>* actions =
       [_engine extensionActionsForBrowser:browser];
@@ -807,6 +876,66 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
                               << base::SysNSStringToUTF8(
                                      error.localizedDescription ?: @"none");
                }];
+}
+
+// #846: Chromium's New Incognito Window command, sent through the host as a
+// menu item would send it, makes a window on the off-the-record profile (the
+// facade's createBrowser(host:) always uses the profile the engine started
+// with, #705). Its tab then loads `url`; the tab's state, its page title and
+// the HTTPS-First interstitial's primary button are logged after `delayMs`.
+- (void)openPrivateWindowFrom:(id<ArktTabHandle>)tab
+                          url:(const std::string&)url
+                      delayMs:(int)delayMs {
+  NSMutableSet<NSNumber*>* before = [NSMutableSet set];
+  for (id<ArktBrowserHandle> browser in _engine.browsers) {
+    [before addObject:@(browser.windowId)];
+  }
+  id<ArktWindowHost> host = tab.browser.host;
+  BOOL enabled =
+      host.validateCommand && host.validateCommand(IDC_NEW_INCOGNITO_WINDOW);
+  LOG(WARNING) << "ARKT selftest private-window enabled="
+               << (enabled ? "yes" : "no")
+               << " from window=" << (tab.browser ? tab.browser.windowId : -1);
+  if (!enabled || !host.executeCommand) {
+    return;
+  }
+  host.executeCommand(
+      IDC_NEW_INCOGNITO_WINDOW,
+      static_cast<NSInteger>(WindowOpenDisposition::CURRENT_TAB));
+  id<ArktBrowserHandle> privateBrowser = nil;
+  for (id<ArktBrowserHandle> browser in _engine.browsers) {
+    if (![before containsObject:@(browser.windowId)]) {
+      privateBrowser = browser;
+    }
+  }
+  id<ArktTabHandle> privateTab =
+      privateBrowser.activeTab ?: privateBrowser.tabs.firstObject;
+  LOG(WARNING) << "ARKT selftest private-window window="
+               << (privateBrowser ? privateBrowser.windowId : -1)
+               << " tabs=" << privateBrowser.tabs.count
+               << " tab=" << (privateTab ? privateTab.sessionId : -1);
+  if (!privateTab) {
+    return;
+  }
+  [privateTab navigateToURL:[NSURL URLWithString:base::SysUTF8ToNSString(url)]];
+  const int32_t sessionId = privateTab.sessionId;
+  dispatch_after(
+      dispatch_time(DISPATCH_TIME_NOW, int64_t{delayMs} * NSEC_PER_MSEC),
+      dispatch_get_main_queue(), ^{
+        id<ArktTabHandle> target = [self tabWithSessionId:sessionId];
+        if (!target) {
+          LOG(WARNING) << "ARKT selftest private-window tab=" << sessionId
+                       << " gone";
+          return;
+        }
+        [self logStateOf:target];
+        [self evaluate:@"document.title + ' | ' + "
+                       @"(document.getElementById('primary-button')"
+                       @"?.innerText ?? 'no interstitial button')"
+                  inTab:target
+            userGesture:NO
+                  label:"private-window page"];
+      });
 }
 
 - (id<ArktTabHandle>)tabWithSessionId:(int32_t)sessionId {
@@ -938,6 +1067,10 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
     [self logStateOf:tab];
   } else if (command == "navigate") {
     [tab navigateToURL:[NSURL URLWithString:base::SysUTF8ToNSString(argument)]];
+  } else if (command == "navigate-typed") {
+    // #784: the address-bar call, as the shell sends what the user typed.
+    [tab navigateFromAddressBarToURL:
+             [NSURL URLWithString:base::SysUTF8ToNSString(argument)]];
   } else if (command == "reload") {
     // Of this tab, or of the tab with session id `argument` (a crashed page
     // cannot set its own title).
@@ -1120,6 +1253,17 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
                               WindowOpenDisposition::CURRENT_TAB));
     }
     LOG(WARNING) << "ARKT selftest chrome-command " << argument << " done";
+  } else if (command == "esc") {
+    // #755: focuses the page, then sends it an Esc after `argument` ms (0 by
+    // default: the next turn, after this title change is handled).
+    int delay_ms = 0;
+    if (!argument.empty() && !base::StringToInt(argument, &delay_ms)) {
+      delay_ms = 0;
+    }
+    [tab focus];
+    [self performSelector:@selector(sendEscapeToTab:)
+               withObject:tab
+               afterDelay:delay_ms / 1000.0];
   } else if (command == "fullscreen") {
     // #577: HTML fullscreen of the page's body, with a user gesture as a
     // click gives it; "exit" leaves it from script.
@@ -1166,6 +1310,10 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
                    << base::SysNSStringToUTF8(origin);
       [self logPageInfoOf:tab];
     }
+  } else if (command == "pageinfo-open") {
+    // #782: the panel opened, so the tab's reads count site data.
+    [tab pageInfoDidOpen];
+    LOG(WARNING) << "ARKT selftest pageinfo-open tab=" << tab.sessionId;
   } else if (command == "pageinfo-close") {
     [tab pageInfoDidClose];
     LOG(WARNING) << "ARKT selftest pageinfo-close tab=" << tab.sessionId;
@@ -1219,6 +1367,15 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
       host.executeCommand(IDC_DEV_TOOLS, static_cast<NSInteger>(
                                              WindowOpenDisposition::CURRENT_TAB));
     }
+  } else if (command == "private-window") {
+    // #846: "private-window <url> [ms]" opens a window on the off-the-record
+    // profile, loads `url` in its tab and logs that tab after `ms` (3000 by
+    // default).
+    int delay_ms = 3000;
+    if (words.size() > 2 && !base::StringToInt(words[2], &delay_ms)) {
+      delay_ms = 3000;
+    }
+    [self openPrivateWindowFrom:tab url:argument delayMs:delay_ms];
   } else {
     LOG(WARNING) << "ARKT selftest unknown command " << command;
   }

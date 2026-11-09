@@ -150,6 +150,12 @@ final class TestTab: NSObject, ArktTabHandle {
     forwardEntries = []
     self.url = url
   }
+  /// #784: the address-bar transition is the engine's business; here it is a navigation that keeps a log.
+  private(set) var addressBarNavigations: [URL] = []
+  func navigate(fromAddressBarTo url: URL) {
+    addressBarNavigations.append(url)
+    navigate(to: url)
+  }
   func reload() { isLoading = true }
   func goBack() { goToHistory(offset: -1) }
   func goForward() { goToHistory(offset: 1) }
@@ -231,6 +237,7 @@ final class TestTab: NSObject, ArktTabHandle {
   }
   /// Page info (#583): one site permission whose setting the calls change; a close records itself.
   var permissionSetting: ArktPermissionSetting = .ask
+  private(set) var pageInfoOpens = 0
   private(set) var pageInfoCloses = 0
   private(set) var openedSiteSettings: [String] = []
   var pageInfo: (any ArktPageInfo)? {
@@ -245,6 +252,7 @@ final class TestTab: NSObject, ArktTabHandle {
     owner?.engine.record(TestEvent(.pageInfoChanged, tab: self, browser: owner))
   }
   func resetPermissions(forOrigin origin: String) { setPermission(.camera, to: .ask, forOrigin: origin) }
+  func pageInfoDidOpen() { pageInfoOpens += 1 }
   func pageInfoDidClose() { pageInfoCloses += 1 }
   func openSiteSettings(forOrigin origin: String) { openedSiteSettings.append(origin) }
   func duplicate() -> (any ArktTabHandle)? {
@@ -613,6 +621,17 @@ struct ConformanceTests {
     #expect(first.isLoading)
   }
 
+  /// #784: the address-bar call keeps its Objective-C name, which the facade implements, and Swift calls it as
+  /// `navigate(fromAddressBarTo:)`.
+  @Test func addressBarNavigationIsItsOwnSelector() {
+    #expect(TestTab.instancesRespond(to: NSSelectorFromString("navigateFromAddressBarToURL:")))
+    #expect(TestTab.instancesRespond(to: NSSelectorFromString("navigateToURL:")))
+    let engine = TestEngine()
+    let tab = engine.createBrowser(host: TestWindowHost()).createTab(url: Self.url("a"), active: true)
+    tab.navigate(fromAddressBarTo: Self.url("b"))
+    #expect((tab as? TestTab)?.addressBarNavigations == [Self.url("b")] && tab.url == Self.url("b"))
+  }
+
   /// The facade serves EngineClient's history(of:), goToHistory(_:offset:) and duplicateTab(_:) (contract rules 9
   /// and 10): entries nearest first, offsets as steps, a duplicate with the source's history.
   @Test func historyIsNearestFirstAndDuplicatesCarryIt() throws {
@@ -954,6 +973,7 @@ struct PageInfoABITests {
 
     tab.setPermission(.camera, to: .block, forOrigin: info.origin)
     tab.setPermission(.camera, to: .block, forOrigin: info.origin)
+    tab.pageInfoDidOpen()
     tab.pageInfoDidClose()
     tab.openSiteSettings(forOrigin: info.origin)
     engine.flush()

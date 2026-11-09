@@ -5445,3 +5445,948 @@ it was cleared afterwards. Nothing under `~/Applications/ArktTest` or `/Applicat
 - Cleanup: both runs and the loopback server stopped by exact PID; profiles and build log deleted; no crash report.
   The clipboard held text this time and the run replaced it with the page URL; it was cleared afterwards and the
   earlier text was not restored.
+
+### Restore pages Swift boundary (#580)
+
+The Swift recovery contract carries only non-private Little Arkt and Peek page titles, URLs and kinds, and supplies the list to the shell, which requests reopening outside the sidebar. The shell presents the offer after its own window
+session restoration; an empty offer acknowledges the crash and shows the status notice. The crashed-session state seam shipped in #577; recoverable-page data integration and
+feature-level killed-process validation remain unverified.
+
+Test-first CI run 42112475936 at 75b3800 failed to compile the missing model in ShellKit tests (job 127543462923)
+and GUI tests (job 127543462890); the Swift tests gate (job 127547434337) consequently failed. No tests executed in
+those jobs. Local builds and tests were not run: the installed toolchain cannot compile the baseline. Syntax parsing
+and diff checks are recorded in the pull request. GUI, accessibility, motion, app and real-engine validation remain
+pending.
+
+### Restore pages review fixes (#580)
+
+The window set retains an unanswered decision across regular-window closure and presents it when another window is
+available. The panel remains above the content in Split View. The shell requests the pages before acknowledging; an unavailable shell path retains the offer and crash. Crash-only providers expose no page capability. A persistent
+database-recovery notice remains underneath the six-second crash notice and reappears after dismissal or expiry.
+
+Regression coverage exercises the production window-set coordinator and window lifecycle, capability and unavailable shell paths,
+Split View, and notice ordering. These additions have not run locally because the installed toolchain cannot compile the
+baseline; syntax parsing alone does not validate behavior. Direct `AppSession.finishLaunch`, GUI, keyboard, accessibility,
+motion and real-engine killed-process validation remain pending. The crashed-session state seam shipped in #577; recoverable-page data integration remains unverified.
+
+### Restore pages privacy routing (#580)
+
+Only ordinary regular windows may host the decision. The window set selects an eligible window even when the primary
+window is private, retains the unanswered offer while only private windows exist, and classifies Blank and Incognito
+windows before considering presentation. A host changing to private mode relinquishes the offer before that mode is
+shown. Little Arkt and popup requests use separate hosts.
+
+New GUI regressions cover both private modes, transfer with a private primary, deferred presentation after the last
+regular host closes, private creation while an offer is pending, and a host changing mode. They were written before
+the fix but not run locally: the installed toolchain cannot compile the baseline. CI must validate compilation and
+behavior on the new head; syntax parsing and source checks do not establish test results.
+
+### Maintainer feedback on restore pages (#580)
+
+The provider supplies a list only; the shell reopens Little Arkt and Peek pages using the host's current tab for Peek.
+A missing source or multiple Peek pages retain the offer: the current Peek controller replaces an existing Peek from
+the same source, so multiple Peek recovery requires a further shell solution. Closing windows are ineligible and a
+cancelled close retries pending presentation. New regression tests and the private-routing suite are not run locally;
+CI must validate the merged head. Recoverable-page data integration and feature-level killed-process validation remain unverified; the crashed-session state seam shipped in #577.
+
+### Restore pages Peek preservation (#580)
+
+Recovery declines a Peek when the host has any live or hidden Peek, and attempts its one supported Peek before
+opening Little Arkt windows. A missing Peek content view closes the new tab and retains the unanswered offer. Ordinary
+link opening retains its replacement behavior. Little Arkt's API does not report presentation success; the shell
+can only report that its opening was requested. Multiple recovered Peeks remain unanswered pending the maintainer's
+routing decision. The crashed-session state seam shipped in #577; recoverable-page data integration and feature-level killed-process validation remain unverified.
+
+GUI regressions cover live and hidden Peek preservation, missing-view cleanup and retry, and Find closing on Escape.
+They were written before the fix but not run locally because the installed toolchain cannot compile the baseline.
+Syntax parsing is not a runtime test. CI on the new head, GUI appearance, VoiceOver, Reduce Motion and UI tests remain
+unverified.
+
+### Restore pages CI evidence and remaining decision (#580)
+
+CI run [42364783894](https://github.com/krystianslowik/arkt/actions/runs/42364783894) applies only to commit
+`4158a3411c5a5e286b2f05b7f7b4ebfd8592c0b7`: all 8 reported checks passed. ShellKit pure tests ran 2,454 tests
+across 278 suites; GUI tests executed 2,025, skipped 48 and had 0 failures. The app build, lint and required Swift gate
+passed; Core and optional UI tests were skipped. The held-close and recovery-window suite passed. These results do not
+validate the subsequent merge head, which requires new CI.
+
+The multi-Peek routing decision is tracked in [#776](https://github.com/krystianslowik/arkt/issues/776)
+(`status:needs-user`); the maximum-one-Peek safety remains in place. #577 shipped crash state and dismissal, but
+recoverable page payload and source grouping integration and feature-level killed-process validation remain missing.
+
+Test-first integration of #777: private-window reopen coverage observes recovery routing during creation and checks
+that a separate empty-crash notice remains available to a regular window. Both private kinds are covered. The current
+`makePrivateWindow` creates a regular window before converting it, so CI is expected to expose the regression; this
+has not yet been observed. Production routing remains unchanged pending that red run. Local tests were not executed:
+the installed toolchain cannot compile baseline ShellKit. Swift source parsing and diff checks passed. The prior green
+for this integration is attributable only to `22d4906e12ddb3cd053b4f836e3be00810c0e1d1`: 2,454 pure tests in 278
+suites, 2,038 GUI tests executed, 51 skipped, zero failures, and all eight reported checks passed. Those results do not
+validate this test-first merge. The PR stays draft while #776 awaits the maintainer; maximum-one-Peek safety remains.
+
+### Private reopen creation routing (#777)
+
+Blank and Incognito reopen windows now receive their final kind during construction, before recovery routing runs.
+The private-window handover still precedes `isClosed`, and recovery reassignment follows it. The existing synchronous
+GUI regressions were not run locally because the installed toolchain cannot compile baseline ShellKit. Swift source
+parsing and `git diff --check` passed; they do not establish compilation or runtime behavior. The shell-owned
+recovery migration remains incomplete and the test-first APIs at `781c729` remain missing.
+
+
+### Restore pages combined migration and live recording (#580)
+
+The local combined head includes the App/Persistence snapshot adapter, shell-owned recovery records and source-node
+routing, removal of the engine page payload, and live Little Arkt and Peek recording. Controller events track opens,
+navigation, titles and actual closes, including hidden Peeks. Private windows and sidebar pages are excluded. The
+initial offer remains immutable; at offer time missing or archived Peek sources are excluded and duplicates keep the
+last. Empty offers show the notice and acknowledge. Confirmed clean quit clears and stops further shell writes; a
+cancelled quit resumes tracking. The App suspends writes during teardown and resumes them after the outcome.
+
+There is no final confirmed-termination hook for SIGTERM: its flush retains the snapshot. Normal confirmed quit
+requests a clear; a failed flush is logged and the existing quit flow allows failure. Neither durable clearing nor
+feature completion is guaranteed by this change. Killed-process validation and App adapter integration remain open.
+
+No migration tests or builds were executed locally: the installed toolchain cannot compile the baseline. Source
+parsing, diff and import checks are static checks only; CI on this combined head is pending. Prior CI green at
+`22d4906` (2,454 pure tests; 2,038 GUI executed, 51 skipped) does not validate this head. The `da223` GUI run had
+eight assertion failures; the private creation path was fixed in `b203`, but has not been runtime verified locally.
+
+### Restore pages cancellation snapshot refresh (#580)
+
+The combined migration at `0fdd51c` passed CI run 42377016354: ArktCore 579 tests in 47 suites, ShellKit pure
+2,489 tests in 281 suites, and GUI 2,068 executed with 53 skipped and no failures. The app build, lint and required
+Swift gate passed; optional UI tests were skipped. These counts apply to that revision.
+
+Independent review found that changes ignored during a cancellable quit left stale recovery records after
+cancellation. The test-first GUI run 42378422902 at `8a9f1df` executed 2,069 tests, with 53 skipped and one failure:
+`testCancelledQuitRebuildsRecordsAfterSuspendedChanges` retained a closed Little Arkt and the old metadata of a
+surviving page. Cancellation now immediately rebuilds records after tracking resumes, without waiting for another
+page event. Current main is merged with both results histories preserved. At `98e63f7`, [CI run 42380522535](https://github.com/krystianslowik/arkt/actions/runs/42380522535) passed all eight reported checks: ArktCore 579 tests in 47 suites, ShellKit pure 2,508 tests in 282 suites, GUI 2,075 executed, 53 skipped and zero failures (including the cancellation regression), app build, lint and the required gate. Optional UI tests were skipped. These results apply to `98e63f7`; the subsequent screenshot fixture head requires fresh CI and a manual workflow for XCUITest. Manual appearance, VoiceOver, Reduce Motion and
+killed-process validation, plus the documented SIGTERM and failed-flush limits, remain outstanding.
+
+
+### Restore pages screenshot evidence (#580)
+
+`RestorePagesScreenshotTests` exports synthetic light and dark window captures with a long title and overflow when
+`ARKT_RESTORE_SHOTS_DIR` is set. The existing GUI CI job exports `restore-pages-screenshots` as a seven-day artifact.
+Rendering, visual inspection and the manually dispatched XCUITest workflow remain pending on the evidence head.
+
+### Restore pages final CI and screenshots (#580)
+
+CI run 42385504787 at `1c110df` passed all eight reported checks: ArktCore 579 tests in 47 suites, ShellKit pure
+2,508 tests in 282 suites, and GUI 2,077 executed with 54 skipped and zero failures. The cancellation regression
+and screenshot fixture passed; the app build, lint and required gate passed. Optional UI tests were skipped.
+The light/dark synthetic 1000 × 674 window-content PNGs are preserved in `docs/evidence/restore-pages/` and
+were visually inspected for the panel, long-title truncation, overflow and action count. This evidence applies
+to `1c110df`; the subsequent evidence commit changes documentation and images only.
+
+Manual XCUITest run 42382637990 at `dd8e937` built the app but did not complete: import/onboarding consent queries
+timed out and a command-bar accessibility snapshot was interrupted before the 40-minute job limit cancelled it.
+The preceding main nightly run 42357672719 has the same signature; #799 tracks the import/onboarding diagnosis.
+This is not a complete XCUITest pass. Real killed-process, VoiceOver, appearance and motion checks remain for
+maintainer validation, together with review of the documented SIGTERM and failed-flush limits. #580 remains open.
+
+### Restore pages full-review cleanup (#580)
+
+The full review of `844074a` found no blocking issue. The engine protocol comment now describes the shell's offer,
+and the noted Swift declarations and expressions are wrapped. Main is merged with both results histories retained,
+main's sections first. Source parsing and diff checks validate syntax and whitespace only; fresh CI must validate the
+integrated revision. The GUI screenshot upload step and committed PNGs remain unchanged pending the maintainer's
+answer. Manual killed-process, VoiceOver and motion checks, and the documented quit limits, remain outstanding.
+
+### Unanswered restore offer contract tests (#580)
+
+The maintainer follow-up requires retaining the crashed snapshot through live page changes and a clean quit until the
+offer is answered, matching the marker behavior proposed in [#803](https://github.com/krystianslowik/arkt/pull/803).
+The test-first GUI cases cover repeated offers using the same record store and persisted sidebar NodeID with fresh fake
+engines, independent overwrite and clear assertions, and resumed recording and clearing after Restore or Dismiss. This
+is a Shell contract test, not a real Chromium or database roundtrip; Core Persistence already tests database reopening.
+The empty filtered offer notice remains covered. At test-first head `912443b`, [GUI run 42422178440](https://github.com/krystianslowik/arkt/actions/runs/42422178440/job/128552912724) executed 2,081 tests, skipped 54 and reported 9 assertion failures in the four unanswered-offer regressions. The earlier `4beeeec` compile error was not a behavioral red.
+
+The window set now protects the captured crashed records from initialization through an unanswered offer, including
+live changes, cancelled quit and confirmed clean quit. Restore, Dismiss and the empty notice release protection and
+immediately rebuild the live snapshot; a failed Restore retains the offer. A pre-offer and cancelled-quit boundary
+regression and an immediate empty-notice refresh assertion supplement the existing tests. The fake engine models the
+retained marker; this is not a Chromium relaunch. #803 remains unmerged.
+
+Swift 6.2.4 source parsing and scoped diff/import checks are static only. Local full builds and tests were not run
+because the baseline cannot compile; CI on the implementation head is pending. Earlier green run 42407828692 at
+`004e3ca` reported Core 579 tests/47 suites, pure ShellKit 2,510/282 and GUI 2,077 executed/54 skipped/0 failures;
+those results predate these regressions and the fix.
+
+## #846: an HTTP-only site crashes the engine at `TabDialogManager`'s `CHECK(host)`
+
+Date 2026-11-08. Branch `engine/846-https-first-dialog` from `origin/main` (`3a0263c`). Found while reviewing #795.
+
+### Gate
+
+- Seam: no patch. The mitigation is one more name in the shell's `--disable-features` list
+  (`EngineLaunchArguments.requiredDisabledFeatures`, where `MediaRouter`, `Glic` and the others are switched off).
+  The check adds test-only code to the self-test embedder.
+- Facade header: unchanged (`cmp` identical). `.patches`: unchanged, 14 lines, 14 `arkt` commits above
+  `156.0.8078.48` (`in sync`).
+- Overlay link checked before each build: `$CR/arkt` points at this worktree's `engine/arkt`.
+- Build: `nice -n 10 autoninja -j 4 -C out/Arkt chrome`, incremental. Chromium disk 1.9 TB free, internal 73 GB,
+  swap 5.5 to 5.7 GB of 7 GB (under the 6.5 GB stop line), load average 4 to 7 from other lanes' work.
+- Test bundle: `out/Arkt/Arkt.app` (`dev.arkt.Arkt`), launched by path; the installed app is `com.arkt.Arkt` and the
+  ArktTest copies are `dev.arkt.ArktShell`. Nothing under `/Applications` or `~/Applications/ArktTest` was touched.
+
+### What triggers it
+
+`HttpsOnlyModeTabHelper::DidFinishNavigation` shows the ask-before-HTTP dialog when an HTTPS-First navigation falls
+back to HTTP and `HttpsFirstDialogUi` is on (on by default). The dialog goes through
+`TabDialogManager::CreateAndShowDialog`, whose `CreateTabScopedDialog` checks the host widget, which an Arkt window
+does not have. Loopback hosts never reach it: `HttpsUpgradesInterceptor` exempts `localhost` and loopback addresses by
+name, non-strict modes exempt non-unique hostnames and URLs with a port. So the page is served on `127.0.0.1:8846` but
+loaded as `http://http-only.example.com/`, with
+`--host-resolver-rules=MAP http-only.example.com:80 127.0.0.1:8846, MAP http-only.example.com:443 127.0.0.1:8846`.
+The HTTPS attempt reaches the plain HTTP server, fails the TLS handshake (the server logged three `400` client
+hellos), and the navigation falls back to HTTP.
+
+An off-the-record Arkt window comes from Chromium's New Incognito Window command sent through the host (the facade's
+`createBrowser(host:)` always uses the profile the engine started with, #705); the shell's private windows run on
+that regular profile today.
+
+### What landed
+
+- `HttpsFirstDialogUi` joins the shell's `--disable-features` list, with its reason in the doc comment, and
+  `EngineLaunchArgumentsTests` follows (`keepsTheHttpsFirstDialogOff`, the expected lists).
+- Self-test embedder: `arkt-selftest private-window <url> [ms]` sends `IDC_NEW_INCOGNITO_WINDOW` through the host,
+  loads `url` in the new window's tab and, after `ms` (3000 by default), logs the tab's `state` and evaluates
+  `document.title` plus the interstitial's `#primary-button` text.
+
+### Smoke (`out/Arkt/Arkt.app`, `--no-startup-window --arkt-facade-selftest --arkt-engine-test-api`, fresh profiles in a scratch folder, `--use-mock-keychain`, the host rules above)
+
+"Old list" is the shell's list before this change (`DestroyProfileOnBrowserClose,WebAuthenticationAmbientSignin,
+MediaRouter,Glic`); "new list" adds `HttpsFirstDialogUi`. Each run lasted 20 s unless it crashed first.
+
+| Run | Window | List | Result |
+|---|---|---|---|
+| a-repro | off the record (`private-window`, driver page on `127.0.0.1:8846/private`) | old | CRASH: `FATAL:chrome/browser/ui/tabs/tab_dialog_manager.cc:307] Check failed: host.`, `Received signal 6`, exit 134, 0.36 s after `urlChanged ... url=http://http-only.example.com/` |
+| a-mitigated | off the record | new | PASS: `titleChanged ... title=Site is not secure`, `state ... url=http://http-only.example.com/ title=Site is not secure loading=no crash=0`, `eval private-window page ... result=Site is not secure \| Go back`; process alive, stopped by PID |
+| b-repro | regular, `https_only_mode_enabled: true` written into the fresh profile ("Always use secure connections") | old | CRASH: the same `Check failed: host.`, exit 134 |
+| b-mitigated | the same | new | PASS: `title=Site is not secure`, alive |
+| c-control | regular, fresh profile, default settings | old | CRASH: the same `Check failed: host.`, exit 134 |
+| c-mitigated | the same | new | PASS: `title=Site is not secure`, alive |
+
+The crash report's crashing thread (symbolized from the framework):
+`HttpsOnlyModeTabHelper::DidFinishNavigation` -> `AskBeforeHttpDialogController::ShowDialog` ->
+`TabDialogManager::CreateAndShowDialog` -> `TabDialogManager::CreateTabScopedDialog` -> `CheckLogMessage` -> `abort`.
+
+The control was meant to load the HTTP page quietly; instead a fresh regular profile also gets the HTTPS-First warning
+on this host, so the crash is not limited to private windows: any HTTP-only site with a public hostname took down the
+engine in a normal window with default settings. No Arkt patch or overlay file touches HTTPS-First, and the
+profile held no HTTPS-First pref, so this is stock 156 behaviour; which heuristic turns the warning on for a fresh
+profile was not traced. With the dialog off, every case shows the interstitial in the tab and the engine stays up.
+
+The old/new pairs are the deliberate break: the same build and page, with and without the one feature name.
+
+| Step | Result |
+|---|---|
+| Build with the self-test command | `The build has finished successfully.`, `FAILED:` 0, under 2 min |
+| Format-only rebuild (clang-format on the added lines) | finished, `FAILED:` 0, 71 s; `git status` in `$CR` clean apart from the untracked `build/util/MINIBRANCH` |
+| `swift test --filter EngineLaunchArgumentsTests` (ShellKit, `nice -n 20 -j 2`) | 10 tests passed |
+
+### Not done here
+
+- The guard before `CHECK(host)` (acceptance 4): left to the maintainer. It would be E3b's choke-point guard landing
+  early and costs one upstream file (`tab_dialog_manager.cc`); with the dialog off, nothing in these runs reaches it.
+- The #795 doc's E3b inventory row for ask-before-HTTP (acceptance 5) lives on the open #795 branch; it should say
+  "switched off by #846" when that doc lands.
+- The Engine app itself was not launched: it builds the same `--disable-features` value through
+  `EngineLaunchArguments`, which the Swift tests cover; the self-test runs pass the list by hand.
+
+### Patch budget
+
+Unchanged: 14 patch files, 14 `arkt` commits, in sync. No upstream file touched.
+
+### Cleanup
+
+Every engine run and the loopback server stopped by exact PID (`ps -p` prints nothing for each). The throwaway
+profiles were deleted. The two macOS crash reports the crashing runs wrote (bundle `dev.arkt.Arkt`) were copied to the
+artifacts folder and removed from `DiagnosticReports`. The runs did not use the clipboard.
+
+
+### Restore pages integration with current main (#580)
+
+Merged main `4d40f38` into the recovery branch. The sole conflict was this shared results document; both the
+complete recovery history and main's #846 engine diagnosis/results were retained. ToastView's automatic merge
+keeps the recovery-specific multiline decision and main's radius/type roles. The unanswered-offer coordinator,
+AppSession recording guard and their existing regression files are byte-identical to the previously tested recovery
+head `aa72ced6a94c478b9c83cead32f09804b19c88c7`.
+
+#810 is now merged. The recovery panel uses `ShellRadius.sheet` and its recessed list uses `ShellRadius.field`,
+preserving their 14 pt and 10 pt values. A source scan mirroring CornerRadiusLintTests' exact regex and exemptions
+found two offending assignments before that correction and zero afterward. This is a static source check, not an
+executed Swift Testing result. No screenshots were regenerated; the existing captures remain historical evidence.
+
+Swift 6.2.4 frontend parsing passed for all 80 changed Swift files. The workflow import/UI-source checks, actionlint
+and whitespace/conflict-marker checks passed. No full local package/App build, GUI, engine or manual accessibility
+run was performed. CI must validate the merged head; the last full green remains run 42424301771 at `aa72ced`.
+#803 remains open, so production-engine repeated unanswered recovery and cross-launch validation still depend on
+that retained crash marker. Native killed-process recovery, quit/cancellation and VoiceOver remain unverified.
+
+## #851: a tab-modal dialog on an Arkt window is cancelled, not a crash (patch 0015)
+
+Date 2026-11-08. Branch `engine/851-tab-dialog-guard` from `engine/846-https-first-dialog` (PR #849, not merged
+yet). The maintainer chose to land E3b's one-file guard now (#851, acceptance 2).
+
+### Gate
+
+- Why a patch: `TabDialogManager::CreateTabScopedDialog` does `CHECK(host)` on the tab's Views host widget, which an
+  Arkt window does not have. Every tab-modal dialog reaches it (`CreateAndShowDialog`, and the direct
+  `CreateTabScopedDialog` callers `chrome_webui_dialog.cc:93` and `indigo_onboarding_dialog.cc:199`), and no overlay
+  seam sits in front of it. #849's switch closes only the HTTPS-First dialog.
+- Facade header: unchanged (`cmp` identical). `.patches`: 14 to 15, number 0015 claimed in the pull request; no open
+  engine pull request touches `engine/patches` and no earlier patch touches `tab_dialog_manager.cc`.
+- Overlay link checked before each build: `$CR/arkt` points at this worktree's `engine/arkt`.
+- Builds: `nice -n 10 autoninja -j 4 -C out/Arkt chrome`. Chromium disk 1.9 TB free, internal 72 GB, swap 5.7 GB of
+  7 GB throughout (under the 6.5 GB stop line), load average 4 to 5.
+
+### Why the guard returns a widget, not nothing
+
+Patch 0013's toast guard drops the toast and returns. Here that would move the crash one line: most callers
+dereference the returned widget at once (`dialog_widget_->MakeCloseSynchronous(...)` in the ask-before-HTTP, credential
+leak, Lens permission, password change, autofill progress, account chooser and Indigo callers). So patch 0015:
+
+- `CreateTabScopedDialog`: with no host widget, the dialog widget is created as usual but parented to the tab's own
+  view (`GetContents()->GetNativeView()`, inside the Arkt window). It is not shown.
+- `ShowDialog` (every path, including the two direct callers' own calls): with no host widget it logs
+  `ARKT: tab-modal dialog cancelled, the window has no Views widget`, posts `Close()` through the widget's weak
+  pointer and returns. The close runs on the next turn, after the caller has set its close handling, so the caller
+  sees an ordinary dismissal (its `MakeCloseSynchronous` callback, or the delegate's close callback).
+
+One file, 27 insertions and 1 deletion.
+
+### Smoke (`out/Arkt/Arkt.app`, `--no-startup-window --arkt-facade-selftest --arkt-engine-test-api`, fresh profiles in a scratch folder, `--use-mock-keychain`, the #846 page `http://http-only.example.com/` mapped to `127.0.0.1:8851`)
+
+"Old list" is the shell's list without `HttpsFirstDialogUi`, so the HTTPS-First dialog is on for that run only;
+"new list" is the shipping list from #849.
+
+| Run | Window | List | Patch 0015 | Result |
+|---|---|---|---|---|
+| g-private-old | off the record (`private-window`) | old | in | PASS: `ARKT: tab-modal dialog cancelled, the window has no Views widget`, then `state ... url=http://http-only.example.com/ title=http-only.example.com loading=no crash=0`; engine alive 20 s, stopped by PID |
+| g-strict-old | regular, "Always use secure connections" | old | in | PASS: the same log line, engine alive |
+| g-default-old | regular, fresh profile, defaults | old | in | PASS: the same log line, engine alive |
+| g-private-new | off the record | new | in | PASS: unchanged from #849, `Site is not secure \| Go back`, no cancel line |
+| break-private-old | off the record | old | removed (`tab_dialog_manager.cc` back to the pin, rebuilt) | CRASH: `Check failed: host.`, `Received signal 6`, exit 134 |
+| break-default-old | regular, defaults | old | removed | CRASH: the same, exit 134 |
+
+`FATAL`, `NOTREACHED` and `DumpWithoutCrashing` lines in the g-runs: 0. With the dialog cancelled, the tab stays on an
+empty page at the HTTP URL: the HTTPS-First throttle has already stopped the navigation, and the dialog that would
+have let the user go on is gone. So the guard is a backstop against the crash, not the user path; the user path stays
+#849's interstitial.
+
+| Step | Result |
+|---|---|
+| Build with patch 0015 | `The build has finished successfully.`, `FAILED:` 0, 75 s |
+| Break build (file back to `156.0.8078.48`) | finished, `FAILED:` 0, 69 s |
+| Restore build | finished, `FAILED:` 0, 69 s; `git status` in `$CR` clean apart from the untracked `build/util/MINIBRANCH` |
+
+### Reachability of the credential leak and edit address dialogs (acceptance 1)
+
+One probe run on the patched build with the new list: a normal window, loopback forms on `127.0.0.1:8851`, values
+typed with DevTools `Input.insertText` (`--remote-debugging-port=9851`), then the button clicked from script with a
+user gesture; `--log-net-log` into the artifacts folder.
+
+- **Edit address: not reachable on an Arkt window.** The only way in is `AddressBubblesController::ShowEditor`, from
+  the Edit button of the save and update address bubbles (`save_address_bubble_controller.cc:244`,
+  `update_address_bubble_controller.cc:124`). The overlay's `ArktAutofillBubbleHandler` closes those prompts without
+  showing them (#768), so there is no Edit button to press. Runtime: a full US address submitted logged
+  `ARKT: autofill bubble SaveAddressProfile not shown`, no tab-modal line, no crash.
+- **Credential leak: the check runs, the warning cannot come back on this build.** Signed out, a sign-in form
+  submitted with a well-known leaked test pair started the lookup: the net log shows
+  `passwordsleakcheck-pa.googleapis.com/v1/leaks:lookupSingle`, which this run sent to `~NOTFOUND`
+  (`--host-resolver-rules`) so nothing left the machine. A signed-out lookup carries the build's Google API key, and
+  this build has none: the framework holds only the `dummytoken` placeholder, not a valid key (the rejection itself was
+  not observed, since nothing was sent). So no leak answer and no dialog here. It becomes reachable in a build with Google API keys, or once a user signs in to a
+  Google account in the engine. With patch 0015 it would then be cancelled rather than crash; drawing it natively,
+  or switching the warning off (the `profile.password_manager_leak_detection` pref), is the follow-up's call.
+
+### Patch budget
+
+| Source | Count |
+|---|---|
+| `.patches` lines | 15 |
+| `arkt` commits above `156.0.8078.48` | 15 |
+
+In sync. Export added 0015 and its `.patches` line; 0001 to 0014 byte-identical. Facade header copies `cmp` identical.
+
+| Gate (design section 2.5) | Before | After #851 |
+|---|---|---|
+| Patch files | 14 | 15 |
+| Upstream files outside 0001-0004 | 19 | 20 |
+| Hunks in `browser_actions.cc` and `browser_commands.cc` | 4 | 4 |
+| Hot-file hunks (`browser_window_features.cc`, `tab_features.cc`) | 0 | 0 |
+| Widely included headers changed | 0 | 0 |
+
+### Left open
+
+- #795's E3b gate grep should also match `CreateTabScopedDialog(` (#851, acceptance 3); #795 is still open, so the
+  line is noted in this pull request instead of edited on that branch.
+- Upstream unit tests for `TabDialogManager` were not run; tests whose tab has no host widget would now get a
+  cancelled dialog instead of the CHECK.
+- The leak warning above, once a build has API keys or sign-in.
+
+### Cleanup
+
+Every engine run and the loopback server stopped by exact PID (`ps -p` prints nothing for each); nothing listens on
+8851 or 9851. The throwaway profiles were deleted. Three macOS crash reports from these runs (the two break runs, and
+one renderer helper that failed to set up its sandbox while g-strict-old was quitting after its `kill`) were copied
+to the artifacts folder and removed from `DiagnosticReports`. The runs did not use the clipboard.
+
+## #785: ask again about an unanswered crashed-session prompt
+
+Date 2026-11-07. Branch `engine/785-unanswered-crash-prompt` from `origin/main` (`e8380ee`). Facade only: no patch,
+no `EngineAPI` change.
+
+### Gate
+
+- Seam: the facade engine's crashed-session state (#577). A patch is not needed: the facade keeps its own marker.
+- Facade header: the doc comment on `lastSessionCrashed` and `dismissLastSession` only; no declaration changes. Both
+  copies `cmp` identical.
+- `.patches`: unchanged (14).
+- Build: `nice -n 15 autoninja -C out/Spike chrome -j 4`; 1.9 TB free on the Chromium disk, 29 GB on `/`, swap 3.8 of
+  5 GB used before the build.
+
+### Why Chromium's own mechanism cannot be used
+
+`ExitTypeService` keeps the last exit `Crashed` across runs only while it waits for the user to acknowledge the crash.
+The first tab added to a window made outside the startup flow acknowledges it (`BrowserTabObserverImpl`,
+`OnTabAddedToNonStartupBrowser`), and every shell window is one. A `CrashedLock` (what Chrome's bubble holds) does not
+help: `DidUserAckCrash` passes once the tab observer is gone, whatever the lock count. After the acknowledgement a
+clean quit writes `SessionEnded`, so the next run read a clean exit.
+
+### What landed
+
+- **Marker.** A file `Arkt Unanswered Crash` in the profile folder (next to `Preferences`). When the facade starts it
+  reads the last exit type as before; `lastSessionCrashed` is YES when that is `kCrashed` or the marker exists. A
+  crashed last session writes the marker at once, so a quit or a kill before the shell's prompt is answered keeps it.
+- **Answer.** `dismissLastSession` removes the marker (thread pool, `MayBlock`, `BLOCK_SHUTDOWN`, so an answer
+  followed at once by Quit is kept). It is the only thing that removes it. A dismiss when nothing is pending does
+  nothing, as before.
+- **Blocking.** The read and the write run when the facade is made, in `PostBrowserStart`, which is inside
+  `BrowserMainLoop::PreMainMessageLoopRun` before it calls `DisallowUnresponsiveTasks`; blocking is still allowed
+  there. Only the removal runs later, off the UI thread. `out/Spike` has DCHECKs off, so the runs below do not prove
+  the blocking rule; the ordering above does.
+- **Log.** `ARKT: facade last session crashed (unanswered from an earlier run)` when only the marker asks.
+- **#690.** The shell API is unchanged: `EngineSessionRecovery.lastSessionCrashed` and `dismissLastSession()` keep their
+  shape, and #690's `RestorePagesModel` and its doubles compile as they are. Its behaviour changes in the right way: an
+  offer that is neither restored nor dismissed comes back on the next launch. Two points for #690: its `.notice`
+  path (no pages to offer) dismisses at once, which also clears the marker; and the recovery pages must survive a
+  launch that did not answer, or the repeated prompt has nothing to offer.
+
+### Tests first
+
+The failing case is a smoke run, as the code is Chromium-side and the Swift doubles do not change. Before the change
+(`out/Spike` as built from `e8380ee`, profile `profiles/785-20261107/base`):
+
+| Run | Result |
+|---|---|
+| Start, SIGKILL once `exit_type` `Crashed` is on disk | `facade last session clean` (fresh profile) |
+| Relaunch, SIGTERM 4 s after `embedderReady` without answering | `embedderReady lastSessionCrashed=yes`; on disk `SessionEnded` |
+| Relaunch | `facade last session clean`, `lastSessionCrashed=no`: the bug |
+
+### Swift tests (`nice -n 20`, `-j 2`, in `app/ArktShell/ShellKit`)
+
+| Command | Result |
+|---|---|
+| `swift test --filter "ArktEngineABITests\|ChromiumTabStateTests\|TabStateTests"` | 4 test runs, 3 + 23 + 15 + 33 = 74 passed, 0 failed; no Swift source changed, the header copy changed in comments only |
+| Full suite | not run locally (memory pressure on this Mac); CI's Swift tests job |
+
+### Build
+
+| Step | Result | Numbers |
+|---|---|---|
+| `nice -n 15 autoninja -C out/Spike chrome -j 4` | `The build has finished successfully.`, `FAILED:` 0 | 45 s; again after a comment and include-order edit, 41 s |
+
+### Self-test runs (`out/Spike/Chromium.app`, `--no-startup-window --arkt-facade-selftest --arkt-engine-test-api`, fresh profiles under `profiles/785-20261107/`, `--use-mock-keychain`; the answer is the self-test's `session dismiss` command, set as the start page title through `--arkt-facade-selftest-url`)
+
+| Check | Result | Evidence |
+|---|---|---|
+| Crash, relaunch | PASS | SIGKILL with `Crashed` on disk; relaunch: `facade last session crashed`, `embedderReady lastSessionCrashed=yes`, marker written |
+| Quit without answering, relaunch | PASS (was the bug) | SIGTERM, on disk `SessionEnded`, marker kept; relaunch: `crashed (unanswered from an earlier run)`, `lastSessionCrashed=yes` |
+| Quit unanswered again | PASS | same again on the next relaunch; the prompt stays until answered |
+| SIGKILL 2 s after a relaunch | PASS | marker kept (on disk `exit_type` still `SessionEnded`, the run's own write had not happened); next relaunch still asks |
+| Answer, quit | PASS | `embedderReady lastSessionCrashed=yes`, `session dismiss`: `crashed session dismissed`, `lastSessionCrashed=no`; SIGTERM about 0.3 s later; marker removed |
+| Relaunch after the answer | PASS | `facade last session clean`, `lastSessionCrashed=no` |
+| Final binary (after the last build), crash, two unanswered quits, answer, relaunch | PASS | `no`, `yes`, `yes`, `yes` then `no`, `no` |
+
+`FATAL` and `Check failed` lines: 0 in every run.
+
+### Known limit: the first Preferences write
+
+A run killed before the profile's first `Preferences` write leaves no `Crashed` mark on disk, so the next run reports
+a clean exit and no marker is written. Fresh profile, SIGKILL 2 s after start: no `Preferences` file; relaunch:
+`lastSessionCrashed=no`. Time to `exit_type` `Crashed` on disk from a fresh start, polled every 0.25 s: 15.7 s,
+12.4 s, 15.5 s (load average 6 to 9; #577 saw about 7 s). Chromium writes prefs through `ImportantFileWriter` on its
+commit interval, so this is Chromium's behaviour too; closing it would need the facade to write `Preferences` early,
+which this change does not do. Once a crash has been seen the marker is written at start, so a second early kill does
+not lose the prompt (row 4 above). Recorded in the header comment on `lastSessionCrashed`.
+
+### Patch budget
+
+| Source | Count |
+|---|---|
+| `.patches` lines | 14 |
+| `arkt` commits above `156.0.8078.48` | 14 |
+
+In sync; nothing exported. Facade header copies `cmp` identical.
+
+### Left open
+
+- The shell prompt itself is #690 (#580). Its `.notice` path and its recovery pages across an unanswered launch (above).
+
+### Cleanup
+
+Every run stopped by exact PID (SIGKILL or SIGTERM; `ps -p` printed nothing for each). The throwaway profiles under
+`profiles/785-20261107/` and the run logs were deleted. No clipboard use. Nothing under `~/Applications/ArktTest` or
+`/Applications/Arkt.app` was touched.
+
+## #782: count site data only while the page info panel is open
+
+### Gate
+
+1. Seam, no patch. Before, every `pageInfo` read more than 10 s after the last count started
+   `BrowsingDataModel::BuildFromDisk` over the whole profile; the address pill reads page info on every refresh.
+2. Facade header: additive. `ArktTabHandle` gains `-pageInfoDidOpen` next to `-pageInfoDidClose`. The comments of
+   `pageInfo`, `hasSiteData` and `ArktEngineEventKindPageInfoChanged` now say when the engine counts. Both copies
+   `cmp` identical.
+3. `.patches` unchanged (14).
+4. `out/Spike` only, `nice -n 15`, 4 jobs; self-test smoke on a fresh profile with `--use-mock-keychain`.
+
+### What landed
+
+- **`PageInfoHub`** (`arkt_page_info.cc`): keeps the tabs whose panel is open (weak pointers, so a closed tab drops
+  out). `PageInfoOpened` records the tab and starts the count when the profile's count is stale or missing;
+  `PageInfoClosed` removes it. `SiteData` starts `BuildFromDisk` only for an open tab. With no panel open, a read
+  returns the profile's last count, however old, or none. When a count arrives, only tabs that are still open get
+  `PageInfoChanged`. A `VLOG(1)` line gives the entry count and the build time (`--vmodule=arkt_page_info=1`).
+- **Facade**: `-pageInfoDidOpen` runs through `runOrQueue`, as `-pageInfoDidClose` does. The self-test embedder adds a
+  `pageinfo-open` command.
+- **EngineAPI**: `EngineSiteSettings.pageInfoDidOpen(tab:)`, with an empty default in a protocol extension.
+  `ChromiumEngine` forwards it to the handle. `InMemoryEngine` records `openPageInfoPanels`; its site data is a test
+  driver that costs nothing to read, so it is still reported with no panel open. `FakeEngine` has an explicit no-op
+  (WebKit's site data is not counted). The scripted facade and `ConformanceTests.TestTab` implement the new method.
+  Contract rule 26's reload-infobar check now opens the panel first, as the shell does.
+- **Shell**: `PageInfoPanelController.show(for:anchoredTo:)` calls `pageInfoDidOpen(tab:)` once the panel is
+  committed to a tab. Every close path already went through `hide`, which calls `pageInfoDidClose(tab:)`.
+
+### Tests first
+
+New: `PageInfoTests.openAndCloseAreRecordedPerTab` (EngineAPITests),
+`ChromiumPageInfoTests.openingThePanelTellsTheFacade`, the open call in `callsForAnUnknownTabDoNothing`,
+`FakeEnginePageInfoTests.engineOffersSiteSettings` calling it, and
+`PageInfoPanelTests.testTheEngineCountsSiteDataOnlyWhileThePanelIsOpen` (GUI). Red run: `swift build --build-tests`
+failed to compile (`InMemoryEngine` has no member `openPageInfoPanels`). Deliberate break: with
+the controller's `pageInfoDidOpen` call commented out, the GUI test fails ("the panel tells the engine it opened");
+restored.
+
+### Swift tests (`nice -n 20`, `-j 2`, in `app/ArktShell/ShellKit`)
+
+| Command | Result |
+|---|---|
+| `swift test --filter "EngineAPITests\|ChromiumEngineKitTests\|ArktEngineABITests\|FakeEngineKitTests.FakeEnginePageInfoTests"` | 286 + 171 + 33 + 6 passed, 0 failed (EngineAPITests +1, ChromiumEngineKitTests +1) |
+| `swift test --filter "ShellKitGUITests.PageInfoPanelTests"` | 28 passed, 0 failed (+1) |
+| Full suite (`swift test --skip ShellKitGUITests`) | not run locally (other lanes building on this Mac); CI's Swift tests job |
+
+### Build
+
+| Step | Result |
+|---|---|
+| `nice -n 15 autoninja -C out/Spike chrome -j 4` | `The build has finished successfully.`; the header change rebuilt the 15 overlay objects and relinked `libchrome_dll.dylib` (41 s) |
+
+### Smoke (`out/Spike/Chromium.app`, `--no-startup-window --arkt-facade-selftest --vmodule=arkt_page_info=1`, fresh profile `profiles/782-20261107/`, `--use-mock-keychain`)
+
+A synthetic profile: a loopback server on `127.0.0.1:8782` led one tab through 400 origins
+(`s0.localhost` to `s399.localhost`), each writing three cookies, 8 KB of local storage and a 32 KB IndexedDB record,
+then to a test page on `127.0.0.1:8782` (two cookies, 2 KB of local storage) whose title ran the commands on a timer.
+The profile was 519 MB on disk afterwards, most of it caches.
+
+| Time | Command | Panel | Result |
+|---|---|---|---|
+| 0 s | `pageinfo` | closed | `siteData=counting`, no count started |
+| 11 s | `pageinfo` | closed | `siteData=counting`, no count started |
+| 12 s | `pageinfo-open` | open | `site data counted entries=1603 in 37 ms`, then `pageInfoChanged siteData=2 cookies 2003 bytes` |
+| 19 s | `pageinfo` | open | `2 cookies 2003 bytes` (fresh, no count) |
+| 25 s | `pageinfo` | open | the old count at once, then `entries=1603 in 12 ms` (older than 10 s); same count, so no `pageInfoChanged` |
+| 27 s | `pageinfo-close` | closed | |
+| 39 s | `pageinfo` | closed | the last count, no count started though it is 14 s old |
+| 40 s | `pageinfo-open` | open | `entries=1603 in 11 ms`; a read at 47 s reports the count |
+| 48 s | `pageinfo-close` | closed | |
+
+Three counts in the run, each after a `pageinfo-open`; none for the closed reads, nor for the reads the self-test
+makes on each `pageInfoChanged` while the 400 pages loaded. `FATAL`, `Check failed`, `NOTREACHED`: 0.
+
+`BuildFromDisk` on this profile: 37 ms for the first count, 11 to 12 ms after that. This is a synthetic profile of 1603
+entries on an SSD; a real profile with years of data was not measured (only throwaway profiles are used here).
+
+### Patch budget
+
+| Source | Count |
+|---|---|
+| `.patches` lines | 14 |
+| `arkt` commits above `156.0.8078.48` | 14 |
+
+In sync; nothing exported. Facade header copies `cmp` identical.
+
+### Left open
+
+- `BuildFromDisk` on a large real profile: the number above is from a synthetic one. A maintainer run on a copy of a
+  real profile would confirm it.
+- The profile's model stays in memory after the last panel closes, as before; it could be dropped then.
+
+### Cleanup
+
+Chromium and the loopback server were stopped by exact PID; `ps -p` prints nothing for either. The profile
+`profiles/782-20261107/` and the build log were deleted. Nothing else on the Chromium volume was touched.
+
+## #754: a history batch sent again after "no answer" is stored once
+
+Date 2026-11-07. Branch `engine/754-history-import-dedupe` from `origin/main` (`e8380ee`). Overlay and Swift only: no
+Chromium patch, `.patches` unchanged, facade header unchanged.
+
+### Cause
+
+#565 found that a batch the history store never confirmed ("no answer from the history store", for example when the
+history service goes away mid-import) can already be on disk. The coordinator freezes the watermark at such a batch,
+so the next import sends it again with every batch after it, and `HistoryBackend::AddPageVisit` checks the URL row but
+not the visit time, so `AddPage` stored each visit a second time. The same resend happens after a visit the engine
+refused (an invalid URL), so confirmed batches behind a refused one were duplicated too. Only the engine can tell what
+is already stored, so the fix is there and the coordinator keeps resending.
+
+### What landed
+
+- `arkt_import_writer.cc`: `HistoryImport` first runs a `HistoryLookup` (a `HistoryDBTask`) that reads, per URL,
+  `GetRowForURL` and `GetVisitsForURL` and marks each visit whose URL and visit time the history already holds (or
+  that came earlier in the same batch). Back on the main thread, held visits are counted skipped and count toward
+  `latest_visit`; the rest go through `HistoryService::AddPage` as before (visited links and `CanAddURL` unchanged),
+  followed by the barrier from #531. A lookup destroyed without answering, or the service going away first, counts
+  every unconfirmed visit failed, as before, so the import still always answers.
+- `latest_visit` (Swift `latestVisit`) is the newest visit written or already held, so a batch that turns out fully
+  held still moves the watermark past it. The facade header still says "newest visit written"; it was left alone
+  because #803 and #811 edit that header.
+- `ImportRecording` (the stub behind `InMemoryEngine` and `FakeEngine`) applies the same rule and takes an injectable
+  clock. `EngineImportContract.runHistory` gains the step "the same batch without a watermark writes nothing".
+- Runner phase `--arkt-import-check=history-retry`: sends the synthetic `history-shutdown` batch (4000 URLs, 10 visits
+  each) with no watermark and waits for the answer. Both phases now count the visit times back from the start of the
+  day, so runs on the same day send the same visits.
+
+### Tests (ShellKit, `nice -n 20 swift test -j 2 --filter ...`)
+
+| Step | Result |
+|---|---|
+| Before the fix: `InMemoryEngineImportTests`, `FakeEngineImportTests`, `ProfileImportCoordinatorTests` | failed: `keepsTheHistoryAndBookmarkContract` in both engines (`same batch again: written: 4`), `aBatchThatGotNoAnswerIsStoredOnceWhenALaterImportSendsItAgain` (10 visits stored, not 5) |
+| After the fix, same filter plus `ChromiumImportTests` | passed: 5, 7, 31 (30 before) and 16 tests |
+| Deliberate break: the held-visit skip in `ImportRecording` disabled | the same three tests fail again; restored |
+| `EngineAPITests`, `FakeEngineKitTests`, `CoreBridgeTests`, `ChromiumEngineKitTests` | passed: four test runs of 29, 285, 343 and 170 tests |
+| Scripted facade: `aBatchTheHistoryAlreadyHoldsComesBackSkippedWithItsNewestVisit` (`ChromiumImportTests`) | passed: 17 tests (16 before); pins that a `written 0, skipped N` answer keeps its `lastVisitTime`. It passes without the engine change too: the facade only carries the answer, the dedupe itself runs in the engine (smoke below) |
+| `IsolationTests` | passed: 60 tests in 7 suites |
+
+### Build
+
+| Step | Result | Numbers |
+|---|---|---|
+| `nice -n 15 autoninja -C out/Spike chrome -j 4` | `The build has finished successfully.`, `FAILED:` 0 | 68 s; `libchrome_dll.dylib` relinked |
+| Engine app, `xcodebuild -scheme ArktShell -configuration Engine PRODUCT_BUNDLE_IDENTIFIER=dev.arkt.Arkt.try754 -jobs 2` (`nice -n 20`, `CONFIGURATION_BUILD_DIR=$CHROMIUM_ROOT/embed-754`) | `BUILD SUCCEEDED`, `Engine framework copied: Chromium Framework.framework 156.0.8078.48` | 226 s; 522 component dylibs cloned next to the bundle (`cp -c`) |
+
+Load average 7 to 13 while building and running (other lanes' work; nothing added).
+
+### Real engine (`dev.arkt.Arkt.try754`, embed folder on `out/Spike`, throwaway profiles under `profiles/754-20261107/`, `ARKT_DATA_DIR`, `ARKT_ARC_DIR` and `ARKT_DEFAULTS_SUITE` per run, `--use-mock-keychain`, `--arkt-engine-test-api`)
+
+Counts are read-only `sqlite3` on the profile's `History` after the process exited: `urls`, `visits`, `visit_source`
+rows with source 7, and (url, visit_time) pairs stored more than once.
+
+| Run | Result | Evidence |
+|---|---|---|
+| Before the fix (`out/Spike` as built for the previous engine task): `history-retry` twice on one profile | FAIL, reproduced | both runs `written=40000 skipped=0`; `urls` 4000, `visits` 80000, source 7 80000, 40000 pairs twice |
+| Fixed: `history-retry` twice on a fresh profile | PASS | run 1 `written=40000`; run 2 `written=0 skipped=40000 failed=0`, `latest` set; `visits` 40000, 0 pairs twice |
+| Fixed: `history-shutdown`, then `history-retry` on a fresh profile | PASS | run 1: `history import: 40000 visits got no answer from the history store`, exit 0 after 6 s, `visits` 40000 already on disk; run 2: `written=0 skipped=40000 failed=0`; `visits` 40000, 0 pairs twice |
+| Deliberate break: the held check in `HistoryImport::Write` disabled, rebuilt (35 s), `history-retry` on the shutdown profile | FAIL as expected | `written=40000 skipped=0`; `visits` 80000 |
+| Fix restored, rebuilt (33 s), `history-retry` again | PASS | `written=0 skipped=40000`; `visits` stays 80000 (the break's copies remain, nothing new) |
+| Stderr | PASS | 0 `FATAL`, `NOTREACHED`, `Check failed` lines in every run; every run exited by itself (exit 0) |
+
+Not run: the fixture `import` phase (unchanged path; the synthetic batch covers the write), and a batch that mixes
+held and new visits on the real engine (covered by the stub contract only).
+
+### Patch budget
+
+| Source | Count |
+|---|---|
+| `.patches` lines | 14 |
+| `arkt` commits above `156.0.8078.48` | 14 |
+
+In sync. Facade header copies `cmp` identical.
+
+### Cleanup
+
+Every app run exited by itself (exit 0; no process left under the embed folder). `lsregister -u` on the app and its 8
+helpers: 0 records for `dev.arkt.Arkt.try754` and 0 paths under the embed folder after. Deleted: the embed folder with
+its dylib clones, derived data, the three throwaway profiles, the three defaults suites and the bundle's preferences
+file, the build logs. No clipboard use. Nothing under `~/Applications/ArktTest` or `/Applications/Arkt.app` was
+touched. `out/Spike` now holds this branch's overlay (built from `origin/main` plus this change).
+
+## #759: gn check under //arkt
+
+### Gate
+
+1. Task: declare the dependencies behind the header-include errors that `gn check out/Spike '//arkt/*'` reports.
+   An overlay `BUILD.gn` change is enough; no Chromium patch.
+2. Facade header: unchanged. `arkt_engine_facade.mm`: unchanged.
+3. `.patches`: unchanged, no patch number claimed.
+4. Commands: `gn check out/Spike '//arkt/*'` before and after, `nice -n 15 autoninja -j 4 -C out/Spike chrome`, and
+   the engine ABI Swift tests. Chromium disk 1.9 TiB free.
+
+### Before
+
+`gn check out/Spike '//arkt/*'` reported 5 errors in 2 targets (4 in `//arkt/api:embedder`, 1 in
+`//arkt/browser:window`), so the count reads as 4 when only the first target is counted:
+
+- `arkt/api/arkt_engine_facade.mm`, lines 71 to 74: `find_notification_details.h`, `find_result_observer.h`,
+  `find_tab_helper.h` and `find_types.h`, from `//components/find_in_page`. The target reached it only through
+  `//arkt/browser:window`, which depends privately on `//chrome/browser/ui/find_bar`.
+- `arkt/browser/arkt_extension_batch_install.mm:29`: `extensions/browser/webstore_install_result.h`, from
+  `//extensions/browser:webstore_installer`, reached only privately through `//chrome/browser/extensions`.
+
+### What landed
+
+- `//arkt/api:embedder` depends on `//components/find_in_page`.
+- `//arkt/browser:window` depends on `//extensions/browser:webstore_installer`.
+
+Neither upstream target sets `visibility`. No include line, source file or patch changed.
+
+### After
+
+- `gn check out/Spike '//arkt/*'`: `Header dependency check OK`.
+- `gn check out/Arkt '//arkt/*'`: `Header dependency check OK`.
+- Overlay link: `readlink $CR/arkt` prints the engine worktree's `engine/arkt`.
+- Sync check: `.patches` 14 lines, 14 `arkt` commits, in sync.
+- `cmp` of the two facade header copies: identical (header untouched).
+
+### Build
+
+`nice -n 15 autoninja -j 4 -C out/Spike chrome`: `The build has finished successfully.`, 58 s. GN regenerated
+`build.ninja`, both target files now list the new dependency, and `libchrome_dll.dylib` was relinked.
+
+### Swift tests (`nice -n 20`, `-j 2`, in `app/ArktShell/ShellKit`)
+
+`swift test -j 2 --filter 'ArktEngineABITests|ChromiumEngineKitTests'`: `Test run with 33 tests in 11 suites
+passed`. No Swift file changed; the run confirms the ABI targets still build and pass on this branch.
+
+### Patch budget
+
+Unchanged: 14 patches.
+
+### Cleanup
+
+No Chromium run was launched, so there is no profile, process or crash report to remove. The build log stayed
+outside the repo and the Chromium disk.
+
+## #755: an Esc the page did not use reaches the host and stops loading
+
+Date 2026-11-08. Branch `engine/755-escape-stop` from `origin/main` (`e8380ee`). Follow-up of #614 (shell side, PRs
+#756 and #760), which could not be checked on an engine build at the time.
+
+### Gate
+
+- Seam: no patch. The overlay already hands an Esc the page did not handle to the host
+  (`ArktBrowserWindow::HandleKeyboardEvent` -> `ForwardUnhandledKeyDown` -> `unhandledKeyDown:inTab:` from a posted
+  task, #313). The check adds test-only code to the self-test embedder.
+- Facade header: unchanged (`cmp` identical). `.patches`: unchanged, 14 lines, 14 `arkt` commits above
+  `156.0.8078.48`; the 14 exported patches match the repo files apart from `From:` lines.
+- Overlay link checked before every build: `$CR/arkt` points at this worktree's `engine/arkt`.
+- Build: `nice -n 15 autoninja -j 4 -C out/Spike chrome`. Chromium disk 1.9 TB free, internal 47 GB. Load average 7
+  to 13 from other lanes' work; nothing added.
+
+### Answer to the issue's open question
+
+The week-3 note that Chromium's delayed shortcuts do not run in Arkt windows is about Cmd key equivalents (the
+Views focus manager path). A bare Esc never takes that path: the overlay takes it in `HandleKeyboardEvent` once the
+renderer reports it unhandled. #313's Engine app check already showed it reaching the shell (`peek unhandled Esc`).
+What was not checked was the loading half: `IDC_STOP` being enabled on an Arkt window while a page loads, and the
+stop taking effect. This run checks both. No key-routing fix is needed.
+
+### What landed (self-test embedder only)
+
+- `ArktSelfTestWindowHost` implements the optional `unhandledKeyDown:inTab:` as `ShellEngineHost` does for a tab
+  that is not in a Peek: a bare Esc, the shown tab loading, the window's first responder inside that tab's container
+  (the overlay names no tab, so the shell checks this too), and `validateCommand(IDC_STOP)`; then
+  `executeCommand(IDC_STOP, CURRENT_TAB)`, as the shell's `.stop` reaches the engine. It logs
+  `unhandledKeyDown ... inPage loading stopEnabled` and `stop sent`.
+- `arkt-selftest esc [ms]`: focuses the tab's page (`-focus`), then on a later turn builds an Esc key down and key up
+  and hands them to the tab's own window with `-[NSWindow sendEvent:]`, in process. The events never enter the system
+  event queue, so no other window or app can receive them; the test window did not need to be key or frontmost
+  (every run logged `appActive=no key=no`, with the page's `RenderWidgetHostViewCocoa` as first responder). This is
+  the real AppKit key path (the page's view, the renderer, the unhandled-key return), not DevTools input.
+
+### Smoke (`out/Spike/Chromium.app`, `--no-startup-window --arkt-facade-selftest --arkt-facade-selftest-url=<page>`, the shell's `--disable-features` list, fresh profiles under `profiles/755-20261108/`, `--use-mock-keychain`, loopback pages on `127.0.0.1:8795`)
+
+Each page drives itself by setting its title (`state`, then `esc`, then `state`), so one launch per page runs the
+check with no DevTools session. `/slow` and `/hang` answer after 30 s.
+
+| Page | Check | Result |
+|---|---|---|
+| `/loading`: an `<img src=/slow>` keeps the page loading | Esc stops it | PASS: `state ... loading=yes`, `unhandledKeyDown key=53 tab=-1 inPage=yes loading=yes stopEnabled=yes`, `stop sent`, `loadingChanged loading=no`, `state ... loading=no` |
+| `/uses-esc`: the same image, a focused field whose `keydown` calls `preventDefault()` on Escape | the page keeps the Esc | PASS: title `#used=1 #focus=1`, no `unhandledKeyDown` line, `state ... loading=yes` afterwards |
+| `/idle`: loaded page | nothing new | PASS: `unhandledKeyDown ... loading=no stopEnabled=no`, no `stop sent`, no navigation |
+| `/nav`: loaded page navigates to `/hang` (no response yet) | Esc cancels the pending navigation | PASS: `state url=.../hang loading=yes`, `unhandledKeyDown ... stopEnabled=yes`, `stop sent`, `state url=.../nav loading=no` |
+| break: `ForwardUnhandledKeyDown`'s key code changed (working tree only) | `/loading` | the check fails: `esc send ... inPage=yes`, no `unhandledKeyDown`, `state ... loading=yes` afterwards |
+| restored | `/loading`, `/uses-esc` | PASS again, the same lines as the first rows |
+
+No `FATAL`, `Check failed` or `Received signal` lines in any run.
+
+| Step | Result |
+|---|---|
+| Build with the self-test changes | `The build has finished successfully.`, `FAILED:` 0, 38 s |
+| Break build, restore build, format-only rebuild | each finished, `FAILED:` 0; `git status` in `$CR` clean apart from the untracked `build/util/MINIBRANCH` |
+| `gn check out/Spike '//arkt/*'` | fails on `main` with the include errors #759 fixes (PR #820); none in the self-test embedder |
+
+### Not checked here
+
+- **Peek closes on Esc on the Engine app.** The self-test host has no Peek. #313 recorded it as PASS on the Engine
+  app (`peek unhandled Esc`, `peek close keyboard`), and #614 left the order unchanged: `handleUnhandledKeyDown`
+  asks `peek.handleEscape` before `stopLoadingOnEscape`, and `escapeStopsLoading(peekOpen:)` yields while a Peek is
+  open (InMemoryEngine tests). Not re-run on the Engine app, because that needs an app build and input into the app
+  window, while this check has the same overlay path end to end.
+- The shell's own `stopLoadingOnEscape` on the Engine app; the self-test host repeats its conditions.
+
+### Patch budget
+
+Unchanged: 14 patch files, 14 `arkt` commits, in sync. No upstream file touched.
+
+### Cleanup
+
+Every Chromium run stopped by exact PID (`ps -p` prints nothing for each) and the loopback server by its PID. The
+throwaway profiles under `profiles/755-20261108/` and the build logs were deleted. The runs did not use the clipboard.
+
+## #784: a dedicated address-bar navigation call
+
+Date 2026-11-08. Branch `engine/784-address-bar-navigation` from `origin/main` (`e8380ee`). Follow-up of #577 / #770
+(the maintainer decision of 2026-11-07 on `chrome://gpucrash`). Facade, overlay and shell only; no patch.
+
+### Gate
+
+- Seam: the facade's tab handle. Chromium takes the transition from `LoadURLParams`; no patch is needed.
+- Facade header: additive. One new `ArktTabHandle` method, `navigateFromAddressBarToURL:`
+  (`navigate(fromAddressBarTo:)` in Swift), next to `navigateToURL:`. Both copies `cmp` identical.
+- `.patches`: unchanged, 14 lines, 14 `arkt` commits above `156.0.8078.48`, in sync before and after.
+- Overlay link checked before every build: `$CR/arkt` points at this worktree's `engine/arkt`.
+- Build: `nice -n 15 autoninja -j 4 -C out/Spike chrome`. Chromium disk 1.9 TB free, internal 49 GB, swap 5.6 of
+  7 GB used, load average 6 to 10 from other lanes (nothing added).
+
+### What landed
+
+- `arkt_engine_facade.mm`: `navigateToURL:` and the new call share one `loadURL:transition:call:` (same queueing,
+  unparking and closed-tab handling). The new call sends `PAGE_TRANSITION_TYPED | PAGE_TRANSITION_FROM_ADDRESS_BAR`,
+  as Chrome's omnibox does.
+- Browser debug URLs: `IsBrowserDebugURL` mirrors content's `IsDebugURL` and `IsAsanDebugURL`
+  (`content/browser/renderer_host/debug_urls.cc`, not exported): `chrome://inducebrowsercrashforrealz`,
+  `chrome://inducebrowserdcheckforrealz`, `chrome://uithreadhang`, `chrome://delayeduithreadhang`, `chrome://gpuclean`,
+  `chrome://gpucrash`, `chrome://gpuhang`, the two memory-pressure URLs, and `chrome://crash/browser/...` and
+  `chrome://crash/gpu/...` (`blink::ParseCrashURL`). Without `--arkt-engine-test-api` such a URL keeps `TYPED` alone,
+  which is what `navigateToURL:` sends: Chromium's `HandleDebugURL` returns without running it, and no navigation
+  starts. The constants come from `third_party/blink/public/common/chrome_debug_urls.h`, a public dependency of
+  `//content/public/common`, so `BUILD.gn` is unchanged.
+- Renderer debug URLs (`chrome://crash`, `chrome://kill`, `chrome://hang`) are not gated: Chromium runs them for any
+  transition, and the contract runner already reaches `chrome://crash` through `navigateToURL:`. Nothing changes there.
+- `EngineClient.navigateFromAddressBar(_:to:)`, with a default that calls `navigate(_:to:)`. ChromiumEngine calls the
+  facade; InMemoryEngine records each call in `addressBarNavigations` and loads as `navigate` does; FakeEngine loads as
+  `navigate` does (WebKit has no address-bar transition).
+- Shell: `ShellWindowController.open(_:inNewTab:)`, the Cmd-L branch, and the private-window path
+  (`openPrivately(_:fromAddressBar:)`, set by the command bar's `onOpen` in a blank or incognito window) use the new
+  call. Every other navigation keeps `navigate` (pinned reset, Peek, reopened private pages, Paste and Go).
+- Self-test (test-only): `arkt-selftest navigate-typed <url>`.
+
+### What the transition changes (measured on `out/Spike`)
+
+The issue expected typed-visit counting to differ. It does not: Chromium records the converted reload with core type
+`TYPED` too, so `typed_count` grows by one for every visit, whichever call made it.
+
+| Navigation | Page's navigation type | `history.length` | History visit (core, qualifier) | `typed_count` of `p.html` after |
+|---|---|---|---|---|
+| `navigate` to `p.html` from `start` | `navigate` | 2 | TYPED, none | 1 |
+| `navigate` to `p.html` again | `reload` | 2 | TYPED, none | 2 |
+| `navigate-typed` to `p.html` again | `navigate` | 2 | TYPED, `FROM_ADDRESS_BAR` (`0x32000001`) | 3 |
+| `navigate-typed` to `q.html` | `navigate` | 3 | TYPED, `FROM_ADDRESS_BAR` | (q: 1) |
+
+So the differences are: the same URL loads as a new navigation that replaces the entry instead of a reload; the visit
+carries `FROM_ADDRESS_BAR` (which Chromium's history sync, the webNavigation API's `transitionQualifiers` and a few
+other observers read); and browser debug URLs.
+
+### Tests first
+
+- `ChromiumAddressBarTests` (8, ChromiumEngineKitTests) against the scripted facade, whose model
+  (`ScriptedAddressBar.swift`) follows the table above: the transition each call sends, same-URL reload against a new
+  navigation, typed counts, the back list, the debug URL gate with and without the test API, which URLs count as
+  browser debug URLs, and a call queued behind a deferred insert. Red first, before ChromiumEngine called the
+  facade (the default sent plain `navigate`): 4 of the first 7 failed with 5 issues. The smoke then showed that a
+  converted reload counts as typed too; the model and two tests were corrected to that (8 tests now).
+- `ConformanceTests.addressBarNavigationIsItsOwnSelector` (ArktEngineABITests): the Objective-C name the facade
+  implements, and the Swift name.
+- `AddressBarNavigationTests` (6, ShellKitGUITests, InMemoryEngine): Cmd-L typed text, the URL on screen retyped, the
+  untouched prefill (reload, no navigation), Cmd-T, a private window's Cmd-L, private pages opened in code. Before the
+  shell change: compile error (no `addressBarNavigations`); with the two call sites put back to `navigate`: 3 of 6
+  failed (5 assertions); restored, 6 of 6 pass.
+
+### Swift tests (`nice -n 20`, `-j 2`, in `app/ArktShell/ShellKit`)
+
+`swift test --filter "ChromiumEngineKitTests|ArktEngineABITests|EngineAPITests|FakeEngineKitTests|ShellUITests"`: all
+passed. ChromiumEngineKitTests 178 (170 + 8), ArktEngineABITests 34 (33 + 1), EngineAPITests 285, FakeEngineKitTests
+29, ShellUITests 1493. GUI, filtered to the new tests and the suites that reach the changed call sites
+(`AddressBarNavigationTests`, `CommandBar*`, `PrivatePages*`, `PrivateReopenTests`, `EmptySpaceContentTests`,
+`EmptyStateTests`, `SplitShortcutTests`, `SplitWindowTests`, `URLBarTests`): 275 executed, 3 skipped, 0 failures. The
+full suite is left to CI.
+
+### Build
+
+| Step | Result | Time |
+|---|---|---|
+| The facade call, the gate and the self-test command | `The build has finished successfully.`, `FAILED:` 0 | 46 s |
+| Break: the gate's condition made always false (`&& url.is_empty()`, working tree only) | finished, `FAILED:` 0 (a first try with `false &&` failed on `-Wunreachable-code`) | 34 s |
+| Restored | finished, `FAILED:` 0 | 33 s |
+| Final (header and doc comments) | finished, `FAILED:` 0; `git status` in `$CR` shows only the `build/util/MINIBRANCH` that was there before | 38 s |
+
+`gn check out/Spike //arkt/api:embedder`: the 4 errors that were already there (the `find_in_page` includes, lines
+71 to 74); none for the two new includes.
+
+### Smoke (`out/Spike/Chromium.app`, `--no-startup-window --arkt-facade-selftest`, fresh profiles under `profiles/784-20261108/`, `--use-mock-keychain`, pages from a loopback server on `127.0.0.1:8784` that drive themselves: each load writes its `performance` navigation type and `history.length` into the title, then sets the next `arkt-selftest` command; the visits read afterwards from the run's own `Default/History` with `sqlite3` in read-only mode)
+
+| Run | Check | Result |
+|---|---|---|
+| A (`--arkt-engine-test-api`) | the four navigations of the table above | as in the table: `reload` for plain `navigate`, `navigate` for the address bar, back list `[start]` after both same-URL loads |
+| A | History | `p.html` visit_count 3, typed_count 3; visits `0x30000001`, `0x30000001`, `0x32000001`; `q.html` `0x32000001` |
+| A | `navigate chrome://gpucrash` | nothing: no GPU exit, URL stays `q.html` |
+| A | `navigate-typed chrome://gpucrash` | `GPU process exited unexpectedly: exit_code=11`, then `Reinitialized the GPU process after a crash`; the tab stays on `q.html`, its back list unchanged |
+| B (no test API) | the same four navigations | the same types, lengths and History rows as A |
+| B | `navigate-typed` `chrome://gpucrash`, `chrome://gpuhang`, `chrome://inducebrowsercrashforrealz`, `chrome://uithreadhang`, `chrome://crash/browser/use-after-free`, 1.5 s apart | none ran: 0 GPU exits, 0 `Received signal`, the browser kept answering (each next command arrived on time), then `close` |
+| C (break, no test API) | `navigate-typed chrome://gpucrash` | `GPU process exited unexpectedly: exit_code=11`: the gate is what stops it |
+| final A and B (restored build) | everything of A and B again, fresh profiles | identical results |
+| D (no test API) | `navigate-typed chrome://crash` (a renderer debug URL, not gated) | the page's renderer crashed (`tabCrashed status=1 listed=yes`), the browser stayed up, as with `navigate` |
+
+Not driven: `chrome://inducebrowsercrashforrealz` and the hang URLs with the test API (they would end or freeze the
+run). Their gate is the same check as `chrome://gpucrash`'s.
+
+### Patch budget
+
+| Source | Count |
+|---|---|
+| `.patches` lines | 14 |
+| `arkt` commits above `156.0.8078.48` | 14 |
+
+In sync; no patch file changed. Facade header copies `cmp` identical.
+
+### Left open
+
+- Cmd-T and the new-tab path create the tab with its URL (`createTab(url:in:)`); Chromium loads that with its own
+  transition, not `FROM_ADDRESS_BAR`. Typing in a new tab therefore still does not run a browser debug URL and does not
+  carry the qualifier. Follow-up if wanted.
+- A search, a history suggestion or a site search committed with Cmd-L uses the new call too (the field is the address
+  field). Chrome's omnibox sends `GENERATED | FROM_ADDRESS_BAR` for a search; the facade offers only `TYPED`, which
+  `navigate` already sent for searches before this change.
+
+### Cleanup
+
+Every Chromium run stopped by exact PID (`ps -p` prints nothing for each); the loopback server stopped by PID; the
+profiles under `profiles/784-20261108/` deleted. The three GPU crashes (runs A, C and final A) and run D's renderer
+crash wrote their dumps to Chromium's shared `Crashpad/pending` folder, not to the profile; those four files (matched
+by time) were deleted, nothing else there. Nothing touched the clipboard (no copy or
+paste command was sent). Nothing under `~/Applications/ArktTest` or `/Applications/Arkt.app` was touched.
