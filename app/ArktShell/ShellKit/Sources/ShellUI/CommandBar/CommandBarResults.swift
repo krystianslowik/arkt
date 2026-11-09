@@ -1,3 +1,6 @@
+#if DEBUG
+import Synchronization
+#endif
 import Foundation
 
 /// Placeholder suggestion provider: URL, matching open tabs and Spaces, Paste and Go, search. Real providers
@@ -380,6 +383,9 @@ public enum CommandBarResults {
   }
 
   private static func tabRow(_ tab: OpenTab, group: Group?, now: Date) -> Result {
+    #if DEBUG
+    tabRowCounter?.count()
+    #endif
     let title = HostDisplay.title(tab.title, for: tab.url)
     var row = Result(kind: .switchTo(tab.node), title: title,
                      subtitle: HostDisplay.hostOrAddress(tab.url),
@@ -445,6 +451,22 @@ public enum CommandBarResults {
     return make(query: raw, input: input)
   }
 }
+
+#if DEBUG
+extension CommandBarResults {
+  /// Counts the tab rows `make` builds, for tests that guard a keystroke's work by counting it instead of timing it
+  /// (#839). Bound with `$tabRowCounter.withValue`, so it counts only the work of the code it wraps, on that task:
+  /// other tests calling `make` at the same time are not counted. Debug builds only.
+  final class TabRowCounter: Sendable {
+    private let built = Mutex(0)
+    init() {}
+    var value: Int { built.withLock { $0 } }
+    func count() { built.withLock { $0 += 1 } }
+  }
+
+  @TaskLocal static var tabRowCounter: TabRowCounter?
+}
+#endif
 
 extension CommandBarResults {
   /// Every open tab of a Space for "Switch to Tab": pinned, then Today, depth-first through folders.
