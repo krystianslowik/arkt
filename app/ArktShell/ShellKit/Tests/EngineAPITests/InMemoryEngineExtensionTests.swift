@@ -160,7 +160,7 @@ struct InMemoryEngineExtensionTests {
     engine.setExtensionActions([action("a", "Alpha", siteAccess: .onClick, options: true)], in: window)
 
     let menu = engine.extensionContextMenu(forAction: "a", in: window)
-    #expect(menu.map(\.title) == ["Alpha", "Options...", "Pin to Sidebar", "This Can Read and Change Site Data", "",
+    #expect(menu.map(\.title) == ["Alpha", "Options...", "Pin to Panel", "This Can Read and Change Site Data", "",
                                   "Manage Extension...", "Remove from Arkt..."])
     #expect(menu[0].isEnabled == false && menu[0].command == ExtensionContextCommand.header)
     #expect(menu[1].isEnabled && menu[1].command == ExtensionContextCommand.options)
@@ -179,13 +179,13 @@ struct InMemoryEngineExtensionTests {
     for id in ["a", "b", "c"] { engine.setExtensionPinned(id, pinned: true) }
     func moves(_ id: String) -> [Bool] {
       engine.extensionContextMenu(forAction: id, in: window)
-        .filter { $0.title == "Move Left" || $0.title == "Move Right" }.map(\.isEnabled)
+        .filter { $0.title == "Move Up" || $0.title == "Move Down" }.map(\.isEnabled)
     }
     #expect(moves("a") == [false, true])
     #expect(moves("b") == [true, true])
     #expect(moves("c") == [true, false])
     let menu = engine.extensionContextMenu(forAction: "a", in: window)
-    #expect(menu.contains { $0.title == "Unpin from Sidebar" })
+    #expect(menu.contains { $0.title == "Unpin from Panel" })
     #expect(menu.first { $0.title == "Options..." }?.isEnabled == false)
     #expect(!menu.contains { $0.title == "This Can Read and Change Site Data" })
     #expect(engine.extensionContextMenu(forAction: "missing", in: window).isEmpty)
@@ -202,9 +202,9 @@ struct InMemoryEngineExtensionTests {
     run(C.togglePin, "a")
     run(C.togglePin, "b")
     #expect(engine.pinnedExtensionIDs == ["a", "b"])
-    run(C.moveLeft, "b")
+    run(C.moveUp, "b")
     #expect(engine.pinnedExtensionIDs == ["b", "a"])
-    run(C.moveRight, "b")
+    run(C.moveDown, "b")
     #expect(engine.pinnedExtensionIDs == ["a", "b"])
     run(C.togglePin, "a")
     #expect(engine.pinnedExtensionIDs == ["b"])

@@ -48,7 +48,7 @@ struct ExtensionsPanelModel: Equatable {
 
   // MARK: Order
 
-  /// The index in the pin order a Move Left (`by: -1`) or Move Right (`by: 1`) of `extensionID` goes to; nil at the end
+  /// The index in the pin order a Move Up (`by: -1`) or Move Down (`by: 1`) of `extensionID` goes to; nil at the end
   /// it moves towards, and for an extension that is not pinned.
   func moveTarget(of extensionID: String, by step: Int) -> Int? {
     guard let place = pinned.firstIndex(where: { $0.extensionID == extensionID }) else { return nil }

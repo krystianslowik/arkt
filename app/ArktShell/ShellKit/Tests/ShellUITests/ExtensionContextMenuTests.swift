@@ -51,15 +51,15 @@ struct ExtensionContextMenuTests {
                                        url: "https://news.example.com/a")
     let menu = try #require(Self.menu(engine, window, "a"))
 
-    #expect(titles(menu) == ["Alpha", "Options...", "Pin to Sidebar", "This Can Read and Change Site Data", "-",
+    #expect(titles(menu) == ["Alpha", "Options...", "Pin to Panel", "This Can Read and Change Site Data", "-",
                              "Manage Extension...", "Remove from Arkt..."])
     #expect(menu.autoenablesItems == false)
     #expect(item(menu, "Alpha")?.isEnabled == false)                  // the name is a disabled header
     #expect(item(menu, "Options...")?.isEnabled == true)
-    #expect(item(menu, "Pin to Sidebar")?.isEnabled == true)
+    #expect(item(menu, "Pin to Panel")?.isEnabled == true)
     #expect(item(menu, "Manage Extension...")?.isEnabled == true)
     #expect(item(menu, "Remove from Arkt...")?.isEnabled == true)
-    #expect(!menu.items.contains { $0.title == "Move Left" || $0.title == "Move Right" })
+    #expect(!menu.items.contains { $0.title == "Move Up" || $0.title == "Move Down" })
 
     let access = try #require(item(menu, "This Can Read and Change Site Data")?.submenu)
     #expect(titles(access) == ["When You Click the Extension", "On news.example.com", "On All Sites"])
@@ -73,14 +73,14 @@ struct ExtensionContextMenuTests {
 
     func moves(_ id: String) throws -> [Bool] {
       let menu = try #require(Self.menu(engine, window, id))
-      return try ["Move Left", "Move Right"].map { try #require(item(menu, $0)).isEnabled }
+      return try ["Move Up", "Move Down"].map { try #require(item(menu, $0)).isEnabled }
     }
     #expect(try moves("a") == [false, true])
     #expect(try moves("b") == [true, true])
     #expect(try moves("c") == [true, false])
 
     let menu = try #require(Self.menu(engine, window, "b"))
-    #expect(titles(menu) == ["B", "Options...", "Unpin from Sidebar", "Move Left", "Move Right", "-",
+    #expect(titles(menu) == ["B", "Options...", "Unpin from Panel", "Move Up", "Move Down", "-",
                              "Manage Extension...", "Remove from Arkt..."])
     #expect(item(menu, "Options...")?.isEnabled == false)             // no options page
     #expect(item(menu, "This Can Read and Change Site Data") == nil)  // no host permissions
@@ -90,8 +90,8 @@ struct ExtensionContextMenuTests {
     let (engine, window) = Self.engine([Self.action("a", "A"), Self.action("b", "B")])
     engine.setExtensionPinned("a", pinned: true)
     let menu = try #require(Self.menu(engine, window, "a"))
-    #expect(item(menu, "Move Left")?.isEnabled == false)
-    #expect(item(menu, "Move Right")?.isEnabled == false)
+    #expect(item(menu, "Move Up")?.isEnabled == false)
+    #expect(item(menu, "Move Down")?.isEnabled == false)
   }
 
   @Test func unknownActionHasNoMenu() {
@@ -113,15 +113,15 @@ struct ExtensionContextMenuTests {
   @Test func pinAndMoveGoToTheEngine() throws {
     let (engine, window) = Self.engine([Self.action("a", "A"), Self.action("b", "B")])
     let first = try #require(Self.menu(engine, window, "a"))
-    first.performActionForItem(at: first.indexOfItem(withTitle: "Pin to Sidebar"))
+    first.performActionForItem(at: first.indexOfItem(withTitle: "Pin to Panel"))
     #expect(engine.pinnedExtensionIDs == ["a"])
-    #expect(try #require(Self.menu(engine, window, "a")).indexOfItem(withTitle: "Unpin from Sidebar") >= 0)
+    #expect(try #require(Self.menu(engine, window, "a")).indexOfItem(withTitle: "Unpin from Panel") >= 0)
 
     engine.setExtensionPinned("b", pinned: true)
     let second = try #require(Self.menu(engine, window, "b"))
-    second.performActionForItem(at: second.indexOfItem(withTitle: "Move Left"))
+    second.performActionForItem(at: second.indexOfItem(withTitle: "Move Up"))
     #expect(engine.pinnedExtensionIDs == ["b", "a"])
-    #expect(engine.performedExtensionContextCommands.map(\.command) == [C.togglePin, C.moveLeft])
+    #expect(engine.performedExtensionContextCommands.map(\.command) == [C.togglePin, C.moveUp])
     #expect(engine.performedExtensionContextCommands.allSatisfy { $0.window == window })
   }
 
@@ -130,7 +130,7 @@ struct ExtensionContextMenuTests {
     engine.setExtensionPinned("a", pinned: true)
     engine.setExtensionPinned("b", pinned: true)
     let menu = try #require(Self.menu(engine, window, "a"))
-    menu.performActionForItem(at: menu.indexOfItem(withTitle: "Move Left"))
+    menu.performActionForItem(at: menu.indexOfItem(withTitle: "Move Up"))
     #expect(engine.pinnedExtensionIDs == ["a", "b"])
     #expect(engine.performedExtensionContextCommands.isEmpty)
   }
@@ -188,7 +188,7 @@ struct ExtensionContextMenuTests {
     }
     #expect(kept != nil)
     #expect(weakEngine == nil)
-    kept?.performActionForItem(at: kept?.indexOfItem(withTitle: "Pin to Sidebar") ?? -1)   // quietly nothing
+    kept?.performActionForItem(at: kept?.indexOfItem(withTitle: "Pin to Panel") ?? -1)   // quietly nothing
   }
 
   // MARK: The row's menu: right-click, Ctrl-click and the accessibility show-menu action
