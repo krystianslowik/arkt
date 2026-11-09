@@ -153,6 +153,8 @@ final class OnboardingTests: XCTestCase {
   private var windows: [ShellWindowController] = []
   /// The services of every flow `present` opened; tearDown answers a prompt a failed test left held.
   private var presentedServices: [FakeOnboardingServices] = []
+  /// A Skip setup question a test holds open; tearDown answers No if a failed test left it up.
+  private var heldSkipAnswer: (@MainActor (Bool) -> Void)?
 
   override func setUp() async throws {
     _ = NSApplication.shared
@@ -161,6 +163,8 @@ final class OnboardingTests: XCTestCase {
 
   override func tearDown() async throws {
     for services in presentedServices { services.answerDefaultPrompt() }
+    heldSkipAnswer?(false)
+    heldSkipAnswer = nil
     presentedServices = []
     for window in windows { window.close() }
     windows = []
@@ -643,6 +647,64 @@ final class OnboardingTests: XCTestCase {
     handOff(window)
     XCTAssertEqual(stub.spaceOrder.count, 1, "only the imported Space")
     XCTAssertEqual(window.currentSpace, stub.spaceOrder.first)
+    window.commandBar.hide()
+    window.close()
+  }
+
+  /// Skip setup asked while the import hero runs, the hero reaching its result while the question is up, then Yes
+  /// (#896): the run finishes with no Continue, and the result is applied the way Continue applies it.
+  func testSkipSetupConfirmedAfterTheHeroReachedItsResultFinishesWithoutContinue() throws {
+    let stub = StubSidebar()
+    let window = makeWindow(stub)
+    let personal = try stub.addSpace(title: "Personal")                  // what the import brought over
+    let services = FakeOnboardingServices(sidebar: stub, arcFound: true)
+    let importer = ScriptedProfileImporter()
+    services.makeImportSource = {
+      BrowserDataImportModel(coordinator: importer, root: URL(fileURLWithPath: "/nonexistent"), spaces: nil,
+                             locale: Locale(identifier: "en_US"))
+    }
+    let onboarding = present(window, services)
+    onboarding.confirmSkip = { [unowned self] answer in heldSkipAnswer = answer }
+    onboarding.performPrimary()                                           // Get started
+    XCTAssertTrue(spin { onboarding.flow.importPhase == .ready })
+    onboarding.performPrimary()                                           // Import now
+    let hero = try XCTUnwrap(onboarding.view.importHero)
+    XCTAssertTrue(spin { importer.consent != nil })
+    let counts = ProfileDataCounts(historyURLs: 100, historyVisits: 48_210, bookmarks: 0, cookies: 3_904, logins: 312, extensions: 14)
+    let consent = Task { @MainActor in await importer.consent?(counts) ?? nil }
+    XCTAssertTrue(spin { hero.source.state.phase == .consent })
+    hero.primaryButton.performClick(nil)                                  // Import
+    XCTAssertTrue(spin { hero.source.state.phase == .progress })
+
+    onboarding.view.onSkipSetup?()                                        // the question comes up
+    XCTAssertNotNil(heldSkipAnswer)
+    XCTAssertEqual(onboarding.lock, .askingSkip(duringImport: true))
+    var summary = ProfileImportSummary()
+    summary.outcomes = [.history: .done(ImportItemCounts(written: 48_210))]
+    importer.finish(summary)
+    XCTAssertTrue(spin { hero.source.state.phase == .result }, "the hero reaches its result under the question")
+    XCTAssertEqual(hero.primaryButton.title, "Continue")
+    XCTAssertEqual(onboarding.lock, .askingSkip(duringImport: true), "the result does not end the import")
+    XCTAssertEqual(onboarding.flow.importPhase, .importing)
+    XCTAssertFalse(onboarding.isFinished)
+
+    let answer = try XCTUnwrap(heldSkipAnswer)
+    heldSkipAnswer = nil
+    answer(true)                                                          // Yes
+    XCTAssertTrue(onboarding.isFinished, "Yes finishes the run with no Continue")
+    XCTAssertEqual(hero.source.state.phase, .dismissed, "the result closed as Continue closes it")
+    XCTAssertNil(onboarding.view.importHero)
+    XCTAssertEqual(onboarding.flow.importPhase, .imported(skipped: 0), "the result is applied as Continue applies it")
+    XCTAssertEqual(services.saved.last?.imported, true)
+    XCTAssertEqual(services.completed, 1)
+    XCTAssertEqual(onboarding.lockTransitions.suffix(3).map(\.event),
+                   [.skipAnswered(confirmed: true), .importEnded, .finish])
+    XCTAssertEqual(onboarding.lock, .finished)
+    handoff.runAll()                                                      // the hero's fade and the finish
+    XCTAssertFalse(window.isShowingOnboarding, "the browser shows")
+    XCTAssertEqual(stub.spaceOrder, [personal], "no Space 1: the imported Space is the landing")
+    XCTAssertEqual(window.currentSpace, personal)
+    _ = consent
     window.commandBar.hide()
     window.close()
   }
