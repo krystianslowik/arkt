@@ -25,7 +25,7 @@ public enum SidebarRevealMotion {
   /// - Full motion: the overlay slides, pixel-aligned at `scale` so text stays sharp, at full opacity. An overshoot
   ///   past the resting place is clamped so no gap opens at the window's left edge.
   /// - Reduce Motion: no movement; the overlay fades in place.
-  /// `progress` is 0 concealed to 1 revealed either way (it fades the traffic lights).
+  /// `progress` is 0 concealed to 1 revealed either way.
   public static func presentation(offset: CGFloat, distance: CGFloat, reduceMotion: Bool,
                                   scale: CGFloat) -> (translation: CGFloat, alpha: CGFloat, progress: CGFloat) {
     let progress = distance > 0 ? min(max(1 + offset / distance, 0), 1) : 1
