@@ -274,6 +274,10 @@ final class AXProxyRows {
     element.parentView = view
   }
 
+  /// The view `setParent(_:)` named: the nearest view of the table's that clients reach. A menu shown for the table
+  /// is shown for this view instead, since AppKit makes that view the menu's accessibility parent (#860).
+  var parentView: NSView? { element.parentView }
+
   /// Marks the proxies stale; the next query builds a fresh set for the table's current rows. After a reload the row
   /// at an index may be a different item, so it gets a new element rather than a recycled one.
   func invalidate() {
