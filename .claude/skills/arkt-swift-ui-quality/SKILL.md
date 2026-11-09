@@ -24,6 +24,7 @@ are in `CONTRIBUTING.md`, section 7 and section 6, Pass 2; this skill is how to 
       database queue; main-actor code only `await`s, never blocks or waits synchronously.
 - [ ] Time is injected: clocks and sleepers are parameters, so tests can drive them.
 - [ ] Tests never `sleep` and never assert against a wall-clock deadline (see `arkt-flaky-tests`).
+- [ ] GUI tests close every window they open in `tearDown` (`arkt-flaky-tests`, "GUI test hygiene").
 
 ## Motion
 
@@ -34,8 +35,8 @@ are in `CONTRIBUTING.md`, section 7 and section 6, Pass 2; this skill is how to 
       jumps or waits for the old one to finish.
 - [ ] Animate transform and opacity only. No per-frame layout, path or frame-size changes on hot paths.
 - [ ] A Reduce Motion variant (a fade or an instant change), with a test that covers it.
-- [ ] Stays inside the 120 Hz frame budget (about 8 ms per frame). Frame-timing tests skip as NOT-MEASURABLE below
-      120 Hz or under load; run them on a quiet machine.
+- [ ] Stays inside the 120 Hz frame budget (about 8 ms per frame). Frame-time and CPU gates fail only when their
+      class runs alone on a quiet machine and only report otherwise (`CONTRIBUTING.md`, section 7, "Speed gates").
 
 ## UI polish
 

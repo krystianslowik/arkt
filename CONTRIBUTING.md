@@ -5,8 +5,8 @@ merged, so that two or more people can work in parallel without stepping on each
 plans (`docs/plans/*`, "Rules" sections) still apply; this file collects the ones every change needs and adds the
 team workflow around them.
 
-Contributor workflow skills in `.claude/skills/` turn this guide into short step-by-step checklists that
-assistants can follow.
+The workflow skills in `.claude/skills/` turn this guide into short step-by-step checklists. Where a rule is
+spelled out in a skill, this guide links to it instead of repeating it.
 
 Contents:
 
@@ -144,8 +144,8 @@ To claim an issue:
    gh pr diff <PR> --name-only
    ```
 
-   If another open pull request touches them, comment on your issue and on that pull request and agree on an order
-   before starting.
+   If another open pull request touches them, decide the merge order yourself, note it on your issue and on that
+   pull request, and start (`.claude/skills/arkt-issue-loop/SKILL.md`, "Decide or ask").
 
 Do not start on an issue someone else is assigned to. If an assignee has been silent for a few days, ask in the
 issue; the maintainer can reassign.
@@ -162,8 +162,10 @@ These files are touched by most features and conflict often. Before changing one
 - `docs/plans/*-results.md`
 - `engine/patches/chromium/.patches` (section 8)
 
-Keep edits to these files small and in their own commits. Rebase on `main` often, at least daily and before asking
-for review: `git fetch origin && git rebase origin/main`.
+Keep edits to these files small and in their own commits. Before you push a branch for the first time, merge the
+latest `main` into it (`git fetch origin && git merge origin/main`); it has no reviewers yet, so you may also rebase
+it then. Once a branch is pushed, merge `main` into it and never rebase or force-push. After a pull request is open,
+update it from `main` only for the reasons in `.claude/skills/arkt-pr-review/SKILL.md`, "Keeping a branch current".
 
 The engine plans also name "hot files" on the Chromium side (`browser_window_features.cc`, `tab_features.cc`). Those
 are upstream files our patches avoid; their hunk count is tracked in the patch budget of the engine results file.
@@ -212,26 +214,27 @@ are upstream files our patches avoid; their hunk count is tracked in the patch b
 - **Draft pull requests for work in progress.** Open a draft early for visibility; the issue stays
   `status:in-progress`. Mark it ready for review when the template checklist is complete, then move the issue to
   `status:in-review`.
+- **Ready for the first pass.** Before asking for review, the pull request carries everything on the
+  first-pass-ready checklist (`.claude/skills/arkt-issue-loop/SKILL.md`, step 6): the deliberate break, baseline + N
+  counts, 20 runs under load for GUI and timing tests, `main` merged in with the lints run, product decisions listed
+  under "Needs the maintainer", overlap with open pull requests, and hot files announced.
 - **Body.** Fill in the template (`.github/pull_request_template.md`): summary, `Closes #N` (or `Refs #N` when a
   maintainer step remains), plan and results links, changes, tests run with counts, deviations from the plan, manual
   checks needed, and screenshots or a screen recording for UI changes.
 - **Review.** Once two developers are active (the second developer has write access), every pull request needs an
-  approving review from someone other than the author; no self-merge. Until then the maintainer may merge their own
-  pull requests after re-reading the diff.
-- **Merge.** Squash merge only. The author merges after approval, with the pull request title as the squash subject,
-  then deletes the branch and cleans up:
-
-  ```zsh
-  gh pr merge <PR> --squash --delete-branch
-  git -C <repo> worktree remove ../arkt-wt/<N>-<slug>
-  git -C <repo> worktree prune
-  git -C <repo> branch -D feat/<N>-<slug>
-  git -C <repo> pull --ff-only
-  ```
+  approving review from someone other than the author; no self-merge. The maintainer may authorize a merge after an
+  independent review in place of a GitHub approval. Until a second developer is active, the maintainer may merge
+  their own pull requests after re-reading the diff.
+- **Merge.** Maintainers merge, squash only, with the pull request title as the squash subject and the reviewed head
+  commit pinned (`--match-head-commit`). When a branch needs updating first, when pull requests may merge back to
+  back, and what to do when `main` is red: `.claude/skills/arkt-pr-review/SKILL.md`, "Keeping a branch current" and
+  "Merge". After the merge the author cleans up their worktree and branch (`.claude/skills/arkt-issue-loop/SKILL.md`,
+  step 7).
 
 ### Reviewer checklist
 
-Review in two passes.
+Review code in two passes. Docs-only and test-only pull requests get one light pass instead: accurate, consistent,
+nothing weakened (`.claude/skills/arkt-pr-review/SKILL.md`, "Light review").
 
 **Pass 1, spec.** Does the change do what the issue and the plan say?
 
@@ -262,9 +265,10 @@ comment (a fix, or a reason not to) before merging.
 
 ### Two pull requests on the same hot file
 
-1. The one approved first merges first. If neither is approved yet, the smaller one goes first.
-2. The other author rebases on the new `main`, resolves the conflict keeping both changes, reruns the full test set
-   and posts the new counts in the pull request.
+1. The one approved first merges first. If neither is approved yet, the smaller one goes first. They merge one at a
+   time, not back to back.
+2. The other author merges the new `main` into their branch, resolves the conflict keeping both changes, reruns the
+   full test set and posts the new counts in the pull request.
 3. If the resolution changes behavior (not just text), the reviewer looks again before the merge.
 4. In `docs/plans/*-results.md`, keep both sections; each change appends its own section and never rewrites another
    change's numbers.
@@ -297,6 +301,14 @@ comment (a fix, or a reason not to) before merging.
 Run the GUI tests (`swift test --filter ShellKitGUITests`, logged-in GUI session) when you touch the shell UI, and
 build the app (`xcodegen generate`, then `xcodebuild`, see `README.md`) when you touch `app/ArktShell/App` or
 `project.yml`.
+
+### Speed gates
+
+One rule covers every speed gate, frame-time and CPU-time alike. It started with the frame gates in #804; the
+maintainer extended it to every CPU gate on 2026-11-08 (#842). A gate fails only when its class runs alone, the run
+is not niced, and the 1-minute load is below the core count. Otherwise it prints its numbers and passes. So a run
+under `nice -n 20` (see "Capacity" above), any batch, and CI only report. #842 moves the remaining CPU gates (the
+first-swipe gates in `SpaceSwipeHitchTests`) onto the shared helper and adds the niced check to it.
 
 Frame-time gates (no frame over 8.6 ms at 120 Hz: Space pager, split divider and reflow, sidebar reveal, Peek) share
 one rule in `PacingEnvironment.checkFrameGate`. Every run measures and prints a `<name>.pacing` summary line per
@@ -335,9 +347,9 @@ xcodebuild -project ArktShell.xcodeproj -scheme ArktShellUITests -derivedDataPat
   -resultBundlePath "$ARTIFACTS/ui-$(date +%s).xcresult" -collect-test-diagnostics never test
 ```
 
-Result bundles are large. Set `ARTIFACTS` to your artifacts folder if you have one (one subfolder per issue);
-otherwise it falls back to `$TMPDIR/arkt-ui`. Check its free space, and delete the bundle once its counts are in the
-pull request (`.claude/skills/arkt-local-app-safety/SKILL.md`, section 2).
+Result bundles are large. Set `ARTIFACTS` to your artifacts folder (one subfolder per issue); where that folder
+goes, the free space to check, and when to delete the bundle are in `.claude/skills/arkt-local-app-safety/SKILL.md`,
+section 2.
 
 Add `-only-testing:ArktShellUITests/<Class>/<test>` for one test. To scale the harness wait timeouts (default 10 s),
 set `TEST_RUNNER_ARKT_UITEST_TIMEOUT_SCALE=3` in the environment of `xcodebuild`; as a build setting argument it does
@@ -389,13 +401,13 @@ The workflow in `engine/README.md` and the Rules section of the current engine p
 - **Patch numbers are claimed in the pull request.** A pull request that adds a patch states its number in the
   description ("adds patch 0004"). The number is reserved while that pull request is open; check open engine pull
   requests before choosing one.
-- **Renumbering on conflict.** If another patch lands first with your number: rebase your branch on `main`, run
+- **Renumbering on conflict.** If another patch lands first with your number: merge `origin/main` into your branch, run
   Apply onto a fresh `arkt` branch (it now includes the merged patch), cherry-pick your commit on top, run Export
   (`format-patch` numbers by commit order), commit the renamed patch files and `.patches` together, update the patch
   budget table in the results file and the number in the pull request description.
 - **One `.patches` change at a time.** Only one person changes the set or order of patches in `.patches` at a time.
   Announce it in the issue ("Exporting patches now"), export, commit, push, and say when you are done; then the other
-  developer may export. Two pull requests that both add patches land one after the other, with a rebase and
+  developer may export. Two pull requests that both add patches land one after the other, with a merge of `main` and a
   re-export in between.
 - **Launch flags.** Every test launch passes `--user-data-dir` (a throwaway profile) and `--use-mock-keychain`, as
   `engine/README.md` requires. Only the maintainer launches without the mock keychain, for the release check.
@@ -437,8 +449,9 @@ The workflow in `engine/README.md` and the Rules section of the current engine p
 
 ## 11. Main, releases and tags
 
-- `main` is always green and buildable: both Swift packages' tests pass and the app builds against the FakeEngine. A
-  change that breaks `main` is reverted first and fixed in a new pull request.
+- `main` is always green and buildable: both Swift packages' tests pass and the app builds against the FakeEngine.
+  `main`'s own CI run is the last check after merges. When it goes red, no more pull requests merge until it is
+  green again; revert the change that broke it, or fix it in a new pull request.
 - Everything reaches `main` through a squash-merged pull request; no direct pushes.
 - No release branches and no tags yet. Versioned tags start with the first build meant for users; this section will
   describe them then.
@@ -456,7 +469,10 @@ Recommendations only; repository settings are changed by the maintainer.
   source of truth until the board is automated.
 - **CI:** `.github/workflows/swift-tests.yml` runs on every pull request, on pushes to `main`, nightly on `main` and
   by hand, on GitHub-hosted `macos-26` runners with a pinned Xcode. Hosted macOS runners are capped at 5 at once for
-  the repository, so a run starts only the macOS jobs the change needs:
+  the repository, so a run starts only the macOS jobs the change needs. Those few runners serve every pull request
+  and `main`, so do not start runs that are not needed: no update from `main` without a reason, no reruns of real
+  failures, and fixes batched into one push. Reruns are for infra failures only
+  (`.claude/skills/arkt-pr-review/SKILL.md`, "CI").
 
   | Job | Runner | Runs when the change touches |
   |---|---|---|
@@ -488,8 +504,8 @@ Recommendations only; repository settings are changed by the maintainer.
   blocking; its frame-timing gates (command bar latency and the frame-time gates of section 7) and the two tests
   that catch a Space settle mid-flight skip themselves as NOT-MEASURABLE on a screen below 120 Hz or a load at or
   above the core count (the rule of the app's SmokeRunner), which shared runners always meet, and assert on a
-  developer machine (a frame-time gate only when run alone or with `ARKT_PACING_GATE=1`). GUI tests and timing gates
-  stay a local check (section 7).
+  developer machine (a speed gate only under the rule in section 7, "Speed gates"). GUI tests and timing gates stay a
+  local check (section 7).
 
   "UI tests (informative)" builds the Debug app and runs the XCUITest scheme `ArktShellUITests` with wait timeouts
   scaled by 3. It takes about 20 minutes of a macOS runner, so it runs nightly on `main` (02:23 UTC) and by hand, not
