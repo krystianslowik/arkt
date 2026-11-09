@@ -134,4 +134,93 @@ struct ChromiumDialogTests {
     #expect(recorder.events(for: tab) == before, "nothing reported")
     #expect(engine.pendingDialogs.isEmpty)
   }
+  // MARK: Several instances over one facade (#882)
+
+  /// Every instance sees every batch. A dialog of a tab another live instance lists is that instance's: an instance
+  /// made earlier (the main one, before the contract runner's or the import checker's) neither answers nor reports it.
+  @Test func aDialogOfAnotherInstancesTabIsLeftToThatInstance() throws {
+    facade.holdsBatches = true
+    let first = ChromiumEngine(facade: facade)
+    _ = first.createWindow(host: StubWindowHost())
+    let second = ChromiumEngine(facade: facade)
+    let tab = second.createTab(url: page, in: second.createWindow(host: StubWindowHost()))
+    facade.flush()
+    let handle = try #require(second.handle(of: tab) as? ScriptedTab)
+    let firstRecorder = EventRecorder(first)
+    let recorder = EventRecorder(second)
+
+    let dialog = handle.raiseDialog(.confirm, message: "Sure?")
+    facade.flush()
+
+    #expect(dialog.answer == nil && !dialog.isEnded, "the first instance did not answer it")
+    #expect(first.pendingDialogs.isEmpty && firstRecorder.events.isEmpty)
+    guard case .dialogRequested(let request)? = recorder.events(for: tab).first else {
+      Issue.record("the owner was not told: \(recorder.events(for: tab))")
+      return
+    }
+    second.respond(to: request.id, accepted: true, userInput: nil)
+    #expect(dialog.answer?.accepted == true, "the owner's answer reached the page")
+  }
+
+  /// A tab this instance closed (its handle retired) has nobody to show a dialog raised just before the close; the
+  /// dialog is not reported, here or by another instance.
+  @Test func aDialogOfARetiredTabIsNotReported() throws {
+    let (engine, tab, handle) = try makeTab()
+    let other = ChromiumEngine(facade: facade)
+    _ = other.createWindow(host: StubWindowHost())
+    facade.flush()
+    let recorder = EventRecorder(engine)
+    let otherRecorder = EventRecorder(other)
+
+    let dialog = handle.raiseDialog(.confirm, message: "Leaving?")
+    engine.closeTab(tab)                      // answered closed: the handle is retired until the facade's TabClosed
+    facade.flush()
+
+    #expect(dialog.isEnded && dialog.answer?.accepted != true)
+    #expect(recorder.events(for: tab) == [.tabClosed(tab, reason: .client)])
+    #expect(engine.pendingDialogs.isEmpty && other.pendingDialogs.isEmpty && otherRecorder.events.isEmpty)
+  }
+
+  /// The New Tab page a Dock reopen's window keeps unlisted (#299) is this instance's own tab: a dialog there has
+  /// nobody to show it and is answered false at once, even with another instance live.
+  @Test func aDialogOfTheKeptNewTabPageIsAnsweredFalse() throws {
+    facade.holdsBatches = true
+    let engine = ChromiumEngine(facade: facade)
+    engine.windowHostProvider = { _ in StubWindowHost() }
+    facade.hostProvider = { engine.host(for: $0) }
+    let other = ChromiumEngine(facade: facade)
+    _ = other.createWindow(host: StubWindowHost())
+    let (_, newTabPage) = try #require(facade.dockReopen())
+    facade.flush()
+    #expect(engine.tabIDs.isEmpty, "kept back")
+
+    let dialog = newTabPage.raiseDialog(.prompt, message: "Name?", defaultText: "x")
+    facade.flush()
+
+    #expect(dialog.answer?.accepted == false && dialog.answer?.userInput == nil, "the page's call returned")
+    #expect(engine.pendingDialogs.isEmpty && other.pendingDialogs.isEmpty)
+  }
+
+  /// A window whose instance is gone (a runner dropped it before its window closed) has nobody to show a dialog: a live
+  /// instance answers it false so the page's call returns.
+  @Test func aDialogInAWindowWhoseInstanceIsGoneIsAnsweredFalse() throws {
+    facade.holdsBatches = true
+    let survivor = ChromiumEngine(facade: facade)
+    _ = survivor.createWindow(host: StubWindowHost())
+    var gone: ChromiumEngine? = ChromiumEngine(facade: facade)
+    weak var released = gone
+    let handle = try #require(gone.flatMap { engine in
+      engine.handle(of: engine.createTab(url: page, in: engine.createWindow(host: StubWindowHost())))
+    } as? ScriptedTab)
+    facade.flush()
+    gone = nil
+    #expect(released == nil, "the instance is gone; its window is still open")
+    #expect(handle.browser != nil)
+
+    let dialog = handle.raiseDialog(.alert, message: "Hello")
+    facade.flush()
+
+    #expect(dialog.answer?.accepted == false, "the page's call returned")
+    #expect(survivor.pendingDialogs.isEmpty)
+  }
 }
