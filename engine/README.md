@@ -156,10 +156,22 @@ objects with the component build in `out/Spike`. Branding comes from the GN arg 
     target_cpu = "arm64"
     use_siso = true
     branding_file_path = "//arkt/branding/BRANDING"
+    proprietary_codecs = true
+    ffmpeg_branding = "Chrome"
 
-Generate and confirm the branding took (expect `branding_file_path = "//arkt/branding/BRANDING"`):
+The two codec args build FFmpeg with the AAC and H.264 decoders and let the media stack use them (#806: Unity web
+games ship their audio as AAC and fail without it). Both are needed: `ffmpeg_branding` compiles the decoders in,
+`proprietary_codecs` adds them to the run-time allow lists. The maintainer accepted shipping these decoders on
+2026-11-09; patent licensing is the maintainer's call. They do not set `is_chrome_branded`.
+
+Generate and confirm the branding and the codecs took (expect `branding_file_path = "//arkt/branding/BRANDING"`,
+`proprietary_codecs = true`, `ffmpeg_branding = "Chrome"`):
 
     cd $CR && gn gen out/Arkt && gn args out/Arkt --list=branding_file_path --short
+    gn args out/Arkt --list=proprietary_codecs --short && gn args out/Arkt --list=ffmpeg_branding --short
+
+After building, `engine/tools/audio-decode` (a loopback `decodeAudioData` page, usage in its header) must exit `0` on
+the bundle.
 
 Before the build, and every hour while it runs: the Chromium disk needs at least 40 GB free; the internal disk (it
 holds swap) needs at least 8 GiB free. Record the swap use each time. Below about 4 GiB free on `/`, stop the build by
