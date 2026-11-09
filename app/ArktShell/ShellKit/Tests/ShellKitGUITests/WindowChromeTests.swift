@@ -81,15 +81,63 @@ final class WindowChromeTests: XCTestCase {
     XCTAssertTrue(root.sidebarVisible)
   }
 
-  func testTitlebarContainerIsNarrowedToSidebar() throws {
+  func testTitlebarButtonHostIsNarrowedToSidebar() throws {
     let controller = ShellWindowController(engine: InMemoryEngine(), sidebar: StubSidebar.sample())
     let window = try XCTUnwrap(controller.window as? ShellWindow)
     window.contentView?.layoutSubtreeIfNeeded()
-    let container = try XCTUnwrap(window.standardWindowButton(.closeButton)?.superview?.superview)
-    XCTAssertEqual(container.frame.minX, 0)
-    XCTAssertEqual(container.frame.width, 190)
+    let titlebar = try XCTUnwrap(window.standardWindowButton(.closeButton)?.superview)   // NSTitlebarView
+    let inWindow = titlebar.convert(titlebar.bounds, to: nil)
+    XCTAssertEqual(inWindow.minX, 0)
+    XCTAssertEqual(inWindow.width, 190)
     // As tall as the sidebar's traffic-light strip, so it never covers the URL bar below it.
-    XCTAssertEqual(container.frame.height, ShellMetrics.standard.sidebarTopBarHeight)
+    XCTAssertEqual(inWindow.height, ShellMetrics.standard.sidebarTopBarHeight)
+  }
+
+  /// #808: the titlebar container also hosts AppKit's titlebar decoration, which draws the window's top rim (a bright
+  /// top edge with rounded corners). Narrowed with the buttons, that rim ended in a corner at the sidebar's edge, next
+  /// to the card, so the docked sidebar looked like a separate card. The decoration spans the window, as in a stock
+  /// window, at the smallest window size and in light and dark.
+  func testWindowTopRimSpansTheWindowWhileDocked() throws {
+    NSApp.setActivationPolicy(.accessory)
+    for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+      let controller = ShellWindowController(engine: InMemoryEngine(), sidebar: StubSidebar.sample())
+      let window = try XCTUnwrap(controller.window as? ShellWindow)
+      defer { controller.close() }
+      window.appearance = NSAppearance(named: appearance)
+      window.setContentSize(window.minSize)
+      controller.showWindow(nil)
+      let root = try XCTUnwrap(window.contentView as? ShellRootView)
+      // Hidden and shown again: docking places the titlebar again too.
+      root.sidebarVisible = false
+      root.layoutSubtreeIfNeeded()
+      root.sidebarVisible = true
+      root.layoutSubtreeIfNeeded()
+      // AppKit puts the titlebar back in its own passes after showing the buttons; the shell places it again on each
+      // layout, resize and key change. Place it now rather than wait for one of those.
+      root.reapplyTrafficLights()
+
+      let titlebar = try XCTUnwrap(window.standardWindowButton(.closeButton)?.superview)
+      let container = try XCTUnwrap(titlebar.superview)                                  // NSTitlebarContainerView
+      XCTAssertEqual(container.frame.minX, 0, "\(appearance.rawValue)")
+      XCTAssertEqual(container.frame.width, window.frame.width, "\(appearance.rawValue)")
+      let decorations = container.subviews.filter { $0 !== titlebar && !$0.isHidden }
+      XCTAssertFalse(decorations.isEmpty, "the titlebar decoration is a sibling of the button host")
+      for decoration in decorations {
+        let inWindow = decoration.convert(decoration.bounds, to: nil)
+        XCTAssertEqual(inWindow.minX, 0, "\(type(of: decoration)) \(appearance.rawValue)")
+        XCTAssertEqual(inWindow.width, window.frame.width, "\(type(of: decoration)) \(appearance.rawValue)")
+      }
+      XCTAssertEqual(titlebar.convert(titlebar.bounds, to: nil).width, root.effectiveSidebarWidth,
+                     "only the buttons' host stays in the sidebar")
+
+      // The full-width decoration takes no clicks: the card's top band, beside and far from the sidebar, is the card's.
+      let frameView = try XCTUnwrap(root.superview)
+      for x in [root.card.frame.minX + 4, root.card.frame.midX] {
+        let point = NSPoint(x: x, y: window.frame.height - 20)
+        let hit = try XCTUnwrap(frameView.hitTest(frameView.convert(point, from: nil)))
+        XCTAssertTrue(hit.isDescendant(of: root.card), "x \(x): got \(hit)")
+      }
+    }
   }
 
   func testClickNearWindowTopInsideCardReachesCard() throws {
