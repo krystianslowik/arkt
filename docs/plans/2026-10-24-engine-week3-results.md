@@ -6390,3 +6390,96 @@ profiles under `profiles/784-20261108/` deleted. The three GPU crashes (runs A, 
 crash wrote their dumps to Chromium's shared `Crashpad/pending` folder, not to the profile; those four files (matched
 by time) were deleted, nothing else there. Nothing touched the clipboard (no copy or
 paste command was sent). Nothing under `~/Applications/ArktTest` or `/Applications/Arkt.app` was touched.
+
+## #806: Unity audio decoding fails (Space Waves)
+
+Date 2026-11-09. Branch `engine/806-unity-audio` from `origin/main` (`801383c`). Investigation only: no overlay,
+patch, facade or `args.gn` change. The fix is a build and licensing decision for the maintainer (below).
+
+### Gate
+
+- Seam: none needed to diagnose. The cause is two GN args, so a fix would be an `args.gn` change, not a patch.
+- Facade header: unchanged; both copies `cmp` identical.
+- `.patches`: unchanged, 15 lines, 15 `arkt` commits above `156.0.8078.48`, in sync.
+- Overlay link: `$CR/arkt` points at this worktree's `engine/arkt`.
+- Build: none. The existing `out/Spike` (`$CR` at `bd284c54bd`, patch 0015) was run as is. Chromium disk 1.9 TB
+  free, internal 71 GB, swap 7.6 of 9 GB used at the start and at the end.
+- Environment: macOS 27.0, Mac14,9 (arm64).
+
+### Cause
+
+Unity's web build stores every compressed `AudioClip` as AAC in an MP4 container (Unity manual, "Audio in Web":
+AAC is the only compression it uses there) and decodes it in the page with `decodeAudioData`. Our builds cannot
+decode AAC:
+
+- Both `out/Spike` and `out/Arkt` leave the codec args at their defaults
+  (`gn args out/<dir> --list=proprietary_codecs --short` and `--list=ffmpeg_branding`): `proprietary_codecs = false`
+  (it defaults to `is_chrome_branded`) and `ffmpeg_branding = "Chromium"`.
+- `decodeAudioData` runs through `media::AudioFileReader` (`content/renderer/media/audio_decoder.cc`), which is FFmpeg
+  only. There is no platform-decoder path for it.
+- `ffmpeg_branding = "Chromium"` compiles FFmpeg without the AAC decoder:
+  `third_party/ffmpeg/chromium/config/Chromium/mac/arm64/config_components.h` has `CONFIG_AAC_DECODER 0` and
+  `CONFIG_AAC_DEMUXER 0`; the `Chrome` config has both at `1`. `CONFIG_MOV_DEMUXER` is `1` in both, so the MP4 opens
+  and the decode fails.
+- `proprietary_codecs = false` also keeps `aac` out of FFmpeg's allow lists at run time
+  (`GetAllowedAudioDecoders` in `media/ffmpeg/ffmpeg_common.cc`, `GetAllowedDemuxers` in `media/filters/ffmpeg_glue.cc`).
+  A fix needs both args; either one alone still fails.
+
+Not the cause: delivery and Content-Encoding (Vorbis decodes when served with `br` and `gzip`, AAC fails in every
+form), the sandbox or audio service (WAV, MP3, Vorbis and Opus decode in the same page), and Arkt windows (the failure
+is in the renderer's decoder, before any window code).
+
+### The game's own audio
+
+The game's `.data.br` (`files.crazygames.com/space-waves/114/Build/`, 9.1 MB, 18.4 MB after `brotli -d`) holds four
+MP4 files (`ftyp mp42`, four `mp4a` tracks; no `OggS`, no `FSB5`). `ffprobe` on each: `aac`, profile `LC`, 44100 Hz,
+three stereo and one mono. Four clips, matching the four `Loading FSB failed` lines.
+
+### Reproduction (`out/Spike/Chromium.app`, fresh profiles under `arkt-artifacts/806/`, `--use-mock-keychain`)
+
+| Run | Result |
+|---|---|
+| The game, `https://www.crazygames.com/game/space-waves`, 60 s, `--enable-logging=stderr --log-level=0` | the reported log exactly: `Creating WebGL 2.0 context.`, four `Decode error: EncodingError: Unable to decode audio data`, `Loading FSB failed for audio clip` for `music_race_mode`, `music`, `music_endless_mode`, `explosion`, four `Uncaught (in promise) EncodingError: Unable to decode audio data` |
+| `engine/tools/audio-decode` (new, loopback `127.0.0.1:8806`) | server exit `1`. `canPlayType` empty for `audio/mp4; codecs="mp4a.40.2"` and `audio/aac`, `probably` for MP3, Vorbis, Opus. WAV, MP3, Vorbis, Opus decode; `aac.m4a`, `aac.aac` (ADTS) and `aac.m4a` with `br` and `gzip` fail with `EncodingError: Unable to decode audio data`; Vorbis with `br` and `gzip` decodes |
+
+Comparison: Chrome for Testing 158.0.8127.18 (the copy Playwright keeps in its cache, its own bundle id, a throwaway
+profile; the maintainer's own Chrome was not launched), same page: server exit `0`, every case decodes, `canPlayType`
+`probably` for both AAC types. Chrome for Testing is built with `ffmpeg_branding = "Chrome"` and proprietary codecs.
+
+Not established: whether gameplay continues without sound. The 60 s run had no user gesture, so the game never left
+its start screen (the `AudioContext was not allowed to start` lines are the autoplay policy, not this bug).
+
+### Regression fixture
+
+`engine/tools/audio-decode/`: `server.mjs`, `index.html` and six 0.25 s fixtures (72 KB: WAV, MP3, Vorbis, Opus,
+AAC in MP4, AAC in ADTS; AAC made with `afconvert`, the rest with `ffmpeg`). The server serves the fixtures as
+`application/octet-stream`, optionally with `Content-Encoding` `br` or `gzip` as Unity's loader receives them, prints
+the page's result and exits `0` only when every case decodes. Today it fails on the engine and passes on Chrome for
+Testing; once AAC is in the build it is the check that it works. Usage is in the file's header.
+
+### Options for the maintainer
+
+1. `proprietary_codecs = true` and `ffmpeg_branding = "Chrome"` in both `args.gn` (and `engine/README.md`). No patch.
+   Brings AAC and H.264 (and the HEVC and Dolby paths those args gate) into FFmpeg, as every major Chromium-based
+   browser ships. Costs a full rebuild of `out/Arkt` (4-7 h, swap-bound, `README`) and most of `out/Spike`. Shipping
+   AAC and H.264 decoders in a distributed binary raises patent licensing questions that are the maintainer's to
+   weigh.
+2. Platform decoders (AudioToolbox for AAC) behind `proprietary_codecs = true` with `ffmpeg_branding = "Chromium"`:
+   keeps the patented decoders out of our binary, but `decodeAudioData` has no platform path today, so this is a
+   patch series in `media/`, not a seam.
+3. Leave it: document that AAC and H.264 do not play (Unity web games silent, many MP4 videos fail). Not a fix.
+
+### Patch budget
+
+| Source | Count |
+|---|---|
+| `.patches` lines | 15 |
+| `arkt` commits above `156.0.8078.48` | 15 |
+
+In sync; no patch file changed. Facade header copies `cmp` identical.
+
+### Cleanup
+
+Every browser and loopback server stopped by exact PID (`ps -p` prints nothing for each). The throwaway profiles,
+the downloaded game data and the scratch fixtures under `arkt-artifacts/806/` deleted. Nothing touched the clipboard,
+the Keychain (mock keychain only) or `/Applications/Arkt.app`.

@@ -1,0 +1,33 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>audio-decode pending</title>
+<pre id="out"></pre>
+<script>
+const cases = [
+  'tone.wav', 'mp3.mp3', 'vorbis.ogg', 'opus.ogg', 'aac.m4a', 'aac.aac',
+  'enc/br/aac.m4a', 'enc/gz/aac.m4a', 'enc/br/vorbis.ogg', 'enc/gz/vorbis.ogg',
+];
+const types = [
+  'audio/mp4; codecs="mp4a.40.2"', 'audio/aac', 'audio/mpeg',
+  'audio/ogg; codecs="vorbis"', 'audio/ogg; codecs="opus"',
+];
+(async () => {
+  const ctx = new OfflineAudioContext(2, 44100, 44100);
+  const probe = document.createElement('audio');
+  const result = { ua: navigator.userAgent, canPlayType: {}, decode: {} };
+  for (const t of types) result.canPlayType[t] = probe.canPlayType(t);
+  for (const c of cases) {
+    try {
+      const buf = await (await fetch(c)).arrayBuffer();
+      const bytes = buf.byteLength;
+      const audio = await ctx.decodeAudioData(buf);
+      result.decode[c] = `ok bytes=${bytes} frames=${audio.length} ch=${audio.numberOfChannels}`;
+    } catch (e) {
+      result.decode[c] = `FAIL ${e.name}: ${e.message}`;
+    }
+  }
+  document.getElementById('out').textContent = JSON.stringify(result, null, 1);
+  await fetch('/result', { method: 'POST', body: JSON.stringify(result) });
+  document.title = 'audio-decode done';
+})();
+</script>
