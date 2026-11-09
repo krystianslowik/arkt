@@ -1,5 +1,6 @@
 import CoreLocation
 import EngineAPI
+import Foundation
 
 /// What macOS lets Arkt itself do for one permission, apart from any site's setting (#786). Page info shows a
 /// "Turned off in macOS" state on the row only once macOS has denied access: while macOS has not decided, it still asks
@@ -20,16 +21,98 @@ enum SystemPermissionAccess: Equatable, Sendable {
   }
 }
 
+/// Why macOS keeps a permission from every site, for the note on its page info row.
+enum SystemPermissionBlock: Equatable, Sendable {
+  /// macOS denies Arkt itself the permission (#786).
+  case appAccess
+  /// Location Services is off for the whole Mac, so no app gets the location (#856).
+  case locationServices
+
+  /// The note under the row's title.
+  var note: String {
+    switch self {
+    case .appAccess: "Turned off in macOS"
+    case .locationServices: "Location Services is off in macOS"
+    }
+  }
+
+  /// The note as VoiceOver reads it after the row's title: lowercase where the note is a plain phrase, the feature's
+  /// name as written.
+  var spokenNote: String {
+    switch self {
+    case .appAccess: "turned off in macOS"
+    case .locationServices: note
+    }
+  }
+}
+
+/// Whether Location Services is on for the whole Mac, read off the main thread and cached (#856). Apple warns that
+/// `CLLocationManager.locationServicesEnabled()` can block, and freeze the UI on the main thread; the cache is read
+/// again when macOS reports a location change and each time page info asks, and the main actor only reads the cache.
+@MainActor
+final class LocationServicesState {
+  /// The last value read; nil until the first read lands, when nothing is assumed.
+  private(set) var isEnabled: Bool?
+  /// Runs when a read changes the cached value, the first read included.
+  var onChange: (@MainActor () -> Void)?
+  private let read: @Sendable () -> Bool
+  private var reading: Task<Void, Never>?
+
+  /// `read` runs on the concurrent pool, never on the main thread. Tests pass their own; nothing is read until
+  /// `refresh()`.
+  init(read: @escaping @Sendable () -> Bool) {
+    self.read = read
+  }
+
+  /// Reads the setting again off the main thread. A refresh asked for while a read is running joins it and returns
+  /// nil; otherwise the returned task ends once the cache holds the new value.
+  @discardableResult
+  func refresh() -> Task<Void, Never>? {
+    guard reading == nil else { return nil }
+    let read = self.read
+    let task = Task { [weak self] in
+      let value = await Self.readOffMain(read)
+      guard let self else { return }
+      self.reading = nil
+      guard value != self.isEnabled else { return }
+      self.isEnabled = value
+      self.onChange?()
+    }
+    reading = task
+    return task
+  }
+
+  @concurrent
+  private nonisolated static func readOffMain(_ read: @Sendable () -> Bool) async -> Bool {
+    read()
+  }
+}
+
 /// macOS's own state for the permissions page info lists. Location only, for now: camera, microphone, notifications
 /// and the clipboard follow with the shell's system permission work.
 @MainActor
 enum SystemPermissions {
-  /// Reading the authorization status never asks the user; only a request or starting updates does, and nothing here
-  /// does either.
-  private static let locationManager = CLLocationManager()
+  /// Posted on the main thread when the cached macOS state changed; an open page info panel reads it again.
+  nonisolated static let didChange = Notification.Name("ArktSystemPermissionsDidChange")
 
-  /// The location state of this app as macOS keeps it. Location Services turned off for the whole Mac leaves the
-  /// app's own state as it was, so it is not counted here.
+  /// Reading the authorization status never asks the user; only a request or starting updates does, and nothing here
+  /// does either. Its delegate rereads Location Services whenever macOS reports a change, and once at creation.
+  private static let locationManager: CLLocationManager = {
+    let manager = CLLocationManager()
+    manager.delegate = locationDelegate
+    return manager
+  }()
+  private static let locationDelegate = LocationManagerDelegate()
+
+  /// Location Services for the whole Mac, cached (#856).
+  private static let locationServices: LocationServicesState = {
+    let state = LocationServicesState(read: { CLLocationManager.locationServicesEnabled() })
+    state.onChange = { NotificationCenter.default.post(name: didChange, object: nil) }
+    return state
+  }()
+
+  /// The location state of this app as macOS keeps it. macOS also reports `.denied` while Location Services is off for
+  /// the whole Mac (`CLLocationManager.h`), so `blocks` asks `locationServices` which of the two it is.
   static var location: SystemPermissionAccess {
     switch locationManager.authorizationStatus {
     case .notDetermined: .notDetermined
@@ -40,8 +123,32 @@ enum SystemPermissions {
     }
   }
 
-  /// The kinds macOS denies Arkt, for `PageInfoModel`.
-  static func deniedKinds() -> Set<SitePermissionKind> {
-    location.isDenied ? [.location] : []
+  /// Which permissions macOS keeps from every site, and why. Location Services off for the whole Mac wins over the
+  /// app's own state: no site gets the location either way, and it is the setting the user has to change. Until the
+  /// first read of Location Services lands (`nil`), only the app's own state counts.
+  nonisolated static func blocks(location: SystemPermissionAccess,
+                                 locationServicesEnabled: Bool?) -> [SitePermissionKind: SystemPermissionBlock] {
+    if locationServicesEnabled == false { return [.location: .locationServices] }
+    return location.isDenied ? [.location: .appAccess] : [:]
+  }
+
+  /// The permissions macOS keeps from every site now, for `PageInfoModel`. Returns the cached Location Services state
+  /// and reads it again off the main thread; a changed value posts `didChange`.
+  static func blockedKinds() -> [SitePermissionKind: SystemPermissionBlock] {
+    let access = location                       // creates the manager, whose delegate starts the first read
+    locationServices.refresh()
+    return blocks(location: access, locationServicesEnabled: locationServices.isEnabled)
+  }
+
+  fileprivate static func locationAuthorizationDidChange() {
+    locationServices.refresh()
+  }
+}
+
+/// The location manager's delegate. macOS calls it on the thread that made the manager, the main thread, when the
+/// manager is made and when the app's authorization changes, which includes Location Services going on or off.
+private final class LocationManagerDelegate: NSObject, CLLocationManagerDelegate {
+  nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+    Task { @MainActor in SystemPermissions.locationAuthorizationDidChange() }
   }
 }

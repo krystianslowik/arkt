@@ -4,13 +4,14 @@ import EngineAPI
 import EngineAPITestSupport
 @testable import ShellUI
 
-/// The page info panel's "Turned off in macOS" state (#786) in the shell window, on InMemoryEngine's page info. The
+/// The page info panel's "Turned off in macOS" state (#786) and Location Services off for the whole Mac (#856) in the
+/// shell window, on InMemoryEngine's page info. The
 /// macOS location state comes from the panel's seam, never from the system: no test reads or asks for real access.
 @MainActor
 final class PageInfoSystemPermissionTests: XCTestCase {
   private var engine: InMemoryEngine!
   private var controller: ShellWindowController!
-  private var denied: Set<SitePermissionKind> = []
+  private var denied: [SitePermissionKind: SystemPermissionBlock] = [:]
 
   override func setUp() async throws {
     _ = NSApplication.shared
@@ -22,7 +23,7 @@ final class PageInfoSystemPermissionTests: XCTestCase {
     controller.window?.contentView?.layoutSubtreeIfNeeded()
     controller.pageInfo.reduceMotion = { true }
     controller.pageInfo.increaseContrast = { false }
-    controller.pageInfo.deniedInMacOS = { [weak self] in self?.denied ?? [] }
+    controller.pageInfo.deniedInMacOS = { [weak self] in self?.denied ?? [:] }
   }
 
   // XCTest keeps each test case object until the run ends: release the windows too, not only hide them (#805).
@@ -48,7 +49,7 @@ final class PageInfoSystemPermissionTests: XCTestCase {
   }
 
   func testDeniedLocationShowsTheNoteUnderItsTitleAndKeepsThePopUp() throws {
-    denied = [.location]
+    denied = [.location: .appAccess]
     let view = try openPanel()
     let location = try row(.location, in: view)
     XCTAssertFalse(location.note.isHidden)
@@ -77,19 +78,51 @@ final class PageInfoSystemPermissionTests: XCTestCase {
 
   /// The macOS state is read again when the panel follows a change: denied, then decided otherwise, drops the note.
   func testTheNoteFollowsTheStateOnReread() throws {
-    denied = [.location]
+    denied = [.location: .appAccess]
     let view = try openPanel()
     XCTAssertFalse(try row(.location, in: view).note.isHidden)
-    denied = []
+    denied = [:]
     controller.pageInfo.pageDidChange(currentTab: controller.currentTab)
     view.layoutSubtreeIfNeeded()
     XCTAssertTrue(try row(.location, in: view).note.isHidden)
     XCTAssertEqual(try row(.location, in: view).frame.height, PageInfoMetrics.rowHeight)
   }
 
+  /// Location Services off for the whole Mac (#856): its own note under the title, the pop-up still enabled, and
+  /// VoiceOver hears the note with "Location Services" as written.
+  func testLocationServicesOffShowsItsOwnNote() throws {
+    denied = [.location: .locationServices]
+    let view = try openPanel()
+    let location = try row(.location, in: view)
+    XCTAssertFalse(location.note.isHidden)
+    XCTAssertEqual(location.note.stringValue, "Location Services is off in macOS")
+    XCTAssertEqual(location.frame.height, PageInfoMetrics.notedRowHeight)
+    XCTAssertGreaterThanOrEqual(location.note.frame.minY, location.title.frame.maxY, "the note sits under the title")
+    XCTAssertLessThanOrEqual(location.note.frame.maxX, location.popUp.frame.minX, "the note stops before the pop-up")
+    XCTAssertGreaterThanOrEqual(location.note.frame.width, location.note.attributedStringValue.size().width,
+                                "the note fits at the default width")
+    XCTAssertTrue(location.popUp.isEnabled, "the stored setting can still be changed")
+    XCTAssertEqual(location.popUp.accessibilityLabel(), "Location, Location Services is off in macOS")
+  }
+
+  /// The cached macOS state changed while the panel is open: the panel rereads it and shows the new note at once.
+  func testTheOpenPanelFollowsAChangeOfTheMacOSState() throws {
+    let view = try openPanel()
+    XCTAssertTrue(try row(.location, in: view).note.isHidden)
+    denied = [.location: .locationServices]
+    NotificationCenter.default.post(name: SystemPermissions.didChange, object: nil)
+    view.layoutSubtreeIfNeeded()
+    XCTAssertEqual(try row(.location, in: view).note.stringValue, "Location Services is off in macOS")
+    XCTAssertFalse(try row(.location, in: view).note.isHidden)
+    denied = [.location: .appAccess]
+    NotificationCenter.default.post(name: SystemPermissions.didChange, object: nil)
+    view.layoutSubtreeIfNeeded()
+    XCTAssertEqual(try row(.location, in: view).note.stringValue, "Turned off in macOS")
+  }
+
   /// The narrowest panel: title, note and pop-up do not overlap.
   func testNarrowPanelKeepsTitleNoteAndPopUpApart() throws {
-    denied = [.location]
+    denied = [.location: .appAccess]
     let view = try openPanel()
     view.frame.size.width = PageInfoMetrics.minWidth
     view.layoutSubtreeIfNeeded()
@@ -99,11 +132,24 @@ final class PageInfoSystemPermissionTests: XCTestCase {
     XCTAssertGreaterThan(location.note.frame.width, 0)
   }
 
+  /// The narrowest panel with the longer Location Services note: it stays inside the row, before the pop-up.
+  func testNarrowPanelKeepsTheLocationServicesNoteBeforeThePopUp() throws {
+    denied = [.location: .locationServices]
+    let view = try openPanel()
+    view.frame.size.width = PageInfoMetrics.minWidth
+    view.layoutSubtreeIfNeeded()
+    let location = try row(.location, in: view)
+    XCTAssertLessThanOrEqual(location.title.frame.maxX, location.popUp.frame.minX)
+    XCTAssertLessThanOrEqual(location.note.frame.maxX, location.popUp.frame.minX)
+    XCTAssertGreaterThan(location.note.frame.width, 0)
+    XCTAssertEqual(location.note.lineBreakMode, .byTruncatingTail)
+  }
+
   /// A very long engine title at the narrowest width: title and note truncate before the pop-up.
   func testLongTitleTruncatesBeforeThePopUp() {
     let title = String(repeating: "Precise location for this site ", count: 4)
     let permission = SitePermission(kind: .location, title: title, setting: .allow, isDefault: false)
-    let row = PageInfoPermissionRow(PageInfoModel.Row(permission, deniedInMacOS: true))
+    let row = PageInfoPermissionRow(PageInfoModel.Row(permission, deniedInMacOS: .appAccess))
     row.frame = NSRect(x: 0, y: 0, width: PageInfoMetrics.minWidth, height: row.height)
     row.layoutSubtreeIfNeeded()
     XCTAssertEqual(row.height, PageInfoMetrics.notedRowHeight)
