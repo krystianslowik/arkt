@@ -45,8 +45,8 @@ explanations. Its proposed sidebar switch is omitted under C. The existing Chrom
 - **What pins**: extensions with an action. A new extension is not pinned (#590); pin it from the install toast or its row in the Extensions panel (B's "Show in
   sidebar" switch is not used under C). A
   profile syncs the order with the Space's profile.
-- **Order**: the panel rows follow pin order. Drag the grip to reorder. The menu has Move Left and
-  Move Right for the keyboard (disabled at the ends). Cmd-E cycles the pinned extensions in this order (KB-047: hold
+- **Order**: the panel rows follow pin order. Drag the grip to reorder. The menu has Move Up and
+  Move Down for the keyboard (disabled at the ends). Cmd-E cycles the pinned extensions in this order (KB-047: hold
   Command, tap E; each tap opens the next one's popup; release Command to leave it open).
 - **Click**: opens the extension's popup anchored under the panel row. A badge updates live.
   Right-click or Ctrl-click opens the context menu.
@@ -60,8 +60,8 @@ A native `NSMenu`, drawn by AppKit like the tab menus (`design/tab-context-menus
 |---|---|---|
 | (extension name) | disabled header | |
 | Options... | extension has an options page | opens it in a tab |
-| Unpin from Sidebar / Pin to Sidebar | always | the title follows the state |
-| Move Left, Move Right | pinned only; each disabled at its end | |
+| Unpin / Pin | always | the title follows the state |
+| Move Up, Move Down | pinned only; each disabled at its end | |
 | This Can Read and Change Site Data > | extension has host permissions | submenu: When You Click the Extension, On <host>, On All Sites (one checked) |
 | Manage Extension... | always | opens its entry in Settings, Extensions |
 | Remove from Arkt... | always | opens the remove sheet |
@@ -112,7 +112,7 @@ Transform and opacity only.
 ## VoiceOver and accessibility
 
 - The Extensions entry point is a button labelled "Extensions".
-- Move Left and Move Right in the menu are the keyboard route for ordering; dragging is never the only way.
+- Move Up and Move Down in the menu are the keyboard route for ordering; dragging is never the only way.
 - The panel is a dialog "Extensions": a list; each row's pin button is a toggle ("Pin <name>", pressed when pinned).
 - An action row reads its name and status line together, for example "<name>, 12 clips on this page"; without a status
   line, it reads the name.

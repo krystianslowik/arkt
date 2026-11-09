@@ -53,7 +53,7 @@ struct ExtensionsPanelModelTests {
     #expect(status.needsAttention == attention)
   }
 
-  @Test func `move left and right step one place and stop at the ends`() {
+  @Test func `move up and down step one place and stop at the ends`() {
     let model = ExtensionsPanelModel(actions: [action("a", pinned: true), action("b", pinned: true),
                                                action("c", pinned: true), action("d")])
     #expect(model.moveTarget(of: "a", by: -1) == nil)

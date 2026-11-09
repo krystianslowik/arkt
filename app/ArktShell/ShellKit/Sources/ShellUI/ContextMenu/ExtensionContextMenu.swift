@@ -4,7 +4,7 @@ import EngineAPI
 /// The context menu of an extension action (#596, design/extensions "The context menu"): a native `NSMenu` built by
 /// `EngineMenuBuilder` from the engine's item tree, so Chromium's site access semantics stay authoritative and every
 /// title and enabled or checked state is the engine's. The design table fixes the items: the name as a disabled
-/// header, Options..., Pin or Unpin, Move Left and Move Right (pinned only, each disabled at its end), the site access
+/// header, Options..., Pin or Unpin, Move Up and Move Down (pinned only, each disabled at its end), the site access
 /// submenu (host permissions only), Manage Extension... and Remove from Arkt....
 ///
 /// A chosen item goes back to the engine through `performExtensionContextCommand`, except `manage` and `remove`,

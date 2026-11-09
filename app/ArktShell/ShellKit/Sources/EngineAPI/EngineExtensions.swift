@@ -126,12 +126,12 @@ public enum ExtensionContextCommand {
   public static let header = EngineMenuCommand(rawValue: 0)
   /// Options...: opens the extension's options page in a tab.
   public static let options = EngineMenuCommand(rawValue: 1)
-  /// Pin to Sidebar or Unpin from Sidebar, by the current state.
+  /// Pin or Unpin, by the current state.
   public static let togglePin = EngineMenuCommand(rawValue: 2)
-  /// Move Left: one place earlier in the pinned order.
-  public static let moveLeft = EngineMenuCommand(rawValue: 3)
-  /// Move Right: one place later in the pinned order.
-  public static let moveRight = EngineMenuCommand(rawValue: 4)
+  /// Move Up: one place earlier in the pinned order.
+  public static let moveUp = EngineMenuCommand(rawValue: 3)
+  /// Move Down: one place later in the pinned order.
+  public static let moveDown = EngineMenuCommand(rawValue: 4)
   public static let siteAccessOnClick = EngineMenuCommand(rawValue: 5)
   public static let siteAccessOnThisSite = EngineMenuCommand(rawValue: 6)
   public static let siteAccessOnAllSites = EngineMenuCommand(rawValue: 7)

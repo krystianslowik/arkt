@@ -159,7 +159,7 @@ final class ExtensionsPinToggle: NSButton {
 }
 
 /// The 10 pt grip at a pinned row's leading edge (six dots). Pressing it lifts the row; dragging moves it among the
-/// pinned rows. The pointer becomes the open hand over it. Hidden from accessibility: Move Left and Move Right are the
+/// pinned rows. The pointer becomes the open hand over it. Hidden from accessibility: Move Up and Move Down are the
 /// row's actions there.
 @MainActor
 final class ExtensionsGripView: NSView {

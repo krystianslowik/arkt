@@ -58,12 +58,12 @@ extension InMemoryEngine {
     var menu = [
       EngineMenuItem(title: action.name, command: ExtensionContextCommand.header, isEnabled: false),
       EngineMenuItem(title: "Options...", command: ExtensionContextCommand.options, isEnabled: action.hasOptionsPage),
-      EngineMenuItem(title: action.isPinned ? "Unpin from Sidebar" : "Pin to Sidebar",
+      EngineMenuItem(title: action.isPinned ? "Unpin" : "Pin",
                      command: ExtensionContextCommand.togglePin),
     ]
     if let place = pinnedExtensionIDs.firstIndex(of: action.extensionID) {
-      menu.append(EngineMenuItem(title: "Move Left", command: ExtensionContextCommand.moveLeft, isEnabled: place > 0))
-      menu.append(EngineMenuItem(title: "Move Right", command: ExtensionContextCommand.moveRight,
+      menu.append(EngineMenuItem(title: "Move Up", command: ExtensionContextCommand.moveUp, isEnabled: place > 0))
+      menu.append(EngineMenuItem(title: "Move Down", command: ExtensionContextCommand.moveDown,
                                  isEnabled: place < pinnedExtensionIDs.count - 1))
     }
     if action.siteAccess != .noSiteAccess {
@@ -92,9 +92,9 @@ extension InMemoryEngine {
     switch command {
     case ExtensionContextCommand.togglePin:
       setExtensionPinned(extensionID, pinned: !action.isPinned)
-    case ExtensionContextCommand.moveLeft, ExtensionContextCommand.moveRight:
+    case ExtensionContextCommand.moveUp, ExtensionContextCommand.moveDown:
       guard let place = pinnedExtensionIDs.firstIndex(of: extensionID) else { return }
-      movePinnedExtension(extensionID, to: place + (command == ExtensionContextCommand.moveLeft ? -1 : 1))
+      movePinnedExtension(extensionID, to: place + (command == ExtensionContextCommand.moveUp ? -1 : 1))
     case ExtensionContextCommand.siteAccessOnClick: setSiteAccess(.onClick, of: extensionID)
     case ExtensionContextCommand.siteAccessOnThisSite: setSiteAccess(.onThisSite, of: extensionID)
     case ExtensionContextCommand.siteAccessOnAllSites: setSiteAccess(.onAllSites, of: extensionID)

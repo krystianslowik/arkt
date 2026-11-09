@@ -5,7 +5,7 @@ extension AXID {
     public static let panel = "extensions.panel"
     /// The list of rows (a list labelled "Extensions").
     public static let list = "extensions.list"
-    /// One extension. Label: its name. Actions: Move Left and Move Right when pinned, Show Menu.
+    /// One extension. Label: its name. Actions: Move Up and Move Down when pinned, Show Menu.
     public static let row = "extensions.row"
     /// Runs the extension's action. Label: "<name>, <status>". Value: the action's id.
     public static let rowRun = "extensions.row.run"
