@@ -182,10 +182,21 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
     axProxyRows.invalidate()
   }
 
-  /// Shows the context menu of a Ctrl-click, when `menu(for:)` gave one; tests replace it to record the request
-  /// instead of tracking the menu.
+  /// Shows the context menu of a right-click or Ctrl-click, when `menu(for:)` gave one, for the view given; tests
+  /// replace it to record the request instead of tracking the menu.
   var presentContextMenu: @MainActor (NSMenu?, NSEvent, NSView) -> Void = { menu, event, view in
     if let menu { NSMenu.popUpContextMenu(menu, with: event, for: view) }
+  }
+
+  /// The view a row's context menu is shown for: the page that lists the proxy outline (#860). AppKit makes that
+  /// view the open menu's accessibility parent, and clients reach the menu's items only through it. This outline is
+  /// not in the accessibility tree (the proxy stands for it), so a menu shown for it was on screen but could not be
+  /// found by XCUITest or walked to by VoiceOver.
+  var contextMenuAnchor: NSView { axProxyRows.parentView ?? self }
+
+  /// A right-click or Ctrl-click: `menu(for:)` sets `clickedRow`, which the menu's delegate reads to fill it.
+  private func showContextMenu(for event: NSEvent) {
+    presentContextMenu(menu(for: event), event, contextMenuAnchor)
   }
 
   public override func mouseDown(with event: NSEvent) {
@@ -195,7 +206,7 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
     // A Ctrl-click is a secondary click: the row's context menu, as a right-click shows, never the click action.
     // Left to the table, it sends the row action with Control set, which activates the row (#277).
     if modifiers.contains(.control) {
-      presentContextMenu(menu(for: event), event, self)
+      showContextMenu(for: event)
       return
     }
     clickModifiers = modifiers
@@ -233,10 +244,11 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
     }
   }
 
-  /// A right-click ends a rename in progress first too, as a left click does.
+  /// A right-click ends a rename in progress first too, as a left click does. The menu is shown here rather than by
+  /// `super`, which would show it for this outline, out of the accessibility tree (#860).
   public override func rightMouseDown(with event: NSEvent) {
     commitRenameInProgress()
-    super.rightMouseDown(with: event)
+    showContextMenu(for: event)
   }
 
   /// A click anywhere in the outline ends a rename in progress first, keeping the typed name (design 4.1): the
@@ -845,11 +857,19 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
       if let present = self.presentAccessibilityMenu {
         present(menu, row)
       } else {
-        let rect = self.outlineView.rect(ofRow: row)
-        menu.popUp(positioning: nil, at: NSPoint(x: rect.minX, y: rect.maxY), in: self.outlineView)
+        let placement = self.accessibilityMenuPlacement(forRow: row)
+        menu.popUp(positioning: nil, at: placement.point, in: placement.view)
       }
       return true
     }
+  }
+
+  /// Where a VoiceOver show-menu pops `row`'s menu up: under the row's bottom-left corner, in the outline's context
+  /// menu anchor, so the open menu hangs off a view clients reach (#860).
+  func accessibilityMenuPlacement(forRow row: Int) -> (view: NSView, point: NSPoint) {
+    let anchor = outlineView.contextMenuAnchor
+    let rect = outlineView.rect(ofRow: row)
+    return (anchor, anchor.convert(NSPoint(x: rect.minX, y: rect.maxY), from: outlineView))
   }
 
   /// Shows the menu of a VoiceOver show-menu on `row`; nil pops it up under the row. Tests replace it to record the
