@@ -42,13 +42,13 @@ public final class ShellWindow: NSWindow {
   /// of the sidebar (window coordinates; the overlay's origin when it is revealed). AppKit resets these frames on
   /// several events; ShellRootView.layout() and the window controller call this again each time.
   ///
-  /// The titlebar container is narrowed to the sidebar so it never sits over (and steals clicks from) the
-  /// content card; it is never narrower than the three buttons, so they stay hit-testable. With the sidebar hidden
-  /// and no overlay out it is zero wide and the buttons are hidden. While the overlay slides, the container keeps the
-  /// overlay's resting extent and only the buttons move with it.
+  /// The buttons' host (`NSTitlebarView`) is narrowed to the sidebar so it never sits over (and steals clicks from)
+  /// the content card; it is never narrower than the three buttons, so they stay hit-testable. With the sidebar hidden
+  /// and no overlay out it is zero wide and the buttons are hidden. Its container keeps the window's width. While the
+  /// overlay slides, the host keeps the overlay's resting extent and only the buttons move with it.
   ///
-  /// Showing, hiding or fading a standard button makes AppKit lay its titlebar out again at once: the container goes
-  /// back to the window's full width and the buttons to AppKit's own places (#807). So visibility and opacity are set
+  /// Showing, hiding or fading a standard button makes AppKit lay its titlebar out again at once: the host goes back
+  /// to the window's full width and the buttons to AppKit's own places (#807). So visibility and opacity are set
   /// first and the geometry last, every call.
   public func layoutTrafficLights(sidebarWidth: CGFloat) {
     guard !styleMask.contains(.fullScreen) else { return }
@@ -76,8 +76,13 @@ public final class ShellWindow: NSWindow {
     let height = max(metrics.sidebarTopBarHeight, origin.y + close.frame.height) + offset.y
     let buttonsExtent = origin.x * 2 + CGFloat(kinds.count - 1) * metrics.trafficLightSpacing + close.frame.width
     let width = shown ? min(frame.width, offset.x + max(sidebarWidth, buttonsExtent)) : 0
-    let containerFrame = NSRect(x: 0, y: frame.height - height, width: width, height: height)
+    // The container spans the window, as in a stock window: it also hosts AppKit's titlebar decoration, which draws the
+    // window's top rim (a bright edge with rounded corners). Narrowed, that rim ended in a corner at the sidebar's edge
+    // and the docked sidebar looked like a separate card (#808). Only the buttons' host is narrowed.
+    let containerFrame = NSRect(x: 0, y: frame.height - height, width: frame.width, height: height)
     if container.frame != containerFrame { container.frame = containerFrame }
+    let titlebarFrame = NSRect(x: 0, y: 0, width: width, height: height)
+    if titlebar.frame != titlebarFrame { titlebar.frame = titlebarFrame }
     for (index, button) in buttons.enumerated() {
       let x = offset.x + slide + origin.x + CGFloat(index) * metrics.trafficLightSpacing
       let y = titlebar.bounds.height - offset.y - origin.y - button.frame.height   // titlebar view is not flipped
