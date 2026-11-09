@@ -1,7 +1,8 @@
 <p align="center">
-  <a href="https://arkt.dev">
-    <img src="design/readme/particle-mark.png" alt="Arkt particle mark" width="180" height="180">
-  </a>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="design/onboarding/screens/01-welcome-dark.png">
+    <img src="design/onboarding/screens/01-welcome-light.png" alt="The Arkt welcome screen: the Arkt mark drawn in golden particles above the line Keep the way you browse, with a Get started button." width="880">
+  </picture>
 </p>
 
 <h1 align="center">arkt</h1>
@@ -9,117 +10,100 @@
 <p align="center"><strong>Keep the way you browse.</strong></p>
 
 <p align="center">
-  Arkt is a native macOS browser built around a familiar sidebar: Spaces, pinned tabs and Today,<br>
-  with a path to bring your Arc data across.
+  A native macOS browser. A Swift and AppKit shell on a Chromium engine,<br>
+  built for a 120 Hz native interface and Chrome extensions.
 </p>
 
 <p align="center">
-  <a href="https://arkt.dev">Official website: arkt.dev</a> ·
+  <a href="https://arkt.dev">arkt.dev</a> ·
   <a href="https://arkt.dev/#get">Join the waitlist</a> ·
   <a href="CONTRIBUTING.md">Contributing</a> ·
   <a href="https://buymeacoffee.com/krystianslowik">Buy me a coffee</a>
 </p>
 
-**Pre-alpha. Not ready for daily use.** [Join the waitlist](https://arkt.dev/#get) to hear when Arkt is ready for you.
+## Status
 
-## Download the preview
+Arkt is in development. There is no download yet. A first release is in preparation.
+[Join the waitlist](https://arkt.dev/#get) to hear when it is ready.
 
-The first preview build is on the [Releases page](https://github.com/krystianslowik/arkt/releases). It is early
-software and not signed or notarized, so macOS blocks it on first open.
+The screens below are captures of Arkt's approved designs. They show the intended look of each surface.
 
-Requirements: a Mac with Apple silicon and macOS 15 or later.
+## What it is
 
-1. Download `Arkt-<version>-arm64.zip` from the latest release and unzip it.
-2. Move `Arkt.app` to `/Applications`.
-3. Open it. macOS shows a warning and does not open it. On macOS 15, Control-click > Open no longer bypasses
-   Gatekeeper. Either:
-   - Open **System Settings > Privacy & Security**, scroll to the message about Arkt and click **Open Anyway**; or
-   - Remove the quarantine flag in Terminal, then open the app:
+Arkt keeps your tabs in a sidebar, organized into Spaces. The window chrome is native AppKit, with motion paced for
+120 Hz displays. Pages run on Chromium, so sites render as they do in Chrome, and Chrome extension support is landing step by step.
 
-         xattr -dr com.apple.quarantine /Applications/Arkt.app
+## A first run worth seeing
 
-   If the warning is still on screen, click **Done** on it before you run the command (never Move to Trash).
-
-The first launch is slower than later ones while macOS checks the app. See the release notes for what the preview
-includes and how to report problems.
-
-## Interface previews
-
-Captures of Arkt’s interactive design prototypes. Features and details may change during implementation.
+The first run is one particle field that changes shape at every step. Arkt counts what it found in your browser data
+and offers to bring it across, then lets you pick a look for your first Space.
 
 <p align="center">
-  <a href="design/readme/screens/peek-open-light.png">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="design/readme/screens/peek-open-dark.png">
-      <img src="design/readme/screens/peek-open-light.png" alt="Arkt design prototype: a city guide opens in Peek over an inbox, alongside its Personal sidebar." width="800">
-    </picture>
-  </a>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="design/onboarding/screens/03-import-dark.png">
+    <img src="design/onboarding/screens/03-import-light.png" alt="Arkt first run: a large particle 37 for pinned tabs, with counts of Spaces, Favorites and folders, above the line Bring your stuff over." width="720">
+  </picture>
 </p>
 
-## What we're building
+## Features
 
-The goal is to preserve the habits you already have in Arc:
-
-- Spaces, Favorites and pinned folders keep the sidebar organized; Today tabs archive themselves.
-- Split View, Peek and small companion windows let you follow a link without losing your place.
-- A command bar opens tabs, links and searches; an importer brings your existing Arc structure across.
-- An AppKit shell surrounds Arkt's Chromium framework, with Chrome extensions as part of the design.
-
-This is the product direction, not a list of release-ready features. The [roadmap](https://github.com/krystianslowik/arkt/issues/30)
-and [implementation plans](docs/plans) track the work.
+- **Spaces and the sidebar.** Spaces, Favorites, pinned tabs and folders, with Today tabs that archive themselves.
+- **Peek.** Open a link over the page you are on, then close it or keep it.
+- **Split View.** Two to four tabs side by side in one window.
+- **Command bar.** One bar for addresses, searches, open tabs, history and actions.
+- **Extensions.** Pin the extensions you use; the rest stay one click away.
+- **Little Arkt.** Links from other apps open in a small window, so your main window stays where it was.
+- **Import.** Bring Spaces, pinned tabs, folders and Favorites across from your browser data.
 
 <table>
   <tr>
+    <th>Peek</th>
     <th>Split View</th>
-    <th>Little Arkt</th>
   </tr>
   <tr>
     <td width="50%">
-      <a href="design/readme/screens/peek-split-light.png">
-        <picture>
-          <source media="(prefers-color-scheme: dark)" srcset="design/readme/screens/peek-split-dark.png">
-          <img src="design/readme/screens/peek-split-light.png" alt="Arkt design prototype: an inbox and a city guide share one window in Split View." width="400">
-        </picture>
-      </a>
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="design/peek/screens/peek-open-dark.png">
+        <img src="design/peek/screens/peek-open-light.png" alt="Arkt Peek: a city guide opens in a floating card over an inbox, next to the Personal sidebar." width="420">
+      </picture>
     </td>
     <td width="50%">
-      <a href="design/readme/screens/la-idle-light.png">
-        <picture>
-          <source media="(prefers-color-scheme: dark)" srcset="design/readme/screens/la-idle-dark.png">
-          <img src="design/readme/screens/la-idle-light.png" alt="Arkt design prototype: a link from Messages opens in a separate Little Arkt window while the main browser stays on a calendar." width="400">
-        </picture>
-      </a>
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="design/peek/screens/peek-split-dark.png">
+        <img src="design/peek/screens/peek-split-light.png" alt="Arkt Split View: an inbox and a city guide share one window." width="420">
+      </picture>
+    </td>
+  </tr>
+  <tr>
+    <th>Command bar</th>
+    <th>Extensions</th>
+  </tr>
+  <tr>
+    <td width="50%">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="design/command-bar/screens/hybrid-tab-dark.png">
+        <img src="design/command-bar/screens/hybrid-tab-light.png" alt="Arkt command bar: results for a search across tabs, history and actions, with a preview of the selected tab." width="420">
+      </picture>
+    </td>
+    <td width="50%">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="design/extensions/screens/extensions-c-pinned-dark.png">
+        <img src="design/extensions/screens/extensions-c-pinned-light.png" alt="Arkt Extensions panel: pinned and unpinned extensions, each with a status line." width="420">
+      </picture>
     </td>
   </tr>
 </table>
 
-### Bring your structure across
+## Build from source
 
-The importer is designed to carry your Spaces, pinned tabs, folders and Favorites from Arc into Arkt. To see the shape of an Arc profile before importing, run the counts-only probe: see [docs/arc-import-probe.md](docs/arc-import-probe.md).
+The default Debug build is a development shell. It uses a WKWebView-backed engine, so it does not need a Chromium
+checkout and does not show Chromium or extension support. The `Engine` configuration runs the shell on Arkt's
+Chromium framework; see the [engine guide](engine/README.md) for that build.
 
-<p align="center">
-  <a href="design/readme/screens/advanced-light.png">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="design/readme/screens/advanced-dark.png">
-      <img src="design/readme/screens/advanced-light.png" alt="Arkt design prototype: Advanced settings with download options, page behavior and an Import from Arc control." width="560">
-    </picture>
-  </a>
-</p>
+You need macOS 15 or later, Xcode with Swift 6.2 or later, and [XcodeGen](https://github.com/yonaskolb/XcodeGen).
+CI pins the versions in [`swift-tests.yml`](.github/workflows/swift-tests.yml).
 
-[Explore the interface on arkt.dev](https://arkt.dev/#parity).
-
-<details>
-<summary>Build the development shell</summary>
-
-The default Debug build is a development shell using `FakeEngine`, backed by WKWebView. A separate `Engine`
-configuration connects the shell to Arkt's Chromium framework; that integration is still in progress. The Debug
-shell is useful for UI development, but does not demonstrate Chromium or Chrome extension support.
-
-The app targets **macOS 15+**. Building it requires Xcode with **Swift 6.2+** and
-[XcodeGen](https://github.com/yonaskolb/XcodeGen), on a macOS version supported by your Xcode release.
-The [CI configuration](.github/workflows/swift-tests.yml) pins Xcode 26.6 and XcodeGen 2.46.0.
-
-From the repository root, generate, build and open the Debug app:
+From the repository root:
 
 ```zsh
 (
@@ -130,54 +114,36 @@ From the repository root, generate, build and open the Debug app:
 )
 ```
 
-This opens the native Arkt Shell window using the WKWebView-backed development engine. A Chromium checkout is not
-needed for this build. The generated `.xcodeproj` is not committed.
-
-To run the core and non-GUI shell tests, also from the repository root:
+Run the core and non-GUI shell tests:
 
 ```zsh
 (cd app/ArktCore && swift test)
 (cd app/ArktShell/ShellKit && swift test --skip ShellKitGUITests)
 ```
 
-GUI tests require a logged-in session. See [Contributing](CONTRIBUTING.md#before-opening-a-pull-request) for the full
-checks. While a Chromium build is running, use `nice -n 20` and two jobs for Swift builds and tests, as described in
-the [capacity rules](CONTRIBUTING.md#7-code-rules).
+[CONTRIBUTING.md](CONTRIBUTING.md#before-opening-a-pull-request) has the full checks, GUI tests and the capacity rules
+for machines that also build Chromium.
 
-For the Chromium toolchain, framework setup and engine build, follow the [engine guide](engine/README.md).
-
-
-</details>
-
-## Contributing
-
-Start with an unassigned [ready issue](https://github.com/krystianslowik/arkt/issues?q=is%3Aissue%20is%3Aopen%20label%3Astatus%3Aready)
-and read the [contribution guide](CONTRIBUTING.md) before claiming it. The [roadmap](https://github.com/krystianslowik/arkt/issues/30)
-sets the order of work. Bug reports and documentation improvements are welcome too.
-
-## Support development
-
-If you'd like to help cover development time and build machines, [buy me a coffee](https://buymeacoffee.com/krystianslowik).
-You can also help by testing, reporting bugs or contributing a change.
-
-## Architecture and documentation
+## Repository
 
 | Path | What it is |
 |---|---|
-| [app/ArktCore](app/ArktCore) | Sidebar model, Arc import, persistence, archive and auto-archive policy |
-| [app/ArktShell](app/ArktShell) | AppKit app shell, XcodeGen project and `ShellKit` UI package |
-| [engine](engine/README.md) | Chromium overlay, upstream patches and engine build workflow |
-| [docs/spec](docs/spec) | Arc behavior and compatibility specification |
+| [app/ArktCore](app/ArktCore) | Sidebar model, import, persistence, archive and auto-archive |
+| [app/ArktShell](app/ArktShell) | AppKit app, XcodeGen project and the `ShellKit` UI package |
+| [engine](engine/README.md) | Chromium overlay, upstream patches and the engine build |
+| [design](design) | Approved designs, prototypes and screens for each surface |
 | [docs/plans](docs/plans) | Design, implementation plans and results |
-| [design/brand](design/brand/README.md) | Brand guide, original artwork and social graphics |
+| [design/brand](design/brand/README.md) | Brand guide, artwork and social graphics |
 
-## Independence
+## Contributing
 
-Arkt is an independent implementation. Arc's behavior is matched from its documentation, observable UI and on-disk
-data formats for import. No Arc code or assets are copied. Arkt is not affiliated with, endorsed by or connected to
-The Browser Company. Arc is a trademark of its owner and is named here to describe compatibility.
+Pick an unassigned [ready issue](https://github.com/krystianslowik/arkt/issues?q=is%3Aissue%20is%3Aopen%20label%3Astatus%3Aready)
+and read [CONTRIBUTING.md](CONTRIBUTING.md) before you claim it. The [roadmap](https://github.com/krystianslowik/arkt/issues/30)
+sets the order of work. Bug reports and documentation fixes are welcome too.
+
+If you want to help cover development time and build machines, you can [buy me a coffee](https://buymeacoffee.com/krystianslowik).
 
 ## License
 
-The source code is licensed under [MIT](LICENSE). Chromium is licensed separately under its own terms. See the
-[brand usage policy](design/brand/README.md#license) for the Arkt name, mark and wordmark.
+The source code is licensed under [MIT](LICENSE). Chromium is licensed separately under its own terms. The Arkt
+name, mark and wordmark follow the [brand usage policy](design/brand/README.md#license).
