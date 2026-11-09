@@ -32,7 +32,7 @@ enum SystemPermissionBlock: Equatable, Sendable {
   var note: String {
     switch self {
     case .appAccess: "Turned off in macOS"
-    case .locationServices: "Location Services is off in macOS"
+    case .locationServices: "Location Services off"
     }
   }
 
@@ -57,6 +57,8 @@ final class LocationServicesState {
   var onChange: (@MainActor () -> Void)?
   private let read: @Sendable () -> Bool
   private var reading: Task<Void, Never>?
+  /// A refresh was asked for while a read was running: that read's value may be stale, so one more follows it.
+  private var readAgain = false
 
   /// `read` runs on the concurrent pool, never on the main thread. Tests pass their own; nothing is read until
   /// `refresh()`.
@@ -64,19 +66,29 @@ final class LocationServicesState {
     self.read = read
   }
 
-  /// Reads the setting again off the main thread. A refresh asked for while a read is running joins it and returns
-  /// nil; otherwise the returned task ends once the cache holds the new value.
+  /// Reads the setting again off the main thread. A refresh asked for while a read is running returns nil and makes
+  /// the running task read once more after it, so a change during the read is not lost; otherwise the returned task
+  /// ends once the cache holds the new value.
   @discardableResult
   func refresh() -> Task<Void, Never>? {
-    guard reading == nil else { return nil }
+    guard reading == nil else {
+      readAgain = true
+      return nil
+    }
     let read = self.read
     let task = Task { [weak self] in
-      let value = await Self.readOffMain(read)
-      guard let self else { return }
-      self.reading = nil
-      guard value != self.isEnabled else { return }
-      self.isEnabled = value
-      self.onChange?()
+      var again = true
+      while again {
+        let value = await Self.readOffMain(read)
+        guard let self else { return }
+        again = self.readAgain
+        self.readAgain = false
+        if again == false { self.reading = nil }
+        if value != self.isEnabled {
+          self.isEnabled = value
+          self.onChange?()
+        }
+      }
     }
     reading = task
     return task
@@ -125,11 +137,17 @@ enum SystemPermissions {
 
   /// Which permissions macOS keeps from every site, and why. Location Services off for the whole Mac wins over the
   /// app's own state: no site gets the location either way, and it is the setting the user has to change. Until the
-  /// first read of Location Services lands (`nil`), only the app's own state counts.
+  /// first read of Location Services lands (`nil`), `.denied` shows no note: macOS reports it for both causes, and
+  /// guessing would flash "Turned off in macOS" before the read says otherwise. `.restricted` is never Location
+  /// Services, so it shows at once.
   nonisolated static func blocks(location: SystemPermissionAccess,
                                  locationServicesEnabled: Bool?) -> [SitePermissionKind: SystemPermissionBlock] {
-    if locationServicesEnabled == false { return [.location: .locationServices] }
-    return location.isDenied ? [.location: .appAccess] : [:]
+    switch (locationServicesEnabled, location) {
+    case (false, _): [.location: .locationServices]
+    case (nil, .denied): [:]
+    case (_, let access) where access.isDenied: [.location: .appAccess]
+    default: [:]
+    }
   }
 
   /// The permissions macOS keeps from every site now, for `PageInfoModel`. Returns the cached Location Services state

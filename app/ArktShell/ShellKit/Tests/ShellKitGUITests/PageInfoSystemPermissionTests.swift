@@ -95,14 +95,14 @@ final class PageInfoSystemPermissionTests: XCTestCase {
     let view = try openPanel()
     let location = try row(.location, in: view)
     XCTAssertFalse(location.note.isHidden)
-    XCTAssertEqual(location.note.stringValue, "Location Services is off in macOS")
+    XCTAssertEqual(location.note.stringValue, "Location Services off")
     XCTAssertEqual(location.frame.height, PageInfoMetrics.notedRowHeight)
     XCTAssertGreaterThanOrEqual(location.note.frame.minY, location.title.frame.maxY, "the note sits under the title")
     XCTAssertLessThanOrEqual(location.note.frame.maxX, location.popUp.frame.minX, "the note stops before the pop-up")
     XCTAssertGreaterThanOrEqual(location.note.frame.width, location.note.attributedStringValue.size().width,
                                 "the note fits at the default width")
     XCTAssertTrue(location.popUp.isEnabled, "the stored setting can still be changed")
-    XCTAssertEqual(location.popUp.accessibilityLabel(), "Location, Location Services is off in macOS")
+    XCTAssertEqual(location.popUp.accessibilityLabel(), "Location, Location Services off")
   }
 
   /// The cached macOS state changed while the panel is open: the panel rereads it and shows the new note at once.
@@ -112,7 +112,7 @@ final class PageInfoSystemPermissionTests: XCTestCase {
     denied = [.location: .locationServices]
     NotificationCenter.default.post(name: SystemPermissions.didChange, object: nil)
     view.layoutSubtreeIfNeeded()
-    XCTAssertEqual(try row(.location, in: view).note.stringValue, "Location Services is off in macOS")
+    XCTAssertEqual(try row(.location, in: view).note.stringValue, "Location Services off")
     XCTAssertFalse(try row(.location, in: view).note.isHidden)
     denied = [.location: .appAccess]
     NotificationCenter.default.post(name: SystemPermissions.didChange, object: nil)

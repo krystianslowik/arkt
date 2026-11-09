@@ -77,7 +77,7 @@ struct PageInfoModel: Equatable {
     /// Why macOS keeps the permission from every site: Arkt's own access denied (#786) or Location Services off for
     /// the whole Mac (#856). Nil otherwise, including while macOS has not decided (it still asks on first use).
     var systemBlock: SystemPermissionBlock?
-    /// "Turned off in macOS" or "Location Services is off in macOS", under the title; nil without a block.
+    /// "Turned off in macOS" or "Location Services off", under the title; nil without a block.
     var systemNote: String? { systemBlock?.note }
     /// VoiceOver reads the pop-up as "Location, turned off in macOS, Allow, pop-up button".
     var accessibilityLabel: String {

@@ -120,27 +120,37 @@ struct PageInfoModelTests {
   @Test func locationServicesOffAddsItsOwnNoteToTheLocationRow() throws {
     let model = try #require(PageInfoModel(info(.secure), deniedInMacOS: [.location: .locationServices]))
     let location = try #require(model.rows.first { $0.kind == .location })
-    #expect(location.systemNote == "Location Services is off in macOS")
+    #expect(location.systemNote == "Location Services off")
     #expect(location.systemNote != SystemPermissionBlock.appAccess.note, "the two states read differently")
     #expect(location.setting == .ask, "the pop-up keeps the stored setting")
     #expect(location.options.map(\.setting) == [.allow, .ask, .block], "the setting can still be changed")
-    #expect(location.accessibilityLabel == "Location, Location Services is off in macOS")
+    #expect(location.accessibilityLabel == "Location, Location Services off")
     #expect(location.height == PageInfoMetrics.notedRowHeight)
     #expect(model.rows.filter { $0.kind != .location }.allSatisfy { $0.systemNote == nil })
   }
 
   /// Location Services off wins over Arkt's own state: whatever the app's status, no site gets the location while the
-  /// whole Mac has it off. Until the first read lands, nothing is assumed.
+  /// whole Mac has it off.
   @Test func locationServicesOffWinsOverTheAppsOwnState() {
     for access in [SystemPermissionAccess.notDetermined, .allowed, .denied, .restricted] {
       #expect(SystemPermissions.blocks(location: access, locationServicesEnabled: false)
                 == [.location: .locationServices], "\(access)")
     }
     #expect(SystemPermissions.blocks(location: .denied, locationServicesEnabled: true) == [.location: .appAccess])
-    #expect(SystemPermissions.blocks(location: .restricted, locationServicesEnabled: nil) == [.location: .appAccess])
     #expect(SystemPermissions.blocks(location: .allowed, locationServicesEnabled: true).isEmpty)
     #expect(SystemPermissions.blocks(location: .notDetermined, locationServicesEnabled: nil).isEmpty,
             "not read yet: nothing is assumed")
+  }
+
+  /// Before the first read of Location Services lands, a denied app shows no note: macOS reports `.denied` for both
+  /// causes, so "Turned off in macOS" would flash and then switch to "Location Services off". Once the read lands,
+  /// the right note shows. Restricted is never Location Services, so it shows at once.
+  @Test func deniedShowsNoNoteUntilTheFirstReadLands() {
+    #expect(SystemPermissions.blocks(location: .denied, locationServicesEnabled: nil).isEmpty, "not read yet")
+    #expect(SystemPermissions.blocks(location: .denied, locationServicesEnabled: false)
+              == [.location: .locationServices])
+    #expect(SystemPermissions.blocks(location: .denied, locationServicesEnabled: true) == [.location: .appAccess])
+    #expect(SystemPermissions.blocks(location: .restricted, locationServicesEnabled: nil) == [.location: .appAccess])
   }
 
   /// The macOS state maps to the note only when access was denied or is restricted.
