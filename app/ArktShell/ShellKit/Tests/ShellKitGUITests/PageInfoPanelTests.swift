@@ -395,6 +395,24 @@ final class PageInfoPanelTests: XCTestCase {
     XCTAssertFalse(panel.isShown, "another tab closes it")
   }
 
+  func testTheEngineCountsSiteDataOnlyWhileThePanelIsOpen() throws {
+    let tab = try open("https://fieldguide.example/a")
+    XCTAssertTrue(engine.openPageInfoPanels.isEmpty, "the pill reads without opening")
+    pressGlyph()
+    XCTAssertEqual(engine.openPageInfoPanels, [tab], "the panel tells the engine it opened")
+    pressGlyph()
+    XCTAssertTrue(engine.openPageInfoPanels.isEmpty, "the glyph closes it again")
+
+    pressGlyph()
+    engine.navigate(tab, to: try XCTUnwrap(URL(string: "https://other.example/")))
+    XCTAssertFalse(panel.isShown)
+    XCTAssertTrue(engine.openPageInfoPanels.isEmpty, "another site closes it for the engine too")
+
+    pressGlyph()
+    panel.hide(keyboard: true)
+    XCTAssertTrue(engine.openPageInfoPanels.isEmpty)
+  }
+
   func testLosingMainOrTheAppGoingToTheBackgroundClosesIt() throws {
     try open("https://fieldguide.example/")
     pressGlyph()
