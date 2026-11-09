@@ -69,9 +69,9 @@ Both checks go in the pull request, with numbers copied from the output:
    for i in {1..20}; do swift test --filter <Suite> || break; done
    ```
 
-   For UI tests: `-test-iterations 20 -run-tests-until-failure` (`CONTRIBUTING.md`, section 12). A frame-time or CPU
-   gate only reports in these runs; it asserts alone on a quiet machine (`CONTRIBUTING.md`, section 7, "Speed
-   gates").
+   For UI tests: `-test-iterations 20 -run-tests-until-failure` (`CONTRIBUTING.md`, section 12). A frame-time gate
+   only reports in a batch; when and where the speed gates assert is in `CONTRIBUTING.md`, section 7, "Speed
+   gates".
 2. **It still fails when the code is broken.** Break the behavior the test guards (remove the guard, drop the call),
    run it, confirm it fails, restore. Name the line you broke.
 3. Run the full suites from `CONTRIBUTING.md`, section 7, and report the counts.

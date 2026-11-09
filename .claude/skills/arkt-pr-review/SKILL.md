@@ -143,7 +143,8 @@ Maintainers merge; contributors open pull requests. Merge only when all hold:
    GitHub approval.
 2. **Swift tests** is green on the pull request's own head commit.
 3. The branch does not need an update (see "Keeping a branch current"), or it was updated and the new run is green.
-4. `main` is green. A red `main` is fixed first, before any more merges.
+4. `main` is green: the required **Swift tests** check passed on `main`'s latest run. The GUI and UI test jobs are
+   informative and do not count. A red `main` is fixed first, before any more merges.
 
 Squash only, title as subject, pinned to the head commit that was reviewed and tested:
 

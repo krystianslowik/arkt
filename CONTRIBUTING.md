@@ -176,6 +176,7 @@ are upstream files our patches avoid; their hunk count is tracked in the patch b
   - `feat/` new capability, `fix/` bug, `docs/` docs only, `engine/` Chromium overlay or patches, `chore/` build or
     housekeeping, `spike/` time-boxed experiment whose result is a written decision.
   - Examples: `feat/27-split-view`, `fix/25-command-bar-latency`, `engine/16-seam-fixes`.
+  - A docs change without an issue (section 2) uses `docs/<slug>`, for example `docs/faster-review-merge`.
 - Branch from the latest `origin/main`. Do not branch from another open feature branch unless both pull requests say
   they land in that order.
 - **Worktrees.** Keep the main checkout on `main` and work on each issue in its own worktree in a sibling folder:
@@ -304,14 +305,17 @@ build the app (`xcodegen generate`, then `xcodebuild`, see `README.md`) when you
 
 ### Speed gates
 
-One rule covers every speed gate, frame-time and CPU-time alike. It started with the frame gates in #804; the
-maintainer extended it to every CPU gate on 2026-11-08 (#842). A gate fails only when its class runs alone, the run
-is not niced, and the 1-minute load is below the core count. Otherwise it prints its numbers and passes. So a run
-under `nice -n 20` (see "Capacity" above), any batch, and CI only report. #842 moves the remaining CPU gates (the
-first-swipe gates in `SpaceSwipeHitchTests`) onto the shared helper and adds the niced check to it.
+The rule on `main` today, from #804: a gate asserts when its class runs alone, or when `ARKT_PACING_GATE=1` is set,
+and the 1-minute load is below the core count. Otherwise it prints its numbers and passes, so a longer batch and CI
+only report.
 
-Frame-time gates (no frame over 8.6 ms at 120 Hz: Space pager, split divider and reflow, sidebar reveal, Peek) share
-one rule in `PacingEnvironment.checkFrameGate`. Every run measures and prints a `<name>.pacing` summary line per
+On 2026-11-08 the maintainer decided this rule applies to every CPU gate too, and that a niced run (for example under
+`nice -n 20`, see "Capacity" above) only reports. That work is planned in #842, which is still open: it adds the
+niced check to the shared helper and moves the first-swipe CPU gates in `SpaceSwipeHitchTests` onto it. Until #842
+lands, those gates assert in any batch and at any load.
+
+Frame-time gates (no frame over 8.6 ms at 120 Hz: Space pager, split divider and reflow, sidebar reveal, Peek) apply
+this rule through `PacingEnvironment.checkFrameGate`. Every run measures and prints a `<name>.pacing` summary line per
 interaction, with `asserted=yes` or `asserted=no`. The test is skipped as NOT-MEASURABLE on a screen below 120 Hz or
 at a 1-minute load at or above the core count, and the hitch count is reported but not asserted when the load read
 after measuring reaches the core count. Inside a longer GUI batch a gate only reports, because the tests before it
@@ -504,8 +508,8 @@ Recommendations only; repository settings are changed by the maintainer.
   blocking; its frame-timing gates (command bar latency and the frame-time gates of section 7) and the two tests
   that catch a Space settle mid-flight skip themselves as NOT-MEASURABLE on a screen below 120 Hz or a load at or
   above the core count (the rule of the app's SmokeRunner), which shared runners always meet, and assert on a
-  developer machine (a speed gate only under the rule in section 7, "Speed gates"). GUI tests and timing gates stay a
-  local check (section 7).
+  developer machine (a frame-time gate only when run alone or with `ARKT_PACING_GATE=1`, section 7, "Speed gates").
+  GUI tests and timing gates stay a local check (section 7).
 
   "UI tests (informative)" builds the Debug app and runs the XCUITest scheme `ArktShellUITests` with wait timeouts
   scaled by 3. It takes about 20 minutes of a macOS runner, so it runs nightly on `main` (02:23 UTC) and by hand, not

@@ -35,8 +35,9 @@ are in `CONTRIBUTING.md`, section 7 and section 6, Pass 2; this skill is how to 
       jumps or waits for the old one to finish.
 - [ ] Animate transform and opacity only. No per-frame layout, path or frame-size changes on hot paths.
 - [ ] A Reduce Motion variant (a fade or an instant change), with a test that covers it.
-- [ ] Stays inside the 120 Hz frame budget (about 8 ms per frame). Frame-time and CPU gates fail only when their
-      class runs alone on a quiet machine and only report otherwise (`CONTRIBUTING.md`, section 7, "Speed gates").
+- [ ] Stays inside the 120 Hz frame budget (about 8 ms per frame). Frame-time gates assert when their class
+      runs alone at a load below the core count and only report otherwise (`CONTRIBUTING.md`, section 7, "Speed
+      gates", which also covers the CPU gates).
 
 ## UI polish
 
