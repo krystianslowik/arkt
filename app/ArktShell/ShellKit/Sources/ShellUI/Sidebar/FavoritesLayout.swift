@@ -1,13 +1,16 @@
 import CoreGraphics
 
-/// Favorites grid math (#337): 1 to 4 columns by sidebar width, rows filled evenly, ~52x46 tiles with 9 pt gaps that
-/// grow to fill the row. Pure; the grid view, its keyboard cursor and its column spring all read it.
+/// Favorites grid math (#337): 1 to 4 columns by sidebar width, with rows filled evenly and tiles growing to fill.
+/// Pure; the grid view, its keyboard cursor and its column spring all read it.
 public enum FavoritesLayout {
   public static let maxColumns = 4
-  /// The measured tile at the default 190 pt sidebar (3 columns); no tile gets narrower.
+  /// Capacity uses the original 52 pt minimum and 9 pt spacing to preserve the adaptive column thresholds (#337).
   public static let minimumTileWidth: CGFloat = 52
-  public static let gap: CGFloat = 9            // measured
-  public static let tileHeight: CGFloat = 46    // measured
+  private static let capacitySpacing: CGFloat = 9
+  /// Related values in docs/plans/2026-10-23-arc-measurements.md: 47 pt tall, about 8.2 pt apart.
+  /// Round the approximate gap to 8 pt; horizontal frame edges are rounded to whole points below.
+  public static let gap: CGFloat = 8
+  public static let tileHeight: CGFloat = 47
   public static let tileCornerRadius: CGFloat = 10
 
   /// Where a tile sits, independent of the width: its left edge and width as shares of one row (each column's share
@@ -31,7 +34,7 @@ public enum FavoritesLayout {
 
   /// How many minimum-width tiles fit side by side, 1 to 4.
   public static func columnCapacity(contentWidth: CGFloat) -> Int {
-    let fitting = Int(((contentWidth + gap) / (minimumTileWidth + gap)).rounded(.down))
+    let fitting = Int(((contentWidth + capacitySpacing) / (minimumTileWidth + capacitySpacing)).rounded(.down))
     return min(max(fitting, 1), maxColumns)
   }
 
