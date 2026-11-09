@@ -14,6 +14,9 @@ it after #847.
   same at 47 pt.
 - The directions compared: [Considered](#considered), with their prototype and screens in
   [`directions/`](directions/).
+- The build: [`shots/`](shots/), `favorite-split-<state>-<light|dark>.png` at 2x for 2, 3 and 4 panes, written by
+  `FavoriteSplitTileScreenshotTests` (`ARKT_FAVORITE_SPLIT_SHOTS_DIR=<folder> swift test --filter
+  FavoriteSplitTileScreenshotTests`).
 
 ## Gate
 

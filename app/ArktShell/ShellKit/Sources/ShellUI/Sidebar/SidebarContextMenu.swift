@@ -223,11 +223,14 @@ public enum SidebarContextMenu {
 
   // MARK: 3.3 Favorite
 
+  /// Separate All Tabs (BH-121): a split row's and a Favorite split's menu, and their VoiceOver action.
+  static let separateAllTabsTitle = "Separate All Tabs"
+
   /// The Favorite menu of a tile: a tab's, or the split items of a split in the Favorites.
   @MainActor
   private static func favorite(_ id: NodeID, _ source: any SidebarSource,
                                _ context: SidebarMenuContext) -> [SidebarMenuEntry] {
-    if case .split? = source.node(id) { return favoriteSplit(id) }
+    if case .split(_, let layout)? = source.node(id) { return favoriteSplit(id, layout: layout) }
     return favoriteTab(id, context)
   }
 
@@ -245,10 +248,14 @@ public enum SidebarContextMenu {
          SidebarMenuEntry(title: "Close and Keep Favorite", action: .archive([id]), key: "w")]
   }
 
-  /// A split in the Favorites (BH-115; its own tile is #788): the Favorite items that act on a split, the pane links
-  /// included. The pin items edit one tab and do nothing on a split (#801).
-  private static func favoriteSplit(_ id: NodeID) -> [SidebarMenuEntry] {
-    copyLink([id], plural: true)
+  /// A split in the Favorites (BH-115, #788, design/favorite-split-tile): the split items, then the Favorite items
+  /// that act on a split, the pane links included. The pin items edit one tab and do nothing on a split (#801).
+  @MainActor
+  private static func favoriteSplit(_ id: NodeID, layout: SplitLayoutInfo) -> [SidebarMenuEntry] {
+    [SidebarMenuEntry(title: separateAllTabsTitle, action: .separateSplit(id)),
+     SidebarMenuEntry(title: SplitMenu.convertTitle(for: layout.orientation), action: .convertSplit(id)),
+     .separator]
+      + copyLink([id], plural: true)
       + [.separator,
          SidebarMenuEntry(title: "Remove from Favorites", action: .removeFromFavorites(id)),
          SidebarMenuEntry(title: "Close and Keep Favorite", action: .archive([id]), key: "w")]
@@ -279,7 +286,7 @@ public enum SidebarContextMenu {
     var items: [SidebarMenuEntry] = [
       .unavailable("Rename"),                  // a split has no stored title yet
       SidebarMenuEntry(title: "Duplicate Split View", action: .duplicateSplit(id)), .separator,
-      SidebarMenuEntry(title: "Separate All Tabs", action: .separateSplit(id)),
+      SidebarMenuEntry(title: separateAllTabsTitle, action: .separateSplit(id)),
       SidebarMenuEntry(title: SplitMenu.convertTitle(for: layout.orientation), action: .convertSplit(id)),
       .separator,
     ]

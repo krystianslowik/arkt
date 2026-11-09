@@ -78,6 +78,28 @@ public final class FavoriteTileView: NSView {
 
   /// Increase Contrast (#640): every tile is filled, so every tile draws the 1 pt edge. Tests replace it.
   var increaseContrast: @MainActor () -> Bool = { IncreasedContrast.systemSetting }
+  /// Read when a Favorite split's front layer changes and when its X plate fades; tests replace it.
+  var reduceMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+
+  // MARK: Split stack (#788)
+
+  /// What a Favorite split's tile shows: its panes in order, and the stack's panes front first with their images.
+  struct SplitStack {
+    var panes: [NodeID]
+    var order: [NodeID]
+    var images: [NSImage]
+  }
+
+  /// A Favorite split's stack of pane favicons (`FavoriteSplitStack`), above the fill and below the X. Nil contents
+  /// on a plain Favorite, which shows `faviconView`.
+  let stackLayer = CALayer()
+  /// The stack's mask: everything but the X's round plate, and the plate itself at `plateLayer`'s opacity (1 while the
+  /// X is hidden, 0 while it shows), so the hovered fill covers the favicons under the X. A cut-out, never a paint.
+  private let stackMask = CALayer()
+  private let stackMaskOutside = CAShapeLayer()
+  let plateLayer = CAShapeLayer()
+  /// The panes and the front pane the stack shows now; nil on a plain Favorite.
+  private(set) var splitStack: SplitStack?
 
   public override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
@@ -88,6 +110,12 @@ public final class FavoriteTileView: NSView {
     fillLayer.cornerCurve = .continuous
     fillLayer.shadowRadius = ShellTokens.rowLiftShadow.radius
     fillLayer.shadowOffset = ShellTokens.rowLiftShadow.unflippedOffset
+    stackLayer.contentsGravity = .resize
+    stackLayer.isHidden = true
+    stackMaskOutside.fillRule = .evenOdd
+    stackMask.addSublayer(stackMaskOutside)
+    stackMask.addSublayer(plateLayer)
+    stackLayer.mask = stackMask
     faviconView.imageScaling = .scaleProportionallyUpOrDown
     faviconView.autoresizingMask = []
     faviconView.setAccessibilityElement(false)
@@ -109,6 +137,7 @@ public final class FavoriteTileView: NSView {
   public override func updateLayer() {
     guard let layer else { return }
     if fillLayer.superlayer !== layer { layer.insertSublayer(fillLayer, at: 0) }
+    if stackLayer.superlayer !== layer { layer.insertSublayer(stackLayer, above: fillLayer) }
     CATransaction.begin()
     CATransaction.setDisableActions(true)
     layer.backgroundColor = nil
@@ -158,6 +187,86 @@ public final class FavoriteTileView: NSView {
     let inset = SidebarMetrics.favoriteCloseButtonInset
     closeButton.frame = NSRect(x: bounds.width - inset - box, y: bounds.height - inset - box, width: box, height: box)
     keyboardFocusRing.frame = bounds
+    layoutStack()
+  }
+
+  /// The stack's box, centered on whole points (`FavoriteSplitStack.boxOrigin`), and the X's plate in it.
+  private func layoutStack() {
+    let size = FavoriteSplitStack.boxSize
+    let origin = FavoriteSplitStack.boxOrigin(in: bounds.size)
+    let frame = NSRect(x: origin.x, y: bounds.height - origin.y - size.height, width: size.width, height: size.height)
+    let plate = closeButton.frame.offsetBy(dx: -frame.minX, dy: -frame.minY)
+    let platePath = CGPath(ellipseIn: plate, transform: nil)
+    let outside = CGMutablePath()
+    outside.addRect(CGRect(origin: .zero, size: size).insetBy(dx: -size.width, dy: -size.height))
+    outside.addPath(platePath)
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    stackLayer.frame = frame
+    stackMask.frame = stackLayer.bounds
+    stackMaskOutside.frame = stackLayer.bounds
+    stackMaskOutside.path = outside
+    plateLayer.frame = stackLayer.bounds
+    plateLayer.path = platePath
+    CATransaction.commit()
+  }
+
+  /// Shows a Favorite split's stack (nil: a plain Favorite, which shows `faviconView`). A change of the front pane
+  /// among the same panes cross-fades in `FavoritesLayout.focusCrossFadeDuration`, ease-out, while the tile is in a
+  /// window; Reduce Motion, a first stack, new panes or a new favicon switch at once.
+  func setSplitStack(_ stack: SplitStack?) {
+    let previous = splitStack
+    splitStack = stack
+    faviconView.isHidden = stack != nil
+    guard let stack else {
+      stackLayer.removeAnimation(forKey: kCATransition)
+      CATransaction.begin()
+      CATransaction.setDisableActions(true)
+      stackLayer.contents = nil
+      stackLayer.isHidden = true
+      CATransaction.commit()
+      return
+    }
+    let scale = shellBackingScale
+    let focusMoved = previous.map { $0.panes == stack.panes && $0.order.first != stack.order.first } ?? false
+    if focusMoved, window != nil, !reduceMotion() {
+      let fade = CATransition()
+      fade.type = .fade
+      fade.duration = FavoritesLayout.focusCrossFadeDuration
+      fade.timingFunction = CAMediaTimingFunction(name: .easeOut)
+      stackLayer.add(fade, forKey: kCATransition)
+    } else if focusMoved {
+      stackLayer.removeAnimation(forKey: kCATransition)
+    }
+    // Row states refresh every tile on each tab switch: draw again only when what the stack shows changed.
+    let unchanged = previous.map { $0.order == stack.order && $0.images.count == stack.images.count
+      && zip($0.images, stack.images).allSatisfy { $0 === $1 } } ?? false
+    guard !unchanged || stackLayer.contentsScale != scale || stackLayer.contents == nil else { return }
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    stackLayer.contentsScale = scale
+    stackLayer.contents = FavoriteSplitStack.render(stack.images, scale: scale)
+    stackLayer.isHidden = false
+    CATransaction.commit()
+  }
+
+  /// The X's plate follows the X: the hole in the stack's mask opens as the X fades in and closes as it fades out.
+  private func setPlateShown(_ shown: Bool, animated: Bool) {
+    let target: Float = shown ? 0 : 1
+    let start = plateLayer.presentation()?.opacity ?? plateLayer.opacity
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    plateLayer.removeAnimation(forKey: "opacity")
+    if animated, splitStack != nil, window != nil, !reduceMotion(), start != target {
+      let animation = CABasicAnimation(keyPath: "opacity")
+      animation.fromValue = NSNumber(value: start)
+      animation.toValue = NSNumber(value: target)
+      animation.duration = HoverCloseFade.duration(from: CGFloat(1 - start), to: shown ? 1 : 0,
+                                                   full: SidebarMetrics.closeButtonFadeDuration)
+      plateLayer.add(animation, forKey: "opacity")
+    }
+    plateLayer.opacity = target
+    CATransaction.commit()
   }
 
   public override func viewDidChangeBackingProperties() {
@@ -182,6 +291,7 @@ public final class FavoriteTileView: NSView {
     guard shown != isCloseButtonShown || !animated else { return }   // unanimated calls always settle the state
     isCloseButtonShown = shown
     closeButton.setShown(shown, animated: animated)
+    setPlateShown(shown, animated: animated)
   }
 
   public override func updateTrackingAreas() {
@@ -209,6 +319,7 @@ public final class FavoriteTileView: NSView {
     isKeyboardFocused = false
     nodeID = nil
     isLoaded = false
+    setSplitStack(nil)                                 // a reused tile never cross-fades from another Favorite
     setCloseAction(nil)
     setCloseButtonShown(false, animated: false)        // no fade on a reused tile
     setAccessibilityValue(nil)
@@ -425,6 +536,8 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
   /// Shows the menu of a VoiceOver show-menu on a tile (#607); nil pops it up under the tile. Tests replace it to
   /// record the menu instead of tracking it.
   var presentAccessibilityMenu: (@MainActor (NSMenu, FavoriteTileView) -> Void)?
+  /// Handed to every tile: a Favorite split's focus cross-fade and X plate (#788). Tests replace it.
+  var reduceMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
   /// A Favorite tab tile started or ended a drag (#214, S7); the window shows and hides its drop overlay.
   public var onNodeDragBegan: (@MainActor (NodeID) -> Void)?
   public var onNodeDragEnded: (@MainActor () -> Void)?
@@ -615,11 +728,14 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
     tile.isCurrent = state(for: id) == .current
     tile.selectionAlpha = selectionFade?.node == id ? (selectionFade?.alpha ?? 1) : 1
     tile.isKeyboardFocused = keyboardFocusID == id
-    var title = "", url: URL?
-    if case .tab(_, let tabURL, let tabTitle)? = source.node(id) { title = tabTitle; url = tabURL }
-    tile.faviconView.image = faviconProvider?(id)
-      ?? SidebarGlyphs.letter(for: title, url: url, flavor: flavor, size: SidebarMetrics.favoriteFaviconSize,
-                              scale: collectionView.shellBackingScale)
+    tile.reduceMotion = reduceMotion
+    if case .split? = source.node(id) {
+      tile.faviconView.image = nil
+      tile.setSplitStack(splitStack(of: id))
+    } else {
+      tile.setSplitStack(nil)
+      tile.faviconView.image = favicon(of: id, size: SidebarMetrics.favoriteFaviconSize)
+    }
     let shown = label(of: id)
     tile.toolTip = shown
     tile.setAccessibilityLabel(shown)
@@ -631,7 +747,8 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
     tile.closeButton.target = self
     tile.closeButton.action = #selector(closeClicked(_:))
     tile.setCloseAction(action)
-    tile.setAccessibilityCustomActions(closeAccessibilityActions(for: id, action: action))
+    tile.setAccessibilityCustomActions(closeAccessibilityActions(for: id, action: action)
+                                         + splitAccessibilityActions(for: id))
     tile.onAccessibilityPress = { [weak self] in self?.accessibilityPress(id) }
     tile.onAccessibilityShowMenu = { [weak self, weak tile] in
       guard let self, let tile else { return }
@@ -639,8 +756,25 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
     }
   }
 
+  /// A tab's favicon, else its letter tile (the host's first letter) at `size`: a page loading or without a favicon.
+  private func favicon(of id: NodeID, size: CGFloat) -> NSImage {
+    var title = "", url: URL?
+    if case .tab(_, let tabURL, let tabTitle)? = source.node(id) { title = tabTitle; url = tabURL }
+    return faviconProvider?(id)
+      ?? SidebarGlyphs.letter(for: title, url: url, flavor: flavor, size: size, scale: collectionView.shellBackingScale)
+  }
+
+  /// A Favorite split's stack (#788): the focused pane in front while the split is shown, else the first pane, and
+  /// each layer's favicon or letter tile at that layer's size.
+  private func splitStack(of id: NodeID) -> FavoriteTileView.SplitStack {
+    let panes = source.children(of: .split(id))
+    let order = FavoriteSplitStack.order(panes: panes, focused: resolver.current)
+    let images = zip(order, FavoriteSplitStack.layerSizes).map { favicon(of: $0, size: $1) }
+    return FavoriteTileView.SplitStack(panes: panes, order: order, images: images)
+  }
+
   /// A tile's tooltip and VoiceOver label: the tab's title, or a split's pane titles joined as its outline row has
-  /// them (#801). The split's own tile look is #788.
+  /// them (#801).
   private func label(of id: NodeID) -> String {
     switch source.node(id) {
     case .tab(_, let url, let title)?:
@@ -702,6 +836,17 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
     return [NSAccessibilityCustomAction(name: action.accessibilityName) { [weak self] in
       guard let self, self.source.node(id) != nil else { return false }
       self.onClose?(id)
+      return true
+    }]
+  }
+
+  /// VoiceOver's Separate All Tabs on a Favorite split's tile (#788), next to the X's close, so it is reached
+  /// without the menu. None on a plain Favorite.
+  private func splitAccessibilityActions(for id: NodeID) -> [NSAccessibilityCustomAction] {
+    guard case .split? = source.node(id) else { return [] }
+    return [NSAccessibilityCustomAction(name: SidebarContextMenu.separateAllTabsTitle) { [weak self] in
+      guard let self, case .split? = self.source.node(id) else { return false }
+      self.onMenuAction?(.separateSplit(id))
       return true
     }]
   }

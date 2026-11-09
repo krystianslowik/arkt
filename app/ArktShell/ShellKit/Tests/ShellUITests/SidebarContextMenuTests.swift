@@ -118,6 +118,28 @@ struct SidebarContextMenuTests {
 
   // MARK: 3.3 Favorite
 
+  /// A split in the Favorites (#788, design/favorite-split-tile): Separate All Tabs and Convert, then the Favorite
+  /// items that act on a split. No Rename... until #847, not even disabled.
+  @Test func favoriteSplitMenuMatchesTheDesign() throws {
+    let split = sidebar.addSplit(in: .favorites(profile: "default"))
+    sidebar.addTab(url: url, title: "L", in: .split(split))
+    sidebar.addTab(url: url, title: "R", in: .split(split))
+    let menu = entries(.favorite(split))
+    #expect(titles(menu) == ["Separate All Tabs", "Convert to Vertical Split View", "", "Copy Links", "",
+                             "Remove from Favorites", "Close and Keep Favorite"])
+    #expect(try entry("Separate All Tabs", in: menu).action == .separateSplit(split))
+    #expect(try entry("Convert to Vertical Split View", in: menu).action == .convertSplit(split))
+    #expect(try entry("Copy Links as Markdown", in: menu).isAlternate)
+    #expect(try entry("Close and Keep Favorite", in: menu).keyEquivalent == "w")
+    #expect(menu.filter { !$0.isSeparator }.allSatisfy { $0.isEnabled })
+
+    let vertical = sidebar.addSplit(in: .favorites(profile: "default"),
+                                    layout: SplitLayoutInfo(orientation: .vertical, widthFactors: [0.5, 0.5]))
+    sidebar.addTab(url: url, title: "T", in: .split(vertical))
+    sidebar.addTab(url: url, title: "B", in: .split(vertical))
+    #expect(titles(entries(.favorite(vertical)))[1] == "Convert to Horizontal Split View")
+  }
+
   @Test func favoriteMenuMatchesTheDesign() throws {
     let favorite = sidebar.addTab(url: url, title: "F", in: .favorites(profile: "default"))
     let menu = entries(.favorite(favorite))
