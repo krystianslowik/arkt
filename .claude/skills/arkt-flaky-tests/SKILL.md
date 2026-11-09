@@ -1,6 +1,6 @@
 ---
 name: arkt-flaky-tests
-description: Use when an Arkt test passes locally but fails on CI or under load, or when writing a test that involves time, animation, display links or async waits - remove the wall-clock dependency, then prove the fix with 20 runs under load and a deliberate break.
+description: Use when an Arkt test passes locally but fails on CI or under load, or when writing a test that involves time, animation, display links, async waits or windows - remove the wall-clock dependency, close every window in tearDown, then prove the fix with 20 runs under load and a deliberate break.
 ---
 
 # Arkt flaky tests
@@ -42,6 +42,22 @@ Use the seams that already exist before adding new ones:
 
 New switches are internal and default to the production behavior. The product keeps its real bounds.
 
+## GUI test hygiene
+
+XCTest keeps every test case object until the whole run ends. A window a test leaves alive keeps its controllers,
+observers and timers running into every later class, where it steals main-thread time and breaks timing gates.
+
+1. **Close windows in `tearDown`.** Call `closeAllForTesting()` on each window set, or `close()` on each window
+   controller the test made. Then set the properties that hold them to `nil` (or empty the arrays).
+2. **`orderOut` alone leaks.** It only hides the window. `windowWillClose` never runs, so what it tears down stays
+   alive, for example the command bar panel.
+3. **The window leak guard fails any class that leaves windows behind** (#805). `AAWindowLeakGuardTests` sorts first
+   and installs it for every class after it in a full GUI run (`swift test --filter ShellKitGUITests`). Its allowlist
+   is empty; fix the leak, do not add to the list.
+4. **Wait for fades.** A panel that fades out is still on screen until the fade ends. Wait for the end state (the
+   panel hidden, or its alpha at 0) with `waitUntil`. Never `sleep` for the fade's length. The deadline in
+   `waitUntil` is only the failure path; the test moves on as soon as the condition holds.
+
 ## 4. Verify before you claim
 
 Both checks go in the pull request, with numbers copied from the output:
@@ -53,7 +69,9 @@ Both checks go in the pull request, with numbers copied from the output:
    for i in {1..20}; do swift test --filter <Suite> || break; done
    ```
 
-   For UI tests: `-test-iterations 20 -run-tests-until-failure` (`CONTRIBUTING.md`, section 12).
+   For UI tests: `-test-iterations 20 -run-tests-until-failure` (`CONTRIBUTING.md`, section 12). A frame-time gate
+   only reports in a batch; when and where the speed gates assert is in `CONTRIBUTING.md`, section 7, "Speed
+   gates".
 2. **It still fails when the code is broken.** Break the behavior the test guards (remove the guard, drop the call),
    run it, confirm it fails, restore. Name the line you broke.
 3. Run the full suites from `CONTRIBUTING.md`, section 7, and report the counts.
@@ -66,3 +84,5 @@ Both checks go in the pull request, with numbers copied from the output:
 - Freezing the reflow clock while the display link still advanced the spring (#436).
 - Asserting a spring's start value while it kept running in wall time (#409).
 - A 20 ms sleep left in a fake after the waits were fixed (#414).
+- Hiding windows with `orderOut` in `tearDown`, which kept the command bar panel and other windows alive into later
+  classes (#805).

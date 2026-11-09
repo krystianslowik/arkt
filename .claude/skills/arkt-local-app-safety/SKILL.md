@@ -35,11 +35,13 @@ behind. These rules hold for every launch, test run and build.
 
 ## 2. Heavy local outputs
 
-1. **Artifacts folder for heavy outputs.** Build products stay where the build puts them (section 1, item 3). Write
-   traces, result bundles, perf logs, extra app copies and DMGs to an artifacts folder, one subfolder per issue
-   (`<artifacts folder>/<issue number>/`). When a brief names one, use it. Without one, use a folder outside the
-   repo, for example `$TMPDIR/arkt-<issue number>/`, and check its free space. **STOP** before an `xctrace`
-   recording if no artifacts folder is given and that volume is short on space.
+1. **Artifacts folder for heavy outputs, off the boot disk.** Build products stay in the build output (item 3 of
+   section 1 launches them from there). Write traces, result bundles, perf logs, extra app copies and DMGs to your
+   artifacts folder, one subfolder per issue (`<artifacts folder>/<issue number>/`). Keep that folder on a volume
+   other than the boot disk when the machine has one; when a brief names a folder, use it. This is the one rule;
+   `CONTRIBUTING.md` points here. Without an artifacts folder, the fallback is `$TMPDIR/arkt-<issue number>/` on the
+   boot disk; check its free space first. **STOP** before an `xctrace` recording or a UI test result bundle if you
+   have no artifacts folder and the boot disk is short on space.
 2. **Time-limit every recording.** Every `xctrace record` passes `--time-limit` (`30s` by default, `120s` at most) and
    `--output` inside the issue subfolder. Record a bounded probe: a fixed number of steps that ends on its own, never
    a loop that repeats until stopped.
