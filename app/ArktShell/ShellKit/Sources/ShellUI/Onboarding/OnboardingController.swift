@@ -69,7 +69,10 @@ public final class OnboardingController {
   public private(set) var theme: OnboardingTheme?
   public private(set) var counts = OnboardingCounts()
   public private(set) var webStoreOn = false
-  public private(set) var isFinished = false
+  /// What holds the flow in place: the default-browser prompt, the Skip setup question, an import, or the end
+  /// (#879). Every navigation entry point asks it; `send(_:)` is the only way it changes.
+  public var lock: OnboardingLock { lockState.lock }
+  public var isFinished: Bool { lock.isFinished }
   /// The Space Make it yours created (fresh path); later visits edit it.
   public private(set) var createdSpace: SpaceID?
   /// The Spaces the import added.
@@ -94,9 +97,7 @@ public final class OnboardingController {
   private var countTimer: Timer?
   private var lastCountApply: TimeInterval = 0
   private var landed: Set<OnboardingCounts.Kind> = []
-  private var isPrompting = false
-  private var skipAfterImport = false
-  private var isAsking = false
+  private var lockState = OnboardingLockState()
   private var browserViews: [(NSView, Bool)] = []
   private var firstStepShown = false
   /// The browser data import while it replaces the Import step's content (#514), and what it drives.
@@ -212,11 +213,31 @@ public final class OnboardingController {
 
   private func refreshFooter(animated: Bool) {
     let progress = flow.progress
+    // Back and Skip setup would do nothing while the system prompt is up: they step out of sight, keeping their place.
+    let prompting = lock.isPromptingDefault
     view.stepValue = progress.map { OnboardingCopy.stepValue($0.index, of: $0.total) } ?? ""
-    view.setFooter(showsBack: flow.showsBack,
+    view.setFooter(showsBack: flow.showsBack && !prompting,
                    progress: flow.showsProgress ? progress.map { OnboardingCopy.progress($0.index, of: $0.total) } : nil,
-                   showsSkip: flow.showsSkipSetup, animated: animated)
+                   showsSkip: flow.showsSkipSetup && !prompting, animated: animated)
   }
+
+  /// The one way the lock changes. Returns false, changing nothing, when the lock ignores `event`.
+  @discardableResult
+  private func send(_ event: OnboardingLock.Event) -> Bool {
+    guard lockState.send(event) else { return false }
+    #if DEBUG
+    if let last = lockState.log.last {
+      let from = String(describing: last.from), to = String(describing: last.to)
+      Self.log.debug("lock \(from, privacy: .public) -> \(to, privacy: .public)")
+    }
+    #endif
+    return true
+  }
+
+  #if DEBUG
+  /// The lock's accepted transitions in order, for tests. Debug builds only.
+  var lockTransitions: [OnboardingLockState.Transition] { lockState.log }
+  #endif
 
   private func content(for step: OnboardingStep) -> OnboardingStepView.Content {
     typealias C = OnboardingCopy
@@ -250,6 +271,7 @@ public final class OnboardingController {
                    secondary: B(title: C.skip, identifier: AXID.Onboarding.skip),
                    primary: B(title: C.continueButton, identifier: AXID.Onboarding.continueButton))
     case .defaultBrowser:
+      let isPrompting = lock.isPromptingDefault
       return .init(step: step, eyebrow: nil, title: C.defaultTitle, titleRole: .stepTitle,
                    lede: isPrompting ? C.defaultPrompting : C.defaultLede,
                    secondary: B(title: C.notNow, identifier: AXID.Onboarding.notNow, isEnabled: !isPrompting),
@@ -337,7 +359,7 @@ public final class OnboardingController {
   // MARK: - Actions
 
   private func primary() {
-    guard !isFinished, !isAsking, !isPrompting, let action = flow.primaryAction else { return }
+    guard lock.acceptsNavigation, let action = flow.primaryAction else { return }
     switch action {
     case .getStarted, .continue, .nextTip, .finishTour:
       leaveTheme(keeping: true)
@@ -349,7 +371,7 @@ public final class OnboardingController {
   }
 
   private func secondary() {
-    guard !isFinished, !isAsking, !isPrompting, let action = flow.secondaryAction else { return }
+    guard lock.acceptsNavigation, let action = flow.secondaryAction else { return }
     switch action {
     case .askSkipSetup: askSkipSetup()
     case .startFresh, .notNow, .skipExtensions:
@@ -370,7 +392,7 @@ public final class OnboardingController {
   }
 
   private func back() {
-    guard !isFinished, !isAsking, importHero == nil, flow.showsBack || flow.step.kind == .tour else { return }
+    guard lock.acceptsNavigation, flow.showsBack || flow.step.kind == .tour else { return }
     let before = flow.step
     flow.back()
     guard flow.step != before else { return }
@@ -378,11 +400,12 @@ public final class OnboardingController {
   }
 
   private func handle(_ key: OnboardingView.Key) {
-    guard !isFinished, !isAsking else { return }
-    if let importHero {
+    // Escape belongs to the browser data import's own controls while it shows (its consent's Not now).
+    if case .importing = lock, let importHero {
       if key == .escape { importHero.handleEscape() }
       return
     }
+    guard lock.acceptsNavigation else { return }
     switch key {
     case .escape:
       if flow.secondaryAction != nil { secondary() }
@@ -454,6 +477,7 @@ public final class OnboardingController {
       presentImportHero(source)
       return
     }
+    guard send(.importStarted) else { return }
     flow.setImportPhase(.importing)
     landed = []
     rebuildImportStep()
@@ -469,14 +493,14 @@ public final class OnboardingController {
   /// Import now: the consent, progress and result replace the step's content in place, in the Hero style. The step
   /// stays underneath, hidden; the particle field, the footer's progress and Skip setup stay.
   private func presentImportHero(_ source: any BrowserDataImportSource) {
-    guard importHero == nil, let stepView = view.stepView else { return }
+    guard importHero == nil, let stepView = view.stepView, send(.importStarted) else { return }
     flow.setImportPhase(.importing)
     landed = []
     let hero = ImportHeroView(source: source, appearance: view.appearanceModel, compact: view.bounds.height < 700)
     hero.onAnnouncement = { [weak self] text in self?.announce(text) }
     // A confirmed Skip setup during the import finishes the run when the result shows: no Continue to press.
     hero.onPhaseChange = { [weak self] phase in
-      if phase == .result, self?.skipAfterImport == true { self?.importSource?.finish() }
+      if phase == .result, self?.lock.skipsWhenImportEnds == true { self?.importSource?.finish() }
     }
     importHero = hero
     importSource = source
@@ -525,7 +549,7 @@ public final class OnboardingController {
       flow.setImportPhase(.ready)
     }
     if options.mode == .firstRun { services.saveProgress(flow.snapshot) }
-    if skipAfterImport {
+    if importEnded() {
       finish(skipped: true)
       return
     }
@@ -550,12 +574,19 @@ public final class OnboardingController {
       announce(OnboardingCopy.importTitle(.failed))
     }
     if options.mode == .firstRun { services.saveProgress(flow.snapshot) }
-    if skipAfterImport {
+    if importEnded() {
       finish(skipped: true)
       return
     }
     rebuildImportStep()
     if case .imported = flow.importPhase { view.stepView?.countsView?.land(landed, reduceMotion: view.appearanceModel.reduceMotion) }
+  }
+
+  /// Tells the lock the import ended; true when Skip setup was confirmed during it, so the run finishes now.
+  private func importEnded() -> Bool {
+    let skips = lock.skipsWhenImportEnds
+    send(.importEnded)
+    return skips
   }
 
   /// The Import step's state changed: its text crossfades (M5) while the stage keeps its shape.
@@ -685,14 +716,16 @@ public final class OnboardingController {
 
   // MARK: - Default browser
 
+  /// Asks macOS. Until the prompt closes the lock holds the step: Back, the arrows, Escape, the buttons and Skip setup
+  /// wait (#879), so the answer always moves on from this step.
   private func makeDefault() {
-    isPrompting = true
+    guard send(.promptDefault) else { return }
     showStepContentInPlace()
+    refreshFooter(animated: true)
     Task { [weak self, services] in
       await services.makeDefaultBrowser()
-      guard let self, !self.isFinished else { return }
-      self.isPrompting = false
-      if self.flow.step == .defaultBrowser { self.advance() }
+      guard let self, self.send(.promptClosed) else { return }
+      self.advance()
     }
   }
 
@@ -709,12 +742,10 @@ public final class OnboardingController {
   // MARK: - Skip setup (6.9)
 
   private func askSkipSetup() {
-    guard !isFinished, !isAsking, flow.showsSkipSetup else { return }
-    isAsking = true
+    guard flow.showsSkipSetup, send(.askSkip) else { return }
     let responder = view.window?.firstResponder
     let answer: @MainActor (Bool) -> Void = { [weak self] confirmed in
-      guard let self else { return }
-      self.isAsking = false
+      guard let self, self.send(.skipAnswered(confirmed: confirmed)) else { return }
       if confirmed {
         self.skipConfirmed()
       } else {
@@ -746,8 +777,7 @@ public final class OnboardingController {
   private func skipConfirmed() {
     if flow.step == .theme, let opened = themeOpened { theme = opened }
     view.setWash(nil, animated: true)
-    if flow.importPhase == .importing {
-      skipAfterImport = true
+    if lock.skipsWhenImportEnds {
       // Asking, not importing: nothing to wait for. Closing the consent ends the flow, which finishes the first run.
       if let importSource, importSource.state.phase == .counting || importSource.state.phase == .consent {
         importSource.cancel()
@@ -761,8 +791,7 @@ public final class OnboardingController {
 
   /// Start browsing, a confirmed Skip setup, or Back to browsing on re-entry.
   private func finish(skipped: Bool) {
-    guard !isFinished, let window else { return }
-    isFinished = true
+    guard let window, send(.finish) else { return }
     countTask?.cancel()
     countTimer?.invalidate()
     let signpost = ShellSignposts.signposter.beginInterval("onboarding.finish")
