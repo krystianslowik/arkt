@@ -6393,8 +6393,10 @@ paste command was sent). Nothing under `~/Applications/ArktTest` or `/Applicatio
 
 ## #806: Unity audio decoding fails (Space Waves)
 
-Date 2026-11-09. Branch `engine/806-unity-audio` from `origin/main` (`801383c`). Investigation only: no overlay,
-patch, facade or `args.gn` change. The fix is a build and licensing decision for the maintainer (below).
+Date 2026-11-09. Branch `engine/806-unity-audio` from `origin/main` (`801383c`). No overlay, patch or facade
+change. The maintainer chose option 1 below the same day: `out/Arkt` now builds with `proprietary_codecs = true` and
+`ffmpeg_branding = "Chrome"` (`engine/README.md`). The maintainer accepted shipping the AAC and H.264 decoders on
+2026-11-09; patent licensing is the maintainer's call. Results in "Fix" below.
 
 ### Gate
 
@@ -6469,6 +6471,22 @@ Testing; once AAC is in the build it is the check that it works. Usage is in the
    patch series in `media/`, not a seam.
 3. Leave it: document that AAC and H.264 do not play (Unity web games silent, many MP4 videos fail). Not a fix.
 
+### Fix (`out/Arkt`, maintainer decision 2026-11-09)
+
+Option 1. `$CR/out/Arkt/args.gn` gained `proprietary_codecs = true` and `ffmpeg_branding = "Chrome"`; `gn gen` and
+`gn args --list` confirm both, `branding_file_path` unchanged. `.patches` unchanged.
+
+| Step | Result |
+|---|---|
+| Build, run 1: `nice -n 10 autoninja -j 4 -C out/Arkt chrome`, 12:55 | 10,162 steps (incremental on the 2026-10-23 `out/Arkt`, not a full rebuild). Stopped by its `siso` PID after 2,006 steps, 0 failed: swap used reached 9.3 GB (load average 18 from other work) |
+| Build, run 2: same at `-j 2`, about 13:05, guarded by `memory_pressure` (stop below 20 % free) | `The build has finished successfully.`, `exit=0`, `FAILED:` 0; framework linked 17:29. Free memory stayed 45-52 % |
+| `engine/tools/audio-decode` on `out/Arkt/Arkt.app` (bundle id `dev.arkt.Arkt`, by path, fresh profile, `--use-mock-keychain`) | server exit `0`. All ten cases decode, among them `aac.m4a`, `aac.aac` and `aac.m4a` over `br` and `gzip`. `canPlayType` `probably` for `audio/mp4; codecs="mp4a.40.2"`, `audio/aac`, `video/mp4; codecs="avc1.42E01E"` and `video/mp4; codecs="avc1.42E01E, mp4a.40.2"` |
+| Space Waves on the same bundle, fresh profile, `--enable-logging=stderr --log-level=0`, input sent as CDP `Input.dispatchMouseEvent` into the test page only (no OS input) | `EncodingError` 0 and `Loading FSB failed` 0 (were 4 + 4 + 4 on the old build). After the input: `IngameCurrencyEarned ... Placement: levelProgressReward_tutorial`, `Game successfully saved!`, then `Audio context resumed after 43.268 seconds.` The game runs, takes input and its audio context starts |
+
+Not checked: listening to the output (the run was not muted; later runs should pass `--mute-audio`). Gameplay beyond the
+tutorial step. `out/Spike` still has the old args and still fails the fixture; rebuild it with the same two args when it
+is next rebuilt.
+
 ### Patch budget
 
 | Source | Count |
@@ -6480,6 +6498,6 @@ In sync; no patch file changed. Facade header copies `cmp` identical.
 
 ### Cleanup
 
-Every browser and loopback server stopped by exact PID (`ps -p` prints nothing for each). The throwaway profiles,
-the downloaded game data and the scratch fixtures under `arkt-artifacts/806/` deleted. Nothing touched the clipboard,
+Every browser and loopback server stopped by exact PID (`ps -p` prints nothing for each), the fix runs included. The
+throwaway profiles, the downloaded game data, the scratch fixtures and the run logs under `arkt-artifacts/806/` deleted. Nothing touched the clipboard,
 the Keychain (mock keychain only) or `/Applications/Arkt.app`.
