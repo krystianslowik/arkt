@@ -12,6 +12,9 @@ public enum FavoritesLayout {
   public static let gap: CGFloat = 8
   public static let tileHeight: CGFloat = 47
   public static let tileCornerRadius: CGFloat = 10
+  /// A Favorite split's stack when focus moves to another pane (#788): the layers cross-fade, ease-out. The same value
+  /// as `SettingsMotion.crossFade`; Reduce Motion switches at once.
+  public static let focusCrossFadeDuration: Double = 0.15
 
   /// Where a tile sits, independent of the width: its left edge and width as shares of one row (each column's share
   /// includes the gap after it), and its row. The column spring interpolates these, so a tile in motion keeps
