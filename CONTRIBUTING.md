@@ -286,7 +286,7 @@ comment (a fix, or a reason not to) before merging.
 - **TDD.** Write the test first, run it and watch it fail (a compile error counts), implement, run it again. Pure
   logic goes into Swift Testing tests; anything that opens windows goes into `ShellKitGUITests`.
 - **Hot paths** (sidebar, command bar, window chrome) are AppKit + Core Animation, not SwiftUI lists or Auto Layout.
-- **Explicit state.** Behaviour whose state spans several flags that must change together follows "Explicit state"
+- **Explicit state.** Behavior whose state spans several flags that must change together follows "Explicit state"
   in `.claude/skills/arkt-swift-ui-quality/SKILL.md`.
 - **Upstream Chromium changes** live only as patch files in `engine/patches/chromium`; follow the workflow in
   `engine/README.md`.
