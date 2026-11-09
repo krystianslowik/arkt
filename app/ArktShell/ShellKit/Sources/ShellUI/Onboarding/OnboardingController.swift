@@ -500,9 +500,7 @@ public final class OnboardingController {
     let hero = ImportHeroView(source: source, appearance: view.appearanceModel, compact: view.bounds.height < 700)
     hero.onAnnouncement = { [weak self] text in self?.announce(text) }
     // A confirmed Skip setup during the import finishes the run when the result shows: no Continue to press.
-    hero.onPhaseChange = { [weak self] phase in
-      if phase == .result, self?.lock.skipsWhenImportEnds == true { self?.importSource?.finish() }
-    }
+    hero.onPhaseChange = { [weak self] _ in self?.endImportForSkip() }
     importHero = hero
     importSource = source
     view.importHero = hero
@@ -775,19 +773,30 @@ public final class OnboardingController {
   }
 
   /// Confirmed: a theme preview is dropped; with no import a fresh "Space 1" in Dune; during an import the import
-  /// finishes first (no Space is added); after one the browser opens on the first imported Space.
+  /// finishes first (no Space is added), or at once when its result already shows (#896); after one the browser
+  /// opens on the first imported Space.
   private func skipConfirmed() {
     if flow.step == .theme, let opened = themeOpened { theme = opened }
     view.setWash(nil, animated: true)
     if lock.skipsWhenImportEnds {
       refreshFooter(animated: true)                 // Skip setup has nothing left to do
-      // Asking, not importing: nothing to wait for. Closing the consent ends the flow, which finishes the first run.
-      if let importSource, importSource.state.phase == .counting || importSource.state.phase == .consent {
-        importSource.cancel()
-      }
+      endImportForSkip()
       return
     }
     finish(skipped: true)
+  }
+
+  /// A confirmed Skip setup waits for the browser data import: the hero is closed the way its own buttons close it,
+  /// and its end (`importFlowFinished`) finishes the run. Counting or asking: nothing to wait for, so it is cancelled.
+  /// The result: closed as Continue closes it, whether it showed before the answer or after. Importing: the result
+  /// comes later and calls this again.
+  private func endImportForSkip() {
+    guard lock.skipsWhenImportEnds, let importSource else { return }
+    switch importSource.state.phase {
+    case .counting, .consent: importSource.cancel()
+    case .result: importSource.finish()
+    case .progress, .dismissed: break
+    }
   }
 
   // MARK: - Finish (M8, P9)
