@@ -71,7 +71,7 @@ public final class OnboardingController {
   public private(set) var webStoreOn = false
   /// What holds the flow in place: the default-browser prompt, the Skip setup question, an import, or the end
   /// (#879). Every navigation entry point asks it; `send(_:)` is the only way it changes.
-  public var lock: OnboardingLock { lockState.lock }
+  var lock: OnboardingLock { lockState.lock }
   public var isFinished: Bool { lock.isFinished }
   /// The Space Make it yours created (fresh path); later visits edit it.
   public private(set) var createdSpace: SpaceID?
@@ -213,12 +213,13 @@ public final class OnboardingController {
 
   private func refreshFooter(animated: Bool) {
     let progress = flow.progress
-    // Back and Skip setup would do nothing while the system prompt is up: they step out of sight, keeping their place.
+    // Back and Skip setup would do nothing while the system prompt is up, and Skip setup nothing once a skip waits for
+    // the import: they step out of sight, keeping their place.
     let prompting = lock.isPromptingDefault
     view.stepValue = progress.map { OnboardingCopy.stepValue($0.index, of: $0.total) } ?? ""
     view.setFooter(showsBack: flow.showsBack && !prompting,
                    progress: flow.showsProgress ? progress.map { OnboardingCopy.progress($0.index, of: $0.total) } : nil,
-                   showsSkip: flow.showsSkipSetup && !prompting, animated: animated)
+                   showsSkip: flow.showsSkipSetup && !prompting && !lock.skipsWhenImportEnds, animated: animated)
   }
 
   /// The one way the lock changes. Returns false, changing nothing, when the lock ignores `event`.
@@ -582,7 +583,8 @@ public final class OnboardingController {
     if case .imported = flow.importPhase { view.stepView?.countsView?.land(landed, reduceMotion: view.appearanceModel.reduceMotion) }
   }
 
-  /// Tells the lock the import ended; true when Skip setup was confirmed during it, so the run finishes now.
+  /// Mutates the lock (sends `.importEnded`) and returns the skip decision: true when Skip setup was confirmed during
+  /// the import, so the run finishes now.
   private func importEnded() -> Bool {
     let skips = lock.skipsWhenImportEnds
     send(.importEnded)
@@ -778,6 +780,7 @@ public final class OnboardingController {
     if flow.step == .theme, let opened = themeOpened { theme = opened }
     view.setWash(nil, animated: true)
     if lock.skipsWhenImportEnds {
+      refreshFooter(animated: true)                 // Skip setup has nothing left to do
       // Asking, not importing: nothing to wait for. Closing the consent ends the flow, which finishes the first run.
       if let importSource, importSource.state.phase == .counting || importSource.state.phase == .consent {
         importSource.cancel()

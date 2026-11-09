@@ -1,7 +1,7 @@
 /// What holds the first run in place (#879, #877): the system's default-browser prompt, the Skip setup question, an
 /// import, or the end. Every navigation entry point of `OnboardingController` asks the same lock; the step itself
 /// stays in `OnboardingFlow`. A value type with no clock, so tests drive it without a window.
-public enum OnboardingLock: Equatable, Sendable {
+enum OnboardingLock: Equatable, Sendable {
   /// Nothing waits: the step's buttons, Back, the arrows and Escape work.
   case idle
   /// Make default asked macOS; the step waits for the prompt to close.
@@ -14,7 +14,7 @@ public enum OnboardingLock: Equatable, Sendable {
   /// Start browsing or a confirmed Skip setup: the flow is over.
   case finished
 
-  public enum Event: Equatable, Sendable {
+  enum Event: Equatable, Sendable {
     /// Make default pressed.
     case promptDefault
     /// The system prompt closed, whatever the answer.
@@ -32,19 +32,19 @@ public enum OnboardingLock: Equatable, Sendable {
   }
 
   /// Step buttons, Back, the arrows and Escape act.
-  public var acceptsNavigation: Bool { self == .idle }
+  var acceptsNavigation: Bool { self == .idle }
 
   /// The flow is over.
-  public var isFinished: Bool { self == .finished }
+  var isFinished: Bool { self == .finished }
 
   /// The default-browser step shows its prompt note and disabled buttons.
-  public var isPromptingDefault: Bool { self == .promptingDefault }
+  var isPromptingDefault: Bool { self == .promptingDefault }
 
   /// Skip setup was confirmed during the import that runs now.
-  public var skipsWhenImportEnds: Bool { self == .importing(skipWhenDone: true) }
+  var skipsWhenImportEnds: Bool { self == .importing(skipWhenDone: true) }
 
   /// The lock after `event`, or nil when the pair is not a transition (the event is ignored).
-  public func next(after event: Event) -> OnboardingLock? {
+  func next(after event: Event) -> OnboardingLock? {
     switch (self, event) {
     case (.idle, .promptDefault): .promptingDefault
     case (.promptingDefault, .promptClosed): .idle

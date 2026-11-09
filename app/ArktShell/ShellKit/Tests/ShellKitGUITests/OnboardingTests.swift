@@ -151,6 +151,8 @@ final class OnboardingTests: XCTestCase {
   private let handoff = ManualOnboardingSchedule()
   /// Every window `makeWindow` made, closed in tearDown whatever the test did.
   private var windows: [ShellWindowController] = []
+  /// The services of every flow `present` opened; tearDown answers a prompt a failed test left held.
+  private var presentedServices: [FakeOnboardingServices] = []
 
   override func setUp() async throws {
     _ = NSApplication.shared
@@ -158,6 +160,8 @@ final class OnboardingTests: XCTestCase {
   }
 
   override func tearDown() async throws {
+    for services in presentedServices { services.answerDefaultPrompt() }
+    presentedServices = []
     for window in windows { window.close() }
     windows = []
   }
@@ -173,6 +177,7 @@ final class OnboardingTests: XCTestCase {
   private func present(_ window: ShellWindowController, _ services: FakeOnboardingServices,
                        mode: OnboardingMode = .firstRun, resume: OnboardingFlow.Snapshot? = nil,
                        extensions: Bool = false, stage: (any OnboardingStage)? = nil) -> OnboardingController {
+    presentedServices.append(services)
     let onboarding = window.presentOnboarding(
       services: services, options: .init(mode: mode, includesExtensions: extensions, resume: resume), stage: stage)
     onboarding.view.layoutSubtreeIfNeeded()
@@ -489,6 +494,11 @@ final class OnboardingTests: XCTestCase {
     onboarding.performPrimary()
     onboarding.performPrimary()
     XCTAssertEqual(onboarding.flow.step, .defaultBrowser)
+    onboarding.performEscape()                                            // Not now, then Back: Right has somewhere to go
+    XCTAssertEqual(onboarding.flow.step, .tour(tip: 1))
+    onboarding.performBack()
+    XCTAssertEqual(onboarding.flow.step, .defaultBrowser)
+    XCTAssertTrue(onboarding.flow.canGoForward)
     onboarding.performPrimary()                                           // Make default: the prompt is up
     XCTAssertTrue(spin { services.makeDefaultCalls == 1 })
     XCTAssertEqual(onboarding.lock, .promptingDefault)
@@ -530,8 +540,15 @@ final class OnboardingTests: XCTestCase {
     XCTAssertEqual(onboarding.flow.step, .defaultBrowser, "the arrows, Escape and Return wait for the prompt")
     XCTAssertEqual(asked, 0, "Skip setup waits for the prompt")
     XCTAssertEqual(services.makeDefaultCalls, 1, "one prompt")
+    #if DEBUG
+    XCTAssertEqual(onboarding.lockTransitions.map(\.to), [.promptingDefault], "no entry point changed the lock")
+    #endif
+    XCTAssertFalse(onboarding.view.backButton.isEnabled, "Back is out of reach during the prompt")
+    XCTAssertFalse(onboarding.view.skipButton.isEnabled, "Skip setup is out of reach during the prompt")
     services.answerDefaultPrompt()
     XCTAssertTrue(spin { onboarding.flow.step == .tour(tip: 1) })
+    XCTAssertTrue(onboarding.view.backButton.isEnabled, "Back returns with the next step")
+    XCTAssertTrue(onboarding.view.skipButton.isEnabled, "Skip setup returns with the next step")
     onboarding.performBack()
     XCTAssertEqual(onboarding.flow.step, .defaultBrowser, "navigation works again after the answer")
   }
@@ -616,6 +633,7 @@ final class OnboardingTests: XCTestCase {
     XCTAssertTrue(spin { services.importStarted })
     onboarding.view.onSkipSetup?()
     XCTAssertEqual(onboarding.lock, .importing(skipWhenDone: true))
+    XCTAssertFalse(onboarding.view.skipButton.isEnabled, "Skip setup has nothing left to do")
     XCTAssertTrue(handoff.delays.isEmpty, "the import finishes first")
     XCTAssertFalse(onboarding.isFinished)
     XCTAssertTrue(window.isShowingOnboarding)
