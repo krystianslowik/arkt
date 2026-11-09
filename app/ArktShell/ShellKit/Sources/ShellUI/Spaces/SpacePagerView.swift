@@ -42,6 +42,27 @@ public final class SpacePagerView: NSView {
   /// Test hook: called after `onSettle`.
   @_spi(Smoke) public var onSettleForTesting: (@MainActor (Int) -> Void)?
 
+  private final class PendingHover {
+    weak var scheduler: HoverResyncScheduler?
+    init(_ scheduler: HoverResyncScheduler) { self.scheduler = scheduler }
+  }
+  private var pendingHover: [PendingHover] = []
+
+  /// Keeps one request per host until the interaction has really ended, including a frozen settle.
+  func deferHoverResync(_ scheduler: HoverResyncScheduler) -> Bool {
+    guard isTracking || driver.isRunning || frozenTarget != nil else { return false }
+    if !pendingHover.contains(where: { $0.scheduler === scheduler }) {
+      pendingHover.append(PendingHover(scheduler))
+    }
+    return true
+  }
+
+  private func flushHoverResyncs() {
+    let pending = pendingHover
+    pendingHover.removeAll()
+    for entry in pending { entry.scheduler?.flushDeferred(in: self) }
+  }
+
   let strip = NSView(frame: .zero)
   /// Tests: force the Reduce Motion path on (true) or off (false) whatever the system setting; nil follows it.
   var reduceMotionForTesting: Bool?
@@ -102,6 +123,7 @@ public final class SpacePagerView: NSView {
     pages = newPages
     // A removed page leaves the set, so a new page that reuses its address is still prepared (#297).
     preparedPages.formIntersection(newPages.map(ObjectIdentifier.init))
+    changedHiddenPages.formIntersection(newPages.map(ObjectIdentifier.init))
     needsLayout = true
     jump(to: newIndex)
     // A page added mid-session (a new Space) gets its rows now, in this pass; the window-open case has no
@@ -141,6 +163,7 @@ public final class SpacePagerView: NSView {
       // switch's frames (#297). Pages with rows already are a cheap check.
       for i in pages.indices { preparePageForDisplay(i) }
     }
+    prepareChangedPagesAtRest()
   }
 
   private func apply(offset newOffset: CGFloat) {
@@ -155,7 +178,6 @@ public final class SpacePagerView: NSView {
       strip.layer?.setAffineTransform(CGAffineTransform(translationX: shift, y: 0))
     }
     updatePageVisibility()
-    parkShownPagesIfNeeded()
     onPosition?(position)
   }
 
@@ -166,7 +188,7 @@ public final class SpacePagerView: NSView {
   /// rounded to whole backing pixels, so the translations that follow stay pixel-aligned for the rest of the motion
   /// (#295); at rest the exact offset is kept.
   private func syncStripFrame() {
-    unparkPages(rememberForRepark: true)
+    unparkPages()
     stripFrameSyncsForTesting += 1
     var x = offset
     if isTracking || driver.isRunning {
@@ -188,17 +210,12 @@ public final class SpacePagerView: NSView {
   /// translation that shows them at their own place in the strip.
   private var parkedPages: [NSView] = []
 
-  /// Pages that were parked when a sync unpacked them and still need parking again: the sync is exact for the hit
-  /// test or hover that asked for it, and the next presented frame restores the text drawing of #415 (#295).
-  private var pagesToRepark: Set<Int> = []
-
   /// Shows page `i` mid-motion where AppKit draws it (#415). The strip moves on its layer, so its view frame still
   /// says where it last rested: a page that comes into view lies outside the pager in AppKit's geometry, its text
   /// fields have an empty visible rect, and AppKit draws no text there (images, which are layer contents, still
-  /// show). So the page's view frame takes the slot the pager shows at rest (`-strip.frame.minX`, the slot of the
-  /// page the strip rests on) and a layer translation puts it back where it belongs in the strip. Nothing else moves:
-  /// the strip frame and the page the strip rests on keep their geometry, so their text stays drawn. One frame move
-  /// per page a motion shows (the shown range only grows); `syncStripFrame` puts the page back.
+  /// show). So the page's view frame takes the slot the pager shows at rest (`-strip.frame.minX`) and a layer
+  /// translation puts it back where it belongs in the strip. A page already in the slot (the page the strip rests on,
+  /// or one parked before) does not move. `syncStripFrame` puts the page back; the next presented frame parks it again.
   private func parkInVisibleSlot(_ page: NSView, at i: Int) {
     guard let layer = page.layer else { return }
     let slot = -strip.frame.origin.x
@@ -209,43 +226,50 @@ public final class SpacePagerView: NSView {
   }
 
   /// Returns parked pages to their own slots and clears their translations; a page that left the strip only loses
-  /// its translation. `rememberForRepark` is for a sync that has to hand the exact geometry to a hit test or a hover:
-  /// the motion goes on from the new frame, and its next pass parks these pages again so their text keeps drawing
-  /// (#415, #295). A layout's unpark is the resize path, which sets every page frame to the new width itself.
-  private func unparkPages(rememberForRepark: Bool = false) {
-    guard !parkedPages.isEmpty else {
-      if !rememberForRepark || !(isTracking || driver.isRunning) { pagesToRepark.removeAll() }
-      return
-    }
+  /// its translation. A sync does this to hand the exact geometry to a hit test or a hover; if the motion goes on,
+  /// its next pass parks every shown page again (`updatePageVisibility`), so their text keeps drawing (#415, #295).
+  /// A layout's unpark is the resize path, which sets every page frame to the new width itself.
+  private func unparkPages() {
+    guard !parkedPages.isEmpty else { return }
     for page in parkedPages {
       if let i = pages.firstIndex(where: { $0 === page }) {
         page.setFrameOrigin(NSPoint(x: CGFloat(i) * pageWidth, y: page.frame.origin.y))
       }
       page.layer?.setAffineTransform(.identity)
     }
-    if rememberForRepark, isTracking || driver.isRunning {
-      pagesToRepark = Set(parkedPages.compactMap { page in
-        pages.firstIndex(where: { $0 === page })
-      })
-    } else {
-      pagesToRepark.removeAll()
-    }
     parkedPages.removeAll()
   }
 
-  /// Parks the pages a sync unpacked, on the next presented frame (#295). The page that was visible before the
-  /// motion is not in the set: it draws in its own frame, which the sync made current.
-  private func parkShownPagesIfNeeded() {
-    guard isTracking || driver.isRunning, !pagesToRepark.isEmpty else { return }
-    for i in pagesToRepark where pages.indices.contains(i) && !pages[i].isHidden {
-      parkInVisibleSlot(pages[i], at: i)
-    }
-    pagesToRepark.removeAll()
+  /// Pages whose visible rows were built already. Legitimately tiled rows survive being parked again; a page
+  /// leaves the set by leaving `pages` (#297) or when its rows change while it is hidden (#676).
+  private var preparedPages: Set<ObjectIdentifier> = []
+
+  /// Hidden pages whose rows changed since they were prepared, waiting for the pager to rest (#676).
+  private var changedHiddenPages: Set<ObjectIdentifier> = []
+
+  /// The rows of `page` changed (inserted, removed, moved, reloaded, expanded or collapsed). A hidden page builds the
+  /// rows that are now in its visible range again before a switch shows it (#676): an import fills a new Space's page
+  /// after `setPages` prepared it empty, and without this the first frame that shows the page would build every
+  /// visible row (about 25 ms of main-thread CPU for a 300-tab Space in Debug). Coalesced: any number of changes in
+  /// one pass cost one build, in the pass's layout, and only while the strip rests; a change while the strip moves
+  /// asks for no layout and leaves the build to the settle's end, or to the next switch's preparation off its frames.
+  public func pageRowsChanged(_ page: NSView) {
+    guard page.isHidden, pages.contains(where: { $0 === page }) else { return }
+    let id = ObjectIdentifier(page)
+    preparedPages.remove(id)
+    changedHiddenPages.insert(id)
+    // Not mid-motion: `layout()` puts the strip frame where the strip shows and unparks the pages shown mid-motion.
+    // The settle's completion, or the layout after `stopInteraction()`, builds the page instead.
+    if !(isTracking || driver.isRunning) { needsLayout = true }
   }
 
-  /// Pages whose visible rows were built already. Legitimately tiled rows survive being parked again; a page
-  /// leaves the set only by leaving `pages` (#297).
-  private var preparedPages: Set<ObjectIdentifier> = []
+  /// Builds the visible rows of the hidden pages whose rows changed, when nothing moves.
+  private func prepareChangedPagesAtRest() {
+    guard !changedHiddenPages.isEmpty, !(isTracking || driver.isRunning) else { return }
+    let changed = changedHiddenPages
+    changedHiddenPages.removeAll()
+    for (i, page) in pages.enumerated() where changed.contains(ObjectIdentifier(page)) { preparePageForDisplay(i) }
+  }
 
   /// Builds a hidden page's visible rows before a switch shows it (#297), off the frame that shows it: the strip
   /// is slid so the page intersects the visible area, the page tiles its table, and everything is put back, all
@@ -331,6 +355,11 @@ public final class SpacePagerView: NSView {
   /// showing or hiding a page updates the tracking areas of every row in it, and each update makes the row's host
   /// ask the window server where the pointer is, a blocking round trip, so a settle that oscillates around a page
   /// must not toggle the page it passes on every swing. An extra page in the overshoot is clipped by the pager.
+  /// While the strip moves, every shown page is parked in the visible slot, not only a page as it is shown (#841): a
+  /// touch-down that catches a settle syncs the strip where it froze and unparks the pages the settle showed, and the
+  /// next swipe or the resumed settle shows those pages again without hiding them first. Left in their own slots, they
+  /// would slide in with AppKit's geometry outside the pager and draw no titles. A page already in the slot costs a
+  /// comparison.
   private func updatePageVisibility() {
     guard !pages.isEmpty else { return }
     let last = pages.count - 1
@@ -352,10 +381,11 @@ public final class SpacePagerView: NSView {
       visible = current...current
       shownWhileMoving = nil
     }
+    let moving = isTracking || driver.isRunning
     for (i, page) in pages.enumerated() {
       let hidden = !visible.contains(i)
+      if !hidden, moving { parkInVisibleSlot(page, at: i) }
       if page.isHidden != hidden {
-        if !hidden, isTracking || driver.isRunning { parkInVisibleSlot(page, at: i) }
         page.isHidden = hidden
         pageVisibilityChangesForTesting[i, default: 0] += 1
       }
@@ -374,6 +404,7 @@ public final class SpacePagerView: NSView {
     index = clamped
     targetIndex = clamped
     apply(offset: -CGFloat(clamped) * pageWidth)
+    flushHoverResyncs()
   }
 
   /// Animates to page `target` (keyboard, Ctrl-N, dots). A running settle hands its velocity over.
@@ -382,7 +413,11 @@ public final class SpacePagerView: NSView {
     let clamped = min(max(target, 0), pages.count - 1)
     if isTracking { return }                               // the fingers own the strip
     frozenTarget = nil
-    if !driver.isRunning && clamped == index && offset == -CGFloat(index) * pageWidth { return }
+    if !driver.isRunning && clamped == index && offset == -CGFloat(index) * pageWidth {
+      // Cancelling a frozen settle at its original offset ends the interaction without a spring completion.
+      flushHoverResyncs()
+      return
+    }
     // The strip passes over every page between here and the target (and the settle's overshoot can show one
     // more): build their rows now, off the animation frames (#297). Already-built pages cost a lookup.
     for i in (min(index, clamped) - 1)...(max(index, clamped) + 1) { preparePageForDisplay(i) }
@@ -417,8 +452,11 @@ public final class SpacePagerView: NSView {
     isTracking = false
     frozenTarget = nil
     targetIndex = index
+    for entry in pendingHover { entry.scheduler?.cancel() }
+    pendingHover.removeAll()
     syncStripFrame()
     updatePageVisibility()
+    if !changedHiddenPages.isEmpty { needsLayout = true }   // built at rest, in the next layout (#676)
   }
 
   private func settle(to target: Int, velocity: CGFloat) {
@@ -436,6 +474,7 @@ public final class SpacePagerView: NSView {
                      self.index = target
                      self.syncStripFrame()
                      self.updatePageVisibility()
+                     self.prepareChangedPagesAtRest()
                      self.settled(target)
                    })
   }
@@ -443,6 +482,7 @@ public final class SpacePagerView: NSView {
   private func settled(_ target: Int) {
     onSettle?(target)
     onSettleForTesting?(target)
+    flushHoverResyncs()
   }
 
   // MARK: Tracking (scrollWheel and scripted swipes share these)

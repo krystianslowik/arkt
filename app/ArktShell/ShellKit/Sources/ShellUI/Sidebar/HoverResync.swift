@@ -66,6 +66,7 @@ final class HoverResyncScheduler {
   private let sync: (NSPoint?) -> Void
   private var isScheduled = false
   private var generation = 0
+  private weak var requestedWindow: NSWindow?
 
   /// `sync` receives the pointer in window coordinates (nil: the pointer is not over this window) and updates every
   /// hover row or tile of the host.
@@ -75,12 +76,16 @@ final class HoverResyncScheduler {
   }
 
   func setNeeded() {
+    guard let window = view?.window else { return }
+    requestedWindow = window
+    if deferDuringPaging() { return }
     guard !isScheduled else { return }
     isScheduled = true
     let generation = generation
     enqueue { [weak self] in
       guard let self, generation == self.generation else { return }
       self.isScheduled = false
+      guard self.view?.window === self.requestedWindow else { return }
       self.resyncNow()
     }
   }
@@ -89,9 +94,41 @@ final class HoverResyncScheduler {
     DispatchQueue.main.async { work() }
   }
 
+  /// A pending request belongs to its original window and sidebar, not a later attachment.
+  func cancel() {
+    generation += 1
+    isScheduled = false
+    requestedWindow = nil
+  }
+
+  func flushDeferred(in pager: SpacePagerView) {
+    guard let window = requestedWindow, view?.window === window else { return }
+    var ancestor = view?.superview
+    while let current = ancestor {
+      if let sidebar = current as? SidebarContainerView {
+        if sidebar.pager === pager { setNeeded() }
+        return
+      }
+      ancestor = current.superview
+    }
+  }
+
+  private func deferDuringPaging() -> Bool {
+    var ancestor = view?.superview
+    while let current = ancestor {
+      if let sidebar = current as? SidebarContainerView {
+        return sidebar.pager.deferHoverResync(self)
+      }
+      ancestor = current.superview
+    }
+    return false
+  }
+
   /// Reads the pointer once and syncs the host; does nothing when the host is not in a visible window.
   func resyncNow() {
     guard let window = view?.window, lookup.isVisible(window) else { return }
+    requestedWindow = window
+    if deferDuringPaging() { return }
     sync(lookup.pointer(in: window))
   }
 }

@@ -37,12 +37,14 @@ enum ArchiveMetrics {
   static let filterButtonTrailing: CGFloat = 10
   static let fieldToFilterButton: CGFloat = 8
   static let chipHeight: CGFloat = 24
+  static let chipRemoveRadius = ShellRadius.control
   static let chipBelow: CGFloat = 10
   static let sideMargin: CGFloat = 12
   static let chipSpacing: CGFloat = 6
   static let bannerBelow: CGFloat = 10
+  static let bannerRadius: CGFloat = 12
   static let listInset: CGFloat = 8
-  static let listRadius: CGFloat = 10
+  static let listRadius = ShellRadius.field
   static let listPaddingY: CGFloat = 4
   static let rowInset: CGFloat = 4
   /// The row fill; rows sit at a 37 pt pitch (3 pt between fills), tighter than the sidebar's 41.

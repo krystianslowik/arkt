@@ -103,8 +103,8 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   /// instead of the layer animation's completion, so a test ends the fade by hand, with no clock.
   var dismissFinisher: (@MainActor (@escaping @MainActor () -> Void) -> Void)?
   private var dismissGeneration = 0
-  /// The input of the latest reload, for the pill counts.
-  private var lastInput = CommandBarResults.Input()
+  /// The pills' counts from the last results pass (`CommandBarResults.makeWithCounts`).
+  private var lastCounts = CommandBarFilter.counts(of: [])
   /// The clipboard URL read for this show: the pasteboard is read once per show, not on every reload (Esc, a filter).
   private var clipboardSnapshot: (url: URL?, isRead: Bool) = (nil, false)
 
@@ -558,7 +558,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     filter = newFilter
     reloadResults()
     relayout()
-    let count = CommandBarResults.counts(query: barView.field.stringValue, input: lastInput)[newFilter] ?? 0
+    let count = lastCounts[newFilter] ?? 0
     announce("\(newFilter.title), \(count == 1 ? "1 result" : "\(count) results")", .high)
   }
 
@@ -843,20 +843,26 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     input.recentTabs = scope == .normal && trimmed.isEmpty ? recentTabsProvider() : []
     input.siteSearchEngines = scope == .normal ? siteSearchProvider() : []
     input.history = historyProvider()
-    lastInput = input
-    unfilteredResults = CommandBarResults.make(query: text, input: input)
+    let made = CommandBarResults.makeWithCounts(query: text, input: input)
+    unfilteredResults = made.results
+    lastCounts = made.counts
     let fresh = scope == .normal ? filter.apply(to: unfilteredResults, query: text) : unfilteredResults
     let headers = CommandBarResults.groupHeaders(of: fresh)
     let scale = backingScale
     barView.selectionAnimates = false                 // new rows do not slide the fill
     if fresh != results || scale != cellScale || text != cellQuery || headers != groupHeaders {
+      // The cells on screen take the new rows in place; rows are added or removed only at the end, and heights noted
+      // where a group header came or went. A reload would take every row view out of the window and build them again
+      // (#606).
+      let oldCount = barView.table.numberOfRows        // what the table holds, before it is told of the new rows
+      let oldHeaders = groupHeaders
       results = fresh
       groupHeaders = headers
       barView.groupHeaders = headers
       cellScale = scale
       cellQuery = text
       barView.setHoveredRow(nil)                      // the rows shifted; no honest hover target anymore
-      barView.table.reloadData()
+      refreshRowsInPlace(oldCount: oldCount, oldHeaders: oldHeaders)
     }
     if results.first?.isActionable == true, barView.table.selectedRow != 0 {
       barView.table.selectRowIndexes([0], byExtendingSelection: false)
@@ -871,7 +877,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
 
   /// The pills (selection and counts of the unfiltered rows) and the hint strip, for the rows on screen.
   private func updatePillsAndHints(query: String, trimmed: String) {
-    barView.pills.update(selected: filter, counts: CommandBarResults.counts(query: query, input: lastInput),
+    barView.pills.update(selected: filter, counts: lastCounts,
                          showsCounts: CommandBarFilter.showsCounts(forQuery: query), flavor: flavor)
     refreshHints()
   }
@@ -976,11 +982,40 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   public func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
     let cell = tableView.makeView(withIdentifier: CommandBarCellView.identifier, owner: nil) as? CommandBarCellView
       ?? CommandBarCellView(frame: .zero)
+    configure(cell, row: row)
+    return cell
+  }
+
+  private func configure(_ cell: CommandBarCellView, row: Int) {
     cell.configure(results[row], query: cellQuery, position: row + 1, count: results.count, flavor: flavor,
                    scale: cellScale, groupHeader: groupHeaders[row])
     cell.onRemove = results[row].removalID != nil ? { [weak self] in self?.removeSuggestion(at: row) } : nil
     cell.setCloseHovered(barView.hoveredRow == row)
-    return cell
+  }
+
+  /// The rows changed: the table grows or shrinks at the end, rows whose header came or went are re-measured, and each
+  /// row the table holds shows its new result.
+  private func refreshRowsInPlace(oldCount: Int, oldHeaders: [Int: String]) {
+    let table = barView.table
+    let count = results.count
+    if count != oldCount || oldHeaders != groupHeaders {
+      table.beginUpdates()
+      if count > oldCount {
+        table.insertRows(at: IndexSet(oldCount..<count), withAnimation: [])
+      } else if count < oldCount {
+        table.removeRows(at: IndexSet(count..<oldCount), withAnimation: [])
+      }
+      let remeasured = IndexSet(Set(oldHeaders.keys).symmetricDifference(groupHeaders.keys).filter { $0 < count })
+      if !remeasured.isEmpty { table.noteHeightOfRows(withIndexesChanged: remeasured) }
+      table.endUpdates()
+    }
+    table.enumerateAvailableRowViews { rowView, row in
+      guard results.indices.contains(row) else { return }
+      if let cell = rowView.view(atColumn: 0) as? CommandBarCellView { configure(cell, row: row) }
+      rowView.setAccessibilityLabel(results[row].accessibilityLabel(position: row + 1, of: results.count))
+      rowView.setAccessibilityValue(results[row].accessibilityCaption)
+    }
+    table.rowsDidChange()
   }
 
   /// A row that starts a group is taller by its header.
