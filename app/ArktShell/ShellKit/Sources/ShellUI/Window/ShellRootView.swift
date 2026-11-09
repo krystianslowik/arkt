@@ -108,7 +108,7 @@ public final class ShellRootView: NSView {
         self.sidebarVisible = true                                 // the same drag brought it back
       }
     }
-    sidebarOverlay.onRevealProgress = { [weak self] progress in self?.revealProgressDidChange(progress) }
+    sidebarOverlay.onPresent = { [weak self] slide, alpha in self?.overlayDidPresent(slide: slide, alpha: alpha) }
   }
 
   @available(*, unavailable)
@@ -211,8 +211,8 @@ public final class ShellRootView: NSView {
 
   // MARK: Traffic lights
 
-  /// Places the traffic lights for the sidebar's state: in the docked column, in the overlay faded with its reveal,
-  /// or hidden.
+  /// Places the traffic lights for the sidebar's state: in the docked column, on the overlay where it is drawn (slid
+  /// and faded as it is), or hidden.
   public func reapplyTrafficLights() {
     guard let window = window as? ShellWindow else { return }
     let placement: ShellWindow.TrafficLightPlacement
@@ -221,18 +221,21 @@ public final class ShellRootView: NSView {
     } else if sidebarOverlay.isHidden {
       placement = .hidden
     } else {
-      placement = .overlay(origin: sidebarOverlay.frame.origin, alpha: revealProgress)
+      placement = .overlay(origin: sidebarOverlay.frame.origin, slide: overlaySlide, alpha: overlayAlpha)
     }
     window.trafficLightPlacement = placement
     window.layoutTrafficLights(sidebarWidth: sidebarVisible ? effectiveSidebarWidth : sidebarOverlay.frame.width)
   }
 
-  private var revealProgress: CGFloat = 1
+  /// What the overlay presents on its current frame: layer translation along x and opacity.
+  private var overlaySlide: CGFloat = 0
+  private var overlayAlpha: CGFloat = 1
 
-  /// Every reveal frame: only the buttons' opacity changes (and their visibility at the ends). Docked, layout places
-  /// them.
-  private func revealProgressDidChange(_ progress: CGFloat) {
-    revealProgress = progress
+  /// Every reveal frame: the buttons move and fade with the overlay (and show or hide at the ends). Docked, layout
+  /// places them.
+  private func overlayDidPresent(slide: CGFloat, alpha: CGFloat) {
+    overlaySlide = slide
+    overlayAlpha = alpha
     guard !sidebarVisible else { return }
     reapplyTrafficLights()
   }

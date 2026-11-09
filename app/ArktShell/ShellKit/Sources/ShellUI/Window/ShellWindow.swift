@@ -22,12 +22,16 @@ public final class ShellWindow: NSWindow {
     setAccessibilityIdentifier(AXID.Shell.window)
   }
 
-  /// Where the traffic lights sit (#102): in the docked sidebar's top strip, in the hover-revealed overlay's (at its
-  /// origin, faded with the reveal), or nowhere while the sidebar is hidden, so no buttons float over the page.
+  /// Where the traffic lights sit (#102): in the docked sidebar's top strip, in the hover-revealed overlay's, or nowhere
+  /// while the sidebar is hidden, so no buttons float over the page.
   /// PARITY(NEEDS-RUNTIME-CHECK RT-10): that Arc hides them with the sidebar.
+  ///
+  /// The overlay case carries what the overlay presents on its current frame (#807): `origin` is its resting place,
+  /// `slide` its layer translation along x and `alpha` its opacity, so the buttons are drawn on the overlay as it moves
+  /// or fades.
   public enum TrafficLightPlacement: Equatable, Sendable {
     case sidebar
-    case overlay(origin: CGPoint, alpha: CGFloat)
+    case overlay(origin: CGPoint, slide: CGFloat, alpha: CGFloat)
     case hidden
   }
 
@@ -40,17 +44,31 @@ public final class ShellWindow: NSWindow {
   ///
   /// The titlebar container is narrowed to the sidebar so it never sits over (and steals clicks from) the
   /// content card; it is never narrower than the three buttons, so they stay hit-testable. With the sidebar hidden
-  /// and no overlay out it is zero wide and the buttons are hidden.
+  /// and no overlay out it is zero wide and the buttons are hidden. While the overlay slides, the container keeps the
+  /// overlay's resting extent and only the buttons move with it.
+  ///
+  /// Showing, hiding or fading a standard button makes AppKit lay its titlebar out again at once: the container goes
+  /// back to the window's full width and the buttons to AppKit's own places (#807). So visibility and opacity are set
+  /// first and the geometry last, every call.
   public func layoutTrafficLights(sidebarWidth: CGFloat) {
     guard !styleMask.contains(.fullScreen) else { return }
     let kinds: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
     guard let close = standardWindowButton(.closeButton),
           let titlebar = close.superview,                    // NSTitlebarView
           let container = titlebar.superview else { return } // NSTitlebarContainerView
-    let (offset, shown, alpha): (CGPoint, Bool, CGFloat) = switch trafficLightPlacement {
-    case .sidebar: (.zero, true, 1)
-    case .overlay(let origin, let alpha): (origin, true, alpha)
-    case .hidden: (.zero, false, 0)
+    let (offset, slide, shown, alpha): (CGPoint, CGFloat, Bool, CGFloat) = switch trafficLightPlacement {
+    case .sidebar: (.zero, 0, true, 1)
+    case .overlay(let origin, let slide, let alpha): (origin, slide, true, alpha)
+    case .hidden: (.zero, 0, false, 0)
+    }
+    let buttons = kinds.compactMap { standardWindowButton($0) }
+    var unhid = false
+    for button in buttons {
+      if button.isHidden == shown {
+        button.isHidden = !shown
+        unhid = unhid || shown
+      }
+      if button.alphaValue != alpha, shown { button.alphaValue = alpha }
     }
     let origin = metrics.trafficLightOrigin
     // As tall as the sidebar's traffic-light strip, so the sidebar URL bar below it keeps its clicks, and never
@@ -60,15 +78,8 @@ public final class ShellWindow: NSWindow {
     let width = shown ? min(frame.width, offset.x + max(sidebarWidth, buttonsExtent)) : 0
     let containerFrame = NSRect(x: 0, y: frame.height - height, width: width, height: height)
     if container.frame != containerFrame { container.frame = containerFrame }
-    var unhid = false
-    for (index, kind) in kinds.enumerated() {
-      guard let button = standardWindowButton(kind) else { continue }
-      if button.isHidden == shown {
-        button.isHidden = !shown
-        unhid = unhid || shown
-      }
-      if button.alphaValue != alpha, shown { button.alphaValue = alpha }
-      let x = offset.x + origin.x + CGFloat(index) * metrics.trafficLightSpacing
+    for (index, button) in buttons.enumerated() {
+      let x = offset.x + slide + origin.x + CGFloat(index) * metrics.trafficLightSpacing
       let y = titlebar.bounds.height - offset.y - origin.y - button.frame.height   // titlebar view is not flipped
       let target = NSPoint(x: x, y: y)
       if button.frame.origin != target { button.setFrameOrigin(target) }
