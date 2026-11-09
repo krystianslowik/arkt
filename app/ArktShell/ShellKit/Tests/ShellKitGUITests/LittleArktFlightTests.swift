@@ -536,6 +536,92 @@ final class LittleArktFlightTests: XCTestCase {
     }
   }
 
+  // MARK: The page closes during the fade (#881)
+
+  /// `window.close()` in the page while the small window fades out before the move: the engine closes the tab, then
+  /// the emptied window (`.lastTabClosed`). Nothing is left to move, so the fade ends with the small window closed,
+  /// never back open around an empty card.
+  private func closePageDuringTheFade(_ engine: InMemoryEngine, tab: TabID, window: EngineWindowID) {
+    engine.engineCloseTab(tab, reason: .page)
+    engine.engineCloseWindow(window, reason: .lastTabClosed)
+  }
+
+  private func assertClosedAfterTheFade(_ little: LittleArktWindowController, _ set: ShellWindowSet,
+                                        _ message: String, line: UInt = #line) {
+    XCTAssertTrue(little.isClosed, "the small window closed: \(message)", line: line)
+    XCTAssertFalse(little.window.isVisible, "and is off screen: \(message)", line: line)
+    XCTAssertNotEqual(little.lastTransition, .appear, "no appear on an emptied window: \(message)", line: line)
+    XCTAssertTrue(set.littleArkts.isEmpty, "the set forgot it: \(message)", line: line)
+  }
+
+  /// Reduce Motion, or a main window the flight refuses: the fade path with an open main window.
+  func testThePageClosingItselfDuringTheFadeClosesTheWindow() throws {
+    let refusals: [(String, Bool, LittleArktFlightConditions?)] = [
+      ("Reduce Motion", true, nil),
+      ("main window minimized", false, LittleArktFlightConditions(mainMiniaturized: true)),
+    ]
+    for (name, reduceMotion, conditions) in refusals {
+      let scene = try makeScene(reduceMotion: reduceMotion)
+      if let conditions { scene.little.mainWindowConditions = { _ in conditions } }
+      let rowsBefore = scene.main.tabsByNode.count
+      scene.little.openIn()
+      XCTAssertNil(scene.little.flight, name)
+      XCTAssertEqual(scene.little.lastTransition, .fadeOut, name)
+
+      closePageDuringTheFade(scene.engine, tab: scene.tab, window: scene.littleWindow)
+      scene.little.finishMotion()
+
+      assertClosedAfterTheFade(scene.little, scene.set, name)
+      XCTAssertEqual(scene.set.controllers.count, 1, "no second main window: \(name)")
+      XCTAssertEqual(scene.main.tabsByNode.count, rowsBefore, "no row for the closed page: \(name)")
+    }
+  }
+
+  /// No main window: Open in would open one for the page, but the page is gone by the end of the fade, so no empty
+  /// main window is left behind.
+  func testThePageClosingItselfDuringTheFadeWithNoMainWindowLeavesNoEmptyWindow() throws {
+    let engine = InMemoryEngine()
+    let world = try EngineWorld.make()
+    let source = ModelSidebarSource(sidebar: world.sidebar, now: { EngineWorld.now })
+    let set = ShellWindowSet(engine: engine, sidebar: source, hostLookup: { [engine] in engine.host(of: $0) })
+    set.littleArktReduceMotion = { false }
+    set.littleArktConfigure = { $0.drivesDisplayLink = false }
+    engine.windowHostProvider = { [weak set] request in
+      guard let set else { preconditionFailure("the set outlives the test") }
+      return set.host(for: request)
+    }
+    sets.append(set)
+    let request = EngineWindowRequest(kind: .page, bounds: nil, profile: EngineProfileID("default"),
+                                      initialURL: popupURL, isPopup: true)
+    let id = try XCTUnwrap(engine.openEngineWindow(request))
+    let little = try XCTUnwrap(set.littleArkts.first { $0.engineWindow == id })
+    let tab = try XCTUnwrap(engine.activeTab(in: id))
+    little.finishMotion()
+    XCTAssertTrue(set.controllers.isEmpty)
+
+    little.openIn()
+    XCTAssertNil(little.flight, "no main window to fly to")
+    XCTAssertEqual(little.lastTransition, .fadeOut)
+    closePageDuringTheFade(engine, tab: tab, window: id)
+    little.finishMotion()
+
+    assertClosedAfterTheFade(little, set, "no main window")
+    XCTAssertTrue(set.controllers.isEmpty, "no empty main window is left behind")
+  }
+
+  /// The chooser's Open in New Window fades too, then opens the new window: not when the page is gone.
+  func testThePageClosingItselfDuringTheOpenInNewWindowFadeClosesTheWindow() throws {
+    let scene = try makeScene()
+    scene.little.openInNewWindow()
+    XCTAssertEqual(scene.little.lastTransition, .fadeOut)
+
+    closePageDuringTheFade(scene.engine, tab: scene.tab, window: scene.littleWindow)
+    scene.little.finishMotion()
+
+    assertClosedAfterTheFade(scene.little, scene.set, "Open in New Window")
+    XCTAssertEqual(scene.set.controllers.count, 1, "no empty new main window")
+  }
+
   func testReduceMotionKeepsTodaysFades() throws {
     let scene = try makeScene(reduceMotion: true)
     scene.little.openIn()
