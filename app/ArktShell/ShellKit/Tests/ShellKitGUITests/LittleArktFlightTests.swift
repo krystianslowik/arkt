@@ -577,6 +577,25 @@ final class LittleArktFlightTests: XCTestCase {
     }
   }
 
+  /// The same sequence as phases (#877): the page closing hands the window off with nothing to move, the engine's
+  /// close ends it, and the fade's end changes nothing. It is never open again in between.
+  func testThePageClosingItselfDuringTheFadeIsOneTransitionSequence() throws {
+    let scene = try makeScene(reduceMotion: true)
+    scene.little.openIn()
+    closePageDuringTheFade(scene.engine, tab: scene.tab, window: scene.littleWindow)
+    scene.little.finishMotion()
+
+    XCTAssertEqual(scene.little.phaseName, .closed)
+    XCTAssertNil(scene.little.engineWindow)
+    #if DEBUG
+    XCTAssertEqual(scene.little.transitionLog.map(\.to), [.open, .handingOff, .handedOff, .closed])
+    XCTAssertEqual(scene.little.transitionLog.map(\.event), [
+      .adopted(scene.littleWindow), .openIn(nil, newWindow: false), .pageClosed,
+      .engineClosedWindow(.lastTabClosed),
+    ])
+    #endif
+  }
+
   /// No main window: Open in would open one for the page, but the page is gone by the end of the fade, so no empty
   /// main window is left behind.
   func testThePageClosingItselfDuringTheFadeWithNoMainWindowLeavesNoEmptyWindow() throws {
