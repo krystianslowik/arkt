@@ -141,8 +141,38 @@ final class DownloadsPopoverStateTests: XCTestCase {
     XCTAssertEqual(popover.phaseName, .closed, "the cancelled show does not run")
     button.performClick(nil)
     XCTAssertEqual(popover.phaseName, .open(pointerInside: false))
+    let panel = try XCTUnwrap(popover.panel)
     popover.show(takesKey: false)                               // already open: nothing
+    XCTAssertTrue(popover.panel === panel, "a show while open keeps the same panel")
+    XCTAssertEqual(popover.phaseName, .open(pointerInside: false))
     button.performClick(nil)
     XCTAssertEqual(popover.phaseName, .closed)
+  }
+
+  func testShowingDuringTheExitFadeStartsCleanAndLeavesTheFadingPanelItsRows() throws {
+    let controller = makeWindow()
+    let button = try XCTUnwrap(controller.sidebarController.view.libraryButton)
+    let popover = try XCTUnwrap(center.popover(of: controller))
+    popover.reduceMotion = { false }
+    _ = engine.beginDownload(url: URL(string: "https://files.example/a.bin")!, filename: "a.bin", totalBytes: 1_000)
+    button.performClick(nil)
+    let fading = try XCTUnwrap(popover.panel)
+    popover.hide(keyboard: false)                               // fades out
+    popover.show(takesKey: false)                               // at once, before the fade has ended
+
+    let fadingContent = try XCTUnwrap(fading.contentView)
+    XCTAssertEqual(popoverViews(in: fadingContent), 1, "the fading panel keeps its rows until it leaves")
+    XCTAssertEqual(trackers(in: fadingContent), 0, "the fading panel stops tracking the pointer at once")
+    let current = try XCTUnwrap(popover.panel)
+    XCTAssertFalse(current === fading)
+    let container = try XCTUnwrap(current.contentView)
+    XCTAssertFalse(container === fadingContent)
+    XCTAssertEqual(popoverViews(in: container), 1)
+    XCTAssertEqual(trackers(in: container), 1)
+    XCTAssertEqual(popover.phaseName, .open(pointerInside: false))
+
+    // The end state of the fade, so no window outlives the test (#805); the deadline is only the failure path.
+    waitUntil("the faded panel to leave") { popoverViews(in: fadingContent) == 0 && !fading.isVisible }
+    popover.hide(keyboard: true)
   }
 }

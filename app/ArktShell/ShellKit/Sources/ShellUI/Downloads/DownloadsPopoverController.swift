@@ -94,6 +94,7 @@ final class DownloadsPopoverController: NSObject {
 
   // MARK: Reading the phase
 
+  /// The current show's session, if open. Read-only: tests and the controller read it; only `send` changes it.
   var session: Session? {
     switch phase {
     case .open(let session, _), .leavePending(let session, _): session
@@ -140,7 +141,9 @@ final class DownloadsPopoverController: NSObject {
 
   /// The one place the phase changes. Pairs not listed change nothing.
   func send(_ event: Event) {
+    #if DEBUG
     let from = phaseName
+    #endif
     switch (phase, event) {
     case (.closed, .buttonHover(true)):
       phase = .showPending(makeTimer(after: DownloadsMetrics.hoverDelay))
@@ -211,6 +214,8 @@ final class DownloadsPopoverController: NSObject {
   /// nothing even if it was not invalidated.
   private func makeTimer(after delay: TimeInterval) -> Timer {
     Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] timer in
+      // The Timer itself cannot cross into the main-actor closure under Swift 6 region checking ("sending 'timer'
+      // risks causing data races"), so its identity does.
       let fired = ObjectIdentifier(timer)
       MainActor.assumeIsolated {
         guard let self, let pending = self.pendingTimer, ObjectIdentifier(pending) == fired else { return }
