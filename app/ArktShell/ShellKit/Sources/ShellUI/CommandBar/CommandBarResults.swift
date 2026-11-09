@@ -1,7 +1,7 @@
-import Foundation
 #if DEBUG
 import Synchronization
 #endif
+import Foundation
 
 /// Placeholder suggestion provider: URL, matching open tabs and Spaces, Paste and Go, search. Real providers
 /// (Chromium autocomplete, history, archived tabs, extensions) replace parts of `make` later behind the same
