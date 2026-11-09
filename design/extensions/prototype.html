@@ -768,7 +768,7 @@ const dimCard = '<div class="dim2"></div>';
 
 /* ----- Context menu ----- */
 const ctx = (pinned, o = {}) => menu([{ hd: o.name || 'Quiet Reader' }, { t: 'Options…' },
-  pinned ? { t: 'Unpin from Panel', hov: !o.hovOther } : { t: 'Pin to Panel', hov: true },
+  pinned ? { t: 'Unpin', hov: !o.hovOther } : { t: 'Pin', hov: true },
   ...(pinned ? [{ t: 'Move Up', dis: true }, { t: 'Move Down' }] : []), '-',
   { t: 'This Can Read and Change Site Data', sub: true }, '-', { t: 'Manage Extension…' }, { t: 'Remove from Arkt…' }], o.style);
 

@@ -126,7 +126,7 @@ public enum ExtensionContextCommand {
   public static let header = EngineMenuCommand(rawValue: 0)
   /// Options...: opens the extension's options page in a tab.
   public static let options = EngineMenuCommand(rawValue: 1)
-  /// Pin to Panel or Unpin from Panel, by the current state.
+  /// Pin or Unpin, by the current state.
   public static let togglePin = EngineMenuCommand(rawValue: 2)
   /// Move Up: one place earlier in the pinned order.
   public static let moveUp = EngineMenuCommand(rawValue: 3)

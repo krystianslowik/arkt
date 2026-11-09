@@ -160,7 +160,7 @@ struct InMemoryEngineExtensionTests {
     engine.setExtensionActions([action("a", "Alpha", siteAccess: .onClick, options: true)], in: window)
 
     let menu = engine.extensionContextMenu(forAction: "a", in: window)
-    #expect(menu.map(\.title) == ["Alpha", "Options...", "Pin to Panel", "This Can Read and Change Site Data", "",
+    #expect(menu.map(\.title) == ["Alpha", "Options...", "Pin", "This Can Read and Change Site Data", "",
                                   "Manage Extension...", "Remove from Arkt..."])
     #expect(menu[0].isEnabled == false && menu[0].command == ExtensionContextCommand.header)
     #expect(menu[1].isEnabled && menu[1].command == ExtensionContextCommand.options)
@@ -185,7 +185,7 @@ struct InMemoryEngineExtensionTests {
     #expect(moves("b") == [true, true])
     #expect(moves("c") == [true, false])
     let menu = engine.extensionContextMenu(forAction: "a", in: window)
-    #expect(menu.contains { $0.title == "Unpin from Panel" })
+    #expect(menu.contains { $0.title == "Unpin" })
     #expect(menu.first { $0.title == "Options..." }?.isEnabled == false)
     #expect(!menu.contains { $0.title == "This Can Read and Change Site Data" })
     #expect(engine.extensionContextMenu(forAction: "missing", in: window).isEmpty)

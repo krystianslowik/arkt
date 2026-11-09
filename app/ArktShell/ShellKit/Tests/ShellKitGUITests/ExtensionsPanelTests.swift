@@ -280,7 +280,7 @@ final class ExtensionsPanelTests: XCTestCase {
     let rightClick = try XCTUnwrap(NSEvent.mouseEvent(with: .rightMouseDown, location: .zero, modifierFlags: [],
                                                       timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0,
                                                       clickCount: 1, pressure: 1))
-    XCTAssertEqual(a.menu(for: rightClick)?.items.map(\.title).contains("Unpin from Panel"), true)
+    XCTAssertEqual(a.menu(for: rightClick)?.items.map(\.title).contains("Unpin"), true)
     XCTAssertEqual(a.runButton.menu(for: rightClick)?.items.first?.title, "A", "right-click on the main area")
     XCTAssertEqual(a.pinToggle.menu(for: rightClick)?.items.first?.title, "A")
 

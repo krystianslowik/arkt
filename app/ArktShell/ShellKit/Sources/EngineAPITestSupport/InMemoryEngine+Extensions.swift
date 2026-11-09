@@ -58,7 +58,7 @@ extension InMemoryEngine {
     var menu = [
       EngineMenuItem(title: action.name, command: ExtensionContextCommand.header, isEnabled: false),
       EngineMenuItem(title: "Options...", command: ExtensionContextCommand.options, isEnabled: action.hasOptionsPage),
-      EngineMenuItem(title: action.isPinned ? "Unpin from Panel" : "Pin to Panel",
+      EngineMenuItem(title: action.isPinned ? "Unpin" : "Pin",
                      command: ExtensionContextCommand.togglePin),
     ]
     if let place = pinnedExtensionIDs.firstIndex(of: action.extensionID) {

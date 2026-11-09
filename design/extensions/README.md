@@ -60,7 +60,7 @@ A native `NSMenu`, drawn by AppKit like the tab menus (`design/tab-context-menus
 |---|---|---|
 | (extension name) | disabled header | |
 | Options... | extension has an options page | opens it in a tab |
-| Unpin from Panel / Pin to Panel | always | the title follows the state |
+| Unpin / Pin | always | the title follows the state |
 | Move Up, Move Down | pinned only; each disabled at its end | |
 | This Can Read and Change Site Data > | extension has host permissions | submenu: When You Click the Extension, On <host>, On All Sites (one checked) |
 | Manage Extension... | always | opens its entry in Settings, Extensions |
