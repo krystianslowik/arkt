@@ -18,6 +18,23 @@ extension ShellWindowController {
   /// Runs a context menu action of any Space page.
   func perform(_ action: SidebarMenuAction) {
     switch action {
+    case .setNodeIcon(let id, let icon): sidebar.setNodeIcon(id, to: icon)
+    case .chooseNodeEmoji(let id):
+      guard let window, window.attachedSheet == nil else { return }
+      var current: String?
+      if case .emoji(let value)? = sidebar.nodeIcon(id) { current = value }
+      let answer: @MainActor (String?) -> Void = { [weak self] text in
+        guard let self, let text, let icon = SpaceIconInfo.validatedEmoji(text) else { return }
+        switch self.sidebar.node(id) {
+        case .folder?: break
+        case .tab?:
+          guard case .favorites? = self.sidebar.section(containing: id) else { return }
+        default: return
+        }
+        self.sidebar.setNodeIcon(id, to: icon)
+      }
+      if let nodeEmojiPromptForTesting { nodeEmojiPromptForTesting(current, answer) }
+      else { SpaceEmojiPrompt(current: current).begin(on: window, answer: answer) }
     case .rename(let id): sidebarController.beginRename(node: id)
     case .duplicate(let ids): duplicate(ids)
     case .pinToggle(let ids): pinToggle(ids)

@@ -3,6 +3,9 @@ import AppKit
 /// What a sidebar context menu item does. The outline runs the split and pin items through its existing callbacks
 /// and hands every other action to the window (`SidebarOutlineController.onMenuAction`).
 public enum SidebarMenuAction: Hashable, Sendable {
+  /// Changes a Favorite or folder icon.
+  case setNodeIcon(NodeID, SpaceIconInfo?)
+  case chooseNodeEmoji(NodeID)
   /// Opens the inline rename field (BH-026).
   case rename(NodeID)
   /// Duplicates every node, each copy right after its original (BH-027, BH-095).
@@ -54,6 +57,8 @@ public struct SidebarMenuEntry: Equatable, Sendable {
   public var keyEquivalent: String
   public var modifiers: NSEvent.ModifierFlags
   public var isEnabled: Bool
+  /// Whether the item is checked in its submenu.
+  public var isSelected: Bool = false
   /// An Option-held alternate of the item before it (`NSMenuItem.isAlternate`).
   public var isAlternate: Bool
   public var submenu: [SidebarMenuEntry]?
@@ -74,7 +79,7 @@ public struct SidebarMenuEntry: Equatable, Sendable {
     self.submenu = submenu
   }
 
-  /// An item that is shown but not built yet (Share, Change Icon): disabled, as the settings
+  /// An item that is shown but not built yet (Share): disabled, as the settings
   /// precedent shows unbuilt rows (design OQ6).
   static func unavailable(_ title: String) -> SidebarMenuEntry {
     SidebarMenuEntry(title: title, action: nil, isEnabled: false)
@@ -150,6 +155,7 @@ public enum SidebarContextMenu {
       item.keyEquivalentModifierMask = entry.modifiers
       item.isAlternate = entry.isAlternate
       item.isEnabled = entry.isEnabled
+      item.state = entry.isSelected ? .on : .off
       item.target = target
       item.representedObject = entry.action
       if let submenu = entry.submenu { item.submenu = self.menu(submenu, target: target, action: action) }
@@ -228,14 +234,16 @@ public enum SidebarContextMenu {
   private static func favorite(_ id: NodeID, _ source: any SidebarSource,
                                _ context: SidebarMenuContext) -> [SidebarMenuEntry] {
     if case .split? = source.node(id) { return favoriteSplit(id) }
-    return favoriteTab(id, context)
+    return favoriteTab(id, source, context)
   }
 
   /// A tile draws no title, so Rename... opens the Edit Pin popover on Name (#363, design/edit-pin); Edit Pinned
   /// URL... opens it on Pinned URL. Back to Pinned URL for Favorites is PARITY and disabled, as the design's
   /// screenshot shows it.
-  private static func favoriteTab(_ id: NodeID, _ context: SidebarMenuContext) -> [SidebarMenuEntry] {
-    [SidebarMenuEntry(title: "Rename\u{2026}", action: .editPin(id, focus: .name)), .unavailable("Change Icon"),
+  @MainActor
+  private static func favoriteTab(_ id: NodeID, _ source: any SidebarSource,
+                                  _ context: SidebarMenuContext) -> [SidebarMenuEntry] {
+    [SidebarMenuEntry(title: "Rename\u{2026}", action: .editPin(id, focus: .name))] + iconEntries(id, source) + [
      .separator,
      .unavailable("Back to Pinned URL"), SidebarMenuEntry(title: editPinnedURLTitle, action: .editPin(id, focus: .url)),
      .separator]
@@ -243,6 +251,22 @@ public enum SidebarContextMenu {
       + [.separator,
          SidebarMenuEntry(title: "Remove from Favorites", action: .removeFromFavorites(id)),
          SidebarMenuEntry(title: "Close and Keep Favorite", action: .archive([id]), key: "w")]
+  }
+
+  @MainActor
+  private static func iconEntries(_ id: NodeID, _ source: any SidebarSource) -> [SidebarMenuEntry] {
+    let current = source.nodeIcon(id)
+    var choices = SpaceIconCatalog.choices.map { choice in
+      var entry = SidebarMenuEntry(title: choice.title, action: .setNodeIcon(id, choice.symbol.map { .symbol($0) }))
+      entry.isSelected = choice.symbol.map { SpaceIconInfo.symbol($0) } == current
+      return entry
+    }
+    choices.append(.separator)
+    var emoji = SidebarMenuEntry(title: "Emoji\u{2026}", action: .chooseNodeEmoji(id))
+    if case .emoji? = current { emoji.isSelected = true }
+    choices.append(emoji)
+    return [SidebarMenuEntry(title: "Change Icon", action: nil, submenu: choices),
+            SidebarMenuEntry(title: "Reset Icon", action: .setNodeIcon(id, nil), isEnabled: current != nil)]
   }
 
   /// A split in the Favorites (BH-115; its own tile is #788): the Favorite items that act on a split, the pane links
@@ -259,7 +283,7 @@ public enum SidebarContextMenu {
   @MainActor
   private static func folder(_ id: NodeID, _ source: any SidebarSource,
                              _ context: SidebarMenuContext) -> [SidebarMenuEntry] {
-    [SidebarMenuEntry(title: "Rename", action: .rename(id)), .unavailable("Change Icon"), .separator,
+    [SidebarMenuEntry(title: "Rename", action: .rename(id))] + iconEntries(id, source) + [.separator,
      SidebarMenuEntry(title: "Duplicate", action: .duplicate([id])), .unavailable("Share"), .separator,
      SidebarMenuEntry(title: "Copy All Links", action: .copyLinks([id], markdown: false)),
      SidebarMenuEntry(title: "Copy All as Markdown Links", action: .copyLinks([id], markdown: true),

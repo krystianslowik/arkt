@@ -982,7 +982,7 @@ final class TabActionsTests: XCTestCase {
                                                  context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
     let menu = try XCTUnwrap(grid.collectionView.menu(for: event), "the tile has a menu")
     XCTAssertEqual(menu.items.filter { !$0.isAlternate }.map(\.title),
-                   ["Rename\u{2026}", "Change Icon", "", "Back to Pinned URL", "Edit Pinned URL\u{2026}", "",
+                   ["Rename\u{2026}", "Change Icon", "Reset Icon", "", "Back to Pinned URL", "Edit Pinned URL\u{2026}", "",
                     "Copy Link", "", "Remove from Favorites", "Close and Keep Favorite"])
 
     menu.performActionForItem(at: menu.indexOfItem(withTitle: "Remove from Favorites"))
@@ -990,6 +990,121 @@ final class TabActionsTests: XCTestCase {
     XCTAssertEqual(harness.children(.favorites(profile: "default")), [])
     XCTAssertEqual(harness.children(.today(world.work)).first, favorite)
     harness.controller.close()
+  }
+
+  func testFavoriteIconMenuSelectionAndReset() throws {
+    var world = try Self.makeWorld()
+    let favorite = try world.sidebar.addTab(url: Self.url("fav"), title: "Fav", in: .favorites(profile: "default"))
+    let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
+    let grid = harness.controller.sidebarController.view.favorites
+    grid.layoutSubtreeIfNeeded()
+    let tile = try XCTUnwrap(grid.tile(for: favorite))
+    let center = tile.convert(NSPoint(x: tile.bounds.midX, y: tile.bounds.midY), to: nil)
+    let event = try XCTUnwrap(NSEvent.mouseEvent(with: .rightMouseDown, location: center, modifierFlags: [],
+                                                 timestamp: 0, windowNumber: grid.window?.windowNumber ?? 0,
+                                                 context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+    let menu = try XCTUnwrap(grid.collectionView.menu(for: event))
+    let picker = try XCTUnwrap(menu.item(withTitle: "Change Icon")?.submenu)
+    XCTAssertNil(harness.source.sidebar.nodes[favorite]?.customIcon, "opening the picker changes nothing")
+    XCTAssertEqual(picker.item(withTitle: "None")?.state, .on)
+    XCTAssertEqual(picker.item(withTitle: "Star")?.state, .off)
+    let star = picker.indexOfItem(withTitle: "Star")
+    XCTAssertGreaterThanOrEqual(star, 0)
+    if star >= 0 { picker.performActionForItem(at: star) }
+    XCTAssertEqual(harness.source.sidebar.nodes[favorite]?.customIcon, .symbol("star"))
+    let resetMenu = try XCTUnwrap(grid.collectionView.menu(for: event))
+    let selectedPicker = try XCTUnwrap(resetMenu.item(withTitle: "Change Icon")?.submenu)
+    XCTAssertEqual(selectedPicker.item(withTitle: "Star")?.state, .on)
+    XCTAssertEqual(selectedPicker.item(withTitle: "None")?.state, .off)
+    let reset = resetMenu.indexOfItem(withTitle: "Reset Icon")
+    XCTAssertGreaterThanOrEqual(reset, 0)
+    if reset >= 0 { resetMenu.performActionForItem(at: reset) }
+    XCTAssertNil(harness.source.sidebar.nodes[favorite]?.customIcon)
+    let clearedMenu = try XCTUnwrap(grid.collectionView.menu(for: event))
+    XCTAssertEqual(clearedMenu.item(withTitle: "Change Icon")?.submenu?.item(withTitle: "None")?.state, .on)
+  }
+
+  func testFolderIconMenuSelectionAndReset() throws {
+    var world = try Self.makeWorld()
+    let folder = try world.sidebar.addFolder(title: "Folder", in: .pinned(world.work))
+    let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
+    let picker = try XCTUnwrap(try harness.menu(folder).item(withTitle: "Change Icon")?.submenu)
+    XCTAssertNil(harness.source.sidebar.nodes[folder]?.customIcon, "opening the picker changes nothing")
+    XCTAssertEqual(picker.item(withTitle: "None")?.state, .on)
+    XCTAssertEqual(picker.item(withTitle: "Star")?.state, .off)
+
+    try harness.choose("Change Icon", "Star", on: folder)
+    XCTAssertEqual(harness.source.sidebar.nodes[folder]?.customIcon, .symbol("star"))
+    let selected = try XCTUnwrap(try harness.menu(folder).item(withTitle: "Change Icon")?.submenu)
+    XCTAssertEqual(selected.item(withTitle: "Star")?.state, .on)
+    XCTAssertEqual(selected.item(withTitle: "None")?.state, .off)
+
+    try harness.choose("Reset Icon", on: folder)
+    XCTAssertNil(harness.source.sidebar.nodes[folder]?.customIcon)
+    let cleared = try XCTUnwrap(try harness.menu(folder).item(withTitle: "Change Icon")?.submenu)
+    XCTAssertEqual(cleared.item(withTitle: "None")?.state, .on)
+    XCTAssertEqual(cleared.item(withTitle: "Star")?.state, .off)
+  }
+
+  func testNodeEmojiCancelPreservesIconsAndConfirmationWritesOnce() throws {
+    var world = try Self.makeWorld()
+    let favorite = try world.sidebar.addTab(url: Self.url("emoji"), title: "Emoji", in: .favorites(profile: "default"))
+    let folder = try world.sidebar.addFolder(title: "Folder", in: .today(world.work))
+    let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
+    for node in [favorite, folder] {
+      harness.source.setNodeIcon(node, to: .emoji("\u{1F680}"))
+      var changes: [SidebarChange] = []
+      var saves = 0
+      let observation = harness.source.observe { changes.append($0) }
+      harness.source.onDidChange = { _ in saves += 1 }
+      var reply: (@MainActor (String?) -> Void)?
+      var initial: String?
+      harness.controller.nodeEmojiPromptForTesting = { current, answer in initial = current; reply = answer }
+
+      harness.controller.perform(.chooseNodeEmoji(node))
+      XCTAssertEqual(initial, "\u{1F680}")
+      let cancel = try XCTUnwrap(reply)
+      cancel(nil)
+      XCTAssertEqual(harness.source.nodeIcon(node), .emoji("\u{1F680}"))
+      XCTAssertEqual(saves, 0)
+      XCTAssertTrue(changes.isEmpty)
+
+      reply = nil
+      harness.controller.perform(.chooseNodeEmoji(node))
+      let confirm = try XCTUnwrap(reply)
+      confirm("\u{1F338}")
+      XCTAssertEqual(harness.source.nodeIcon(node), .emoji("\u{1F338}"))
+      XCTAssertEqual(saves, 1)
+      XCTAssertEqual(changes, [.node(node)])
+      withExtendedLifetime(observation) {}
+    }
+  }
+
+  func testNodeEmojiCompletionIgnoresFavoriteMovedToTodayWhilePromptIsOpen() throws {
+    var world = try Self.makeWorld()
+    let favorite = try world.sidebar.addTab(url: Self.url("moving-emoji"), title: "Moving",
+                                           in: .favorites(profile: "default"))
+    let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
+    harness.source.setNodeIcon(favorite, to: .symbol("star"))
+    var reply: (@MainActor (String?) -> Void)?
+    harness.controller.nodeEmojiPromptForTesting = { _, answer in reply = answer }
+    harness.controller.perform(.chooseNodeEmoji(favorite))
+    let complete = try XCTUnwrap(reply)
+    // A shared source may change through another window while this window's sheet is outstanding.
+    try harness.source.moveNode(favorite, to: .today(world.work), at: 0)
+    var changes: [SidebarChange] = []
+    var saves = 0
+    let observation = harness.source.observe { changes.append($0) }
+    harness.source.onDidChange = { _ in saves += 1 }
+    complete("\u{1F680}")
+    XCTAssertEqual(harness.source.nodeIcon(favorite), .symbol("star"))
+    XCTAssertEqual(saves, 0)
+    XCTAssertTrue(changes.isEmpty)
+    withExtendedLifetime(observation) {}
   }
 
   // MARK: Empty area (BH-021, BH-023) and dimming (BH-025)

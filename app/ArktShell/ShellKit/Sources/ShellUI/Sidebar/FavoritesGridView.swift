@@ -612,7 +612,9 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
     tile.isKeyboardFocused = keyboardFocusID == id
     var title = "", url: URL?
     if case .tab(_, let tabURL, let tabTitle)? = source.node(id) { title = tabTitle; url = tabURL }
-    tile.faviconView.image = faviconProvider?(id)
+    tile.faviconView.image = source.nodeIcon(id).map { SidebarGlyphs.customIcon($0, flavor: flavor,
+      size: SidebarMetrics.favoriteFaviconSize, scale: collectionView.shellBackingScale) }
+      ?? faviconProvider?(id)
       ?? SidebarGlyphs.letter(for: title, url: url, flavor: flavor, size: SidebarMetrics.favoriteFaviconSize,
                               scale: collectionView.shellBackingScale)
     let shown = label(of: id)

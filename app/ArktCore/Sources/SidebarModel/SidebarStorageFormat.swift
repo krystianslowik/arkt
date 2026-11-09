@@ -22,6 +22,9 @@ import Foundation
 /// with a texture, 0 without) and `opacity` 1, so every stored theme draws as it did. Those keys inside an older
 /// document are ignored.
 ///
+/// Version 4 adds an optional node custom icon. Versions 1 through 3 decode nodes through the old shape,
+/// ignoring any icon key and migrating every override to nil.
+///
 /// Equality: two stored documents hold the same sidebar when their decoded values are equal. Byte equality is only a
 /// fast path (the encoding is deterministic for a given build), never the definition.
 ///
@@ -29,12 +32,12 @@ import Foundation
 /// `Sidebar.maximumNestingDepth`, enforced by `insert`, bounds how deep the decoded tree may be, and is reported as
 /// `.invalidTree(.nestingTooDeep(id))`.
 public enum SidebarStorageFormat {
-  public static let currentVersion = 3
+  public static let currentVersion = 4
 
   /// Documents this build reads. Version 1 migrates by leaving `Space.icon` nil (the field did not exist); versions
   /// 1 and 2 give themes the version 3 defaults. `SidebarStorageFormat` versions only the sidebar document; archived
   /// `NodeSnapshot`s carry no Space data and are versioned on their own (`ArchiveStore.snapshotFormatVersion`).
-  public static let readableVersions: Set<Int> = [1, 2, 3]
+  public static let readableVersions: Set<Int> = [1, 2, 3, 4]
 
   /// Same value as `Sidebar.maximumNestingDepth`, the model invariant that decoding enforces through `insert`.
   public static let maximumNestingDepth = Sidebar.maximumNestingDepth
@@ -66,6 +69,17 @@ public enum SidebarDocumentError: Error, Hashable, Sendable {
   case invalidTree(SidebarError)
 }
 
+private struct LegacyNode: Decodable {
+  var id: NodeID
+  var kind: NodeKind
+  var createdAt: Date
+  var children: [LegacyNode]
+
+  var snapshot: NodeSnapshot {
+    NodeSnapshot(id: id, kind: kind, createdAt: createdAt, children: children.map(\.snapshot))
+  }
+}
+
 private struct SpaceEntry: Codable {
   var space: Space
   var pinned: [NodeSnapshot]
@@ -95,13 +109,13 @@ private struct SpaceEntryV1: Decodable {
   }
 
   var space: SpaceV1
-  var pinned: [NodeSnapshot]
-  var today: [NodeSnapshot]
+  var pinned: [LegacyNode]
+  var today: [LegacyNode]
 
   var entry: SpaceEntry {
     SpaceEntry(
       space: Space(id: space.id, title: space.title, profile: space.profile, theme: space.theme?.theme, icon: nil),
-      pinned: pinned, today: today)
+      pinned: pinned.map(\.snapshot), today: today.map(\.snapshot))
   }
 }
 
@@ -116,15 +130,28 @@ private struct SpaceEntryV2: Decodable {
   }
 
   var space: SpaceV2
-  var pinned: [NodeSnapshot]
-  var today: [NodeSnapshot]
+  var pinned: [LegacyNode]
+  var today: [LegacyNode]
 
   var entry: SpaceEntry {
     SpaceEntry(
       space: Space(id: space.id, title: space.title, profile: space.profile, theme: space.theme?.theme,
                    icon: space.icon),
-      pinned: pinned, today: today)
+      pinned: pinned.map(\.snapshot), today: today.map(\.snapshot))
   }
+}
+
+private struct SpaceEntryV3: Decodable {
+  var space: Space
+  var pinned: [LegacyNode]
+  var today: [LegacyNode]
+  var entry: SpaceEntry { SpaceEntry(space: space, pinned: pinned.map(\.snapshot), today: today.map(\.snapshot)) }
+}
+
+private struct FavoritesEntryLegacy: Decodable {
+  var profile: String
+  var items: [LegacyNode]
+  var entry: FavoritesEntry { FavoritesEntry(profile: profile, items: items.map(\.snapshot)) }
 }
 
 private struct FavoritesEntry: Codable {
@@ -146,9 +173,12 @@ extension Sidebar: Codable {
     let spaces: [SpaceEntry] = switch version {
     case 1: try container.decode([SpaceEntryV1].self, forKey: .spaces).map(\.entry)
     case 2: try container.decode([SpaceEntryV2].self, forKey: .spaces).map(\.entry)
+    case 3: try container.decode([SpaceEntryV3].self, forKey: .spaces).map(\.entry)
     default: try container.decode([SpaceEntry].self, forKey: .spaces)
     }
-    let favorites = try container.decode([FavoritesEntry].self, forKey: .favorites)
+    let favorites = version < 4
+      ? try container.decode([FavoritesEntryLegacy].self, forKey: .favorites).map(\.entry)
+      : try container.decode([FavoritesEntry].self, forKey: .favorites)
     var sidebar = Sidebar()
     var profiles: Set<String> = []
     do {

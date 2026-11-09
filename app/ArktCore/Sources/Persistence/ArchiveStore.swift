@@ -17,8 +17,9 @@ public struct ArchiveStore: Sendable {
   /// `archived_item.format_version`: the version of the stored `NodeSnapshot` JSON. It is versioned apart from the
   /// sidebar document (`SidebarStorageFormat.currentVersion`) because a snapshot holds no Space data: sidebar format
   /// 2 added `Space.icon` and left `NodeSnapshot` unchanged, so archive rows stay at 1 and builds that read only
-  /// version 1 keep reading them. Bump this only when `NodeSnapshot`'s stored shape changes.
-  public static let snapshotFormatVersion = 1
+  /// version 1 keep reading them. Version 2 adds the node custom icon; version 1 snapshots decode without it.
+  /// Bump this only when `NodeSnapshot`'s stored shape changes.
+  public static let snapshotFormatVersion = 2
 
   let database: ArktDatabase
 

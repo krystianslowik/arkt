@@ -170,12 +170,15 @@ public struct Node: Hashable, Sendable, Identifiable {
   public var kind: NodeKind
   public var parent: Location
   public var createdAt: Date
+  public var customIcon: SpaceIcon?
 
-  public init(id: NodeID = NodeID(), kind: NodeKind, parent: Location, createdAt: Date = .now) {
+  public init(id: NodeID = NodeID(), kind: NodeKind, parent: Location, createdAt: Date = .now,
+              customIcon: SpaceIcon? = nil) {
     self.id = id
     self.kind = kind
     self.parent = parent
     self.createdAt = createdAt
+    self.customIcon = customIcon
   }
 }
 
@@ -249,6 +252,12 @@ public struct Sidebar: Hashable, Sendable {
     guard var space = spaces[id], space.icon != icon else { return }
     space.icon = icon
     spaces[id] = space
+  }
+
+  /// Sets a node override; nil restores its default icon. Unknown nodes are ignored.
+  public mutating func setNodeIcon(_ id: NodeID, to icon: SpaceIcon?) {
+    guard nodes[id] != nil else { return }
+    nodes[id]?.customIcon = icon
   }
 
   /// Sets Space `id`'s theme (BH-034). Nil clears it. An unknown `id`, or the theme it already has, changes nothing.
@@ -447,7 +456,7 @@ public struct Sidebar: Hashable, Sendable {
     case .tab: nil
     }
     let children = childLocation.map { self.children(of: $0).compactMap { snapshot(of: $0) } } ?? []
-    return NodeSnapshot(id: id, kind: node.kind, createdAt: node.createdAt, children: children)
+    return NodeSnapshot(id: id, kind: node.kind, createdAt: node.createdAt, children: children, customIcon: node.customIcon)
   }
 
   /// The top-level section (`.favorites`, `.pinned`, `.today`) that holds `id`, directly or through folders and
@@ -483,7 +492,8 @@ public struct Sidebar: Hashable, Sendable {
     guard nodes[snapshot.id] == nil else { throw SidebarError.duplicateID(snapshot.id) }
     try validate(location, accepting: snapshot.kind)
     guard depth <= Self.maximumNestingDepth else { throw SidebarError.nestingTooDeep(snapshot.id) }
-    nodes[snapshot.id] = Node(id: snapshot.id, kind: snapshot.kind, parent: location, createdAt: snapshot.createdAt)
+    nodes[snapshot.id] = Node(id: snapshot.id, kind: snapshot.kind, parent: location, createdAt: snapshot.createdAt,
+                              customIcon: snapshot.customIcon)
     childOrder[location, default: []].append(snapshot.id)
     // A tab has no child location; `.folder(tabID)` fails validation, which is the error we want.
     let childLocation: Location = if case .split = snapshot.kind { .split(snapshot.id) } else { .folder(snapshot.id) }

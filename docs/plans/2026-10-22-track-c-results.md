@@ -2897,6 +2897,134 @@ Written first. Each failed to compile before the code existed.
   The app and test bundle build (`xcodebuild ... build-for-testing`: TEST BUILD SUCCEEDED). Not run: the suite needs
   the real pointer and keyboard, and the Mac was in use.
 
+### Custom Favorite and folder icons (#339): local test-first gate
+
+- Added three SidebarModel test cases for independent Favorite and folder overrides, storage round trips and clearing,
+  preserving an override through a tab update and snapshot restore, and fallback for the existing version 3 fixture.
+  The proposed `setNodeIcon` and `customIcon` names are test seams, not a storage format decision.
+- Swift 6.2.4 parsed the new test file and compiled the actual SidebarModel sources as an isolated module. A focused
+  typecheck against that module failed because `Sidebar.setNodeIcon` and `Node.customIcon` do not exist, as expected.
+  The test file itself was not typechecked or run: the local toolchain could not locate the `Testing` module. No test
+  count or runtime failure is claimed. Full package, GUI and app checks were not run.
+- Remaining: implement and verify the model and versioned storage migration, picker and menu wiring, rendering and
+  reset fallback, including favicon updates and both folder states. Add integration and UI coverage and run the required
+  package and GUI checks on a suitable macOS toolchain. Coordinate later Favorite grid and context menu edits with
+  #278, #338 and #801; #618 changes layout math, and #580 touches session/window files.
+
+### Custom Favorite and folder icons (#339): Core model and storage
+
+- Added independent optional node overrides using the existing symbol/emoji icon type. Tab updates, snapshot restore
+  and fresh-ID copies retain them; clearing restores nil. Sidebar format 4 writes the field and migrates formats 1–3
+  through their older node shape. Archive snapshot format 2 records the changed snapshot shape; version 1 remains
+  readable. Added a frozen synthetic version 4 fixture and coverage for migration, copying and archive persistence.
+- Test-first evidence remains the scoped compile probe above, not a Swift Testing suite failure. Swift 6.2.4 compiled
+  all seven production SidebarModel sources for macOS 15 with the selected SDK. A separate standard-assert driver
+  linked that module and passed 3 flows with 11 assertions: independent overrides and clearing, tab update and snapshot
+  copying, and version 3/4 fixture migration. This is not a package test run. Swift 6.2.4 parse, diff whitespace and
+  SidebarModel import checks passed. Core and ShellKit suites were not run; CI must run them.
+- This is a Core-only draft. Picker and menu wiring, Favorite favicon fallback, folder expanded/collapsed rendering,
+  integration and UI checks remain. No UI, performance or animation behavior was checked in this slice.
+- Core review found no P1/P2 blocker. Added an ArchiveStore regression that inserts a frozen format-1 folder/tab
+  payload emitted by the actual encoder at e8380ee, before custom icons existed, and checks a readable snapshot
+  with nil overrides without rewriting its version. Swift 6.2.4 compiled the seven prior model sources to generate
+  that synthetic payload, and parsed the added test. The ArchiveStore regression itself remains unrun locally;
+  database and full-suite validation require CI.
+
+### Custom Favorite and folder icons (#339): launch and Shell test-first gates
+
+- The previous Core head `821480a78a0ddd9005e30e122b58de1b3b75fe42` passed CI run 42431293793: Core job
+  128580619267 passed 582 tests in 46 suites, including node icons and legacy archive coverage; pure ShellKit job
+  128580619085 passed 2505 tests in 279 suites. App build, lint and required gate passed; GUI and UI were skipped.
+  These counts predate the gates below.
+- Added Shell boundary, notification, no-op, copied subtree, Favorite fallback and reset, folder state, picker and menu
+  selection tests. They have not been compiled or run; the anticipated missing `nodeIcon` / `setNodeIcon` boundary
+  failure is unobserved. No new Shell test count is claimed.
+- Added a launch-level regression using the existing frozen synthetic sidebar format 3 fixture in a real temporary
+  SQLite database. It opens through `ArktLaunch.openAndLoad`, verifies the loaded values and nil node icons, saves
+  through `SidebarStore`, checks the row and document format 4 and payload, and reopens the saved sidebar. Sidebar
+  format 3 is independent of SQL schema migration versions. Launch does not save on its own; the normal save is explicit.
+- Picker and menu implementation, Favorite favicon fallback with latest favicon after reset, expanded and collapsed
+  folder rendering, GUI/UI tests and manual appearance, accessibility, keyboard and emoji Cancel checks remain.
+  Integrate the overlapping Favorite and menu work described in `docs/339-custom-icons-integration.md` first.
+- Swift 6.4.1: an isolated test package depending on the actual ArktCore `Persistence` and `SidebarModel` products
+  and GRDB 7.11.1 ran `swift test -j 2 --filter SidebarV3LaunchTests`: 1 test in 1 suite passed. The focused run
+  does not include the other Core tests. Swift parsing of the new test and Shell gate files, import inspection and
+  `git diff --check` passed. No GUI, app launch or ShellKit baseline build was run locally.
+
+
+### Custom Favorite and folder icons (#339): Shell value and CoreBridge boundary
+
+- On head `6b74913fc2025bd1f1a1630a7eb8a0997ca883e0`, [CI GUI job 128591714123](https://github.com/krystianslowik/arkt/actions/runs/42434942680/job/128591714123) failed compilation at the intended missing `nodeIcon` and `setNodeIcon` boundary in `NodeIconContractTests.swift`. No tests executed in that job. Core, app and lint passed at the observed status; pure ShellKit was still in progress.
+- Added the plain-value source boundary, Core icon conversion, node notifications and no-op handling. Snapshot restamping and stub subtree and split duplication retain icon overrides. Added stub coverage for source dispatch, notifications, no-ops and subtree copies.
+- Swift 6.4.1 parsed the changed Swift sources and the boundary tests; import inspection and `git diff --check` passed. These checks do not compile or execute the contract tests. The local full ShellKit baseline is compiler-broken and full Xcode is unavailable; new CI validation is pending.
+- Picker and menu wiring, Favorite rendering and favicon reset fallback, expanded and collapsed folder rendering, GUI/UI and manual appearance, keyboard, accessibility and emoji Cancel checks remain. Follow the integration order in `docs/339-custom-icons-integration.md`.
+
+### Custom Favorite and folder icons: UI integration (#339)
+
+The Favorite and folder menus use the Space symbol catalog and emoji prompt, with checked selection and a Reset Icon
+item enabled only for the selected node's override. Node changes refresh the affected tile or row; the Favorite's
+favicon remains independently updated and is used again on reset. Folder overrides apply in both expansion states.
+The existing tile layout, media and close behavior remain in place. This is main-actor, event-driven work with cached
+glyphs and no per-frame work.
+
+The test-first ShellKit CI run 42436332236 at `cb1e891b516ddb1ea4c87ee8cfc76d3f4b750c43` ran 2509 tests in
+280 suites and reported 7 issues, all in SidebarContextMenuTests: one reset-enabled issue, three folder-menu issues,
+and three Favorite-menu issues. NodeIconContractTests and the stub node icon copies test passed. The aggregate failed;
+Core, app and lint passed. The GUI job was still running when observed and has no claimed result here.
+
+Swift 6.1.2 parsed the five changed UI sources and the three existing UI test files. `git diff --check` and the
+ShellUI forbidden-import scan passed. The changed paths have not been compiled or executed locally: the local
+ShellKit baseline is broken and full Xcode is unavailable. New-head CI, GUI and manual light/dark, keyboard,
+accessibility, emoji Cancel and screenshots remain required. No performance or runtime claim is made.
+
+### Node emoji cancellation and stale-target gate (#339)
+
+Review of `e86d85c` found that emoji completion writes without checking whether a Favorite moved out of Favorites
+while its sheet was open in another window. The fix is not applied in this test-first stage. A narrow optional prompt
+completion hook lets the actual window action run without opening the Character Viewer; nil still uses the existing
+sheet and the original completion logic. No production eligibility behavior changes yet.
+
+Two GUI regression methods now require Cancel to preserve both Favorite and folder icons, save counts and node
+notifications; a valid emoji confirmation is the positive control and must write and notify once. The stale-target
+case moves a Favorite to Today while completion is held, then requires the old icon and no extra mutation after
+confirmation. Its expected runtime red is the current completion changing that ineligible node. Red remains
+unobserved. Swift 6.2.4 frontend parsing and diff checks passed; no local build or tests ran. CI must establish the
+correct regression failure before the completion guard is fixed. Earlier UI and menu results apply to their stated
+heads, not this gate; manual rendering, accessibility and screenshots remain unverified.
+
+
+### Node emoji stale-target completion correction (#339)
+
+At `184a288`, GUI run 42438892411, job 128603784145, executed 2051 tests with 54 skipped and three assertion
+failures, all in `testNodeEmojiCompletionIgnoresFavoriteMovedToTodayWhilePromptIsOpen`. The held completion changed
+the moved tab's icon, saved once and notified instead of leaving it untouched. The cancellation and valid-confirmation
+control passed for both a Favorite and a Today folder. This establishes the intended runtime red.
+
+Completion now reads the current node and section before writing: folders remain eligible, and tabs must still
+be Favorites. Missing nodes, splits and tabs moved elsewhere are ignored. The regression tests are unchanged.
+Swift 6.2.4 source parsing, the ShellUI import-boundary inspection and diff checks passed. No local full build or GUI
+test ran; new-head CI must establish green. Manual light/dark rendering, accessibility and screenshots remain unverified.
+
+
+### Custom icon capture selection correction (#339)
+
+The eight PNGs from `dad920f`, run 42442702244, are nonblank and show the intended light/dark icons and fallbacks,
+but their closed states retain the folder child. The custom open/closed pairs are identical. Source tracing shows
+why: launch activates the first pinned tab, which is the fixture's sole folder child; closing a folder deliberately
+keeps its current tab visible through BH-105. This is not evidence of a product rendering defect or a timing race.
+
+The fixture now activates the symbol Favorite before capture, outside the folder. Each save asserts the requested
+open/closed state and the child's corresponding row presence, so a peek cannot silently masquerade as a closed-state
+capture. Production code is unchanged. Swift 6.2.4 source parsing and diff checks passed; no local GUI ran. Updated
+CI must regenerate the PNGs, and their visual audit remains pending. Native sheet and VoiceOver checks are unverified.
+
+
+### #339: merge current main after Favorite split menu changes
+
+Merged main at `3a0263c`, including #802's Favorite split behavior and #804's shared pacing rule. The single content conflict was in SidebarContextMenu: the merged builder keeps main's split-versus-tab dispatch and split-specific copy/remove/close menu, and retains the custom Change Icon and Reset Icon controls on tab Favorites and folders. The Favorite-tab helper still receives the source and runs on the main actor. The FavoritesGridView merge retains custom-icon-first rendering together with main's split labels, loaded/current state, close and drag updates. Existing icon tests and FavoriteSplitTileTests remain present.
+
+Swift 6.2.4 frontend parsing passed for all ten Swift files changed by the merge; whitespace and source-layer inspection passed. No full local build, GUI or runtime tests ran because the local baseline/toolchain limitation remains. Earlier icon test and screenshot evidence belongs to `e8e807f`; the merge head requires fresh CI, including Favorite split and icon coverage. No new icon behavior, fixture capture, accessibility or performance claim is made.
+
 ## Composite Space theme overlays (#534)
 
 The drawn base and opacity-scaled overlay are expanded in OKLab and source-over composited at the union of their
@@ -2930,3 +3058,15 @@ maintainer hardware after landing. No frame-time improvement is claimed. Merged 
 the deterministic completion and asynchronous download cancellation fixes. The existing 50% contrast fallback may
 remain below target, contrast samples do not cover every point or texture, and the pre-existing empty-base
 opacity-scaling limitation remains unchanged.
+
+
+### Custom-icon main integration after recovery and theme composition (#339)
+
+Merged main `859c4ce` (including #690 recovery, #833 retained-window fixes and #555 theme composition) into the
+custom-icon branch. The two conflicts were the GUI screenshot workflow and this append-only results history.
+Both screenshot environment variables and independent upload steps are retained; both results histories remain.
+Icon implementation and custom-icon test sources are unchanged from `8e20b9d`; main's unrelated sidebar/window
+changes merged automatically. Parser/source/lint and resolution whitespace checks passed. No new-head App/GUI
+build, icon interaction, screenshot capture or inspection ran locally. The earlier screenshots and suite counts
+remain historical until new-head CI and artifact inspection complete. Native accessibility/Character Viewer and
+manual performance remain unverified.

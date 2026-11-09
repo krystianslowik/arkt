@@ -768,7 +768,9 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
       return (HostDisplay.title(title, for: url), image)
     case .folder?:
       let symbol = display.collapsed.contains(id) ? "folder" : "folder.fill"
-      return (title(of: id), SidebarGlyphs.symbol(symbol, flavor: flavor, scale: scale))
+      let image = source.nodeIcon(id).map { SidebarGlyphs.customIcon($0, flavor: flavor,
+        size: SidebarMetrics.faviconSize, scale: scale) } ?? SidebarGlyphs.symbol(symbol, flavor: flavor, scale: scale)
+      return (title(of: id), image)
     case .split?:
       return (title(of: id), SidebarGlyphs.symbol("rectangle.split.2x1", flavor: flavor, scale: scale))
     case nil:

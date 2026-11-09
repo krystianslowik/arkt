@@ -6,12 +6,15 @@ public struct NodeSnapshot: Hashable, Sendable, Codable, Identifiable {
   public var kind: NodeKind
   public var createdAt: Date
   public var children: [NodeSnapshot]
+  public var customIcon: SpaceIcon?
 
-  public init(id: NodeID = NodeID(), kind: NodeKind, createdAt: Date, children: [NodeSnapshot] = []) {
+  public init(id: NodeID = NodeID(), kind: NodeKind, createdAt: Date, children: [NodeSnapshot] = [],
+              customIcon: SpaceIcon? = nil) {
     self.id = id
     self.kind = kind
     self.createdAt = createdAt
     self.children = children
+    self.customIcon = customIcon
   }
 
   /// Every id in the subtree, root first, depth first.
@@ -19,7 +22,7 @@ public struct NodeSnapshot: Hashable, Sendable, Codable, Identifiable {
 
   /// The same subtree with new ids, used when restoring over an id that is already taken.
   public func withFreshIDs() -> NodeSnapshot {
-    NodeSnapshot(kind: kind, createdAt: createdAt, children: children.map { $0.withFreshIDs() })
+    NodeSnapshot(kind: kind, createdAt: createdAt, children: children.map { $0.withFreshIDs() }, customIcon: customIcon)
   }
 }
 
