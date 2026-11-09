@@ -249,7 +249,8 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
     case (.flying, .closeRequested):
       flight?.abort(.closeRequested)                          // the page lands now, never stranded in a hidden window
       guard case .open = phase else { break }                 // handed off: the engine closes the emptied window
-      send(event)                                             // the page stayed: the close goes on
+      send(event)                                             // the page stayed: the close goes on (logged there)
+      return
     case (.open(let id, .some), .closeCancelled):
       phase = .open(id, heldClose: nil)                       // the user stayed at the leave-site prompt
 
