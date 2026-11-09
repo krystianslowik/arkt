@@ -308,6 +308,8 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     barView.selectionMotion.settleNow()
     thumbnailTask?.cancel()
     _ = thumbnailGate.begin()
+    archivedSearch?.cancel()                        // a late reply must not reload the hidden bar (#880)
+    archivedSearch = nil
     barView.widthMotion.stopWithoutSettling()
     barView.releaseDrawnWidth()
     barView.previewColumn.setContent(nil, flavor: flavor)
@@ -794,7 +796,8 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     barView.layoutSubtreeIfNeeded()
   }
 
-  /// Asks for the archived matches of the field's text; a reply for an older text is dropped.
+  /// Asks for the archived matches of the field's text; a reply for an older text, or one that lands after the bar
+  /// hid or opened again, is dropped (#880).
   private func searchArchive() {
     archivedSearch?.cancel()
     let query = barView.field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -802,9 +805,10 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
       archivedSearch = nil
       return
     }
+    let generation = showGeneration
     archivedSearch = Task { [weak self] in
       let matches = await archivedProvider(query)
-      guard let self, !Task.isCancelled,
+      guard let self, !Task.isCancelled, self.isVisible, self.showGeneration == generation,
             self.barView.field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) == query else { return }
       self.archived = matches
       self.archivedQuery = query
