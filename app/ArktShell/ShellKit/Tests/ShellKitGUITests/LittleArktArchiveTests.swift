@@ -190,6 +190,28 @@ final class LittleArktArchiveTests: XCTestCase {
     XCTAssertFalse(set.canReopenClosedLittleArkt)
   }
 
+  /// Open in New Window while a leave-site prompt is up, and the new window cannot take the page: the page comes back
+  /// here with the close still held, and Leave archives it as the user's Cmd-W (#900 review).
+  func testAFailedOpenInNewWindowKeepsTheCloseHeldAtALeaveSitePrompt() throws {
+    let (set, engine) = try makeSet()
+    let (little, id, tab) = try openPopup(engine, set)
+    little.onOpenInNewWindow = { _, _ in false }           // the new window cannot take the page
+    engine.holdClose(tab)
+    little.closeTab(nil)                                    // the prompt is up
+
+    little.openInNewWindow()
+    little.finishMotion()                                   // the fade ends; the move fails
+    XCTAssertTrue(little.isOpen, "the page came back")
+    little.finishMotion()
+    XCTAssertTrue(engine.answerDialog(tab, accept: true))   // Leave
+    little.finishMotion()
+
+    XCTAssertFalse(engine.windowIDs.contains(id))
+    XCTAssertTrue(little.isClosed)
+    XCTAssertEqual(archived.map(\.url), [popupURL], "the close the user asked for still archives")
+    XCTAssertTrue(set.canReopenClosedLittleArkt)
+  }
+
   // MARK: Idle (BH-137)
 
   func testIdleWindowsAreCandidatesFromTheirLastActivity() throws {

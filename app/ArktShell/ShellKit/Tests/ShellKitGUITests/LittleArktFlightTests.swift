@@ -596,6 +596,25 @@ final class LittleArktFlightTests: XCTestCase {
     #endif
   }
 
+  /// The page closes during the fade while another tab is left in the engine window, so the engine does not close
+  /// it: the window waits handed off, and Cmd-W still closes it through the engine (#900 review).
+  func testAHandedOffWindowTheEngineKeepsClosesOnCmdW() throws {
+    let scene = try makeScene(reduceMotion: true)
+    scene.engine.createTab(url: popupURL, in: scene.littleWindow)
+    scene.little.openIn()
+    scene.engine.engineCloseTab(scene.tab, reason: .page)
+    scene.little.finishMotion()
+    XCTAssertEqual(scene.little.phaseName, .handedOff)
+    XCTAssertTrue(scene.engine.windowIDs.contains(scene.littleWindow), "the engine keeps the window")
+
+    scene.little.requestClose()
+
+    XCTAssertFalse(scene.engine.windowIDs.contains(scene.littleWindow), "the engine was asked to close it")
+    XCTAssertTrue(scene.little.isClosed)
+    XCTAssertFalse(scene.little.window.isVisible)
+    XCTAssertTrue(scene.set.littleArkts.isEmpty)
+  }
+
   /// No main window: Open in would open one for the page, but the page is gone by the end of the fade, so no empty
   /// main window is left behind.
   func testThePageClosingItselfDuringTheFadeWithNoMainWindowLeavesNoEmptyWindow() throws {
