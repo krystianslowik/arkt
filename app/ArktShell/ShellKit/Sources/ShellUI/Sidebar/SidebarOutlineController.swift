@@ -48,6 +48,11 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
   private lazy var hoverResync = HoverResyncScheduler(view: self) { [unowned self] pointer in
     enumerateAvailableRowViews { rowView, _ in (rowView as? SidebarRowView)?.syncHover(pointerInWindow: pointer) }
   }
+  public override func viewWillMove(toWindow newWindow: NSWindow?) {
+    if window !== newWindow { hoverResync.cancel() }
+    super.viewWillMove(toWindow: newWindow)
+  }
+
   /// Where hover resyncs read the pointer; tests replace it.
   var hoverPointerLookup: HoverPointerLookup {
     get { hoverResync.lookup }

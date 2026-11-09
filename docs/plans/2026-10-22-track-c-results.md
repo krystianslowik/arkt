@@ -2897,6 +2897,25 @@ Written first. Each failed to compile before the code existed.
   The app and test bundle build (`xcodebuild ... build-for-testing`: TEST BUILD SUCCEEDED). Not run: the suite needs
   the real pointer and keyboard, and the Mac was in use.
 
+### #278 — Defer hover resync during Space paging
+
+- The outline and Favorites hosts coalesce pointer resyncs during tracking, frozen gestures and animated settling; pending hosts resync at final rest using the current pointer and geometry. A jump flushes pending work, while closing or detaching discards stale requests.
+- Test-first CI run 42428504805, GUI job 128571999129 at `00b8116`: 2,050 tests executed, 54 skipped, 10 assertion failures, all in `PagerHoverResyncTests`. Four of five methods failed; Reduce Motion/idle passed. Tracking queried both hosts `[1, 1]` instead of `[0, 0]` (line 74); settling reached `[2, 2]` instead of `[0, 0]` (line 79). The required Swift gate, pure tests, app build and lint passed at that test-only head.
+- Implementation verification: Swift frontend syntax parsing of the four changed production files and the GUI test file, `git diff --check`, and import-layer grep passed. These are not compilation or executable tests. Full local ShellKit builds and GUI tests were not run because the local baseline cannot build and full Xcode is unavailable. Current-head CI and separate review are pending; rerun the GUI suite after #816 lands. No #275 timing or physical 120 Hz performance claim is made.
+
+### Hover resync frozen-to-idle follow-up (#278)
+
+The new `testFrozenSettleCancelledAtOriginalSpaceFlushesPendingHosts` failed at `92391cd` in CI run 42433234430,
+GUI job 128586564315: both final assertions observed `[0, 0]` rather than `[1, 1]`. The other seven hover-resync
+methods passed. The complete GUI job executed 2,053 tests with 54 skipped and two assertion failures, both in that
+one regression. The required Swift gate, pure tests, app build and lint passed; Core and XCUITest jobs were skipped.
+
+The `go(to:)` early return now flushes pending hosts after clearing the frozen target when the pager is already idle
+at the requested resting offset. It uses the existing coalesced scheduler, with no timer or per-frame query. The
+regression and its exactly-once assertion are unchanged. Swift 6.2.4 frontend parsing and diff checks passed; the
+production fix has not run locally because the baseline cannot build. A new-head CI result is required. The GUI
+rerun after #816 and the independent physical timing gates remain separate validation work.
+
 ## Composite Space theme overlays (#534)
 
 The drawn base and opacity-scaled overlay are expanded in OKLab and source-over composited at the union of their
@@ -2930,3 +2949,9 @@ maintainer hardware after landing. No frame-time improvement is claimed. Merged 
 the deterministic completion and asynchronous download cancellation fixes. The existing 50% contrast fallback may
 remain below target, contrast samples do not cover every point or texture, and the pre-existing empty-base
 opacity-scaling limitation remains unchanged.
+
+### #278 main integration update
+
+Merged main `1188868` into the hover-query deferral branch. The sole conflict was this append-only history; both histories are retained. The pager keeps main's changed-hidden-page preparation and visible-page parking fixes alongside the deferred-hover queue, frozen-to-idle flush, and detach cancellation. The queued callback still rechecks paging and reads the current pointer and geometry when allowed to run. No new polling or per-frame pointer query is introduced.
+
+After the merge, changed Swift source parsing, workflow import-layer and UI-source checks, actionlint and engine-header parity were checked. No local full build, GUI run or app launch was performed. Merged-head CI, including the overlapping pager GUI coverage, remains pending; earlier passes apply to the previous head only.

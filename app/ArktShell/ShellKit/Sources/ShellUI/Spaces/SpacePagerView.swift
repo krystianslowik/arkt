@@ -42,6 +42,27 @@ public final class SpacePagerView: NSView {
   /// Test hook: called after `onSettle`.
   @_spi(Smoke) public var onSettleForTesting: (@MainActor (Int) -> Void)?
 
+  private final class PendingHover {
+    weak var scheduler: HoverResyncScheduler?
+    init(_ scheduler: HoverResyncScheduler) { self.scheduler = scheduler }
+  }
+  private var pendingHover: [PendingHover] = []
+
+  /// Keeps one request per host until the interaction has really ended, including a frozen settle.
+  func deferHoverResync(_ scheduler: HoverResyncScheduler) -> Bool {
+    guard isTracking || driver.isRunning || frozenTarget != nil else { return false }
+    if !pendingHover.contains(where: { $0.scheduler === scheduler }) {
+      pendingHover.append(PendingHover(scheduler))
+    }
+    return true
+  }
+
+  private func flushHoverResyncs() {
+    let pending = pendingHover
+    pendingHover.removeAll()
+    for entry in pending { entry.scheduler?.flushDeferred(in: self) }
+  }
+
   let strip = NSView(frame: .zero)
   /// Tests: force the Reduce Motion path on (true) or off (false) whatever the system setting; nil follows it.
   var reduceMotionForTesting: Bool?
@@ -383,6 +404,7 @@ public final class SpacePagerView: NSView {
     index = clamped
     targetIndex = clamped
     apply(offset: -CGFloat(clamped) * pageWidth)
+    flushHoverResyncs()
   }
 
   /// Animates to page `target` (keyboard, Ctrl-N, dots). A running settle hands its velocity over.
@@ -391,7 +413,11 @@ public final class SpacePagerView: NSView {
     let clamped = min(max(target, 0), pages.count - 1)
     if isTracking { return }                               // the fingers own the strip
     frozenTarget = nil
-    if !driver.isRunning && clamped == index && offset == -CGFloat(index) * pageWidth { return }
+    if !driver.isRunning && clamped == index && offset == -CGFloat(index) * pageWidth {
+      // Cancelling a frozen settle at its original offset ends the interaction without a spring completion.
+      flushHoverResyncs()
+      return
+    }
     // The strip passes over every page between here and the target (and the settle's overshoot can show one
     // more): build their rows now, off the animation frames (#297). Already-built pages cost a lookup.
     for i in (min(index, clamped) - 1)...(max(index, clamped) + 1) { preparePageForDisplay(i) }
@@ -426,6 +452,8 @@ public final class SpacePagerView: NSView {
     isTracking = false
     frozenTarget = nil
     targetIndex = index
+    for entry in pendingHover { entry.scheduler?.cancel() }
+    pendingHover.removeAll()
     syncStripFrame()
     updatePageVisibility()
     if !changedHiddenPages.isEmpty { needsLayout = true }   // built at rest, in the next layout (#676)
@@ -454,6 +482,7 @@ public final class SpacePagerView: NSView {
   private func settled(_ target: Int) {
     onSettle?(target)
     onSettleForTesting?(target)
+    flushHoverResyncs()
   }
 
   // MARK: Tracking (scrollWheel and scripted swipes share these)

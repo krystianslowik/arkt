@@ -448,6 +448,11 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
       item.tileView.syncHover(pointerInWindow: pointer)
     }
   }
+  public override func viewWillMove(toWindow newWindow: NSWindow?) {
+    if window !== newWindow { hoverResync.cancel() }
+    super.viewWillMove(toWindow: newWindow)
+  }
+
   /// Where hover resyncs read the pointer; tests replace it.
   var hoverPointerLookup: HoverPointerLookup {
     get { hoverResync.lookup }
