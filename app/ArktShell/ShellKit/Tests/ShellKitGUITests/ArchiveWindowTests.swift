@@ -56,6 +56,27 @@ final class ArchiveWindowTests: XCTestCase {
     XCTAssertTrue(controller.tableView.enclosingScrollView != nil)
   }
 
+  /// #863: the window's top rim spans the window at its smallest size, in light and dark; only the buttons' host is
+  /// narrowed, and the search field and the filter button in the same bar keep their clicks.
+  func testWindowTopRimSpansTheWindow() throws {
+    for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+      let controller = makeWindow(StubArchiveSource())
+      let window = try XCTUnwrap(controller.window as? ArchiveWindow)
+      window.appearance = NSAppearance(named: appearance)
+      window.setFrame(NSRect(origin: window.frame.origin, size: window.minSize), display: false)
+      controller.showWindow(nil)
+      window.contentView?.layoutSubtreeIfNeeded()
+      window.layoutTrafficLights()
+      let close = try XCTUnwrap(window.standardWindowButton(.closeButton))
+      let hostWidth = ArchiveMetrics.trafficLightX * 2 + ArchiveMetrics.trafficLightSpacing * 2 + close.frame.width
+      try assertTopRimSpansTheWindow(window, buttonHostWidth: hostWidth,
+                                     clicks: [(centerInWindow(controller.searchField), controller.searchField),
+                                              (centerInWindow(controller.filterButton), controller.filterButton)],
+                                     appearance.rawValue)
+      XCTAssertEqual(close.convert(close.bounds, to: nil).minX, ArchiveMetrics.trafficLightX, "\(appearance.rawValue)")
+    }
+  }
+
   /// Escape (`cancelOperation:` up the responder chain from the table) closes the window like its close button.
   func testEscapeClosesTheWindow() throws {
     let controller = makeWindow(StubArchiveSource())

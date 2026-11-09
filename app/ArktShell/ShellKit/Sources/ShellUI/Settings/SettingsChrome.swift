@@ -345,20 +345,10 @@ final class SettingsWindow: NSWindow {
 
   private static let escapeKeyCode: UInt16 = 53
 
-  /// Close, minimize and zoom at x 20, 40 and 60, centered 20 pt from the top, level with the title.
+  /// Close, minimize and zoom at x 20, 40 and 60, centered 20 pt from the top, level with the title. Only the buttons'
+  /// host is narrowed to the buttons; the window's top rim spans the window.
   func layoutTrafficLights() {
-    guard !styleMask.contains(.fullScreen), let close = standardWindowButton(.closeButton),
-          let titlebar = close.superview, let container = titlebar.superview else { return }
-    let height = SettingsMetrics.titleCenterY * 2
-    let width = SettingsMetrics.trafficLightX * 2 + SettingsMetrics.trafficLightSpacing * 2 + close.frame.width
-    let containerFrame = NSRect(x: 0, y: frame.height - height, width: width, height: height)
-    if container.frame != containerFrame { container.frame = containerFrame }
-    let kinds: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
-    for (index, kind) in kinds.enumerated() {
-      guard let button = standardWindowButton(kind) else { continue }
-      let origin = NSPoint(x: SettingsMetrics.trafficLightX + CGFloat(index) * SettingsMetrics.trafficLightSpacing,
-                           y: ((titlebar.bounds.height - button.frame.height) / 2).rounded())
-      if button.frame.origin != origin { button.setFrameOrigin(origin) }
-    }
+    placeTrafficLights(barHeight: SettingsMetrics.titleCenterY * 2, firstX: SettingsMetrics.trafficLightX,
+                       spacing: SettingsMetrics.trafficLightSpacing)
   }
 }
