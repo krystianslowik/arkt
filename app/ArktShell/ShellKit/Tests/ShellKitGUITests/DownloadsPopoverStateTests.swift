@@ -129,7 +129,7 @@ final class DownloadsPopoverStateTests: XCTestCase {
     #endif
   }
 
-  func testATimerFromAnEarlierPhaseDoesNothing() throws {
+  func testACancelledHoverShowAndAShowWhileOpenDoNothing() throws {
     let controller = makeWindow()
     let button = try XCTUnwrap(controller.sidebarController.view.libraryButton)
     let popover = try XCTUnwrap(center.popover(of: controller))
