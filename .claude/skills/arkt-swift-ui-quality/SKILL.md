@@ -26,6 +26,25 @@ are in `CONTRIBUTING.md`, section 7 and section 6, Pass 2; this skill is how to 
 - [ ] Tests never `sleep` and never assert against a wall-clock deadline (see `arkt-flaky-tests`).
 - [ ] GUI tests close every window they open in `tearDown` (`arkt-flaky-tests`, "GUI test hygiene").
 
+## Explicit state
+
+When one behaviour's state is spread over several flags, optionals or tokens that must change together (#877):
+
+- [ ] One `enum` holds the phase; data that only exists in a phase (tasks, timers, sessions, tokens) is its
+      associated value.
+- [ ] One transition entry point (`send(_:)`, `handle(_:)` or `step(_:)`) switches on `(state, event)`. Side
+      effects come back as values or run in one place. Unknown pairs are no-ops.
+- [ ] Async replies carry the token or session they started under and are dropped if it no longer matches.
+- [ ] A debug-only transition log (`#if DEBUG`, as the command bar counters in #876), and the phase readable by
+      tests (`internal` or `ForTesting`), so a test asserts one value and a transition sequence.
+- [ ] One machine per pull request: first a test that reproduces the bad sequence and fails, then the conversion.
+- [ ] Do not convert two-flag cases, single debounce tokens, re-entrancy guards, or code that already has a phase
+      enum and tests.
+
+Templates: `ShellUI/Onboarding/OnboardingFlow.swift`, `ShellUI/Window/QuitWarningGate.swift`,
+`CrashReporting/CrashReportPolicy.swift`, `ShellWindow.TrafficLightPlacement` in `ShellUI/Window/ShellWindow.swift`,
+and `Batch::Phase` with `Settle()` in `engine/arkt/browser/arkt_extension_batch_install.mm`.
+
 ## Motion
 
 - [ ] Animate only when it has a purpose: show where something came from or went, confirm an action, or keep
