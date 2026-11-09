@@ -45,6 +45,8 @@ final class WindowHostAdapter: NSObject, ArktWindowHost {
   /// Maps a facade tab handle to the engine's Swift id; set by `ChromiumEngine` when it makes the adapter. A handle it
   /// does not list (another instance's tab) maps to nil.
   var resolveTab: (@MainActor (any ArktTabHandle) -> TabID?)?
+  /// The instance that made the adapter, while it lives: whose window this is (#882).
+  weak var engine: ChromiumEngine?
 
   // MARK: Links and keys (#313)
 

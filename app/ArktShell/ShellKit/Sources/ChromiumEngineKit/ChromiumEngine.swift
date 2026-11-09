@@ -333,6 +333,7 @@ public final class ChromiumEngine: EngineClient, EngineExtensions, EngineDownloa
   private func makeAdapter(host: any EngineWindowHosting) -> WindowHostAdapter {
     let adapter = WindowHostAdapter(host: host)
     adapter.resolveTab = { [weak self] handle in self?.tabByHandle[ObjectIdentifier(handle)] }
+    adapter.engine = self
     return adapter
   }
 
