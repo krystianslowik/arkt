@@ -10,6 +10,8 @@ it after #847.
   `#<resting|hover|selected|loading|menu|menu-rename|rename-popover>[&dark][&shot]`.
 - Screens: [`screens/`](screens/), `<state>-<light|dark>.png`, at 2x. Each shows the sidebar at its real size on the
   left and the split tile at 2x on the right for a split of 2 panes side by side, 2 stacked, 3 and 4.
+  They were rendered before #824, at 52 x 46 pt with a 9 pt gap; the stack's offsets and every other value are the
+  same at 47 pt.
 - The directions compared: [Considered](#considered), with their prototype and screens in
   [`directions/`](directions/).
 
@@ -17,8 +19,8 @@ it after #847.
 
 1. **Surface:** a Favorites tile. Everyday chrome: system font, no Hero style, no mustard.
 2. **States:** resting, hover (with the X), selected (the split is shown), a pane loading or without a favicon,
-   context menu. Longest content: 4 panes, the most a split holds (BH-116). Smallest window: the 52 x 46 pt tile of
-   a 3-column grid at the default 190 pt sidebar; no tile is narrower.
+   context menu. Longest content: 4 panes, the most a split holds (BH-116). Smallest window: the 3-column grid at the
+   default 190 pt sidebar, tiles about 52.7 x 47 pt; no tile is narrower than 52 pt.
 3. **Primary action:** click the tile to show the split. Nothing else on the tile competes with it.
 
 ## Tile
@@ -27,7 +29,7 @@ The tile is a Favorite tile like any other; only its content differs. These valu
 
 | Value | Source |
 |---|---|
-| Tile 52 x 46 pt at its narrowest, 9 pt gap, 1 to 4 columns | `FavoritesLayout.minimumTileWidth`, `tileHeight`, `gap` |
+| Tile 47 pt tall, 52 pt at its narrowest, 8 pt gap, 1 to 4 columns (measured, #824) | `FavoritesLayout.minimumTileWidth`, `tileHeight`, `gap` |
 | Corner radius 10, continuous | `FavoritesLayout.tileCornerRadius` |
 | Resting fill `sidebarItemBackground`, hovered `sidebarItemHovered`, selected `tabCurrent` with `rowLiftShadow` | `FavoriteTileView.displayedFill` |
 | X: 16 pt hit box, inset 3 from the top trailing corner, 10 pt glyph, fades with the hover (120 ms) | `SidebarMetrics.favoriteCloseButtonSize`, `favoriteCloseButtonInset`, `closeButtonGlyphSize`, `closeButtonFadeDuration` |
@@ -43,8 +45,9 @@ own `tileCornerRadius`; #810 does not change it.
 
 ### The stack
 
-Up to three pane favicons, layered. Offsets are from the top leading corner of a 52 x 46 pt box; on a wider tile that
-box is centered in the tile, as a plain Favorite's favicon is.
+Up to three pane favicons, layered. Offsets are from the top leading corner of a 52 x 47 pt box (the third layer
+ends at y 42, so it fits). On a wider tile that box is centered in the tile and its origin rounded to whole points,
+as a plain Favorite's favicon is, so no layer lands on a half point.
 
 | Layer | Pane | Size | Offset (x, y) |
 |---|---|---|---|
