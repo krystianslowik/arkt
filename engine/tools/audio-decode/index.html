@@ -10,6 +10,7 @@ const cases = [
 const types = [
   'audio/mp4; codecs="mp4a.40.2"', 'audio/aac', 'audio/mpeg',
   'audio/ogg; codecs="vorbis"', 'audio/ogg; codecs="opus"',
+  'video/mp4; codecs="avc1.42E01E"', 'video/mp4; codecs="avc1.42E01E, mp4a.40.2"',
 ];
 (async () => {
   const ctx = new OfflineAudioContext(2, 44100, 44100);

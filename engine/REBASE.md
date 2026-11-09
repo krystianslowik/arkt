@@ -136,6 +136,7 @@ rebuilds.
     tail -3 $CHROMIUM_ROOT/build-rebase-spike.log; grep -c FAILED: $CHROMIUM_ROOT/build-rebase-spike.log
 
     cd $CR && gn gen out/Arkt && gn args out/Arkt --list=branding_file_path --short
+    gn args out/Arkt --list=proprietary_codecs --short && gn args out/Arkt --list=ffmpeg_branding --short
     nice -n 15 autoninja -C out/Arkt chrome > $CHROMIUM_ROOT/build-rebase-arkt.log 2>&1 &
     echo $! > $CHROMIUM_ROOT/build-arkt.pid
 
