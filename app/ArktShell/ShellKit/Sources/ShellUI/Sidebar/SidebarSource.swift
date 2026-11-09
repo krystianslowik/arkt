@@ -179,6 +179,9 @@ public protocol SidebarSource: AnyObject {
   func space(_ id: SpaceID) -> SidebarSpaceInfo?
   func children(of location: SidebarLocation) -> [NodeID]
   func node(_ id: NodeID) -> SidebarNodeInfo?
+  /// The name a split was given (#787), which its row shows instead of the pane titles; nil for a split without one,
+  /// a node that is not a split, and an unknown id. A change to it is reported as `.node(id)`.
+  func splitTitle(_ id: NodeID) -> String?
   /// The location that holds `id` (Track B: `Node.parent`).
   func parent(of id: NodeID) -> SidebarLocation?
   /// Throws when the model refuses the location (unknown Space, too deep). `StubSidebar` never throws.
@@ -203,8 +206,8 @@ public protocol SidebarSource: AnyObject {
   func updateTab(_ id: NodeID, url: URL?, title: String?)
   /// Rename (BH-026). A tab takes `title`, trimmed, as its custom title: `node(_:)` reports it from then on and page
   /// titles from `updateTab` no longer replace it; nil or an empty name clears it. A folder takes the trimmed name as
-  /// its title; an empty name keeps the old one. Emits `.node(id)` when the shown title changed; splits (no stored
-  /// title yet) and unknown ids are ignored.
+  /// its title; an empty name keeps the old one. A split takes the trimmed name as its `splitTitle`; nil or an empty
+  /// name clears it (#787). Emits `.node(id)` when the shown title changed; unknown ids are ignored.
   func renameNode(_ id: NodeID, to title: String?)
   /// Duplicate (BH-027, BH-095): a copy of `id` and its subtree with new ids, right after the original in the same
   /// location. Tabs keep their URL and custom title. Emits `.structure` for that location. Returns the copy.

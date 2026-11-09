@@ -192,7 +192,8 @@ struct SidebarContextMenuTests {
     let menu = entries(.rows([split]))
     #expect(titles(menu) == ["Rename", "Duplicate Split View", "", "Separate All Tabs",
                              "Convert to Vertical Split View", "", "Pin Tab", "Move To", "Share Split View"])
-    #expect(try !entry("Rename", in: menu).isEnabled, "a split has no stored title yet")
+    #expect(try entry("Rename", in: menu).isEnabled, "a split takes a name (#787)")
+    #expect(try entry("Rename", in: menu).action == .rename(split), "the row's inline field, as tabs and folders")
     #expect(try entry("Separate All Tabs", in: menu).action == .separateSplit(split))
     #expect(try entry("Pin Tab", in: menu).action == .pinToggle([split]))
   }

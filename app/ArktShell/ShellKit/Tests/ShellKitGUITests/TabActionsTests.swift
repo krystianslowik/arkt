@@ -220,6 +220,91 @@ final class TabActionsTests: XCTestCase {
   }
 
   /// A page title arriving while the field is open leaves the field open (the row reload waits for it).
+  // MARK: Rename a split (#787)
+
+  /// The split row's title and accessibility label.
+  private func shownTitle(_ harness: Harness, _ node: UUID) throws -> (row: String, label: String?) {
+    let row = try harness.row(node)
+    return (try harness.cell(node).titleField.stringValue,
+            try harness.outline().outlineView.axProxyRows.content?(row)?.label)
+  }
+
+  /// Rename from the split row's menu: the inline field opens on the joined pane titles, all selected; Return stores
+  /// the name in the model, and the row and its accessibility label show it from then on, whatever the panes load.
+  func testRenamingASplitFromItsMenuShowsAndStoresTheName() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
+    harness.controller.activate(node: world.panes[0])
+    XCTAssertEqual(try shownTitle(harness, world.split).row, "S0 | S1")
+
+    try harness.choose("Rename", on: world.split)
+
+    let cell = try harness.cell(world.split)
+    let field = try XCTUnwrap(cell.renameField, "the rename field opens on the split row")
+    XCTAssertEqual(field.stringValue, "S0 | S1")
+    let editor = try XCTUnwrap(field.currentEditor() as? NSTextView)
+    XCTAssertEqual(editor.selectedRange(), NSRange(location: 0, length: 7), "the whole title is selected")
+    editor.insertText("Research", replacementRange: editor.selectedRange())
+    editor.insertNewline(nil)
+
+    XCTAssertNil(cell.renameField, "Return closes the field")
+    guard case .split(let item)? = harness.source.sidebar.nodes[world.split]?.kind else {
+      return XCTFail("not a split")
+    }
+    XCTAssertEqual(item.title, "Research", "the name is in the stored model")
+    XCTAssertEqual(try shownTitle(harness, world.split).row, "Research")
+    XCTAssertEqual(try shownTitle(harness, world.split).label, "Research")
+    harness.engine.setDocumentTitle(try XCTUnwrap(harness.tab(world.panes[0])), "Page title")
+    XCTAssertEqual(try shownTitle(harness, world.split).row, "Research", "a pane's page title never replaces it")
+  }
+
+  /// Clearing the name shows the pane titles again; committing the pane titles unchanged stores no name.
+  func testClearingASplitNameShowsThePaneTitlesAgain() throws {
+    var world = try Self.makeWorld()
+    try world.sidebar.rename(world.split, to: "Research")
+    let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
+    XCTAssertEqual(try shownTitle(harness, world.split).row, "Research")
+
+    XCTAssertTrue(try harness.outline().beginRename(world.split))
+    let field = try XCTUnwrap(try harness.cell(world.split).renameField)
+    XCTAssertEqual(field.stringValue, "Research")
+    let editor = try XCTUnwrap(field.currentEditor() as? NSTextView)
+    editor.selectAll(nil)
+    editor.deleteBackward(nil)
+    editor.insertNewline(nil)
+
+    guard case .split(let cleared)? = harness.source.sidebar.nodes[world.split]?.kind else {
+      return XCTFail("not a split")
+    }
+    XCTAssertNil(cleared.title)
+    XCTAssertEqual(try shownTitle(harness, world.split).row, "S0 | S1")
+    XCTAssertEqual(try shownTitle(harness, world.split).label, "S0 | S1")
+
+    XCTAssertTrue(try harness.outline().beginRename(world.split))
+    try XCTUnwrap(try harness.cell(world.split).renameField?.currentEditor() as? NSTextView).insertNewline(nil)
+    guard case .split(let unchanged)? = harness.source.sidebar.nodes[world.split]?.kind else {
+      return XCTFail("not a split")
+    }
+    XCTAssertNil(unchanged.title, "committing the pane titles unchanged is not a rename")
+  }
+
+  /// Escape keeps the split's name as it was.
+  func testEscapeKeepsTheSplitName() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
+    XCTAssertTrue(try harness.outline().beginRename(world.split))
+    let editor = try XCTUnwrap(try harness.cell(world.split).renameField?.currentEditor() as? NSTextView)
+    editor.insertText("Other", replacementRange: editor.selectedRange())
+    editor.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
+
+    XCTAssertNil(try harness.cell(world.split).renameField)
+    XCTAssertNil(harness.source.splitTitle(world.split))
+    XCTAssertEqual(try shownTitle(harness, world.split).row, "S0 | S1")
+  }
+
   func testAPageTitleDuringRenameDoesNotCloseTheField() throws {
     let world = try Self.makeWorld()
     let harness = Harness(world.sidebar)

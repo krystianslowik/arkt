@@ -40,6 +40,8 @@ public final class ModelSidebarSource: SidebarSource {
 
   public func parent(of id: UUID) -> SidebarLocation? { sidebar.nodes[id].map { BridgeMapping.location($0.parent) } }
 
+  public func splitTitle(_ id: UUID) -> String? { sidebar.nodes[id].flatMap(BridgeMapping.splitTitle) }
+
   public func observe(_ handler: @escaping @MainActor (SidebarChange) -> Void) -> SidebarObservation {
     hub.observe(handler)
   }
@@ -94,7 +96,7 @@ public final class ModelSidebarSource: SidebarSource {
     _ = try? mutate { try $0.updateTab(id, url: url, title: title) }
   }
 
-  /// Rename (BH-026): the model's `rename`. Splits and unknown ids are ignored, like `StubSidebar`.
+  /// Rename (BH-026, #787): the model's `rename`. Unknown ids are ignored, like `StubSidebar`.
   public func renameNode(_ id: UUID, to title: String?) {
     _ = try? mutate { try $0.rename(id, to: title) }
   }

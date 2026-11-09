@@ -211,4 +211,21 @@ struct NodeSnapshotTests {
     #expect(sidebar.section(of: favorite) == .favorites(profile: "p"))
     #expect(sidebar.section(of: NodeID()) == nil)
   }
+
+  /// #787: whether a split anywhere in the subtree has a title; `withoutSplitTitles()` removes every one.
+  @Test func containsSplitTitleFindsANamedSplitAtAnyDepth() {
+    let tab = NodeSnapshot(kind: .tab(TabItem(url: URL(string: "https://example.com")!, title: "T")),
+                           createdAt: .distantPast)
+    func split(_ title: String?) -> NodeSnapshot {
+      NodeSnapshot(kind: .split(SplitItem(orientation: .vertical, widthFactors: [0.5, 0.5], title: title)),
+                   createdAt: .distantPast, children: [tab, tab.withFreshIDs()])
+    }
+    #expect(!tab.containsSplitTitle)
+    #expect(!split(nil).containsSplitTitle)
+    #expect(split("Research").containsSplitTitle)
+    let folder = NodeSnapshot(kind: .folder(FolderItem(title: "F")), createdAt: .distantPast,
+                              children: [tab, split("Research")])
+    #expect(folder.containsSplitTitle)
+    #expect(!folder.withoutSplitTitles().containsSplitTitle)
+  }
 }

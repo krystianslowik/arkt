@@ -135,10 +135,14 @@ public enum Orientation: String, Hashable, Sendable, Codable {
 public struct SplitItem: Hashable, Sendable, Codable {
   public var orientation: Orientation
   public var widthFactors: [Double]
+  /// The name the user gave the split (#787), drawn instead of its pane titles; nil when it has none. Stored from
+  /// sidebar format 4 and archive snapshot format 2 on, and omitted from the encoding when nil.
+  public var title: String?
 
-  public init(orientation: Orientation, widthFactors: [Double]) {
+  public init(orientation: Orientation, widthFactors: [Double], title: String? = nil) {
     self.orientation = orientation
     self.widthFactors = widthFactors
+    self.title = title
   }
 }
 
@@ -421,8 +425,9 @@ public struct Sidebar: Hashable, Sendable {
 
   /// Rename (BH-026). A tab gets `title` as its custom title, trimmed; an empty or nil name clears it, so the row
   /// shows the page title again. Page titles keep arriving through `updateTab` and never replace a custom title. A
-  /// folder takes the trimmed name as its title; an empty name leaves it unchanged. Throws `.unknownNode` for an
-  /// unknown id or a split (splits have no stored title yet); the sidebar is unchanged on throw.
+  /// folder takes the trimmed name as its title; an empty name leaves it unchanged. A split takes the trimmed name as
+  /// its title and an empty or nil name clears it, as a tab does (#787). Throws `.unknownNode` for an unknown id; the
+  /// sidebar is unchanged on throw.
   public mutating func rename(_ id: NodeID, to title: String?) throws {
     let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     switch nodes[id]?.kind {
@@ -433,7 +438,10 @@ public struct Sidebar: Hashable, Sendable {
       guard !trimmed.isEmpty else { return }
       folder.title = trimmed
       nodes[id]?.kind = .folder(folder)
-    case .split?, nil:
+    case .split(var split)?:
+      split.title = trimmed.isEmpty ? nil : trimmed
+      nodes[id]?.kind = .split(split)
+    case nil:
       throw SidebarError.unknownNode(id)
     }
   }

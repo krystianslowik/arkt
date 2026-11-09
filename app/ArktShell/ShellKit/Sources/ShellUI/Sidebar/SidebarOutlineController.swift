@@ -793,8 +793,8 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     }
   }
 
-  /// A row's title: the tab or folder title, or a split's pane titles joined. No image is made, so accessibility
-  /// queries can read it cheaply.
+  /// A row's title: the tab or folder title, or a split's name (#787), else its pane titles joined. No image is made,
+  /// so accessibility queries can read it cheaply.
   private func title(of id: NodeID) -> String {
     switch source.node(id) {
     case .tab(_, let url, let title)?:
@@ -802,6 +802,7 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     case .folder(_, let title)?:
       return title
     case .split?:
+      if let name = source.splitTitle(id) { return name }
       let titles = children(of: id).compactMap { child -> String? in
         if case .tab(_, let url, let title)? = source.node(child) { return HostDisplay.title(title, for: url) }
         return nil
@@ -1784,7 +1785,7 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   private var renameOriginalTitle: String?
 
   /// Double-click on a tab row opens its rename field (BH-026, GS-004). Folders open and close on the first click
-  /// and are renamed from their menu; splits have no stored title.
+  /// and are renamed from their menu, as splits are (#787).
   @objc private func rowDoubleClicked(_ sender: Any?) {
     handleDoubleClick(row: outlineView.clickedRow, modifiers: outlineView.clickModifiers)
   }
@@ -1795,14 +1796,14 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     beginRename(id)
   }
 
-  /// Opens the inline rename field on `id`'s row (tabs and folders). The typed name goes to the source on Return or
-  /// a click elsewhere; Escape keeps the title. False when the row is not shown or the field could not open.
+  /// Opens the inline rename field on `id`'s row (tabs, folders and splits). The typed name goes to the source on
+  /// Return or a click elsewhere; Escape keeps the title. False when the row is not shown or the field could not open.
   @discardableResult
   public func beginRename(_ id: NodeID) -> Bool {
     guard renamingNode == nil else { return false }
     switch source.node(id) {
-    case .tab?, .folder?: break
-    case .split?, nil: return false
+    case .tab?, .folder?, .split?: break
+    case nil: return false
     }
     let row = row(for: id)
     guard row >= 0 else { return false }
@@ -1811,7 +1812,9 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     else { return false }
     renamingNode = id
     renameReloadPending = false
-    renameOriginalTitle = Self.renameText(of: source.node(id))
+    // A split's field opens on its row title: its name, else its pane titles (#787).
+    renameOriginalTitle = if case .split? = source.node(id) { title(of: id) }
+      else { Self.renameText(of: source.node(id)) }
     let opened = cell.beginRename(flavor: flavor) { [weak self] typed in self?.finishRename(id, typed: typed) }
     if !opened { renamingNode = nil }
     return opened

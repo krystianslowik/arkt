@@ -70,7 +70,7 @@ S5 uses Ctrl-Shift-= to add (KB-070), Ctrl-Shift-- to close the pane (KB-071), C
 
 | ID | Status | Where |
 |---|---|---|
-| BH-115 | Implemented: one sidebar item in Pinned, Today, a folder or Favorites, movable. Deferred: renaming a split (the Rename item is shown disabled) and drawing a split as a Favorites tile (`FavoritesGridView` draws tabs only); neither has an issue yet | S1, S2, S6 |
+| BH-115 | Implemented: one sidebar item in Pinned, Today, a folder or Favorites, movable; Rename on the split row names it, and the row shows the name instead of the pane titles (#787). Deferred: drawing a split as a Favorites tile (#788) | S1, S2, S6 |
 | BH-116 | Implemented: a 5th pane does nothing and shows "Cannot Add New Pane" | S1, S2, S5, S7 |
 | BH-117 | Implemented: Ctrl-Shift-=, drag a sidebar tab onto the content, Opt-click the current tab (GS-032), Add Right / Left / Top / Bottom Split. Deferred: multi-select Open in Split View and the plus-menu New Split | S5, S6, S7 |
 | BH-118 | Implemented: drop a tab onto another sidebar tab (GS-010) | #104 (PR #374) |
@@ -88,5 +88,5 @@ S5 uses Ctrl-Shift-= to add (KB-070), Ctrl-Shift-- to close the pane (KB-071), C
 ### Outstanding runtime checks and deferrals
 
 - Runtime checks RT-06, RT-21, RT-22 and RT-31 through RT-38 remain open in #78. RT-22 no longer blocks work: #83 was closed as not planned.
-- Deferred, from the plan's Deferred section: split rename and the Favorites tile (BH-115), Share (#362), multi-select Open in Split View, the plus-menu New Split, BH-190 (toast above its pane), and KB-064 (left out by user decision). BH-148, Peek's Split button, belongs to #29.
+- Deferred, from the plan's Deferred section: the Favorites tile (BH-115, #788; split rename shipped in #787), Share (#362), multi-select Open in Split View, the plus-menu New Split, BH-190 (toast above its pane), and KB-064 (left out by user decision). BH-148, Peek's Split button, belongs to #29.
 - The gate measures shell work with `InMemoryEngine` views. A real-engine re-run of the divider drag belongs to the engine lane.

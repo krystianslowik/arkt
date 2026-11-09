@@ -17,6 +17,24 @@ public struct NodeSnapshot: Hashable, Sendable, Codable, Identifiable {
   /// Every id in the subtree, root first, depth first.
   public var allIDs: [NodeID] { [id] + children.flatMap(\.allIDs) }
 
+  /// Whether a split anywhere in the subtree has a title (#787): the one field that needs archive snapshot format 2.
+  public var containsSplitTitle: Bool {
+    if case .split(let split) = kind, split.title != nil { return true }
+    return children.contains { $0.containsSplitTitle }
+  }
+
+  /// The subtree as a format that predates split titles reads it (sidebar format 3, archive snapshot format 1): every
+  /// split in it unnamed. A `title` key in such a document was never part of its format, so it is not read.
+  public func withoutSplitTitles() -> NodeSnapshot {
+    var copy = self
+    if case .split(var split) = kind {
+      split.title = nil
+      copy.kind = .split(split)
+    }
+    copy.children = children.map { $0.withoutSplitTitles() }
+    return copy
+  }
+
   /// The same subtree with new ids, used when restoring over an id that is already taken.
   public func withFreshIDs() -> NodeSnapshot {
     NodeSnapshot(kind: kind, createdAt: createdAt, children: children.map { $0.withFreshIDs() })
