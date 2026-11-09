@@ -93,8 +93,10 @@ struct SitePermissionsValues {
 PageConnection ReadConnection(content::WebContents* contents);
 
 // One per facade. Owns the site data counts, the settings observation of each
-// profile it has read, and the open page info sessions (one Chromium PageInfo
-// per tab with a change, until its panel closes).
+// profile it has read, the tabs whose page info panel is open, and the open
+// page info sessions (one Chromium PageInfo per tab with a change, until its
+// panel closes). Site data is counted only for a tab whose panel is open
+// (#782): BrowsingDataModel::BuildFromDisk reads the whole profile.
 class PageInfoHub : public ProfileObserver {
  public:
   // A tab's page info changed: its site's settings, or the site data count
@@ -120,6 +122,9 @@ class PageInfoHub : public ProfileObserver {
                      const std::string& origin);
   void ResetPermissions(content::WebContents* contents,
                         const std::string& origin);
+  // The tab's panel opened: its reads count site data until it closes. Starts
+  // the count when the profile's is stale or missing.
+  void PageInfoOpened(content::WebContents* contents);
   void PageInfoClosed(content::WebContents* contents);
   void OpenSiteSettings(content::WebContents* contents,
                         const std::string& origin);
@@ -136,6 +141,8 @@ class PageInfoHub : public ProfileObserver {
   Session* SessionFor(content::WebContents* contents,
                       const url::Origin& origin);
   void EndSession(content::WebContents* contents);
+  // Whether the tab's panel is open; drops the entries of destroyed tabs.
+  bool IsOpen(content::WebContents* contents);
   std::optional<SiteDataCount> SiteData(Profile* profile,
                                         const url::Origin& origin,
                                         content::WebContents* contents);
@@ -155,6 +162,7 @@ class PageInfoHub : public ProfileObserver {
   ChangedCallback changed_;
   TabsCallback tabs_;
   std::map<content::WebContents*, std::unique_ptr<Session>> sessions_;
+  std::vector<base::WeakPtr<content::WebContents>> open_;
   std::map<Profile*, std::unique_ptr<SiteDataCache>> site_data_;
   std::map<Profile*, std::unique_ptr<SettingsWatcher>> watchers_;
   int collecting_ = 0;

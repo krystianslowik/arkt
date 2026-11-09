@@ -75,6 +75,51 @@ struct PageInfoModelTests {
             + PageInfoMetrics.readOnlyNoteHeight)
   }
 
+  // MARK: Turned off in macOS (#786)
+
+  /// macOS denied Arkt location access: the location row says so under its title, keeps the stored setting in its
+  /// pop-up, and VoiceOver hears both. The other rows are as they were.
+  @Test func locationDeniedInMacOSAddsTheNoteToItsRowOnly() throws {
+    let model = try #require(PageInfoModel(info(.secure), deniedInMacOS: [.location]))
+    let location = try #require(model.rows.first { $0.kind == .location })
+    #expect(location.systemNote == "Turned off in macOS")
+    #expect(location.setting == .ask, "the pop-up keeps the stored setting")
+    #expect(location.options.map(\.setting) == [.allow, .ask, .block], "the setting can still be changed")
+    #expect(location.accessibilityLabel == "Location, turned off in macOS")
+    #expect(location.height == PageInfoMetrics.notedRowHeight)
+    for row in model.rows where row.kind != .location {
+      #expect(row.systemNote == nil)
+      #expect(row.accessibilityLabel == row.title)
+      #expect(row.height == PageInfoMetrics.rowHeight)
+    }
+    let plain = try #require(PageInfoModel(info(.secure)))
+    #expect(model.contentHeight == plain.contentHeight + PageInfoMetrics.notedRowHeight - PageInfoMetrics.rowHeight)
+  }
+
+  /// The note says what macOS does, so it shows whatever the site's stored setting is.
+  @Test(arguments: PermissionSetting.allCases)
+  func theNoteShowsWhateverTheStoredSetting(_ setting: PermissionSetting) throws {
+    let permissions = [SitePermission(kind: .location, title: "Location", setting: setting, isDefault: false)]
+    let model = try #require(PageInfoModel(info(.secure, permissions: permissions), deniedInMacOS: [.location]))
+    #expect(model.rows.first?.systemNote == "Turned off in macOS")
+    #expect(model.rows.first?.setting == setting)
+  }
+
+  /// While macOS has not decided (or allows access), nothing is added: macOS still asks on first use.
+  @Test func noNoteUntilMacOSDenies() throws {
+    let model = try #require(PageInfoModel(info(.secure)))
+    #expect(model.rows.allSatisfy { $0.systemNote == nil })
+    #expect(try #require(PageInfoModel(info(.secure), deniedInMacOS: [])).rows.allSatisfy { $0.systemNote == nil })
+  }
+
+  /// The macOS state maps to the note only when access was denied or is restricted.
+  @Test func systemAccessMapsToDeniedOnlyForDeniedAndRestricted() {
+    #expect(SystemPermissionAccess.notDetermined.isDenied == false)
+    #expect(SystemPermissionAccess.allowed.isDenied == false)
+    #expect(SystemPermissionAccess.denied.isDenied)
+    #expect(SystemPermissionAccess.restricted.isDenied)
+  }
+
   @Test func localFileShowsOnlyTheNote() throws {
     let file = PageInfo(tab: tab, origin: "file://", host: "trail-notes.html", connection: .localFile)
     let model = try #require(PageInfoModel(file))
