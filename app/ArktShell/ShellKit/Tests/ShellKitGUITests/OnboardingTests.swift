@@ -15,6 +15,9 @@ final class FakeOnboardingServices: OnboardingServices {
   var saved: [OnboardingFlow.Snapshot] = []
   var completed = 0
   var makeDefaultCalls = 0
+  /// Keeps the system's default-browser prompt up until `answerDefaultPrompt()`; false answers at once.
+  var holdsDefaultPrompt = false
+  private var defaultPromptContinuation: CheckedContinuation<Void, Never>?
   /// Spaces the fake import adds, with their themes.
   var importSpaces: [(String, SpaceThemeInfo)] = [
     ("Personal", SpaceThemeInfo(baseColors: [.srgb(hex: 0xF4E4EC), .srgb(hex: 0xEFA8C4)], isDark: false)),
@@ -60,7 +63,17 @@ final class FakeOnboardingServices: OnboardingServices {
   }
 
   func isDefaultBrowser() -> Bool { isDefault }
-  func makeDefaultBrowser() async { makeDefaultCalls += 1 }
+  func makeDefaultBrowser() async {
+    makeDefaultCalls += 1
+    guard holdsDefaultPrompt else { return }
+    await withCheckedContinuation { defaultPromptContinuation = $0 }
+  }
+
+  /// The held system prompt closes.
+  func answerDefaultPrompt() {
+    defaultPromptContinuation?.resume()
+    defaultPromptContinuation = nil
+  }
   func saveProgress(_ snapshot: OnboardingFlow.Snapshot) { saved.append(snapshot) }
   func markCompleted() { completed += 1 }
 }
@@ -136,14 +149,30 @@ final class OnboardingTests: XCTestCase {
   /// The finish's reveal and browser handoff of every flow `present` opens: tests run them with `handOff()`, so no
   /// test waits on the real 0.9 s delay.
   private let handoff = ManualOnboardingSchedule()
+  /// Every window `makeWindow` made, closed in tearDown whatever the test did.
+  private var windows: [ShellWindowController] = []
+  /// The services of every flow `present` opened; tearDown answers a prompt a failed test left held.
+  private var presentedServices: [FakeOnboardingServices] = []
+  /// A Skip setup question a test holds open; tearDown answers No if a failed test left it up.
+  private var heldSkipAnswer: (@MainActor (Bool) -> Void)?
 
   override func setUp() async throws {
     _ = NSApplication.shared
     NSApp.setActivationPolicy(.accessory)
   }
 
+  override func tearDown() async throws {
+    for services in presentedServices { services.answerDefaultPrompt() }
+    heldSkipAnswer?(false)
+    heldSkipAnswer = nil
+    presentedServices = []
+    for window in windows { window.close() }
+    windows = []
+  }
+
   private func makeWindow(_ stub: StubSidebar = StubSidebar(), height: CGFloat = 720) -> ShellWindowController {
     let controller = ShellWindowController(engine: InMemoryEngine(), sidebar: stub)
+    windows.append(controller)
     controller.window?.setFrame(NSRect(x: 0, y: 0, width: 1120, height: height), display: false)
     controller.rootView.layoutSubtreeIfNeeded()
     return controller
@@ -152,6 +181,7 @@ final class OnboardingTests: XCTestCase {
   private func present(_ window: ShellWindowController, _ services: FakeOnboardingServices,
                        mode: OnboardingMode = .firstRun, resume: OnboardingFlow.Snapshot? = nil,
                        extensions: Bool = false, stage: (any OnboardingStage)? = nil) -> OnboardingController {
+    presentedServices.append(services)
     let onboarding = window.presentOnboarding(
       services: services, options: .init(mode: mode, includesExtensions: extensions, resume: resume), stage: stage)
     onboarding.view.layoutSubtreeIfNeeded()
@@ -458,6 +488,75 @@ final class OnboardingTests: XCTestCase {
     other.close()
   }
 
+  /// Opens a flow with no Arc, walks to the default-browser step and presses Make default; the system prompt stays up
+  /// until `services.answerDefaultPrompt()`.
+  private func promptingDefault() -> (ShellWindowController, FakeOnboardingServices, OnboardingController) {
+    let window = makeWindow()
+    let services = FakeOnboardingServices(sidebar: window.sidebar as! StubSidebar, arcFound: false)
+    services.holdsDefaultPrompt = true
+    let onboarding = present(window, services)
+    onboarding.performPrimary()
+    onboarding.performPrimary()
+    XCTAssertEqual(onboarding.flow.step, .defaultBrowser)
+    onboarding.performEscape()                                            // Not now, then Back: Right has somewhere to go
+    XCTAssertEqual(onboarding.flow.step, .tour(tip: 1))
+    onboarding.performBack()
+    XCTAssertEqual(onboarding.flow.step, .defaultBrowser)
+    XCTAssertTrue(onboarding.flow.canGoForward)
+    onboarding.performPrimary()                                           // Make default: the prompt is up
+    XCTAssertTrue(spin { services.makeDefaultCalls == 1 })
+    XCTAssertEqual(onboarding.lock, .promptingDefault)
+    return (window, services, onboarding)
+  }
+
+  /// #879, the issue's sequence: Left while the system prompt is up used to move to Make it yours, and the answer then
+  /// found no default-browser step to leave, so the flow stayed stuck there. Now Left waits and the answer moves on.
+  func testLeftDuringTheDefaultBrowserPromptWaitsAndTheAnswerMovesOn() throws {
+    let (_, services, onboarding) = promptingDefault()
+    onboarding.view.onKey?(.left)
+    XCTAssertEqual(onboarding.flow.step, .defaultBrowser, "Left waits for the prompt")
+    XCTAssertEqual(onboarding.lock, .promptingDefault)
+    services.answerDefaultPrompt()
+    XCTAssertTrue(spin { onboarding.flow.step == .tour(tip: 1) }, "the answer moves on from the step that asked")
+    XCTAssertEqual(onboarding.lock, .idle)
+    onboarding.performPrimary()
+    XCTAssertEqual(onboarding.flow.step, .tour(tip: 2), "the flow is not stuck")
+    #if DEBUG
+    XCTAssertEqual(onboarding.lockTransitions.map(\.to), [.promptingDefault, .idle], "Left took no transition")
+    #endif
+  }
+
+  /// #879: every entry point (Back, the arrows, Escape, Return, Skip setup) waits while the prompt is up.
+  func testEveryEntryPointWaitsForTheDefaultBrowserPrompt() throws {
+    let (_, services, onboarding) = promptingDefault()
+    var asked = 0
+    onboarding.confirmSkip = { answer in
+      asked += 1
+      answer(false)
+    }
+    onboarding.performBack()
+    XCTAssertEqual(onboarding.flow.step, .defaultBrowser, "Back waits for the prompt")
+    onboarding.view.onBack?()
+    onboarding.performRight()
+    onboarding.performEscape()
+    onboarding.performPrimary()
+    onboarding.view.onSkipSetup?()
+    XCTAssertEqual(onboarding.flow.step, .defaultBrowser, "the arrows, Escape and Return wait for the prompt")
+    XCTAssertEqual(asked, 0, "Skip setup waits for the prompt")
+    XCTAssertEqual(services.makeDefaultCalls, 1, "one prompt")
+    #if DEBUG
+    XCTAssertEqual(onboarding.lockTransitions.map(\.to), [.promptingDefault], "no entry point changed the lock")
+    #endif
+    XCTAssertFalse(onboarding.view.backButton.isEnabled, "Back is out of reach during the prompt")
+    XCTAssertFalse(onboarding.view.skipButton.isEnabled, "Skip setup is out of reach during the prompt")
+    services.answerDefaultPrompt()
+    XCTAssertTrue(spin { onboarding.flow.step == .tour(tip: 1) })
+    XCTAssertTrue(onboarding.view.backButton.isEnabled, "Back returns with the next step")
+    XCTAssertTrue(onboarding.view.skipButton.isEnabled, "Skip setup returns with the next step")
+    onboarding.performBack()
+    XCTAssertEqual(onboarding.flow.step, .defaultBrowser, "navigation works again after the answer")
+  }
+
   // MARK: - Skip setup
 
   func testSkipSetupCancelKeepsTheStepAndConfirmMakesSpace1InDune() throws {
@@ -537,6 +636,8 @@ final class OnboardingTests: XCTestCase {
     onboarding.performPrimary()
     XCTAssertTrue(spin { services.importStarted })
     onboarding.view.onSkipSetup?()
+    XCTAssertEqual(onboarding.lock, .importing(skipWhenDone: true))
+    XCTAssertFalse(onboarding.view.skipButton.isEnabled, "Skip setup has nothing left to do")
     XCTAssertTrue(handoff.delays.isEmpty, "the import finishes first")
     XCTAssertFalse(onboarding.isFinished)
     XCTAssertTrue(window.isShowingOnboarding)
@@ -546,6 +647,64 @@ final class OnboardingTests: XCTestCase {
     handOff(window)
     XCTAssertEqual(stub.spaceOrder.count, 1, "only the imported Space")
     XCTAssertEqual(window.currentSpace, stub.spaceOrder.first)
+    window.commandBar.hide()
+    window.close()
+  }
+
+  /// Skip setup asked while the import hero runs, the hero reaching its result while the question is up, then Yes
+  /// (#896): the run finishes with no Continue, and the result is applied the way Continue applies it.
+  func testSkipSetupConfirmedAfterTheHeroReachedItsResultFinishesWithoutContinue() throws {
+    let stub = StubSidebar()
+    let window = makeWindow(stub)
+    let personal = try stub.addSpace(title: "Personal")                  // what the import brought over
+    let services = FakeOnboardingServices(sidebar: stub, arcFound: true)
+    let importer = ScriptedProfileImporter()
+    services.makeImportSource = {
+      BrowserDataImportModel(coordinator: importer, root: URL(fileURLWithPath: "/nonexistent"), spaces: nil,
+                             locale: Locale(identifier: "en_US"))
+    }
+    let onboarding = present(window, services)
+    onboarding.confirmSkip = { [unowned self] answer in heldSkipAnswer = answer }
+    onboarding.performPrimary()                                           // Get started
+    XCTAssertTrue(spin { onboarding.flow.importPhase == .ready })
+    onboarding.performPrimary()                                           // Import now
+    let hero = try XCTUnwrap(onboarding.view.importHero)
+    XCTAssertTrue(spin { importer.consent != nil })
+    let counts = ProfileDataCounts(historyURLs: 100, historyVisits: 48_210, bookmarks: 0, cookies: 3_904, logins: 312, extensions: 14)
+    let consent = Task { @MainActor in await importer.consent?(counts) ?? nil }
+    XCTAssertTrue(spin { hero.source.state.phase == .consent })
+    hero.primaryButton.performClick(nil)                                  // Import
+    XCTAssertTrue(spin { hero.source.state.phase == .progress })
+
+    onboarding.view.onSkipSetup?()                                        // the question comes up
+    XCTAssertNotNil(heldSkipAnswer)
+    XCTAssertEqual(onboarding.lock, .askingSkip(duringImport: true))
+    var summary = ProfileImportSummary()
+    summary.outcomes = [.history: .done(ImportItemCounts(written: 48_210))]
+    importer.finish(summary)
+    XCTAssertTrue(spin { hero.source.state.phase == .result }, "the hero reaches its result under the question")
+    XCTAssertEqual(hero.primaryButton.title, "Continue")
+    XCTAssertEqual(onboarding.lock, .askingSkip(duringImport: true), "the result does not end the import")
+    XCTAssertEqual(onboarding.flow.importPhase, .importing)
+    XCTAssertFalse(onboarding.isFinished)
+
+    let answer = try XCTUnwrap(heldSkipAnswer)
+    heldSkipAnswer = nil
+    answer(true)                                                          // Yes
+    XCTAssertTrue(onboarding.isFinished, "Yes finishes the run with no Continue")
+    XCTAssertEqual(hero.source.state.phase, .dismissed, "the result closed as Continue closes it")
+    XCTAssertNil(onboarding.view.importHero)
+    XCTAssertEqual(onboarding.flow.importPhase, .imported(skipped: 0), "the result is applied as Continue applies it")
+    XCTAssertEqual(services.saved.last?.imported, true)
+    XCTAssertEqual(services.completed, 1)
+    XCTAssertEqual(onboarding.lockTransitions.suffix(3).map(\.event),
+                   [.skipAnswered(confirmed: true), .importEnded, .finish])
+    XCTAssertEqual(onboarding.lock, .finished)
+    handoff.runAll()                                                      // the hero's fade and the finish
+    XCTAssertFalse(window.isShowingOnboarding, "the browser shows")
+    XCTAssertEqual(stub.spaceOrder, [personal], "no Space 1: the imported Space is the landing")
+    XCTAssertEqual(window.currentSpace, personal)
+    _ = consent
     window.commandBar.hide()
     window.close()
   }
