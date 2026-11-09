@@ -31,7 +31,7 @@ The screens below are captures of Arkt's approved designs. They show the intende
 ## What it is
 
 Arkt keeps your tabs in a sidebar, organized into Spaces. The window chrome is native AppKit, with motion paced for
-120 Hz displays. Pages run on Chromium, so sites and Chrome extensions behave as they do in Chrome.
+120 Hz displays. Pages run on Chromium, so sites render as they do in Chrome, and Chrome extension support is landing step by step.
 
 ## A first run worth seeing
 
@@ -49,7 +49,7 @@ and offers to bring it across, then lets you pick a look for your first Space.
 
 - **Spaces and the sidebar.** Spaces, Favorites, pinned tabs and folders, with Today tabs that archive themselves.
 - **Peek.** Open a link over the page you are on, then close it or keep it.
-- **Split View.** Two tabs side by side in one window.
+- **Split View.** Two to four tabs side by side in one window.
 - **Command bar.** One bar for addresses, searches, open tabs, history and actions.
 - **Extensions.** Pin the extensions you use; the rest stay one click away.
 - **Little Arkt.** Links from other apps open in a small window, so your main window stays where it was.
