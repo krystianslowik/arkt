@@ -30,24 +30,12 @@ final class LittleArktWindow: NSWindow {
     setAccessibilityLabel(LittleArktCopy.windowDescription)
   }
 
-  /// Close, minimize and zoom at x 12, 35 and 58, centered in the 40 pt top bar. The titlebar container is narrowed
-  /// to the buttons, so it never takes clicks from the host label or the controls.
+  /// Close, minimize and zoom at x 12, 35 and 58, centered in the 40 pt top bar. Only the buttons' host is narrowed to
+  /// the buttons, so it never takes clicks from the host label or the controls; the window's top rim spans the window.
   func layoutTrafficLights() {
-    guard !styleMask.contains(.fullScreen), let close = standardWindowButton(.closeButton),
-          let titlebar = close.superview, let container = titlebar.superview else { return }
     let metrics = ShellMetrics.standard
-    let height = LittleArktLayout.topBarHeight
-    let width = metrics.trafficLightOrigin.x * 2 + metrics.trafficLightSpacing * 2 + close.frame.width
-    let containerFrame = NSRect(x: 0, y: frame.height - height, width: width, height: height)
-    if container.frame != containerFrame { container.frame = containerFrame }
-    let kinds: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
-    for (index, kind) in kinds.enumerated() {
-      guard let button = standardWindowButton(kind) else { continue }
-      let x = metrics.trafficLightOrigin.x + CGFloat(index) * metrics.trafficLightSpacing
-      let y = ((titlebar.bounds.height - button.frame.height) / 2).rounded()
-      let origin = NSPoint(x: x, y: y)
-      if button.frame.origin != origin { button.setFrameOrigin(origin) }
-    }
+    placeTrafficLights(barHeight: LittleArktLayout.topBarHeight, firstX: metrics.trafficLightOrigin.x,
+                       spacing: metrics.trafficLightSpacing)
   }
 
   override func performKeyEquivalent(with event: NSEvent) -> Bool {
