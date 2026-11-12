@@ -1704,7 +1704,13 @@ class Facade : public BrowserCollectionObserver,
   // BeforeUnloadFired, before Chromium resets those windows.
   void RecordWindowCloseCancelled(ArktFacadeTab* prompted,
                                   BrowserWindowInterface* browser) {
-    const bool quitting = browser_shutdown::IsTryingToQuit();
+    // A quit is told by the facade's own flag, set when Chromium starts
+    // closing all browsers (OnClosingAllBrowsers) and cleared only by the
+    // cancel notification that follows this call.
+    // browser_shutdown::IsTryingToQuit() is not enough: it read false when a
+    // Stay in the second window of a quit was answered, before the dialog's
+    // CancelTerminate (#911 review), and CancelTerminate resets it anyway.
+    const bool quitting = terminating_ || browser_shutdown::IsTryingToQuit();
     GlobalBrowserCollection::GetInstance()->ForEach(
         [&](BrowserWindowInterface* each) {
           if (each != browser &&

@@ -6697,7 +6697,11 @@ Date 2026-11-12. Branch `engine/585-beforeunload-panel` from `main` at `ceb2afd1
 - Facade: `ArktFacadeJavaScriptDialog` reads any `ArktPageDialog`. On a cancelled window close or quit, Chromium tells
   only the prompted tab (`BeforeUnloadFired`); the facade now reports `CloseCancelled` for every other tab that showed
   closing: the window's tabs, and for a quit the tabs of every window the quit had reached
-  (`RecordWindowCloseCancelled`).
+  (`RecordWindowCloseCancelled`). A quit is told by the facade's own terminating flag (set at
+  `OnClosingAllBrowsers(true)`, cleared by the cancel notification after this call), not by
+  `browser_shutdown::IsTryingToQuit()`: the #911 review found that the second window's Stay missed the first window's
+  tabs, and a diagnostic run showed `IsTryingToQuit()` already false when that Stay was answered, before the dialog's
+  `CancelTerminate` (which resets it too).
 - Swift: `ChromiumEngine+Dialogs.swift` maps the kind to `.beforeUnload`; a leave-site dialog nobody can show is answered
   Leave (#897 review); a `CloseCancelled` ends the tab's pending leave-site dialog first. `ChromiumEngine` keeps its
   own close as `TabLifecycle` (`live`, `closeHeld`) and the kept New Tab page as `NewTabPageSlot`; `.skipUnloadHandlers`
@@ -6728,6 +6732,8 @@ afterwards would have cancelled the close of a tab with no row).
 | 5. `close skip` while the tab's own close shows its prompt | `result=closed`, `tabClosed reason=client`, then `dialogEnded`; no `closeCancelled`; a Stay sent afterwards `answered=no` |
 | 6. Quit with held tabs in two windows, Stay | prompt in the first window; Stay: `closeCancelled` for both tabs of that window, `quit cancelled`, the process stays |
 | 6. Quit again, Leave, Leave | the second window's tab is prompted after the first Leave; every tab `tabClosed reason=appTerminating`, both windows closed |
+| 6b. Quit, held tabs in two windows, Leave in the first, Stay in the second (#911 review) | before the fix: `closeCancelled` only for the second window's tab; the first window's two tabs, which showed closing, got none. After: `closeCancelled` for all three, `quit cancelled` |
+| 6c. Window close Stay with a second window open | `closeCancelled` for the closing window's two tabs only; the other window's tab gets none |
 | 7. Test API `answer <id> cancel` | the same path: `leave-site dialog answered stay`, `dialogEnded`, `closeCancelled` |
 | No engine-drawn dialog | the process's on-screen windows while a prompt is up: only the 900x632 host window (CoreGraphics window list) |
 | `FATAL`, `Check failed`, signals | 0 in every run |

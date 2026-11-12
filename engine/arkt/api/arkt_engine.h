@@ -116,7 +116,10 @@ typedef NS_ENUM(NSInteger, ArktEngineEventKind) {
   ArktEngineEventKindTabClosed = 1,
   // The tab became its window's active tab.
   ArktEngineEventKindActiveTabChanged = 2,
-  // A held close was cancelled; the tab stays open.
+  // A held close was cancelled; the tab stays open. When the engine ends a
+  // leave-site dialog itself (a cancel that runs the page's callback before
+  // the dialog closes), this can come before that dialog's DialogEnded; a
+  // shell answer always reports DialogEnded first.
   ArktEngineEventKindCloseCancelled = 3,
   // Values: url (the visible URL, pending while a navigation starts).
   ArktEngineEventKindURLChanged = 4,
