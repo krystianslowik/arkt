@@ -1,0 +1,272 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Arkt contributors <noreply@arkt.invalid>
+Date: Thu, 12 Nov 2026 20:31:13 +0100
+Subject: [PATCH] Arkt: show the page context menu on a window without a Views
+ widget
+
+RenderViewContextMenuMacCocoa::Show() returned early when the page's
+window had no top-level Views widget, so right-click showed nothing on
+an embedder's own NSWindow. The menu is now shown on the page view's own
+window, with its colours taken from the page's color provider.
+
+On such a window, items whose follow-up UI is a Views bubble, dialog,
+side panel, popup or tab-modal sheet are hidden (QR code, send to
+devices, Translate, Lens, Print, Cast, reading mode, split view, image
+descriptions, Live Caption, compose and the password fallbacks). QR code
+and Lens took the browser process down there. Separators and submenus
+left empty by the hiding are hidden too.
+---
+ .../render_view_context_menu_mac_cocoa.h      |   6 +
+ .../render_view_context_menu_mac_cocoa.mm     | 163 +++++++++++++++++-
+ 2 files changed, 165 insertions(+), 4 deletions(-)
+
+diff --git a/chrome/browser/ui/cocoa/renderer_context_menu/render_view_context_menu_mac_cocoa.h b/chrome/browser/ui/cocoa/renderer_context_menu/render_view_context_menu_mac_cocoa.h
+index 3506a973cf..172ce8068d 100644
+--- a/chrome/browser/ui/cocoa/renderer_context_menu/render_view_context_menu_mac_cocoa.h
++++ b/chrome/browser/ui/cocoa/renderer_context_menu/render_view_context_menu_mac_cocoa.h
+@@ -31,6 +31,7 @@ class RenderViewContextMenuMacCocoa : public RenderViewContextMenuMac {
+ 
+   // RenderViewContextMenu:
+   void Show() override;
++  bool IsCommandIdVisible(int command_id) const override;
+ 
+  private:
+   // RenderViewContextMenuViewsMac:
+@@ -46,6 +47,11 @@ class RenderViewContextMenuMacCocoa : public RenderViewContextMenuMac {
+ 
+   // The Cocoa parent view.
+   NSView* __weak parent_view_;
++
++  // Set when the menu is shown on an embedder's window without a Views
++  // widget: items whose follow-up UI is a Views bubble, dialog, side panel or
++  // sheet are hidden there.
++  bool without_views_widget_ = false;
+ };
+ 
+ #endif  // CHROME_BROWSER_UI_COCOA_RENDERER_CONTEXT_MENU_RENDER_VIEW_CONTEXT_MENU_MAC_COCOA_H_
+diff --git a/chrome/browser/ui/cocoa/renderer_context_menu/render_view_context_menu_mac_cocoa.mm b/chrome/browser/ui/cocoa/renderer_context_menu/render_view_context_menu_mac_cocoa.mm
+index 10829d1e59..f426d91075 100644
+--- a/chrome/browser/ui/cocoa/renderer_context_menu/render_view_context_menu_mac_cocoa.mm
++++ b/chrome/browser/ui/cocoa/renderer_context_menu/render_view_context_menu_mac_cocoa.mm
+@@ -4,24 +4,33 @@
+ 
+ #include "chrome/browser/ui/cocoa/renderer_context_menu/render_view_context_menu_mac_cocoa.h"
+ 
++#include <optional>
+ #include <utility>
+ 
+ #include "base/compiler_specific.h"
++#include "base/logging.h"
+ #include "base/mac/mac_util.h"
+ #import "base/mac/scoped_sending_event.h"
+ #include "base/memory/raw_ptr.h"
+ #import "base/message_loop/message_pump_apple.h"
++#include "base/numerics/safe_conversions.h"
+ #include "base/strings/sys_string_conversions.h"
+ #include "base/task/current_thread.h"
++#include "chrome/app/chrome_command_ids.h"
+ #include "chrome/browser/headless/headless_mode_util.h"
+ #import "components/remote_cocoa/app_shim/menu_controller_cocoa_delegate_impl.h"
++#include "components/remote_cocoa/common/menu.mojom.h"
+ #include "content/public/browser/web_contents.h"
+ #include "ui/base/cocoa/menu_utils.h"
+ #include "ui/base/interaction/element_tracker_mac.h"
++#include "ui/color/color_id.h"
+ #include "ui/color/color_provider.h"
+ #import "ui/menus/cocoa/menu_controller.h"
++#include "ui/views/badge_painter.h"
++#include "ui/views/controls/menu/menu_config.h"
+ #include "ui/views/controls/menu/menu_controller_cocoa_delegate_params.h"
+ #include "ui/views/interaction/element_tracker_views.h"
++#include "ui/views/layout/layout_provider.h"
+ #include "ui/views/widget/widget.h"
+ 
+ namespace {
+@@ -52,6 +61,117 @@ NSMenuItem* GetMenuItemByID(ui::MenuModel* model,
+   return nil;
+ }
+ 
++// As views::MenuControllerParamsForWidget(), for an embedder's window without a
++// Views widget: the colours come from the page's own color provider.
++remote_cocoa::mojom::MenuControllerParamsPtr MenuControllerParamsForContents(
++    content::WebContents* web_contents) {
++  const ui::ColorProvider& color_provider = web_contents->GetColorProvider();
++  auto params = remote_cocoa::mojom::MenuControllerParams::New();
++  params->badge_font = views::BadgePainter::GetBadgeFont(
++                           views::MenuConfig::instance().font_list)
++                           .GetPrimaryFont();
++  params->badge_color =
++      color_provider.GetColor(ui::kColorBadgeInCocoaMenuBackground);
++  params->badge_text_color =
++      color_provider.GetColor(ui::kColorBadgeInCocoaMenuForeground);
++  params->badge_horizontal_margin = views::BadgePainter::kBadgeHorizontalMargin;
++  params->badge_internal_padding = views::BadgePainter::kBadgeInternalPadding;
++  params->badge_min_height = views::BadgePainter::kBadgeMinHeightCocoa;
++  params->badge_radius = base::checked_cast<uint32_t>(
++      views::LayoutProvider::Get()->GetCornerRadiusMetric(
++          views::ShapeContextTokens::kBadgeRadius));
++  params->iph_dot_color =
++      color_provider.GetColor(ui::kColorButtonBackgroundProminent);
++  return params;
++}
++
++// Commands whose follow-up UI is a Views bubble, dialog, side panel, popup or
++// tab-modal sheet, which an embedder's window without a Views widget cannot
++// show (or which crash looking for the Views browser window).
++bool IsViewsFollowUpCommand(int command_id) {
++  switch (command_id) {
++    case IDC_CONTENT_CONTEXT_GENERATE_QR_CODE:
++    case IDC_SEND_TAB_TO_SELF:
++    case IDC_CONTENT_CONTEXT_SHARING_CLICK_TO_CALL_MULTIPLE_DEVICES:
++    case IDC_CONTENT_CONTEXT_TRANSLATE:
++    case IDC_CONTENT_CONTEXT_PARTIAL_TRANSLATE:
++    case IDC_CONTENT_CONTEXT_LENS_OVERLAY:
++    case IDC_CONTENT_CONTEXT_LENS_REGION_SEARCH:
++    case IDC_CONTENT_CONTEXT_WEB_REGION_SEARCH:
++    case IDC_CONTENT_CONTEXT_SEARCHLENSFORIMAGE:
++    case IDC_CONTENT_CONTEXT_SEARCHLENSFORVIDEOFRAME:
++    case IDC_PRINT:
++    case IDC_ROUTE_MEDIA:
++    case IDC_CONTENT_CONTEXT_OPEN_IN_READING_MODE:
++    case IDC_CONTENT_CONTEXT_LISTEN_TO_THIS_PAGE:
++    case IDC_CONTENT_CONTEXT_OPENLINKSPLITVIEW:
++    case IDC_CONTENT_CONTEXT_ACCESSIBILITY_LABELS:
++    case IDC_CONTENT_CONTEXT_ACCESSIBILITY_LABELS_TOGGLE:
++    case IDC_CONTENT_CONTEXT_ACCESSIBILITY_LABELS_TOGGLE_ONCE:
++    case IDC_LIVE_CAPTION:
++    case IDC_CONTEXT_COMPOSE:
++    case IDC_CONTENT_CONTEXT_GLIC:
++    case IDC_CONTENT_CONTEXT_GLICSHAREIMAGE:
++    case IDC_CONTENT_CONTEXT_RELOAD_GLIC:
++    case IDC_CONTENT_CONTEXT_ARCHIVE_GLIC:
++    case IDC_CONTENT_CONTEXT_CONTEXTUAL_TASKS_SUBMENU:
++    case IDC_CONTENT_CONTEXT_GENERATEPASSWORD:
++    case IDC_CONTENT_CONTEXT_USE_PASSKEY_FROM_ANOTHER_DEVICE:
++    case IDC_CONTENT_CONTEXT_AUTOFILL_FALLBACK_PASSWORDS_SELECT_PASSWORD:
++    case IDC_CONTENT_CONTEXT_AUTOFILL_FALLBACK_PASSWORDS_SUGGEST_PASSWORD:
++    case IDC_CONTENT_CONTEXT_AUTOFILL_FALLBACK_PASSWORDS_USE_PASSKEY_FROM_ANOTHER_DEVICE:
++    case IDC_CONTENT_CONTEXT_AUTOFILL_FALLBACK_AT_MEMORY:
++    case IDC_CONTENT_CONTEXT_AUTOFILL_FEEDBACK:
++      return true;
++    default:
++      return false;
++  }
++}
++
++// Whether `model` has a visible item other than a separator.
++bool HasVisibleItem(ui::MenuModel* model) {
++  for (size_t i = 0; i < model->GetItemCount(); ++i) {
++    if (model->GetTypeAt(i) != ui::MenuModel::TYPE_SEPARATOR &&
++        model->IsVisibleAt(i)) {
++      return true;
++    }
++  }
++  return false;
++}
++
++// After items are hidden: hides submenus left with no visible item, and
++// separators that would lead, trail or follow another separator.
++void TidyAfterHiding(ui::SimpleMenuModel* model) {
++  for (size_t i = 0; i < model->GetItemCount(); ++i) {
++    if (model->GetTypeAt(i) == ui::MenuModel::TYPE_SUBMENU &&
++        model->IsVisibleAt(i) && !HasVisibleItem(model->GetSubmenuModelAt(i))) {
++      model->SetVisibleAt(i, false);
++    }
++  }
++  bool after_item = false;
++  std::optional<size_t> pending_separator;
++  for (size_t i = 0; i < model->GetItemCount(); ++i) {
++    if (model->GetTypeAt(i) == ui::MenuModel::TYPE_SEPARATOR) {
++      if (!model->IsVisibleAt(i)) {
++        continue;
++      }
++      if (!after_item || pending_separator) {
++        model->SetVisibleAt(i, false);
++      } else {
++        pending_separator = i;
++      }
++      continue;
++    }
++    if (model->IsVisibleAt(i)) {
++      after_item = true;
++      pending_separator.reset();
++    }
++  }
++  if (pending_separator) {
++    model->SetVisibleAt(*pending_separator, false);
++  }
++}
++
+ }  // namespace
+ 
+ // Obj-C bridge class that is the target of all items in the context menu.
+@@ -78,16 +198,41 @@ void RenderViewContextMenuMacCocoa::Show() {
+   views::Widget* widget = views::Widget::GetTopLevelWidgetForNativeView(
+       source_web_contents_->GetNativeView());
+ 
+-  if (!widget || headless::IsHeadlessMode()) {
++  if (headless::IsHeadlessMode()) {
++    return;
++  }
++  // An embedder's window without a Views widget shows the menu on the page
++  // view's own window.
++  if (!widget && !parent_view_.window) {
+     return;
+   }
++  if (!widget) {
++    LOG(WARNING) << "ARKT: page context menu on a window without a Views "
++                    "widget";
++    without_views_widget_ = true;
++    TidyAfterHiding(&menu_model_);
++  }
+ 
+   menu_controller_delegate_ = [[MenuControllerCocoaDelegateImpl alloc]
+-      initWithParams:MenuControllerParamsForWidget(widget)];
++      initWithParams:widget ? MenuControllerParamsForWidget(widget)
++                            : MenuControllerParamsForContents(
++                                  source_web_contents_)];
+   menu_controller_ =
+       [[MenuControllerCocoa alloc] initWithModel:&menu_model_
+                                    isContextMenu:YES
+                                         delegate:menu_controller_delegate_];
++  if (without_views_widget_) {
++    // MenuControllerCocoa shows every separator; hide the ones tidied away.
++    NSMenu* menu = menu_controller_.menu;
++    for (size_t i = 0; i < menu_model_.GetItemCount() &&
++                       i < static_cast<size_t>(menu.numberOfItems);
++         ++i) {
++      if (menu_model_.GetTypeAt(i) == ui::MenuModel::TYPE_SEPARATOR &&
++          !menu_model_.IsVisibleAt(i)) {
++        [menu itemAtIndex:static_cast<NSInteger>(i)].hidden = YES;
++      }
++    }
++  }
+ 
+   NSPoint position =
+       NSMakePoint(params_.x, NSHeight(parent_view_.bounds) - params_.y);
+@@ -97,7 +242,16 @@ void RenderViewContextMenuMacCocoa::Show() {
+ 
+   ui::ShowContextMenu(menu_controller_.menu, clickEvent, parent_view_,
+                       /*allow_nested_tasks=*/true,
+-                      views::ElementTrackerViews::GetContextForWidget(widget));
++                      widget ? views::ElementTrackerViews::GetContextForWidget(
++                                   widget)
++                             : ui::ElementContext());
++}
++
++bool RenderViewContextMenuMacCocoa::IsCommandIdVisible(int command_id) const {
++  if (without_views_widget_ && IsViewsFollowUpCommand(command_id)) {
++    return false;
++  }
++  return RenderViewContextMenuMac::IsCommandIdVisible(command_id);
+ }
+ 
+ void RenderViewContextMenuMacCocoa::CancelToolkitMenu() {
+@@ -118,5 +272,6 @@ void RenderViewContextMenuMacCocoa::UpdateToolkitMenuItem(
+   // Update the returned NSMenuItem directly so we can update it immediately.
+   item.enabled = enabled;
+   item.title = base::SysUTF16ToNSString(title);
+-  item.hidden = hidden;
++  item.hidden =
++      hidden || (without_views_widget_ && IsViewsFollowUpCommand(command_id));
+ }

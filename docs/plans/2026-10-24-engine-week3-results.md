@@ -6501,3 +6501,154 @@ In sync; no patch file changed. Facade header copies `cmp` identical.
 Every browser and loopback server stopped by exact PID (`ps -p` prints nothing for each), the fix runs included. The
 throwaway profiles, the downloaded game data, the scratch fixtures and the run logs under `arkt-artifacts/806/` deleted. Nothing touched the clipboard,
 the Keychain (mock keychain only) or `/Applications/Arkt.app`.
+
+## #588: page context menu on Arkt windows (patch 0016)
+
+Date 2026-11-12. Branch `engine/588-page-context-menu` from `main` at `4024dff5`. `$CR` branch `arkt` at `bd284c54bd`
+(0001-0015) before, `f970895cc9` (0001-0016) after.
+
+### Gate
+
+- Why a patch: `RenderViewContextMenuMacCocoa::Show()` returns when the page's window has no top-level Views widget
+  (week-2 results, seam 7; run 6 above). No delegate-level seam sits in front of it:
+  - `WebContentsDelegate::HandleContextMenu`: the delegate is `Browser`, which does not override it, and the overlay
+    cannot take `Browser`'s place as the delegate.
+  - The `WebContentsViewDelegate` comes from the single free function `CreateWebContentsViewDelegate`
+    (`chrome_web_contents_view_delegate_views_mac.mm`), reached from `ChromeContentBrowserClient`, which the overlay
+    does not subclass.
+  - `RenderViewContextMenuBase` offers only `*ForTesting` callbacks.
+- Shape: the maintainer chose (2026-11-12) Chromium's own menu as a native `NSMenu` on the page view's own window, with
+  the items whose follow-up UI is Views hidden in the same pull request (decision 3). No facade change.
+- Item hiding: no overlay seam hides single items. The prefs and feature switches that remove some of them (QR code
+  policy pref, Translate, Cast, printing) switch the whole feature off everywhere, so the hiding is in the same patch.
+- Facade header: unchanged (`cmp` identical). `.patches`: 15 to 16, number 0016 claimed in the pull request; no open
+  engine pull request touches `engine/patches`, and no earlier patch touches these files.
+- Overlay link checked before each build: `$CR/arkt` points at this worktree's `engine/arkt`.
+- Builds: `nice -n 15 autoninja -j 4 -C out/Arkt chrome` in the background with a bounded wait. Chromium disk 1.9 TB
+  free; internal disk 48 GB free at the start, 37 GB at the end; swap 11.7 of 12 GB at the start and 16.3 of 17.4 GB
+  at the end (other lanes were building; `-j 4` as the README says above 6 GB); load average 4 to 25.
+
+### What patch 0016 does
+
+Two files, `render_view_context_menu_mac_cocoa.h` and `.mm` (one patch):
+
+- `Show()`: with no Views widget (and not headless), the menu is shown on `parent_view_`'s own window, and returns
+  only if that view has no window. The `MenuControllerCocoa` params (badge font, colours, radius) are built as
+  `views::MenuControllerParamsForWidget` builds them, with the colours from the page's color provider; the element
+  context is empty. Positioning and `ui::ShowContextMenu(..., allow_nested_tasks=true)` are upstream's, unchanged. It
+  logs `ARKT: page context menu on a window without a Views widget`.
+- On such a window, `IsCommandIdVisible` returns false for the commands whose follow-up UI is a Views bubble, dialog,
+  side panel, popup or tab-modal sheet: QR code, send to devices, click to call, Translate and partial translate,
+  every Lens and region search entry, Print, Cast, reading mode, Listen to This Page, Open Link in Split View, image
+  descriptions, Live Caption, compose, the Glic and contextual-task entries, generate password, passkey from another
+  device, the password and autofill fallbacks that open a popup, and autofill feedback. The override reaches
+  submenus, since their models use the menu as delegate. `UpdateToolkitMenuItem` keeps them hidden when an observer
+  updates them later.
+- Submenus left with no visible item are hidden, and so are separators that would lead, trail or double up
+  (`MenuControllerCocoa` shows every separator, so the `NSMenuItem`s are hidden after it builds the menu).
+
+The engine self-test embedder gained a probe (`--arkt-facade-selftest` only): it logs a context menu's items once
+validated (`ARKT selftest context menu open items=[...]`, `(off)` for disabled items) and its close, and the commands
+`ctx-pick <title prefix>` and `ctx-cancel` run an item or close the menu. Scripted runs need no Accessibility access.
+
+### Smoke (`out/Arkt/Arkt.app`, `--no-startup-window --arkt-facade-selftest --arkt-engine-test-api --remote-debugging-port`, a fresh profile per run, `--use-mock-keychain --mute-audio`, `--host-resolver-rules="MAP * ~NOTFOUND, EXCLUDE 127.0.0.1"`, a loopback fixture page and an unpacked probe extension with one `contextMenus` item)
+
+Right-clicks and Ctrl-clicks were sent with DevTools `Input.dispatchMouseEvent`. The machine allows no synthetic OS
+input or Accessibility access for these runs, and none was granted.
+
+Menus on the final build, as the probe logs them:
+
+| Context | Items |
+|---|---|
+| Page | Back (off), Forward (off), Reload, -, Save As..., -, probe extension item, -, View Page Source, Inspect |
+| Link (right-click and Ctrl-click) | Open Link in New Tab, in New Window, in Incognito Window, -, Save Link As..., Copy Link Address, Add Link to Reading List, -, Copy, Copy Link to "..." , Search Google for "...", -, probe extension item, -, Inspect, -, Speech |
+| Image | Open Image in New Tab, Save Image As..., Copy Image, Copy Image Address, -, probe extension item, -, Inspect |
+| Selected text | Look Up "...", -, Copy, Copy Link to "...", -, Search Google for "...", -, probe extension item, -, Inspect, -, Speech |
+| Editable field | Look Up "...", -, Emoji & Symbols, -, Undo, Redo, -, Cut, Copy, Paste, Paste and Match Style, Select All, -, Search Google for "...", -, Language Settings, Writing Direction, -, probe extension item, -, Inspect, -, Speech |
+| Password field | Emoji & Symbols, -, Import Passwords, -, Undo, Redo, -, Cut, Copy, Paste, Paste and Match Style, Select All, -, Writing Direction, -, probe extension item, -, Inspect |
+
+Per item. "Live" means the item was run from the menu (`ctx-pick`) and the result checked; each risky item ran on its
+own fresh instance. Clipboard items ran with the general pasteboard saved first (every item and type) and restored
+after; each restore compared byte-identical.
+
+| Item | Shown | Live | Result |
+|---|---|---|---|
+| Open Link in New Tab | shown | yes | background tab in the same window, opener set (`tabCreated ... active=no opener=<tab> url=.../b.html`) |
+| Open Link in New Window | shown | yes | new Arkt window, tab active, opener set |
+| Open Link in Incognito Window | shown | yes | new off-the-record Arkt window |
+| Copy (selection) | shown | yes | pasteboard `serendipity`, plain text and HTML types |
+| Copy Link Address, Copy Image Address | shown | yes | the URL on the pasteboard |
+| Copy Link to Highlight | shown | yes | the page URL with a `#:~:text=` fragment |
+| Copy Image | shown | yes | PNG and HTML types on the pasteboard |
+| Cut (editable) | shown | yes | the field's text on the pasteboard |
+| Inspect | shown | yes | DevTools opens on the page (`devtools://` target) |
+| Probe extension item | shown | yes | `contextMenus.onClicked` in the extension with the menu item id, page URL and tab id |
+| View Page Source, Open Image in New Tab, Search Google for | shown | yes | new tab with the expected URL (Google was not reached) |
+| Language Settings | shown | yes | `chrome://settings/languages` tab |
+| Reload, Back, Undo, Select All | shown | yes | no crash |
+| Save As, Save Link As, Save Image As | shown | ran | no crash; the save panel was not observed (the test window is never key) |
+| Add Link to Reading List | shown | ran | no crash, no UI |
+| Look Up | shown | ran | no crash; the Look Up panel was not observed (the test window is never key) |
+| Emoji & Symbols, Dictation, Redo, Paste, Paste and Match Style, Writing Direction, Speech, Import Passwords | shown | no | not run: they open system UI over the user's screen, use the microphone, or would paste the user's clipboard |
+| Spelling suggestions, Spelling and Grammar | shown when present | no | none appeared: the renderer did not mark misspellings in the hidden, unfocused test window (with focus emulation either); the patch does not touch that path |
+| Services | system | no | not observable without Accessibility access |
+| Create QR Code | hidden | yes | before hiding: SIGSEGV 3 of 5 runs in `QRCodeWindowController::ShowBubble` (`ToolbarButtonProvider::From(browser)` is null); hidden: `ctx-pick` finds no such item |
+| Search with Image Search (Lens) | hidden | yes | before hiding: `Check failed: contents_web_view` in `OverlayBaseController::CloseUI`, 3 of 3 runs; hidden now |
+| Search This Image with Image Search (Lens) | hidden | yes | before hiding: the tab-modal was cancelled by 0015; hidden now |
+| Print, Print Text Selection | hidden | yes | before hiding: Chromium's print preview as a tab-modal on the Arkt window (the #250 path, as Cmd-P today); hidden now |
+| Translate, Cast, Open in Reading Mode, Listen to This Page | hidden | yes | before hiding: no crash and nothing shown; hidden now |
+| Open Link in Split View | hidden | yes | before hiding: only a background tab (Chromium's split view needs the Views tab strip); hidden now |
+| Send to devices, click to call, partial translate, region search, video frame Lens, image descriptions, Live Caption, compose, Glic, contextual tasks, generate password, passkey from another device, password and autofill fallbacks, autofill feedback | hidden | no | not offered on the fixture (signed out, no saved passwords, no video) |
+| Picture in Picture, Open Link as another profile, Open Link With, Paste from clipboard | shown when present | no | not offered on the fixture; Picture in Picture opens Chromium's own overlay window (E2 item 6) |
+
+Not verified here: that the menu opens exactly at a real pointer (the positioning code is upstream's and unchanged; the
+DevTools clicks moved the menu linearly with the click point); Main window, Split View pane, Peek, Little Arkt and
+"Open Link in New Tab lands in the right Space", which are shell surfaces the self-test cannot reach.
+
+Nested loop: commands sent over DevTools while a menu was open (title changes, `ctx-pick`, `ctx-cancel`, script
+evaluation) ran inside it, and facade batches were delivered in it: the W3-3 model (an `NSMenu` tracked from a Chromium
+task with application tasks allowed).
+
+| Step | Result |
+|---|---|
+| Build, first version | `The build has finished successfully.`, `FAILED:` 0, about 80 s |
+| Break build (`.mm` back to `156.0.8078.48`) | finished, `FAILED:` 0, 125 s. Three right-clicks reached the page (`contextmenu` count 3); `ARKT: page context menu` lines 0, menus 0 |
+| Restore build | finished, `FAILED:` 0, 85 s; the menu is back |
+| Build with item hiding (final) | finished, `FAILED:` 0, 85 s and 75 s; FATAL, `Check failed` and signal lines in the final runs 0 |
+| `gn check out/Arkt "//chrome/browser/ui/cocoa:*"` and `"//arkt/*"` | `Header dependency check OK` (both) |
+
+### Patch budget
+
+| Source | Count |
+|---|---|
+| `.patches` lines | 16 |
+| `arkt` commits above `156.0.8078.48` | 16 |
+
+In sync. Export added 0016 and its `.patches` line; 0001 to 0015 byte-identical. Facade header copies `cmp` identical.
+
+| Gate (design section 2.5) | Before | After #588 |
+|---|---|---|
+| Patch files | 15 | 16 |
+| Seam and hook patch files | 7 | 8 |
+| Upstream files outside 0001-0004 | 20 | 22 |
+| Hunks in `browser_actions.cc` and `browser_commands.cc` | 4 | 4 |
+| Hot-file hunks (`browser_window_features.cc`, `tab_features.cc`) | 0 | 0 |
+| Widely included headers changed | 0 | 0 (`render_view_context_menu_mac_cocoa.h` has 2 includers) |
+
+### Left open
+
+- A real-pointer check (menu at the pointer, the Look Up panel, Services, spelling suggestions) on a focused window,
+  and the shell surfaces (Split View pane, Peek, Little Arkt, the Space of a new tab), once the shell hosts this build.
+- Native replacements for hidden items the maintainer wants back: Print (Cmd-P still shows Chromium's preview sheet),
+  Open Link in Split View (could map to Arkt's own split), Translate, Cast, reading mode.
+- The QR code and Lens crashes stay reachable from other entry points if any calls them on an Arkt window; none is
+  wired today.
+- Upstream unit tests for the Mac context menu were not run.
+
+### Cleanup
+
+Every engine run and the loopback server stopped by exact PID (`ps -p` prints nothing for each). Seven macOS crash
+reports from the test build (QR code and Lens) were moved from `DiagnosticReports` to the artifacts folder. The
+throwaway profiles and run logs were deleted. Clipboard runs saved and restored the general pasteboard, every item and
+type, and each restore compared identical. Nothing touched the Keychain (mock keychain only) or
+`/Applications/Arkt.app`.
