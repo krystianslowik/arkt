@@ -17,8 +17,8 @@ and Lens took the browser process down there. Separators and submenus
 left empty by the hiding are hidden too.
 ---
  .../render_view_context_menu_mac_cocoa.h      |   6 +
- .../render_view_context_menu_mac_cocoa.mm     | 163 +++++++++++++++++-
- 2 files changed, 165 insertions(+), 4 deletions(-)
+ .../render_view_context_menu_mac_cocoa.mm     | 162 +++++++++++++++++-
+ 2 files changed, 164 insertions(+), 4 deletions(-)
 
 diff --git a/chrome/browser/ui/cocoa/renderer_context_menu/render_view_context_menu_mac_cocoa.h b/chrome/browser/ui/cocoa/renderer_context_menu/render_view_context_menu_mac_cocoa.h
 index 3506a973cf..172ce8068d 100644
@@ -45,14 +45,14 @@ index 3506a973cf..172ce8068d 100644
  
  #endif  // CHROME_BROWSER_UI_COCOA_RENDERER_CONTEXT_MENU_RENDER_VIEW_CONTEXT_MENU_MAC_COCOA_H_
 diff --git a/chrome/browser/ui/cocoa/renderer_context_menu/render_view_context_menu_mac_cocoa.mm b/chrome/browser/ui/cocoa/renderer_context_menu/render_view_context_menu_mac_cocoa.mm
-index 10829d1e59..f426d91075 100644
+index 10829d1e59..d5ee59b61c 100644
 --- a/chrome/browser/ui/cocoa/renderer_context_menu/render_view_context_menu_mac_cocoa.mm
 +++ b/chrome/browser/ui/cocoa/renderer_context_menu/render_view_context_menu_mac_cocoa.mm
 @@ -4,24 +4,33 @@
  
  #include "chrome/browser/ui/cocoa/renderer_context_menu/render_view_context_menu_mac_cocoa.h"
  
-+#include <optional>
++#include <algorithm>
  #include <utility>
  
  #include "base/compiler_specific.h"
@@ -82,7 +82,7 @@ index 10829d1e59..f426d91075 100644
  #include "ui/views/widget/widget.h"
  
  namespace {
-@@ -52,6 +61,117 @@ NSMenuItem* GetMenuItemByID(ui::MenuModel* model,
+@@ -52,6 +61,125 @@ NSMenuItem* GetMenuItemByID(ui::MenuModel* model,
    return nil;
  }
  
@@ -140,6 +140,7 @@ index 10829d1e59..f426d91075 100644
 +    case IDC_CONTENT_CONTEXT_RELOAD_GLIC:
 +    case IDC_CONTENT_CONTEXT_ARCHIVE_GLIC:
 +    case IDC_CONTENT_CONTEXT_CONTEXTUAL_TASKS_SUBMENU:
++    case IDC_CONTENT_CONTEXT_ASK_GOOGLE_ABOUT_THIS_PAGE:
 +    case IDC_CONTENT_CONTEXT_GENERATEPASSWORD:
 +    case IDC_CONTENT_CONTEXT_USE_PASSKEY_FROM_ANOTHER_DEVICE:
 +    case IDC_CONTENT_CONTEXT_AUTOFILL_FALLBACK_PASSWORDS_SELECT_PASSWORD:
@@ -164,60 +165,67 @@ index 10829d1e59..f426d91075 100644
 +  return false;
 +}
 +
-+// After items are hidden: hides submenus left with no visible item, and
-+// separators that would lead, trail or follow another separator.
-+void TidyAfterHiding(ui::SimpleMenuModel* model) {
++// After items are hidden: hides submenus left with no visible item.
++void HideEmptySubmenus(ui::SimpleMenuModel* model) {
 +  for (size_t i = 0; i < model->GetItemCount(); ++i) {
 +    if (model->GetTypeAt(i) == ui::MenuModel::TYPE_SUBMENU &&
 +        model->IsVisibleAt(i) && !HasVisibleItem(model->GetSubmenuModelAt(i))) {
 +      model->SetVisibleAt(i, false);
 +    }
 +  }
++}
++
++// MenuControllerCocoa shows every separator and builds one NSMenuItem per
++// model index. Hides the separators of `menu` and its submenus that would
++// lead, trail or follow another separator once hidden items are gone.
++void HideStraySeparators(ui::MenuModel* model, NSMenu* menu) {
++  const size_t count =
++      std::min(model->GetItemCount(), static_cast<size_t>(menu.numberOfItems));
 +  bool after_item = false;
-+  std::optional<size_t> pending_separator;
-+  for (size_t i = 0; i < model->GetItemCount(); ++i) {
++  NSMenuItem* pending_separator = nil;
++  for (size_t i = 0; i < count; ++i) {
++    NSMenuItem* item = [menu itemAtIndex:static_cast<NSInteger>(i)];
 +    if (model->GetTypeAt(i) == ui::MenuModel::TYPE_SEPARATOR) {
-+      if (!model->IsVisibleAt(i)) {
-+        continue;
-+      }
 +      if (!after_item || pending_separator) {
-+        model->SetVisibleAt(i, false);
++        item.hidden = YES;
 +      } else {
-+        pending_separator = i;
++        pending_separator = item;
 +      }
 +      continue;
 +    }
-+    if (model->IsVisibleAt(i)) {
-+      after_item = true;
-+      pending_separator.reset();
++    if (!model->IsVisibleAt(i)) {
++      continue;
++    }
++    after_item = true;
++    pending_separator = nil;
++    if (model->GetTypeAt(i) == ui::MenuModel::TYPE_SUBMENU && item.submenu) {
++      HideStraySeparators(model->GetSubmenuModelAt(i), item.submenu);
 +    }
 +  }
-+  if (pending_separator) {
-+    model->SetVisibleAt(*pending_separator, false);
-+  }
++  pending_separator.hidden = YES;
 +}
 +
  }  // namespace
  
  // Obj-C bridge class that is the target of all items in the context menu.
-@@ -78,16 +198,41 @@ void RenderViewContextMenuMacCocoa::Show() {
+@@ -78,16 +206,32 @@ void RenderViewContextMenuMacCocoa::Show() {
    views::Widget* widget = views::Widget::GetTopLevelWidgetForNativeView(
        source_web_contents_->GetNativeView());
  
 -  if (!widget || headless::IsHeadlessMode()) {
 +  if (headless::IsHeadlessMode()) {
-+    return;
-+  }
+     return;
+   }
 +  // An embedder's window without a Views widget shows the menu on the page
 +  // view's own window.
 +  if (!widget && !parent_view_.window) {
-     return;
-   }
++    return;
++  }
 +  if (!widget) {
 +    LOG(WARNING) << "ARKT: page context menu on a window without a Views "
 +                    "widget";
 +    without_views_widget_ = true;
-+    TidyAfterHiding(&menu_model_);
++    HideEmptySubmenus(&menu_model_);
 +  }
  
    menu_controller_delegate_ = [[MenuControllerCocoaDelegateImpl alloc]
@@ -230,21 +238,12 @@ index 10829d1e59..f426d91075 100644
                                     isContextMenu:YES
                                          delegate:menu_controller_delegate_];
 +  if (without_views_widget_) {
-+    // MenuControllerCocoa shows every separator; hide the ones tidied away.
-+    NSMenu* menu = menu_controller_.menu;
-+    for (size_t i = 0; i < menu_model_.GetItemCount() &&
-+                       i < static_cast<size_t>(menu.numberOfItems);
-+         ++i) {
-+      if (menu_model_.GetTypeAt(i) == ui::MenuModel::TYPE_SEPARATOR &&
-+          !menu_model_.IsVisibleAt(i)) {
-+        [menu itemAtIndex:static_cast<NSInteger>(i)].hidden = YES;
-+      }
-+    }
++    HideStraySeparators(&menu_model_, menu_controller_.menu);
 +  }
  
    NSPoint position =
        NSMakePoint(params_.x, NSHeight(parent_view_.bounds) - params_.y);
-@@ -97,7 +242,16 @@ void RenderViewContextMenuMacCocoa::Show() {
+@@ -97,7 +241,16 @@ void RenderViewContextMenuMacCocoa::Show() {
  
    ui::ShowContextMenu(menu_controller_.menu, clickEvent, parent_view_,
                        /*allow_nested_tasks=*/true,
@@ -262,7 +261,7 @@ index 10829d1e59..f426d91075 100644
  }
  
  void RenderViewContextMenuMacCocoa::CancelToolkitMenu() {
-@@ -118,5 +272,6 @@ void RenderViewContextMenuMacCocoa::UpdateToolkitMenuItem(
+@@ -118,5 +271,6 @@ void RenderViewContextMenuMacCocoa::UpdateToolkitMenuItem(
    // Update the returned NSMenuItem directly so we can update it immediately.
    item.enabled = enabled;
    item.title = base::SysUTF16ToNSString(title);

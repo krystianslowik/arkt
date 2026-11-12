@@ -6540,16 +6540,19 @@ Two files, `render_view_context_menu_mac_cocoa.h` and `.mm` (one patch):
 - On such a window, `IsCommandIdVisible` returns false for the commands whose follow-up UI is a Views bubble, dialog,
   side panel, popup or tab-modal sheet: QR code, send to devices, click to call, Translate and partial translate,
   every Lens and region search entry, Print, Cast, reading mode, Listen to This Page, Open Link in Split View, image
-  descriptions, Live Caption, compose, the Glic and contextual-task entries, generate password, passkey from another
-  device, the password and autofill fallbacks that open a popup, and autofill feedback. The override reaches
+  descriptions, Live Caption, compose, the Glic and contextual-task entries, Ask Google about this page, generate
+  password, passkey from another device, the password and autofill fallbacks that open a popup, and autofill
+  feedback. The override reaches
   submenus, since their models use the menu as delegate. `UpdateToolkitMenuItem` keeps them hidden when an observer
   updates them later.
-- Submenus left with no visible item are hidden, and so are separators that would lead, trail or double up
-  (`MenuControllerCocoa` shows every separator, so the `NSMenuItem`s are hidden after it builds the menu).
+- Submenus left with no visible item are hidden. `MenuControllerCocoa` shows every separator, so after it builds the
+  menu, the separators that would lead, trail or double up are hidden as `NSMenuItem`s, in submenus too (review of
+  #904). A separator left over when an observer hides an item later is not tidied (looks only).
 
 The engine self-test embedder gained a probe (`--arkt-facade-selftest` only): it logs a context menu's items once
 validated (`ARKT selftest context menu open items=[...]`, `(off)` for disabled items) and its close, and the commands
-`ctx-pick <title prefix>` and `ctx-cancel` run an item or close the menu. Scripted runs need no Accessibility access.
+`ctx-pick <title prefix>` and `ctx-cancel` run an item or close the menu; after the close they find no menu
+(`ctx-pick "Reload" menu=none`). Scripted runs need no Accessibility access.
 
 ### Smoke (`out/Arkt/Arkt.app`, `--no-startup-window --arkt-facade-selftest --arkt-engine-test-api --remote-debugging-port`, a fresh profile per run, `--use-mock-keychain --mute-audio`, `--host-resolver-rules="MAP * ~NOTFOUND, EXCLUDE 127.0.0.1"`, a loopback fixture page and an unpacked probe extension with one `contextMenus` item)
 
@@ -6614,7 +6617,8 @@ task with application tasks allowed).
 | Build, first version | `The build has finished successfully.`, `FAILED:` 0, about 80 s |
 | Break build (`.mm` back to `156.0.8078.48`) | finished, `FAILED:` 0, 125 s. Three right-clicks reached the page (`contextmenu` count 3); `ARKT: page context menu` lines 0, menus 0 |
 | Restore build | finished, `FAILED:` 0, 85 s; the menu is back |
-| Build with item hiding (final) | finished, `FAILED:` 0, 85 s and 75 s; FATAL, `Check failed` and signal lines in the final runs 0 |
+| Build with item hiding | finished, `FAILED:` 0, 85 s and 75 s |
+| Build after the #904 review (Ask Google item, separators in submenus, probe) | finished, `FAILED:` 0, 75 s; the smoke above re-run on it: same menus, every hidden item `index=-1`, Open Link in New Tab, Copy (restored identical), Inspect and the extension item pass; FATAL, `Check failed` and signal lines 0 |
 | `gn check out/Arkt "//chrome/browser/ui/cocoa:*"` and `"//arkt/*"` | `Header dependency check OK` (both) |
 
 ### Patch budget
@@ -6637,10 +6641,12 @@ In sync. Export added 0016 and its `.patches` line; 0001 to 0015 byte-identical.
 
 ### Left open
 
-- A real-pointer check (menu at the pointer, the Look Up panel, Services, spelling suggestions) on a focused window,
-  and the shell surfaces (Split View pane, Peek, Little Arkt, the Space of a new tab), once the shell hosts this build.
-- Native replacements for hidden items the maintainer wants back: Print (Cmd-P still shows Chromium's preview sheet),
-  Open Link in Split View (could map to Arkt's own split), Translate, Cast, reading mode.
+- #905 (needs the user): the acceptance items not verifiable here, once the shell hosts this build, with real input:
+  the menu at the pointer in a main window, a Split View pane, a Peek and Little Arkt; Open Link in New Tab landing in
+  the right Space; spelling suggestions, Look Up and Services; the save panels.
+- Hidden items to bring back natively (not preview must-haves; they stay hidden for the preview): #906 Print (Cmd-P
+  still shows Chromium's preview sheet), #907 Open Link in Split View mapped to Arkt's split, #908 Translate, #909
+  Cast. Reading mode has no issue yet.
 - The QR code and Lens crashes stay reachable from other entry points if any calls them on an Arkt window; none is
   wired today.
 - Upstream unit tests for the Mac context menu were not run.

@@ -376,6 +376,7 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
   if (![self isContextMenu:menu]) {
     return;
   }
+  _contextMenu = nil;
   LOG(WARNING) << "ARKT selftest context menu closed";
 }
 
