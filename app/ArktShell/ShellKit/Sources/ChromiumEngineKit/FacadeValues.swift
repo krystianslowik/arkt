@@ -92,9 +92,39 @@ extension HistoryEntry {
 }
 
 extension ExtensionAction {
+  /// Chromium's action ids are extension ids, so `extensionID` is the action id.
   @MainActor init(facade action: any ArktExtensionAction) {
     self.init(id: action.actionId, name: action.name, iconPNG: action.iconPNG, isEnabled: action.isEnabled,
-              canUninstall: action.canUninstall, canReportAbuse: action.canReportAbuse)
+              isPinned: action.isPinned, hasOptionsPage: action.hasOptionsPage,
+              siteAccess: ExtensionSiteAccess(facade: action.siteAccess), canUninstall: action.canUninstall,
+              canReportAbuse: action.canReportAbuse)
+  }
+}
+
+extension ExtensionSiteAccess {
+  init(facade access: ArktExtensionSiteAccess) {
+    switch access {
+    case .onClick: self = .onClick
+    case .onThisSite: self = .onThisSite
+    case .onAllSites: self = .onAllSites
+    case .none: self = .noSiteAccess
+    @unknown default: self = .noSiteAccess
+    }
+  }
+}
+
+extension EngineMenuItem {
+  /// A facade menu item (#593); an unknown kind reads as a separator.
+  @MainActor init(facade item: any ArktMenuItem) {
+    switch item.kind {
+    case .command:
+      self.init(title: item.title, command: EngineMenuCommand(rawValue: item.command), isEnabled: item.isEnabled,
+                isChecked: item.isChecked)
+    case .submenu:
+      self = .submenu(item.title, item.children.map(EngineMenuItem.init(facade:)), isEnabled: item.isEnabled)
+    case .separator: self = .separator
+    @unknown default: self = .separator
+    }
   }
 }
 

@@ -14,6 +14,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/sequenced_task_runner.h"
 #include "chrome/browser/extensions/extension_view_host.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/themes/theme_service.h"
@@ -23,6 +24,9 @@
 #include "chrome/browser/ui/extensions/extension_action_view_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "content/public/browser/web_contents.h"
+#include "extensions/browser/extension_registry.h"
+#include "extensions/common/extension.h"
+#include "extensions/common/manifest_handlers/options_page_info.h"
 #include "ui/base/models/image_model.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia.h"
@@ -108,8 +112,12 @@ class ArktExtensionActionDelegate : public ExtensionActionDelegate {
     ShowPopover(std::move(host), menu_->anchor(), menu_, std::move(callback));
   }
 
+  // Chrome shows the action's context menu when a click cannot run it
+  // (disabled on this tab, #593).
   void ShowContextMenuAsFallback() override {
-    LOG(WARNING) << "ARKT: action disabled on this tab; no context menu yet";
+    if (model_) {
+      menu_->ShowContextMenuForAction(model_->GetId());
+    }
   }
 
   void CloseExtensionsMenuIfOpen() override { menu_->CloseForAction(); }
@@ -174,6 +182,10 @@ ArktExtensionsMenu::ArktExtensionsMenu(BrowserWindowInterface* browser,
   }
   if (ui::NativeTheme* native = ui::NativeTheme::GetInstanceForNativeUi()) {
     native_theme_observation_.Observe(native);
+  }
+  if (auto* permissions =
+          extensions::PermissionsManager::Get(browser_->GetProfile())) {
+    permissions_observation_.Observe(permissions);
   }
   model_ = ToolbarActionsModel::Get(browser_->GetProfile());
   if (!model_) {
@@ -243,7 +255,10 @@ std::vector<ArktExtensionsMenu::ActionInfo> ArktExtensionsMenu::GetActions()
     return actions;
   }
   content::WebContents* web_contents = active_web_contents();
-  for (const auto& id : model_->action_ids()) {
+  Profile* profile = browser_->GetProfile();
+  const extensions::ExtensionSet& enabled =
+      extensions::ExtensionRegistry::Get(profile)->enabled_extensions();
+  for (const auto& id : OrderedActionIds()) {
     auto it = view_models_.find(id);
     if (it == view_models_.end()) {
       continue;
@@ -252,13 +267,124 @@ std::vector<ArktExtensionsMenu::ActionInfo> ArktExtensionsMenu::GetActions()
     ActionInfo info;
     info.id = id;
     info.name = view_model->GetActionName();
+    info.pinned = model_->IsActionPinned(id);
     if (web_contents) {
       info.icon = CachedIcon(id, view_model, web_contents);
       info.enabled = view_model->IsEnabled(web_contents);
     }
+    if (const extensions::Extension* extension = enabled.GetByID(id)) {
+      info.has_options_page =
+          extensions::OptionsPageInfo::HasOptionsPage(extension);
+      info.site_access =
+          GetExtensionSiteAccess(profile, *extension, web_contents);
+    }
     actions.push_back(std::move(info));
   }
   return actions;
+}
+
+std::vector<extensions::ExtensionId> ArktExtensionsMenu::OrderedActionIds()
+    const {
+  std::vector<extensions::ExtensionId> ids;
+  if (!model_ || !model_->actions_initialized()) {
+    return ids;
+  }
+  for (const auto& id : model_->pinned_action_ids()) {
+    if (model_->action_ids().contains(id)) {
+      ids.push_back(id);
+    }
+  }
+  for (const auto& id : model_->action_ids()) {
+    if (!model_->IsActionPinned(id)) {
+      ids.push_back(id);
+    }
+  }
+  return ids;
+}
+
+std::vector<ExtensionMenuItem> ArktExtensionsMenu::BuildContextMenu(
+    const extensions::ExtensionId& extension_id) {
+  context_menu_.reset();
+  if (!browser_ || !view_models_.contains(extension_id)) {
+    LOG(WARNING) << "ARKT: no extension action for a context menu "
+                 << extension_id;
+    return {};
+  }
+  context_menu_ = ArktExtensionContextMenu::Create(browser_, extension_id);
+  if (!context_menu_) {
+    return {};
+  }
+  LOG(WARNING) << "ARKT: extension context menu " << extension_id << " "
+               << context_menu_->items().size() << " items";
+  return context_menu_->items();
+}
+
+bool ArktExtensionsMenu::ExecuteContextCommand(
+    const extensions::ExtensionId& extension_id,
+    int command) {
+  if (!context_menu_ || context_menu_->extension_id() != extension_id) {
+    LOG(WARNING) << "ARKT: no context menu built for " << extension_id;
+    return false;
+  }
+  return context_menu_->Execute(command);
+}
+
+void ArktExtensionsMenu::ShowContextMenuForAction(
+    const extensions::ExtensionId& extension_id) {
+  // Called from inside the action's ExecuteUserAction (and, through the
+  // facade, while the shell's anchor is set for that one call): show the menu
+  // on a later task, at the anchor of this moment, so its tracking loop does
+  // not run under the view model.
+  NSView* anchor = anchor_;
+  if (!browser_ || !anchor) {
+    return;
+  }
+  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+      FROM_HERE,
+      base::BindOnce(
+          [](base::WeakPtr<ArktExtensionsMenu> menu,
+             extensions::ExtensionId extension_id, NSView* anchor) {
+            if (menu) {
+              menu->ShowContextMenuAt(extension_id, anchor);
+            }
+          },
+          weak_factory_.GetWeakPtr(), extension_id, anchor));
+}
+
+void ArktExtensionsMenu::ShowContextMenuAt(
+    const extensions::ExtensionId& extension_id,
+    NSView* anchor) {
+  if (!browser_ || !anchor || !anchor.window || fallback_menu_) {
+    return;
+  }
+  fallback_menu_ = ArktExtensionContextMenu::Create(browser_, extension_id);
+  if (!fallback_menu_) {
+    return;
+  }
+  NSMenu* menu = fallback_menu_->BuildNativeMenu();
+  LOG(WARNING) << "ARKT: extension context menu fallback " << extension_id
+               << " " << menu.numberOfItems << " items";
+  if (dump_) {
+    for (NSInteger i = 0; i < menu.numberOfItems; ++i) {
+      NSMenuItem* item = [menu itemAtIndex:i];
+      LOG(WARNING) << "ARKT: fallback item " << i << " "
+                   << base::SysNSStringToUTF8(item.title)
+                   << " enabled=" << (item.enabled ? "1" : "0");
+    }
+    [menu performSelector:@selector(cancelTracking)
+               withObject:nil
+               afterDelay:kDumpMenuCloseDelay
+                  inModes:@[ NSRunLoopCommonModes ]];
+  }
+  // Tracking runs a nested run loop in which Chromium keeps running tasks; a
+  // window close there destroys this menu (the window owns it).
+  base::WeakPtr<ArktExtensionsMenu> weak_this = weak_factory_.GetWeakPtr();
+  [menu popUpMenuPositioningItem:nil
+                      atLocation:NSMakePoint(0, NSMaxY(anchor.bounds) + 4)
+                          inView:anchor];
+  if (weak_this) {
+    fallback_menu_.reset();
+  }
 }
 
 ArktExtensionsMenu::IconCacheEntry::IconCacheEntry() = default;
@@ -389,6 +515,27 @@ void ArktExtensionsMenu::OnToolbarActionUpdated(
   NotifyChanged();
 }
 
+void ArktExtensionsMenu::OnToolbarPinnedActionsChanged() {
+  // Pinned, unpinned or moved, here or on chrome://extensions: the order and
+  // the pin state of the list changed (#593).
+  DumpMenu();
+  NotifyChanged();
+}
+
+void ArktExtensionsMenu::OnUserPermissionsSettingsChanged(
+    const extensions::PermissionsManager::UserPermissionsSettings& settings) {
+  NotifyChanged();
+}
+
+void ArktExtensionsMenu::OnExtensionPermissionsUpdated(
+    const extensions::Extension& extension,
+    const extensions::PermissionSet& permissions,
+    extensions::PermissionsManager::UpdateReason reason) {
+  if (view_models_.contains(extension.id())) {
+    NotifyChanged();
+  }
+}
+
 void ArktExtensionsMenu::OnToolbarModelInitialized() {
   icon_cache_.clear();
   SyncViewModels();
@@ -466,7 +613,7 @@ NSMenu* ArktExtensionsMenu::BuildMenu() {
   menu.autoenablesItems = NO;
   content::WebContents* web_contents = active_web_contents();
   if (model_ && model_->actions_initialized()) {
-    for (const auto& id : model_->action_ids()) {
+    for (const auto& id : OrderedActionIds()) {
       auto it = view_models_.find(id);
       if (it == view_models_.end()) {
         continue;
@@ -547,8 +694,11 @@ void ArktExtensionsMenu::Shutdown() {
   icon_subscriptions_.clear();
   view_models_.clear();
   icon_cache_.clear();
+  context_menu_.reset();
+  fallback_menu_.reset();
   on_changed_.Reset();
   observation_.Reset();
+  permissions_observation_.Reset();
   theme_observation_.Reset();
   native_theme_observation_.Reset();
   model_ = nullptr;
