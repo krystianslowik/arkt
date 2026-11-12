@@ -6700,8 +6700,8 @@ Date 2026-11-12. Branch `engine/585-beforeunload-panel` from `main` at `ceb2afd1
   (`RecordWindowCloseCancelled`). A quit is told by the facade's own terminating flag (set at
   `OnClosingAllBrowsers(true)`, cleared by the cancel notification after this call), not by
   `browser_shutdown::IsTryingToQuit()`: the #911 review found that the second window's Stay missed the first window's
-  tabs, and a diagnostic run showed `IsTryingToQuit()` already false when that Stay was answered, before the dialog's
-  `CancelTerminate` (which resets it too).
+  tabs, and a diagnostic run observed `IsTryingToQuit()` false when that Stay was answered, cause not confirmed
+  (the dialog's `CancelTerminate` resets it too).
 - Swift: `ChromiumEngine+Dialogs.swift` maps the kind to `.beforeUnload`; a leave-site dialog nobody can show is answered
   Leave (#897 review); a `CloseCancelled` ends the tab's pending leave-site dialog first. `ChromiumEngine` keeps its
   own close as `TabLifecycle` (`live`, `closeHeld`) and the kept New Tab page as `NewTabPageSlot`; `.skipUnloadHandlers`

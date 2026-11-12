@@ -1707,9 +1707,9 @@ class Facade : public BrowserCollectionObserver,
     // A quit is told by the facade's own flag, set when Chromium starts
     // closing all browsers (OnClosingAllBrowsers) and cleared only by the
     // cancel notification that follows this call.
-    // browser_shutdown::IsTryingToQuit() is not enough: it read false when a
-    // Stay in the second window of a quit was answered, before the dialog's
-    // CancelTerminate (#911 review), and CancelTerminate resets it anyway.
+    // browser_shutdown::IsTryingToQuit() is not enough: it was observed false
+    // when a Stay in the second window of a quit was answered (#911 review),
+    // cause not confirmed, and the dialog's CancelTerminate resets it anyway.
     const bool quitting = terminating_ || browser_shutdown::IsTryingToQuit();
     GlobalBrowserCollection::GetInstance()->ForEach(
         [&](BrowserWindowInterface* each) {
