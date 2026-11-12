@@ -6769,3 +6769,115 @@ Unchanged: 16 patch files, 8 seam and hook patch files, 22 upstream files outsid
 Every engine run and the fixture server stopped by exact PID (`ps -p` prints nothing for each). No crash reports from
 these runs. Throwaway profiles under `profiles/585-20261112/` deleted after the runs. Nothing touched the Keychain
 (mock keychain only), the clipboard or `/Applications/Arkt.app`.
+
+## #593: pinned order, extension context menu and site access (seam, no patch)
+
+Date 2026-11-12. Branch `engine/593-extension-pins-menu` from `main` at `2fa0783f`. `$CR` branch `arkt` unchanged at
+`e483001f98` (0001-0016).
+
+### Gate
+
+- Seam, no patch. Pins and order are `ToolbarActionsModel`'s (`SetActionVisibility`, `MovePinnedAction`,
+  `pinned_action_ids()`), stored in the profile's `extensions.pinned_extensions`, which is also what
+  `chrome://extensions` reads and writes (`developerPrivate` `pinnedToToolbar`). The context menu is
+  `extensions::ExtensionContextMenuModel`, built for the window's `BrowserWindowInterface`: its active tab comes from
+  `TabListInterface`, and `SidePanelUI::From` is null on an Arkt window, so it needs no Views browser. On desktop
+  `kExtensionsMenuAccessControl` is off (the `InitMenu` path). Site access is `PermissionsManager` and
+  `SitePermissionsHelper`, reached through the model's own `ExecuteCommand`.
+- Facade header: additive. `ArktExtensionSiteAccess`, `ArktExtensionContextCommand` (the shell's
+  `ExtensionContextCommand` values), `ArktMenuItemKind` and the `ArktMenuItem` protocol; `ArktExtensionAction` gains
+  `isPinned`, `hasOptionsPage`, `siteAccess`; `ArktEngine` gains `pinnedExtensionIDs`, `setExtensionPinned:pinned:`,
+  `movePinnedExtension:toIndex:`, `extensionContextMenuForAction:inBrowser:`,
+  `performExtensionContextCommand:forAction:inBrowser:`. No existing member changed. Both copies `cmp` identical.
+  Gate and lanes note on #593.
+- `.patches` unchanged (16 lines, 16 commits above `156.0.8078.48`: in sync).
+- Builds: `nice -n 15 autoninja -j 4 -C out/Arkt chrome` (swap above 6 GB). Chromium disk 1.9 TB free throughout;
+  internal disk 34 GB free at the start and the end; swap 17.6 of 18.4 GB at the start, 17.6 at the end; load
+  average 4 to 9.
+
+### What landed
+
+- `arkt_extension_context_menu.{h,mm}` (new): `PinnedExtensionIds`, `SetExtensionPinned` and `MovePinnedExtension`
+  guard every case the model `CHECK`s or `DCHECK`s (no such action, already in that state, policy-pinned, off the
+  record, not pinned) and clamp the index. `GetExtensionSiteAccess` reports the user's site access under the same
+  conditions the model shows its submenu (none on a page the extension may not run on). `ArktExtensionContextMenu`
+  builds the model once and emits the items design/extensions fixes: the name as a disabled header, Options...
+  (enabled with an options page), Pin or Unpin, Move Up and Move Down (pinned only, each disabled at its end), the
+  site access submenu with the model's enabled and checked state, Manage Extension..., Remove from Arkt... (only when
+  the model offers Uninstall). Titles are the design's; the site item reads "On <host>" with the host the model
+  derives (Chromium's Mac string reads "Always on <host>"). Options and site access run through the model's
+  `ExecuteCommand`; Pin and the moves go straight to `ToolbarActionsModel` (the model's `TOGGLE_VISIBILITY` also
+  notifies the Views element tracker). A site choice after the tab left the origin the menu was built for is
+  ignored, as in Chrome.
+- `ArktExtensionsMenu`: actions listed pinned first in pin order, then the rest; `OnToolbarPinnedActionsChanged`
+  (an empty body until now, so a pin change never reached the shell) raises the change; observes
+  `PermissionsManager`, so a site access change from `chrome://extensions` reaches the shell too; keeps the last built
+  context menu per window for the shell's choice. `ShowContextMenuAsFallback` (a click on an action disabled on the
+  tab) used to log "no context menu yet"; it now shows the same items as a native menu at the action's anchor, on a
+  later task. There Manage and Remove run through the model (`chrome://extensions/?id=`, and the uninstall dialog
+  through the 0007 hook), as #593 asks; the shell's own menu keeps running them itself.
+- Facade: the listing fields, the five members, the menu item values. Swift: `ChromiumEngine+ExtensionPins.swift` maps
+  them onto the `EngineExtensions` members from #591; `FacadeValues.swift` maps site access and menu items.
+- Self-test embedder: `pin`, `unpin`, `move-pin <id> <index>`, `ext-menu <id>`, `ext-pick <id> <command>`; the
+  actions log prints `pinned`, `options`, `siteAccess` and the pinned list.
+- `engine/test-extensions/site-probe` (new): `<all_urls>` host permissions, an options page, a content script that
+  marks the page, a badge counting completed loads, and the action disabled on a page whose path holds "disabled".
+
+### Smoke (`out/Arkt/Arkt.app`, `--no-startup-window --arkt-facade-selftest --arkt-engine-test-api --remote-debugging-port`, fresh profiles under `profiles/593-20261112/`, `--use-mock-keychain --mute-audio`, `--host-resolver-rules="MAP * ~NOTFOUND, EXCLUDE 127.0.0.1"`, a loopback fixture server, `site-probe` and `action-probe` unpacked, commands through page titles over DevTools)
+
+| Step | Result |
+|---|---|
+| 1. Listing on the http page | site probe `options=1 siteAccess=3` (all sites), action probe `options=0 siteAccess=0`; `pinned []` |
+| 2. `pin` site, `pin` action, `move-pin` action 0, `unpin` site, `pin` site | each change one `extensionActionsChanged`; listing and `pinned` follow: `[site,action]`, `[action,site]`, `[action]`, `[action,site]` |
+| 3. `chrome://extensions` (`developerPrivate.getExtensionInfo`) | both `pinnedToToolbar=true`; site probe `hostAccess=ON_ALL_SITES` |
+| 3. Unpin from `chrome://extensions` (`updateExtensionConfiguration`) | `extensionActionsChanged`, site probe `pinned=0`, `pinned [action]` |
+| 4. Persistence: quit, relaunch on the same profile | `Preferences` `extensions.pinned_extensions` `[action, site]`; after relaunch `pinned [action,site]` in that order |
+| 5. `ext-menu` site probe on the http page | 9 items: name (off), Options..., Unpin, Move Up, Move Down (off, last), This Can Read and Change Site Data > When You Click the Extension, On 127.0.0.1, On All Sites (checked), -, Manage Extension..., Remove from Arkt... |
+| 5. `ext-menu` action probe | 8 items: no site submenu, Options... off, Move Up off (first) |
+| 5. `ext-menu` on the options page (an extension page) | 8 items, no site submenu |
+| 6. Site access: When You Click the Extension | `siteAccess=1`; `chrome://extensions` `ON_CLICK`; after a reload the content script did not run (`siteProbe=none`) |
+| 6. On 127.0.0.1 | `siteAccess=2`; `ON_SPECIFIC_SITES` with `http://127.0.0.1:8593/*`; after a reload the script ran |
+| 6. On All Sites | `siteAccess=3`; `ON_ALL_SITES` |
+| 6. `ON_CLICK` set from `chrome://extensions` | `extensionActionsChanged`, `siteAccess=1` |
+| 7. Stale menu: built on the http page, tab moved to a `data:` URL, then On click picked | `site access choice after the tab left http://127.0.0.1:8593`, `ignored`; `chrome://extensions` still `ON_ALL_SITES` |
+| 8. Menu Move Up, Move Down, Unpin, Pin; a second Pin from the same menu | order and pins follow; the second Pin `ignored` (already pinned), no `CHECK` |
+| 9. Options... | engine tab `chrome-extension://<site probe>/options.html`, active, opener the page |
+| 10. Badge (`chrome.action.setBadgeText` on each load) | a reload gives 2 `extensionActionsChanged`; badge text 4; the icon PNG changes size with each count |
+| 11. `run` on `disabled.html` (action `enabled=0`) | `extension context menu fallback ... 9 items`, the same items as step 5 at the action's anchor; closed by the dump timer |
+| `FATAL`, `Check failed`, `DCHECK`, signals | 0 in every run |
+
+Not exercised live: choosing Manage or Remove in the engine-drawn fallback menu. The self-test chooses menu items by
+page-title commands, which the facade defers out of a nested run loop, so they arrive after the menu closed. The
+shell's own menu runs Manage and Remove itself (#596, #720) and never sends them to the engine.
+
+### Deliberate break
+
+`OnToolbarPinnedActionsChanged` emptied again (its state on `main`), rebuilt (72 s, `FAILED:` 0): `pin` logged
+`setExtensionPinned ... changed` and `pinned [site]`, and no `extensionActionsChanged` reached the shell. Restored
+and rebuilt (80 s, `FAILED:` 0): the same `pin` gives `extensionActionsChanged`.
+
+| Step | Result |
+|---|---|
+| Builds | first two stopped on compile errors (a header path that moved to `ui/base/models/`, an incomplete `PermissionsData`), then `The build has finished successfully.`, `FAILED:` 0 on every later build (86 s, 76 s) |
+| `gn check out/Arkt "//arkt/*"` | `Header dependency check OK` (new dependency `//components/url_formatter`) |
+
+### Patch budget
+
+Unchanged: 16 patch files, 8 seam and hook patch files, 22 upstream files outside 0001-0004. `.patches` 16 lines, 16
+`arkt` commits: in sync. Facade header copies `cmp` identical.
+
+### Left open
+
+- Which of Chromium's other action menu items belong in the menu: the extension's own `chrome.contextMenus` items
+  for the `action` context, Rate, View web permissions, Inspect popup (developer mode), the side panel toggle. The
+  design table lists none of them; question on #593.
+- Revoking access to On click marks the page as needing a reload (`TabHelper::SetReloadRequired`); Chrome shows that
+  in its toolbar, Arkt shows nothing yet.
+- The shell's menu and panel against this engine with real input (right-click, Ctrl-click, VoiceOver show-menu) need
+  the shell build that hosts the engine.
+
+### Cleanup
+
+Every engine run and the fixture server stopped by exact PID (`ps -p` prints nothing for each). No crash reports from
+these runs. Throwaway profiles under `profiles/593-20261112/` deleted after the runs. Nothing touched the Keychain
+(mock keychain only), the clipboard or `/Applications/Arkt.app`.

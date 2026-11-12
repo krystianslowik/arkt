@@ -948,7 +948,29 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
                          : std::string("none"))
                  << " png=" << (__bridge void*)action.iconPNG
                  << " canUninstall=" << (action.canUninstall ? "1" : "0")
-                 << " canReportAbuse=" << (action.canReportAbuse ? "1" : "0");
+                 << " canReportAbuse=" << (action.canReportAbuse ? "1" : "0")
+                 << " pinned=" << (action.isPinned ? "1" : "0")
+                 << " options=" << (action.hasOptionsPage ? "1" : "0")
+                 << " siteAccess=" << static_cast<int>(action.siteAccess);
+  }
+  std::string pinned;
+  for (NSString* id in _engine.pinnedExtensionIDs) {
+    pinned += (pinned.empty() ? "" : ",") + base::SysNSStringToUTF8(id);
+  }
+  LOG(WARNING) << "ARKT selftest pinned [" << pinned << "]";
+}
+
+- (void)logMenuItems:(NSArray<id<ArktMenuItem>>*)items depth:(int)depth {
+  for (id<ArktMenuItem> item in items) {
+    LOG(WARNING) << "ARKT selftest ext-menu " << std::string(depth * 2, ' ')
+                 << (item.kind == ArktMenuItemKindSeparator ? "---"
+                     : item.kind == ArktMenuItemKindSubmenu
+                         ? "> " + base::SysNSStringToUTF8(item.title)
+                         : base::SysNSStringToUTF8(item.title))
+                 << " command=" << item.command
+                 << " enabled=" << (item.isEnabled ? "1" : "0")
+                 << " checked=" << (item.isChecked ? "1" : "0");
+    [self logMenuItems:item.children depth:depth + 1];
   }
 }
 
@@ -1266,6 +1288,27 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
     }
   } else if (command == "actions") {
     [self logActionsOf:tab.browser];
+  } else if (command == "pin" || command == "unpin") {
+    [_engine setExtensionPinned:base::SysUTF8ToNSString(argument)
+                         pinned:command == "pin"];
+  } else if (command == "move-pin") {
+    int index = 0;
+    base::StringToInt(words.size() > 2 ? words[2] : "0", &index);
+    [_engine movePinnedExtension:base::SysUTF8ToNSString(argument)
+                         toIndex:index];
+  } else if (command == "ext-menu") {
+    NSArray<id<ArktMenuItem>>* items =
+        [_engine extensionContextMenuForAction:base::SysUTF8ToNSString(argument)
+                                     inBrowser:tab.browser];
+    LOG(WARNING) << "ARKT selftest ext-menu " << argument
+                 << " items=" << items.count;
+    [self logMenuItems:items depth:0];
+  } else if (command == "ext-pick") {
+    int picked = -1;
+    base::StringToInt(words.size() > 2 ? words[2] : "-1", &picked);
+    [_engine performExtensionContextCommand:picked
+                                  forAction:base::SysUTF8ToNSString(argument)
+                                  inBrowser:tab.browser];
   } else if (command == "menu-check") {
     [self menuCheckIn:tab.browser.host.window];
   } else if (command == "run") {

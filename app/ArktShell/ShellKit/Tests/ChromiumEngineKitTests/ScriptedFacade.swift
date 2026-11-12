@@ -187,11 +187,45 @@ final class ScriptedAction: NSObject, ArktExtensionAction {
   let isEnabled: Bool
   let canUninstall: Bool
   let canReportAbuse: Bool
+  /// Set by the facade's listing from its profile pins (#593).
+  let isPinned: Bool
+  let hasOptionsPage: Bool
+  let siteAccess: ArktExtensionSiteAccess
   init(actionId: String, name: String, iconPNG: Data? = nil, isEnabled: Bool = true, canUninstall: Bool = true,
-       canReportAbuse: Bool = true) {
+       canReportAbuse: Bool = true, isPinned: Bool = false, hasOptionsPage: Bool = false,
+       siteAccess: ArktExtensionSiteAccess = .none) {
     self.actionId = actionId; self.name = name; self.iconPNG = iconPNG; self.isEnabled = isEnabled
     self.canUninstall = canUninstall; self.canReportAbuse = canReportAbuse
+    self.isPinned = isPinned; self.hasOptionsPage = hasOptionsPage; self.siteAccess = siteAccess
   }
+
+  /// This action as the listing shows it with `pinned`.
+  func listed(pinned: Bool) -> ScriptedAction {
+    ScriptedAction(actionId: actionId, name: name, iconPNG: iconPNG, isEnabled: isEnabled, canUninstall: canUninstall,
+                   canReportAbuse: canReportAbuse, isPinned: pinned, hasOptionsPage: hasOptionsPage,
+                   siteAccess: siteAccess)
+  }
+}
+
+/// One context menu item the scripted facade returns (#593).
+final class ScriptedMenuItem: NSObject, ArktMenuItem {
+  let kind: ArktMenuItemKind
+  let title: String
+  let command: Int
+  let isEnabled: Bool
+  let isChecked: Bool
+  let children: [any ArktMenuItem]
+  init(title: String, command: ArktExtensionContextCommand, isEnabled: Bool = true, isChecked: Bool = false) {
+    kind = .command; self.title = title; self.command = command.rawValue; self.isEnabled = isEnabled
+    self.isChecked = isChecked; children = []
+  }
+  init(title: String, children: [ScriptedMenuItem]) {
+    kind = .submenu; self.title = title; command = 0; isEnabled = true; isChecked = false; self.children = children
+  }
+  private init(separator: Void) {
+    kind = .separator; title = ""; command = 0; isEnabled = false; isChecked = false; children = []
+  }
+  static func separator() -> ScriptedMenuItem { ScriptedMenuItem(separator: ()) }
 }
 
 final class ScriptedRequest: NSObject, ArktWindowRequest {
@@ -1088,8 +1122,65 @@ final class ScriptedFacade: NSObject, ArktEngine {
     return browser
   }
 
+  /// The listing as the real facade orders it (#593): pinned actions first in `pinnedIDs` order, then the rest in
+  /// their own order, each with `isPinned` from the profile.
   func extensionActions(in browser: any ArktBrowserHandle) -> [any ArktExtensionAction] {
-    actions[ObjectIdentifier(browser)] ?? []
+    let list = actions[ObjectIdentifier(browser)] ?? []
+    let pinned = pinnedIDs.compactMap { id in list.first { $0.actionId == id }?.listed(pinned: true) }
+    return pinned + list.filter { !pinnedIDs.contains($0.actionId) }.map { $0.listed(pinned: false) }
+  }
+
+  // MARK: Pins and the context menu (#593)
+
+  /// The profile's pins, in order; tests may set them directly (a profile's stored pins).
+  var pinnedIDs: [String] = []
+  var pinnedExtensionIDs: [String] { pinnedIDs }
+  private(set) var pinCalls: [(extensionID: String, pinned: Bool)] = []
+  private(set) var moveCalls: [(extensionID: String, index: Int)] = []
+  /// The menu `extensionContextMenu` returns per action id.
+  var contextMenus: [String: [ScriptedMenuItem]] = [:]
+  private(set) var contextMenuCalls: [(actionId: String, window: Int32)] = []
+  private(set) var performedContextCommands: [(command: Int, actionId: String, window: Int32)] = []
+
+  /// As the real facade: nothing for an unknown id or one already in that state; otherwise the pin list changes and
+  /// every window that lists the action gets `ExtensionActionsChanged`, inside the call
+  /// (`OnToolbarPinnedActionsChanged` fires inside `SetActionVisibility`).
+  func setExtensionPinned(_ extensionID: String, pinned: Bool) {
+    pinCalls.append((extensionID, pinned))
+    guard isListed(extensionID), pinnedIDs.contains(extensionID) != pinned else { return }
+    if pinned { pinnedIDs.append(extensionID) } else { pinnedIDs.removeAll { $0 == extensionID } }
+    announcePins(of: extensionID)
+  }
+
+  func movePinnedExtension(_ extensionID: String, to index: Int) {
+    moveCalls.append((extensionID, index))
+    guard let from = pinnedIDs.firstIndex(of: extensionID) else { return }
+    let to = min(max(index, 0), pinnedIDs.count - 1)
+    guard to != from else { return }
+    pinnedIDs.remove(at: from)
+    pinnedIDs.insert(extensionID, at: to)
+    announcePins(of: extensionID)
+  }
+
+  func extensionContextMenu(forAction actionId: String, in browser: any ArktBrowserHandle) -> [any ArktMenuItem] {
+    contextMenuCalls.append((actionId, browser.windowId))
+    return contextMenus[actionId] ?? []
+  }
+
+  func performExtensionContextCommand(_ command: Int, forAction actionId: String, in browser: any ArktBrowserHandle) {
+    performedContextCommands.append((command, actionId, browser.windowId))
+  }
+
+  private func isListed(_ extensionID: String) -> Bool {
+    browserList.contains { actions[ObjectIdentifier($0)]?.contains { $0.actionId == extensionID } == true }
+  }
+
+  private func announcePins(of extensionID: String) {
+    for browser in browserList where actions[ObjectIdentifier(browser)]?.contains(where: {
+      $0.actionId == extensionID
+    }) == true {
+      record(ScriptedEvent(.extensionActionsChanged, tab: nil, browser: browser))
+    }
   }
 
   func runExtensionAction(_ actionId: String, in browser: any ArktBrowserHandle, anchor: NSView) {

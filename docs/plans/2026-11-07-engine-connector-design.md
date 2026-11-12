@@ -532,10 +532,12 @@ From the audit's missing list (`arkt_extensions_menu.mm:72-78` `RegisterCommand`
 
 1. Keyboard commands: overlay `ExtensionKeybindingRegistry` subclass; `RegisterCommand` stops logging "not
    supported"; `_execute_action` opens the popup. Chrome model per the 2026-11-05 decision.
-2. Action context menu: `ExtensionContextMenuModel` rendered as an `NSMenu`.
+2. Action context menu: `ExtensionContextMenuModel` rendered as an `NSMenu`. Landed as a seam (#593): the shell
+   draws the design's items from the model's state; a click on a disabled action shows them engine-side.
 3. Side panel: create `ExtensionSidePanelManager`; host through E2's side panel.
 4. Pinning and site access, and the request-access button, over `ToolbarActionsModel` and `SitePermissionsHelper`;
-   the pinned-by-default hint (from #265).
+   the pinned-by-default hint (from #265). Pinning, order and site access landed as a seam (#593); the
+   request-access button and the hint remain.
 5. Extension message bubbles (settings overridden, developer mode) as native UI.
 6. Popup Inspect and docked DevTools (BWF :793, from #586).
 7. Post-install event instead of Chromium's dialog (#592).

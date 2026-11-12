@@ -3,6 +3,7 @@
 #import <AppKit/AppKit.h>
 
 #include <algorithm>
+#include <limits>
 #include <map>
 #include <memory>
 #include <optional>
@@ -1147,6 +1148,9 @@ NSArray<id<ArktSitePermission>>* SitePermissionObjects(
 @property(nonatomic) BOOL isEnabled;
 @property(nonatomic) BOOL canUninstall;
 @property(nonatomic) BOOL canReportAbuse;
+@property(nonatomic) BOOL isPinned;
+@property(nonatomic) BOOL hasOptionsPage;
+@property(nonatomic) ArktExtensionSiteAccess siteAccess;
 @end
 
 @implementation ArktFacadeExtensionAction
@@ -1156,6 +1160,28 @@ NSArray<id<ArktSitePermission>>* SitePermissionObjects(
 @synthesize isEnabled = _isEnabled;
 @synthesize canUninstall = _canUninstall;
 @synthesize canReportAbuse = _canReportAbuse;
+@synthesize isPinned = _isPinned;
+@synthesize hasOptionsPage = _hasOptionsPage;
+@synthesize siteAccess = _siteAccess;
+@end
+
+// One item of an extension action's context menu (#593).
+@interface ArktFacadeMenuItem : NSObject <ArktMenuItem>
+@property(nonatomic) ArktMenuItemKind kind;
+@property(nonatomic, copy) NSString* title;
+@property(nonatomic) NSInteger command;
+@property(nonatomic) BOOL isEnabled;
+@property(nonatomic) BOOL isChecked;
+@property(nonatomic, copy) NSArray<id<ArktMenuItem>>* children;
+@end
+
+@implementation ArktFacadeMenuItem
+@synthesize kind = _kind;
+@synthesize title = _title;
+@synthesize command = _command;
+@synthesize isEnabled = _isEnabled;
+@synthesize isChecked = _isChecked;
+@synthesize children = _children;
 @end
 
 // -----------------------------------------------------------------------------
@@ -2892,6 +2918,47 @@ void ParkDuplicate(ArktFacadeBrowser* browser_handle,
 // popups, and is the window's ExtensionsContainer menu, so
 // chrome.action.openPopup works there too. The placeholder host gets its
 // sidebar menu from the hook; the facade lists and runs that one.
+static_assert(static_cast<int>(ExtensionSiteAccess::kOnAllSites) ==
+              ArktExtensionSiteAccessOnAllSites);
+static_assert(static_cast<int>(ExtensionSiteAccess::kOnThisSite) ==
+              ArktExtensionSiteAccessOnThisSite);
+static_assert(static_cast<int>(ExtensionSiteAccess::kOnClick) ==
+              ArktExtensionSiteAccessOnClick);
+static_assert(static_cast<int>(ExtensionContextCommand::kRemove) ==
+              ArktExtensionContextCommandRemove);
+static_assert(static_cast<int>(ExtensionContextCommand::kSiteAccessOnAllSites) ==
+              ArktExtensionContextCommandSiteAccessOnAllSites);
+
+// An extension context menu's items as facade values (#593).
+NSArray<id<ArktMenuItem>>* FacadeMenuItems(
+    const std::vector<ExtensionMenuItem>& items) {
+  NSMutableArray<id<ArktMenuItem>>* result = [NSMutableArray array];
+  for (const auto& item : items) {
+    ArktFacadeMenuItem* entry = [[ArktFacadeMenuItem alloc] init];
+    entry.title = base::SysUTF16ToNSString(item.title);
+    entry.isEnabled = item.enabled;
+    entry.children = @[];
+    switch (item.kind) {
+      case ExtensionMenuItem::Kind::kCommand:
+        entry.kind = ArktMenuItemKindCommand;
+        entry.command = static_cast<NSInteger>(item.command);
+        entry.isChecked = item.checked;
+        break;
+      case ExtensionMenuItem::Kind::kSeparator:
+        entry.kind = ArktMenuItemKindSeparator;
+        entry.title = @"";
+        entry.isEnabled = NO;
+        break;
+      case ExtensionMenuItem::Kind::kSubmenu:
+        entry.kind = ArktMenuItemKindSubmenu;
+        entry.children = FacadeMenuItems(item.children);
+        break;
+    }
+    [result addObject:entry];
+  }
+  return result;
+}
+
 ArktExtensionsMenu* EnsureActionsMenu(ArktBrowserWindow* window) {
   if (!window) {
     return nullptr;
@@ -4058,6 +4125,9 @@ void DeliverImportResult(void (^completion)(id<ArktImportResult>),
         interface ? interface->GetProfile() : nullptr, info.id);
     action.canUninstall = ability.can_uninstall;
     action.canReportAbuse = ability.can_report_abuse;
+    action.isPinned = info.pinned;
+    action.hasOptionsPage = info.has_options_page;
+    action.siteAccess = static_cast<ArktExtensionSiteAccess>(info.site_access);
     [actions addObject:action];
   }
   return actions;
@@ -4395,6 +4465,91 @@ void DeliverImportResult(void (^completion)(id<ArktImportResult>),
 - (void)cancelExtensionInstalls {
   arkt::CheckFacadeEntry();
   arkt::CancelWebstoreExtensionInstalls();
+}
+
+- (NSArray<NSString*>*)pinnedExtensionIDs {
+  arkt::CheckFacadeEntry();
+  NSMutableArray<NSString*>* ids = [NSMutableArray array];
+  for (const auto& id : arkt::PinnedExtensionIds(arkt::EmbedderProfile())) {
+    [ids addObject:base::SysUTF8ToNSString(id)];
+  }
+  return ids;
+}
+
+- (void)setExtensionPinned:(NSString*)extensionID pinned:(BOOL)pinned {
+  arkt::CheckFacadeEntry();
+  arkt::RunOrDefer(
+      "setExtensionPinned",
+      base::BindOnce(
+          [](std::string extension_id, bool pinned) {
+            const bool changed = arkt::SetExtensionPinned(
+                arkt::EmbedderProfile(), extension_id, pinned);
+            LOG(WARNING) << "ARKT: facade setExtensionPinned " << extension_id
+                         << " pinned=" << pinned
+                         << (changed ? " changed" : " unchanged");
+          },
+          base::SysNSStringToUTF8(extensionID), static_cast<bool>(pinned)));
+}
+
+- (void)movePinnedExtension:(NSString*)extensionID toIndex:(NSInteger)index {
+  arkt::CheckFacadeEntry();
+  const int clamped = static_cast<int>(
+      std::clamp<NSInteger>(index, 0, std::numeric_limits<int>::max()));
+  arkt::RunOrDefer(
+      "movePinnedExtension",
+      base::BindOnce(
+          [](std::string extension_id, int index) {
+            const bool moved = arkt::MovePinnedExtension(
+                arkt::EmbedderProfile(), extension_id, index);
+            LOG(WARNING) << "ARKT: facade movePinnedExtension " << extension_id
+                         << " to " << index << (moved ? " moved" : " unchanged");
+          },
+          base::SysNSStringToUTF8(extensionID), clamped));
+}
+
+- (NSArray<id<ArktMenuItem>>*)extensionContextMenuForAction:(NSString*)actionId
+                                                  inBrowser:
+                                                      (id<ArktBrowserHandle>)
+                                                          browser {
+  arkt::CheckFacadeEntry();
+  if (![browser isKindOfClass:[ArktFacadeBrowser class]]) {
+    return @[];
+  }
+  BrowserWindowInterface* interface =
+      static_cast<ArktFacadeBrowser*>(browser).browserInterface;
+  arkt::ArktExtensionsMenu* menu = arkt::EnsureActionsMenu(
+      interface ? arkt::ArktBrowserWindow::FromBrowser(interface) : nullptr);
+  if (!menu) {
+    return @[];
+  }
+  return arkt::FacadeMenuItems(
+      menu->BuildContextMenu(base::SysNSStringToUTF8(actionId)));
+}
+
+- (void)performExtensionContextCommand:(NSInteger)command
+                             forAction:(NSString*)actionId
+                             inBrowser:(id<ArktBrowserHandle>)browser {
+  arkt::CheckFacadeEntry();
+  if (![browser isKindOfClass:[ArktFacadeBrowser class]]) {
+    return;
+  }
+  arkt::RunOrDefer(
+      "performExtensionContextCommand",
+      base::BindOnce(
+          [](ArktFacadeBrowser* browser, std::string action_id, int command) {
+            BrowserWindowInterface* interface = browser.browserInterface;
+            arkt::ArktExtensionsMenu* menu = arkt::EnsureActionsMenu(
+                interface ? arkt::ArktBrowserWindow::FromBrowser(interface)
+                          : nullptr);
+            const bool ran =
+                menu && menu->ExecuteContextCommand(action_id, command);
+            LOG(WARNING) << "ARKT: facade performExtensionContextCommand "
+                         << command << " " << action_id
+                         << (ran ? " ran" : " ignored");
+          },
+          static_cast<ArktFacadeBrowser*>(browser),
+          base::SysNSStringToUTF8(actionId),
+          static_cast<int>(std::clamp<NSInteger>(command, -1, 1000))));
 }
 
 - (void)uninstallExtension:(NSString*)extensionID

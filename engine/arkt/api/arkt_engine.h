@@ -643,6 +643,67 @@ NS_SWIFT_UI_ACTOR
 @property(nonatomic, readonly, nullable, copy) NSURL* initialURL;
 @end
 
+// What an extension may read and change on sites (#593): Chromium's user site
+// access for the window's active tab, as its toolbar context menu shows it.
+typedef NS_ENUM(NSInteger, ArktExtensionSiteAccess) {
+  // It asks for no site access the user can change on this tab (no host
+  // permissions, or a page it may not run on): no site access submenu.
+  ArktExtensionSiteAccessNone = 0,
+  // Only when the user clicks its action.
+  ArktExtensionSiteAccessOnClick = 1,
+  // On the active tab's site.
+  ArktExtensionSiteAccessOnThisSite = 2,
+  // On all sites.
+  ArktExtensionSiteAccessOnAllSites = 3,
+};
+
+// The commands of an extension action's context menu (#593), the menu
+// design/extensions fixes. The values are the shell's ExtensionContextCommand
+// raw values.
+typedef NS_ENUM(NSInteger, ArktExtensionContextCommand) {
+  // The extension's name, a disabled header.
+  ArktExtensionContextCommandHeader = 0,
+  // Opens the extension's options page in a tab.
+  ArktExtensionContextCommandOptions = 1,
+  // Pin or Unpin, by the current state.
+  ArktExtensionContextCommandTogglePin = 2,
+  // One place earlier or later in the pinned order.
+  ArktExtensionContextCommandMoveUp = 3,
+  ArktExtensionContextCommandMoveDown = 4,
+  // The site access submenu's three choices.
+  ArktExtensionContextCommandSiteAccessOnClick = 5,
+  ArktExtensionContextCommandSiteAccessOnThisSite = 6,
+  ArktExtensionContextCommandSiteAccessOnAllSites = 7,
+  // Manage Extension... and Remove from Arkt...: the shell runs these itself;
+  // performExtensionContextCommand ignores them.
+  ArktExtensionContextCommandManage = 8,
+  ArktExtensionContextCommandRemove = 9,
+};
+
+typedef NS_ENUM(NSInteger, ArktMenuItemKind) {
+  ArktMenuItemKindCommand = 0,
+  ArktMenuItemKindSeparator = 1,
+  ArktMenuItemKindSubmenu = 2,
+};
+
+// One item of a menu the engine gives the shell to draw (#593), as plain
+// values. Titles are the engine's.
+NS_SWIFT_UI_ACTOR
+@protocol ArktMenuItem <NSObject>
+@property(nonatomic, readonly) ArktMenuItemKind kind;
+// "" for a separator.
+@property(nonatomic, readonly, copy) NSString* title;
+// The command passed back when the user chooses the item; meaningful only for
+// ArktMenuItemKindCommand, and only to the menu's source.
+@property(nonatomic, readonly) NSInteger command;
+// NO for a separator.
+@property(nonatomic, readonly) BOOL isEnabled;
+// Shown with a check mark; NO for a separator or a submenu holder.
+@property(nonatomic, readonly) BOOL isChecked;
+// The submenu's items; empty for any other kind.
+@property(nonatomic, readonly, copy) NSArray<id<ArktMenuItem>>* children;
+@end
+
 // One extension toolbar action of a window, as plain values (Decision 10).
 NS_SWIFT_UI_ACTOR
 @protocol ArktExtensionAction <NSObject>
@@ -660,6 +721,12 @@ NS_SWIFT_UI_ACTOR
 // there (#721). The shell offers Report abuse only then; uninstallExtension
 // opens no report page for the others anyway.
 @property(nonatomic, readonly) BOOL canReportAbuse;
+// Pinned in the profile (#593, pinnedExtensionIDs).
+@property(nonatomic, readonly) BOOL isPinned;
+// The extension has an options page (the context menu's Options...).
+@property(nonatomic, readonly) BOOL hasOptionsPage;
+// Its site access on the window's active tab.
+@property(nonatomic, readonly) ArktExtensionSiteAccess siteAccess;
 @end
 
 // One back or forward history entry of a tab.
@@ -1100,6 +1167,8 @@ NS_SWIFT_UI_ACTOR
 // Creates a Browser in the host's window, synchronously.
 - (id<ArktBrowserHandle>)createBrowserWithHost:(id<ArktWindowHost>)host
     NS_SWIFT_NAME(createBrowser(host:));
+// The window's actions: the pinned ones first, in pinnedExtensionIDs order,
+// then the rest.
 - (NSArray<id<ArktExtensionAction>>*)extensionActionsForBrowser:
     (id<ArktBrowserHandle>)browser NS_SWIFT_NAME(extensionActions(in:));
 // Runs the action; its popup is anchored to `anchor`.
@@ -1229,6 +1298,38 @@ NS_SWIFT_UI_ACTOR
                                completion
     NS_SWIFT_NAME(uninstallExtension(_:reportAbuse:in:completion:))
         NS_SWIFT_DISABLE_ASYNC;
+
+// Pinned extensions (#593), of the profile the engine started with: Chromium's
+// toolbar pins, stored in the profile (what chrome://extensions shows as "Pin
+// to toolbar"), in order. Action ids are extension ids.
+@property(nonatomic, readonly, copy) NSArray<NSString*>* pinnedExtensionIDs;
+// Pins (at the end of the order) or unpins an extension that has an action.
+// Nothing for an unknown id, one already in that state, or one the policy
+// pins. A change reaches the sinks as ExtensionActionsChanged for every window.
+- (void)setExtensionPinned:(NSString*)extensionID
+                    pinned:(BOOL)pinned
+    NS_SWIFT_NAME(setExtensionPinned(_:pinned:));
+// Moves a pinned extension to `index` in pinnedExtensionIDs, clamped to the
+// ends. Nothing for one that is not pinned, already there, or policy-pinned.
+- (void)movePinnedExtension:(NSString*)extensionID
+                    toIndex:(NSInteger)index
+    NS_SWIFT_NAME(movePinnedExtension(_:to:));
+// The context menu of action `actionId` in `browser`, from Chromium's
+// ExtensionContextMenuModel for the window's active tab, with
+// ArktExtensionContextCommand commands; empty for an unknown action. The
+// engine keeps that model until the next call for the window, so a choice made
+// after the tab moved to another site changes no site access.
+- (NSArray<id<ArktMenuItem>>*)extensionContextMenuForAction:(NSString*)actionId
+                                                  inBrowser:
+                                                      (id<ArktBrowserHandle>)
+                                                          browser
+    NS_SWIFT_NAME(extensionContextMenu(forAction:in:));
+// Runs a command the user chose from that menu. Nothing for an unknown action
+// or command, a disabled item, or Header, Manage and Remove (the shell's).
+- (void)performExtensionContextCommand:(NSInteger)command
+                             forAction:(NSString*)actionId
+                             inBrowser:(id<ArktBrowserHandle>)browser
+    NS_SWIFT_NAME(performExtensionContextCommand(_:forAction:in:));
 
 // Downloads (#132), of the profile the engine started with. The events are
 // DownloadCreated, DownloadUpdated and DownloadRemoved (no tab, no window).

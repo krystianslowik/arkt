@@ -19,10 +19,30 @@ final class TestExtensionAction: NSObject, ArktExtensionAction {
   let isEnabled: Bool
   let canUninstall: Bool
   let canReportAbuse: Bool
+  let isPinned: Bool
+  let hasOptionsPage: Bool
+  let siteAccess: ArktExtensionSiteAccess
   init(actionId: String, name: String, iconPNG: Data? = nil, isEnabled: Bool = true, canUninstall: Bool = true,
-       canReportAbuse: Bool = false) {
+       canReportAbuse: Bool = false, isPinned: Bool = false, hasOptionsPage: Bool = false,
+       siteAccess: ArktExtensionSiteAccess = .none) {
     self.actionId = actionId; self.name = name; self.iconPNG = iconPNG; self.isEnabled = isEnabled
     self.canUninstall = canUninstall; self.canReportAbuse = canReportAbuse
+    self.isPinned = isPinned; self.hasOptionsPage = hasOptionsPage; self.siteAccess = siteAccess
+  }
+}
+
+/// A menu item as the engine returns one (#593).
+final class TestMenuItem: NSObject, ArktMenuItem {
+  let kind: ArktMenuItemKind
+  let title: String
+  let command: Int
+  let isEnabled: Bool
+  let isChecked: Bool
+  let children: [any ArktMenuItem]
+  init(kind: ArktMenuItemKind = .command, title: String, command: Int = 0, isEnabled: Bool = true,
+       isChecked: Bool = false, children: [any ArktMenuItem] = []) {
+    self.kind = kind; self.title = title; self.command = command; self.isEnabled = isEnabled
+    self.isChecked = isChecked; self.children = children
   }
 }
 
@@ -429,6 +449,33 @@ final class TestEngine: NSObject, ArktEngine {
     ranActions.append(actionId)
   }
 
+  private(set) var pinnedExtensionIDs: [String] = []
+  private(set) var performedContextCommands: [(Int, String, Int32)] = []
+
+  func setExtensionPinned(_ extensionID: String, pinned: Bool) {
+    pinnedExtensionIDs.removeAll { $0 == extensionID }
+    if pinned { pinnedExtensionIDs.append(extensionID) }
+  }
+
+  func movePinnedExtension(_ extensionID: String, to index: Int) {
+    guard let from = pinnedExtensionIDs.firstIndex(of: extensionID) else { return }
+    pinnedExtensionIDs.remove(at: from)
+    pinnedExtensionIDs.insert(extensionID, at: min(max(index, 0), pinnedExtensionIDs.count))
+  }
+
+  func extensionContextMenu(forAction actionId: String, in browser: any ArktBrowserHandle) -> [any ArktMenuItem] {
+    [TestMenuItem(title: "Action Probe", command: ArktExtensionContextCommand.header.rawValue, isEnabled: false),
+     TestMenuItem(kind: .separator, title: "", isEnabled: false),
+     TestMenuItem(kind: .submenu, title: "Site", children: [
+       TestMenuItem(title: "On All Sites", command: ArktExtensionContextCommand.siteAccessOnAllSites.rawValue,
+                    isChecked: true),
+     ])]
+  }
+
+  func performExtensionContextCommand(_ command: Int, forAction actionId: String, in browser: any ArktBrowserHandle) {
+    performedContextCommands.append((command, actionId, browser.windowId))
+  }
+
   func addEventSink(_ sink: @escaping ([any ArktEngineEvent]) -> Void) -> any NSObjectProtocol {
     let token = NSObject()
     sinks[ObjectIdentifier(token)] = (token, sink)
@@ -797,6 +844,26 @@ struct ConformanceTests {
     engine.evaluateScript("1 + 1", in: tab, userGesture: true) { value, _ in result = value }
     #expect(result as? Int == 5)
     #expect(engine.testAPIEnabled && !engine.answerDialog(in: tab, accept: true))
+  }
+
+  @Test func pinsOrderAndTheContextMenuGoThroughTheProtocol() throws {
+    let facade = TestEngine()
+    let engine: any ArktEngine = facade
+    let browser = engine.createBrowser(host: TestWindowHost())
+    engine.setExtensionPinned("a", pinned: true)
+    engine.setExtensionPinned("b", pinned: true)
+    engine.movePinnedExtension("b", to: 0)
+    #expect(engine.pinnedExtensionIDs == ["b", "a"])
+    let action: any ArktExtensionAction = TestExtensionAction(actionId: "a", name: "A", isPinned: true,
+                                                                hasOptionsPage: true, siteAccess: .onThisSite)
+    #expect(action.isPinned && action.hasOptionsPage && action.siteAccess == .onThisSite)
+    let menu = engine.extensionContextMenu(forAction: "action-probe", in: browser)
+    #expect(menu.map(\.kind) == [.command, .separator, .submenu])
+    let child = try #require(menu.last?.children.first)
+    #expect(child.command == ArktExtensionContextCommand.siteAccessOnAllSites.rawValue && child.isChecked)
+    engine.performExtensionContextCommand(ArktExtensionContextCommand.togglePin.rawValue, forAction: "action-probe",
+                                          in: browser)
+    #expect(facade.performedContextCommands.map(\.0) == [ArktExtensionContextCommand.togglePin.rawValue])
   }
 
   @Test func uninstallReachesTheFacadeWithItsFlagAndWindowAndAnswersLater() async throws {
