@@ -531,7 +531,9 @@ NS_SWIFT_UI_ACTOR
 @property(nonatomic, readonly, nullable, copy) NSString* defaultPromptText;
 // OK; Leave or Reload for a leave-site dialog.
 @property(nonatomic, readonly, copy) NSString* acceptTitle;
-// Cancel; nil for an alert, which only has OK.
+// Cancel; nil for an alert, which only has OK, and for a leave-site dialog:
+// Chromium's own decline button there is a plain Cancel, and the shell draws
+// its Stay (#584).
 @property(nonatomic, readonly, nullable, copy) NSString* cancelTitle;
 // The dialog is over, however it ended.
 @property(nonatomic, readonly) BOOL isEnded;

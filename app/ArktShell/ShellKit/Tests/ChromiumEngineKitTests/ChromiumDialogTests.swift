@@ -251,7 +251,7 @@ struct ChromiumDialogTests {
 
     let dialog = try #require(leaveSiteRequest(recorder, tab), "\(recorder.events(for: tab))")
     #expect(dialog.title == "Leave site?" && dialog.message == "Changes you made may not be saved.")
-    #expect(dialog.acceptTitle == "Leave" && dialog.cancelTitle == "Cancel")
+    #expect(dialog.acceptTitle == "Leave" && dialog.cancelTitle == nil, "the shell draws its own Stay (#584)")
     #expect(dialog.defaultPromptText == nil)
     #expect(engine.snapshot(of: tab)?.isClosing == true)
   }

@@ -62,12 +62,12 @@ final class ScriptedDialog: NSObject, ArktJavaScriptDialog {
   /// A leave-site dialog's answer reaches the held close after the end is recorded, as the real facade orders it.
   var onAnswer: ((Bool) -> Void)?
 
-  /// A leave-site dialog has Chromium's strings: "Leave site?", Leave and Cancel.
+  /// A leave-site dialog has Chromium's strings ("Leave site?", Leave) and no decline title: the shell draws Stay.
   init(kind: ArktDialogKind, tab: any ArktTabHandle, title: String, message: String, defaultPromptText: String?) {
     self.kind = kind; self.tab = tab; self.title = title; self.message = message
     self.defaultPromptText = kind == .prompt ? (defaultPromptText ?? "") : nil
     acceptTitle = kind == .beforeUnload ? "Leave" : "OK"
-    cancelTitle = kind == .alert ? nil : "Cancel"
+    cancelTitle = kind == .alert || kind == .beforeUnload ? nil : "Cancel"
   }
 
   func respond(accepted: Bool, userInput: String?) -> Bool {

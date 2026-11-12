@@ -40,7 +40,8 @@ class ArktPageDialog {
   // A prompt's initial text; empty for the other kinds.
   virtual std::u16string default_prompt_text() const = 0;
   // Chromium's button titles: OK (Leave or Reload for a leave-site dialog),
-  // and Cancel, which an alert has not.
+  // and Cancel, which an alert and a leave-site dialog have not (the shell
+  // draws Stay for the latter).
   virtual std::u16string accept_title() const = 0;
   virtual std::optional<std::u16string> cancel_title() const = 0;
   virtual content::WebContents* contents() const = 0;

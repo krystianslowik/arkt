@@ -6689,7 +6689,9 @@ Date 2026-11-12. Branch `engine/585-beforeunload-panel` from `main` at `ceb2afd1
   sees the end before the `TabClosed` or `CloseCancelled` it brings. `CloseAppModalDialog` (the queue ending it: a
   navigation, the tab closing, shutdown) ends it without an answer. `HandleJavaScriptDialog` (the test API, DevTools)
   answers through the same path. Strings are Chromium's: "Leave site?" or "Reload site?", "Changes you made may not
-  be saved.", Leave or Reload, and Cancel (`IDS_APP_CANCEL`, Chromium's own decline button; Chromium has no "Stay").
+  be saved.", Leave or Reload. No decline title (`cancelTitle` nil, the header allows it for this kind): Chromium's
+  decline button is a plain Cancel and has no "Stay", and the shell's panel from #584 was designed as Stay / Leave, so
+  the shell draws Stay (decision on #585, 2026-11-12).
 - The app-modal queue keeps Chromium's accounting: one prompt at a time across all windows, a window close or a quit
   prompting its held tabs in turn, the next one only after Leave, Stay cancelling the whole close or quit.
 - Facade: `ArktFacadeJavaScriptDialog` reads any `ArktPageDialog`. On a cancelled window close or quit, Chromium tells
@@ -6716,7 +6718,7 @@ afterwards would have cancelled the close of a tab with no row).
 
 | Step | Result |
 |---|---|
-| 1. Client close (`close`), Stay (`respond stay`) | `held`, `dialogRequested kind=3 active=yes title="Leave site?" message="Changes you made may not be saved." accept="Leave" cancel="Cancel"`; then `dialogEnded`, `closeCancelled isClosing=no` (separate batches, in that order); `state` closing=no |
+| 1. Client close (`close`), Stay (`respond stay`); re-run on the final build (no decline title) | `held`, `dialogRequested kind=3 active=yes title="Leave site?" message="Changes you made may not be saved." accept="Leave" cancel="(none)"`; then `dialogEnded`, `closeCancelled isClosing=no` (separate batches, in that order); `state` closing=no |
 | 1. Again, Leave | `dialogEnded`, then `tabClosed reason=client` |
 | 2. Held reload, Stay | `title="Reload site?" accept="Reload"`; Stay: `dialogEnded`, no `closeCancelled`, the old page stays |
 | 2. Held reload, Leave | `dialogEnded`, then the page reloads (title back to the fixture's) |

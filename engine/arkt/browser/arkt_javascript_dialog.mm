@@ -265,16 +265,17 @@ std::u16string ArktBeforeUnloadDialog::default_prompt_text() const {
   return controller_->default_prompt_text();
 }
 
-// Chromium's leave-site buttons (Cocoa and Views): Leave or Reload, and
-// Cancel.
+// Chromium's leave-site accept button (Cocoa and Views): Leave or Reload.
 std::u16string ArktBeforeUnloadDialog::accept_title() const {
   return l10n_util::GetStringUTF16(
       controller_->is_reload() ? IDS_BEFORERELOAD_MESSAGEBOX_OK_BUTTON_LABEL
                                : IDS_BEFOREUNLOAD_MESSAGEBOX_OK_BUTTON_LABEL);
 }
 
+// None: Chromium's decline button is a plain Cancel, and the shell's panel
+// draws its own Stay (#584, #585).
 std::optional<std::u16string> ArktBeforeUnloadDialog::cancel_title() const {
-  return l10n_util::GetStringUTF16(IDS_APP_CANCEL);
+  return std::nullopt;
 }
 
 content::WebContents* ArktBeforeUnloadDialog::contents() const {

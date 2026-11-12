@@ -629,7 +629,7 @@ ArktTerminationStatus CrashStatusOf(content::WebContents* contents) {
           base::SysUTF16ToNSString(request->default_prompt_text());
     }
     // Chromium's button strings: OK (Leave or Reload for a leave-site
-    // dialog), and Cancel, which an alert has not.
+    // dialog), and Cancel, which an alert and a leave-site dialog have not.
     _acceptTitle = base::SysUTF16ToNSString(request->accept_title());
     if (std::optional<std::u16string> cancel = request->cancel_title()) {
       _cancelTitle = base::SysUTF16ToNSString(*cancel);
