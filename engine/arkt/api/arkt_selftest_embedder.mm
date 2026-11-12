@@ -68,6 +68,32 @@ const char* ReasonName(ArktCloseReason reason) {
   return "unknown";
 }
 
+// The page context menu probe (#588): each item's title, "-" for a separator,
+// "(off)" for a disabled item and "[...]" around a submenu's items.
+std::string DescribeMenu(NSMenu* menu) {
+  std::string out;
+  for (NSMenuItem* item in menu.itemArray) {
+    if (item.hidden) {
+      continue;
+    }
+    if (!out.empty()) {
+      out += " | ";
+    }
+    if (item.separatorItem) {
+      out += "-";
+      continue;
+    }
+    out += base::SysNSStringToUTF8(item.title);
+    if (!item.enabled) {
+      out += " (off)";
+    }
+    if (item.submenu) {
+      out += " [" + DescribeMenu(item.submenu) + "]";
+    }
+  }
+  return out;
+}
+
 std::string SelectorName(SEL action) {
   return action ? base::SysNSStringToUTF8(NSStringFromSelector(action))
                 : std::string("none");
@@ -241,6 +267,10 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
   NSMenu* _probeFileMenu;
   NSMenuItem* _probeBookmarksItem;
   NSMenu* _probeBookmarksSubmenu;
+  // The page context menu probe (#588): the open context menu, if any.
+  id _contextMenuBeginObserver;
+  id _contextMenuEndObserver;
+  NSMenu* __weak _contextMenu;
 }
 
 + (id<ArktEngineEmbedder>)sharedEmbedder {
@@ -282,6 +312,7 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
           arkt::kFacadeSelfTestSwitch);
   LOG(WARNING) << "ARKT selftest engineDidStart mode="
                << (mode.empty() ? "ready" : mode);
+  [self observeContextMenus];
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           arkt::kMenuProbeSwitch)) {
     // Arkt's menu goes in after launch (Decision 9): after AppController's
@@ -302,6 +333,73 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
                withObject:nil
                afterDelay:mode == "hold" ? kDelayedStart : 0];
   }
+}
+
+// The page context menu probe (#588): logs a context menu's items when it
+// begins tracking, so a scripted run can check it without Accessibility
+// access; ctx-pick and ctx-cancel act on it.
+- (void)observeContextMenus {
+  ArktSelfTestEmbedder* __weak weakSelf = self;
+  _contextMenuBeginObserver = [NSNotificationCenter.defaultCenter
+      addObserverForName:NSMenuDidBeginTrackingNotification
+                  object:nil
+                   queue:nil
+              usingBlock:^(NSNotification* note) {
+                [weakSelf contextMenuBegan:note.object];
+              }];
+  _contextMenuEndObserver = [NSNotificationCenter.defaultCenter
+      addObserverForName:NSMenuDidEndTrackingNotification
+                  object:nil
+                   queue:nil
+              usingBlock:^(NSNotification* note) {
+                [weakSelf contextMenuEnded:note.object];
+              }];
+}
+
+- (BOOL)isContextMenu:(NSMenu*)menu {
+  return [menu isKindOfClass:[NSMenu class]] && menu != NSApp.mainMenu &&
+         !menu.supermenu;
+}
+
+- (void)contextMenuBegan:(NSMenu*)menu {
+  if (![self isContextMenu:menu]) {
+    return;
+  }
+  _contextMenu = menu;
+  // Validate first: that is what hides the items a model marks invisible.
+  [menu update];
+  LOG(WARNING) << "ARKT selftest context menu open items=["
+               << DescribeMenu(menu) << "]";
+}
+
+- (void)contextMenuEnded:(NSMenu*)menu {
+  if (![self isContextMenu:menu]) {
+    return;
+  }
+  _contextMenu = nil;
+  LOG(WARNING) << "ARKT selftest context menu closed";
+}
+
+// ctx-pick <title prefix>: runs the open context menu's first item whose
+// title starts with the words given, then closes the menu.
+- (void)pickContextMenuItem:(const std::string&)prefix {
+  NSMenu* menu = _contextMenu;
+  NSString* wanted = base::SysUTF8ToNSString(prefix);
+  NSInteger index = -1;
+  for (NSInteger i = 0; i < menu.numberOfItems; ++i) {
+    NSMenuItem* item = [menu itemAtIndex:i];
+    if (!item.separatorItem && !item.hidden && [item.title hasPrefix:wanted]) {
+      index = i;
+      break;
+    }
+  }
+  LOG(WARNING) << "ARKT selftest ctx-pick \"" << prefix << "\" menu="
+               << (menu ? "open" : "none") << " index=" << index;
+  if (index < 0) {
+    return;
+  }
+  [menu performActionForItemAtIndex:index];
+  [menu cancelTracking];
 }
 
 - (void)ready {
@@ -1201,6 +1299,20 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
     LOG(WARNING) << "ARKT selftest answer tab=" << sessionId
                  << " accept=" << (accept ? "yes" : "no")
                  << " answered=" << (answered ? "yes" : "no");
+  } else if (command == "ctx-pick") {
+    std::string prefix;
+    for (size_t i = 1; i < words.size(); ++i) {
+      if (words[i].starts_with("@")) {
+        continue;
+      }
+      prefix += (prefix.empty() ? "" : " ") + words[i];
+    }
+    [self pickContextMenuItem:prefix];
+  } else if (command == "ctx-cancel") {
+    NSMenu* menu = _contextMenu;
+    LOG(WARNING) << "ARKT selftest ctx-cancel menu="
+                 << (menu ? "open" : "none");
+    [menu cancelTracking];
   } else if (command == "zoom") {
     // #577: zoom in|out|reset on this tab, or on the tab with session id
     // `@<id>` (a crashed page cannot set its own title).

@@ -226,7 +226,7 @@ guard or a generalization, classified:
 | In-tab sheets: a guard and hook at each of the two tab-modal choke points, plus hooks in sheet factories | guard + hook | E3b | planned (decision 6). The `TabDialogManager` guard landed early as 0015 (#852). Up to 40 upstream files in total (section 2.5) |
 | Toast routing to the shell | hook | none planned | allowed, not planned. Row T drops toasts; taken only if a batch shows a need, and counted against the cap |
 | `SetResizableFromWebAPI` | hook | E2 | allowed, not planned. Accept the gap (row 8) |
-| Page context menu on Arkt windows (#588) | hook, only if no delegate seam works | E2 | planned; #588 is unblocked by decision 5. Counted against the cap |
+| Page context menu on Arkt windows (#588) | generalization (no delegate seam works) | E2 | landed as 0016: Chromium's own menu as a native `NSMenu` on the page's window, items whose follow-up UI is Views hidden (maintainer, 2026-11-12). Counted against the cap |
 | `EmbedderBrowserWindowFeatures` | hook | reserved | not wired (below) |
 
 `EmbedderBrowserWindowFeatures` (`ui/browser_window/public/embedder_browser_window_features.h`) is documented as "should
@@ -251,7 +251,7 @@ definition. It counts **seam patch files** (the tolerate-a-non-BrowserView theme
 0001-0004. It trips on more than 8 seam patch files, more than 25 upstream files, more than 6 hunks in the hot files
 (`browser_window_features.cc`, `tab_features.cc`), or a change to a widely included header. Before E1: 4 seam patch
 files, 15 upstream files outside 0001-0004 (24 in all, 9 of them in 0001-0004), 0 hot-file hunks. On main now
-(0001-0015): 15 patch files, 7 seam and hook patch files, 20 upstream files outside 0001-0004, 4 hunks in
+(0001-0016): 16 patch files, 8 seam and hook patch files, 22 upstream files outside 0001-0004, 4 hunks in
 `browser_actions.cc` and `browser_commands.cc` (3 and 1), 0 hot-file hunks.
 
 | Step | Patch files | Upstream files outside 0001-0004 | Seam and hook patch files | Status |
@@ -260,7 +260,7 @@ files, 15 upstream files outside 0001-0004 (24 in all, 9 of them in 0001-0004), 
 | E1: guard theme (rows 1, 3-5, T) and generalization theme (row 2) | 14 | 19 | 6 | landed (#800, 0013 and 0014) |
 | E3b's `TabDialogManager` guard, landed early (#846) | 15 | 20 (sheet file) | 7 | landed (#852, 0015) |
 | E2: rows 6-7 added to the generalization theme | 15 | 21-22 | 7 | planned |
-| E2: page context menu hook (#588) | 15-16 | 21-24 | 7-8 | planned (#588 unblocked) |
+| E2: page context menu (#588): the window lookup generalized and the Views-only items hidden, in one patch (2 files) | 16 | 22 | 8 | landed (0016) |
 | E3a: planned hooks: permission prompt factory, device pickers and permission element, beforeunload (#585 unblocked), low disk (low disk adds no file) | 16-18 | 23-27 | 8-10 | allowed (decision 5) |
 | E3b: `ShowWebModalDialogViews` guard and hook (1 file), the `TabDialogManager` hook (in 0015's file, no new file), sheet hooks (about 5-8 files) | 17-20 | 29-36 | 9-12 | allowed (decision 6), up to 40 |
 | toast routing and `SetResizable` hooks | | | | not planned; only within the cap |
@@ -278,8 +278,8 @@ Limits, set by the maintainer's answers (decisions 5 and 6) and kept in the gate
 - at most 4 hunks each in `browser_actions.cc` and `browser_commands.cc` (today 3 and 1);
 - at most 6 hot-file hunks (no batch adds one), and no change to a widely included header.
 
-After 0015, 20 upstream files are used, one of them a sheet file. E2 and E3a take about 3-7 more, so the non-sheet
-files end at about 22-26, under 30. E3b's sheet files then take the total to about 29-36, under 40. At 40 E3b stops
+After 0016, 22 upstream files are used, one of them a sheet file. The rest of E2 and E3a take about 1-5 more, so the
+non-sheet files end at about 22-26, under 30. E3b's sheet files then take the total to about 29-36, under 40. At 40 E3b stops
 and asks the maintainer. With the 40-file allowance, the seam and hook patch file cap (12) is now the tighter one:
 E3b keeps all its sheet hooks in one or two theme patch files.
 
