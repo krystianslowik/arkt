@@ -6881,3 +6881,98 @@ Unchanged: 16 patch files, 8 seam and hook patch files, 22 upstream files outsid
 Every engine run and the fixture server stopped by exact PID (`ps -p` prints nothing for each). No crash reports from
 these runs. Throwaway profiles under `profiles/593-20261112/` deleted after the runs. Nothing touched the Keychain
 (mock keychain only), the clipboard or `/Applications/Arkt.app`.
+
+## #592: post-install event instead of Chromium's dialog (seam, no patch)
+
+Date 2026-11-13. Branch `engine/592-post-install-event` from `main` at `aaa87844`. `$CR` branch `arkt` unchanged at
+`e483001f98` (0001-0016).
+
+### Gate
+
+- Seam, no patch. The event comes from an `ExtensionRegistryObserver` on the embedder profile
+  (`OnExtensionInstalled`), as the `EngineExtensionEvent.installed` doc from #591 already describes. Chromium's
+  post-install dialog reaches the overlay through the 0007 hook (`ShowDialog(gfx::NativeWindow, ...)` without a Views
+  container). The hook receives no extension id and the dialog sets no internal name, so the overlay recognises it by
+  its title: `IDS_EXTENSION_INSTALLED_HEADING` with the display name of an extension the window's profile has
+  (`GetFixupExtensionNameForUIDisplay`, `AdjustStringForLocaleDirection`, as `ConfigurePostInstallDialogModel` builds
+  it), and neither OK nor Cancel (the desktop dialog has none). Any other dialog model still gets the sheet.
+- Facade header: additive. `ArktEngineEventKindExtensionInstalled = 31`; `ArktEngineEvent` gains `extensionID` and
+  `extensionName` (nil on every other kind). No existing member changed. Both copies `cmp` identical. Gate note on
+  #592.
+- `.patches` unchanged (16 lines, 16 commits above `156.0.8078.48`: in sync).
+- Builds: `nice -n 15 autoninja -j 4 -C out/Arkt chrome` (swap 16.5 of 17.4 GB at the start). Chromium disk 1.9 TB
+  free throughout; internal disk 44 GB free at the start; load average 5 to 7. First build 97 s, `FAILED:` 0.
+- `gn check out/Arkt "//arkt/*"`: first `Can't include this header` for `crx_installer.h`; with the
+  `//extensions/browser:crx_installer` dependency `Header dependency check OK`; rebuilt (16 s, `FAILED:` 0). Line wraps only after run 3, rebuilt (68 s, `FAILED:` 0).
+
+### What landed
+
+- `arkt_extension_installs.{h,cc}` (new, `//arkt/browser:window`): `ReportsExtensionInstall` (a first install at
+  `ManifestLocation::kInternal`, not a theme and not an app: the installs Chromium follows with its post-install
+  dialog, which are the Web Store, a user's .crx and the import batch), `ExtensionInstallWatcher` (the registry
+  observer) and `InstallCrxForSelfTest` (below).
+- Facade: the watcher on the embedder profile, created with the download watcher; each accepted install records one
+  profile-wide `ExtensionInstalled` (no tab, no browser) from inside the notification, delivered in the next batch.
+- `arkt_extension_dialogs.mm`: `ShowModalDialog` drops the post-install model on an Arkt window and logs
+  `post-install dialog not shown <id>`. The model goes without a host, so its destroying callback (the
+  pinned-by-default hint, which needs a `BrowserView` and which 0006 guards) never runs. Chromium's "has been added ...
+  Window menu" text is gone.
+- Swift: `ChromiumEngine.observeExtensions` (the protocol default delivered nothing until now, so neither `.installed`
+  nor `.commandsChanged` could reach the shell from this engine) and the `.installed` mapping. Ids of an
+  `installExtensionResults` batch are tagged `.browserImport` (#594): every id is tagged when the batch starts, an id
+  the batch did not install loses its tag when the batch answers, and an installed id keeps it until its event
+  arrives, because the facade's batch can be delivered after the import's completion has resumed. A tag is used once.
+- Batch (#513): one event per installed id (the decision the acceptance item leaves to this pull request; the shell's
+  toast already skips `.browserImport`).
+- Self-test embedder: `install-crx <path>` installs a packed .crx the way chrome://extensions installs a dropped one
+  (`CrxInstaller` with an `ExtensionInstallPrompt`, off-store allowed from the settings page); the prompt is accepted
+  by a `ScopedTestDialogAutoConfirm` held until the installer finishes, so Chromium continues to
+  `ExtensionInstallUI::OnInstallSuccess` and its post-install dialog, the same path a Web Store install takes. The
+  events log prints `extensionInstalled`.
+- `engine/test-extensions/install-probe` (new): an action and nothing else; packed locally for each run with the
+  engine's own `--pack-extension` (the .crx and key stay under `arkt-artifacts/592/`).
+
+### Smoke (`out/Arkt/Arkt.app`, `--no-startup-window --arkt-facade-selftest`, fresh profiles under `profiles/592-20261113/`, `--use-mock-keychain --mute-audio`, `--host-resolver-rules="MAP * ~NOTFOUND, EXCLUDE 127.0.0.1"`, a local `file://` drive page that sends commands through its title, no network)
+
+| Run | Steps | Result |
+|---|---|---|
+| 1 | `--load-extension` action probe (unpacked), then `install-crx` install probe | unpacked: `extension installed ... location=8 update=0 not reported`; crx: `location=1 update=0 reported`, one batch `ExtensionActionsChanged,ExtensionInstalled`, `extensionInstalled id=bmjf... name=Arkt install probe tab=nil browser=nil`, `post-install dialog not shown bmjf...`; no `dialog sheet shown` |
+| 2 | `install-crx` twice (the second is an update of the same version) | first as run 1, one `ExtensionInstalled`; second `update=1 not reported`, no dialog reached the hook, no sheet; 1 `ExtensionInstalled` in the whole run |
+| 3 (restored build) | as run 1 | the same as run 1: unpacked `not reported`, crx `reported`, one `ExtensionInstalled`, `post-install dialog not shown`, no `dialog sheet shown` |
+| all | `FATAL`, `Check failed`, `DCHECK` | 0 |
+
+Component extensions on a fresh profile fire no `OnExtensionInstalled` (none logged in any run).
+
+Not exercised live: an install from the Chrome Web Store and a live import batch. Both need the network, which these
+runs do not use; they reach the same observer (`kInternal`) and, for the Web Store, the same
+`ExtensionInstallUI::OnInstallSuccess` path as the .crx. Tracked in #918 (needs the maintainer).
+
+### Deliberate break
+
+The title match made to fail (`+ u"BREAK"` on the expected heading), rebuilt (68 s, `FAILED:` 0): the same
+`install-crx` still reported one `ExtensionInstalled`, and `dialog sheet shown` came back (Chromium's post-install text
+as a sheet). Restored and rebuilt (72 s, `FAILED:` 0): run 3 above. A first attempt (`if (false && ...)`) stopped on
+`-Wunreachable-code`.
+
+Swift: releasing every tag when the batch answers (the naive rule) fails
+`anEventThatLandsAfterTheBatchCompletedIsStillBrowserImport` and `aTagIsConsumedByItsEvent` (the event arrives as
+`.user`); restored, all pass.
+
+### Patch budget
+
+Unchanged: 16 patch files, 8 seam and hook patch files, 22 upstream files outside 0001-0004. `.patches` 16 lines, 16
+`arkt` commits: in sync. Facade header copies `cmp` identical.
+
+### Left open
+
+- Which installs report: this pull request reports the installs Chromium itself follows with its dialog. External
+  (sideloaded), policy-installed, unpacked, theme and app installs report nothing; question on #592.
+- No icon: the registry path has no decoded bitmap, `InstalledExtension.iconPNG` stays nil (the toast shows none).
+- A reinstall over the same version shows nothing at all (Chromium showed no dialog there either in run 2).
+- The shell's toast against this engine with a real Web Store install needs the shell build that hosts the engine.
+
+### Cleanup
+
+Every engine run ended by its own `quit` command under a 60 s `alarm`; `pgrep` on each profile path prints nothing. No
+crash reports from these runs. Throwaway profiles under `profiles/592-20261113*/` deleted after the runs. Nothing
+touched the Keychain (mock keychain only), the clipboard or `/Applications/Arkt.app`.

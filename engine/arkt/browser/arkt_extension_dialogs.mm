@@ -11,7 +11,9 @@
 #include "arkt/browser/arkt_browser_window.h"
 #import "arkt/browser/arkt_dialog_sheet.h"
 #include "arkt/browser/arkt_extension_dialog_hook.h"
+#include "arkt/browser/arkt_extension_installs.h"
 #include "base/i18n/number_formatting.h"
+#include "base/i18n/rtl.h"
 #include "base/logging.h"
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observation.h"
@@ -24,6 +26,7 @@
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
 #include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/grit/branded_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "content/public/browser/page_navigator.h"
 #include "content/public/browser/web_contents.h"
@@ -327,6 +330,35 @@ bool ShowInstallDialog(
 class ModelSheet final : public ui::DialogModelHost,
                          public ui::DialogModelFieldHost {
  public:
+  // Chromium's post-install dialog (#592): ShowExtensionPostInstallDialog
+  // (extension_post_install_dialog.cc) titles it
+  // IDS_EXTENSION_INSTALLED_HEADING with the display name of the extension,
+  // and on desktop gives it neither OK nor Cancel. The hook receives no extension id, so the title is matched
+  // against every extension `profile` has installed. Returns that extension's
+  // id, or an empty string for any other dialog.
+  static std::string PostInstallExtensionId(Profile* profile,
+                                            ui::DialogModel& model) {
+    auto key = DialogModelHost::GetPassKey();
+    extensions::ExtensionRegistry* registry =
+        profile ? extensions::ExtensionRegistry::Get(profile) : nullptr;
+    if (!registry || model.ok_button(key) || model.cancel_button(key)) {
+      return std::string();
+    }
+    const std::u16string& title = model.title(key);
+    for (const extensions::ExtensionSet* set :
+         {&registry->enabled_extensions(), &registry->disabled_extensions()}) {
+      for (const auto& extension : *set) {
+        std::u16string name = ExtensionNameForDisplay(*extension);
+        base::i18n::AdjustStringForLocaleDirection(&name);
+        if (title == l10n_util::GetStringFUTF16(IDS_EXTENSION_INSTALLED_HEADING,
+                                                name)) {
+          return extension->id();
+        }
+      }
+    }
+    return std::string();
+  }
+
   explicit ModelSheet(std::unique_ptr<ui::DialogModel> model)
       : model_(std::move(model)) {
     model_->set_host(DialogModelHost::GetPassKey(), this);
@@ -623,6 +655,18 @@ bool ShowModalDialog(gfx::NativeWindow parent,
   ArktBrowserWindow* window = ArktWindowFor(parent);
   if (!window) {
     return false;
+  }
+  // The shell reports the install itself (the facade's ExtensionInstalled,
+  // #592): Chromium's post-install text, which names its Window menu, is not
+  // shown. The model goes without a host, so its destroying callback (the
+  // pinned-by-default hint, which needs a BrowserView) never runs.
+  const std::string installed = ModelSheet::PostInstallExtensionId(
+      window->browser() ? window->browser()->GetProfile() : nullptr,
+      *dialog_model);
+  if (!installed.empty()) {
+    LOG(WARNING) << "ARKT: post-install dialog not shown " << installed;
+    dialog_model.reset();
+    return true;
   }
   auto* sheet = new ModelSheet(std::move(dialog_model));
   sheet->Show(window->host().window);

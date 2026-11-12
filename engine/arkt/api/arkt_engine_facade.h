@@ -3,7 +3,11 @@
 
 #import <Foundation/Foundation.h>
 
+#include <string>
+
 #import "arkt/api/arkt_engine.h"
+#include "base/files/file_path.h"
+#include "base/functional/callback.h"
 
 class BrowserWindowInterface;
 
@@ -47,6 +51,12 @@ void AdoptHeldBrowser(BrowserWindowInterface* browser);
 // From the quit start on, tabs that close report ArktCloseReasonAppTerminating
 // (Decision 12); a cancelled quit clears it.
 void SetFacadeTerminating(bool terminating);
+
+// Self-test only (#592): InstallCrxForSelfTest (arkt_extension_installs.h)
+// for the contents of `tab`, a facade tab handle, in its profile.
+void InstallCrxForSelfTest(id<ArktTabHandle> tab,
+                           const base::FilePath& crx_path,
+                           base::OnceCallback<void(const std::string&)> done);
 
 }  // namespace arkt
 

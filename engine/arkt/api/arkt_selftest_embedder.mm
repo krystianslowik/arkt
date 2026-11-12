@@ -7,7 +7,10 @@
 #include <string>
 #include <vector>
 
+#include "arkt/api/arkt_engine_facade.h"
 #include "base/command_line.h"
+#include "base/files/file_path.h"
+#include "base/functional/bind.h"
 #include "base/logging.h"
 #include "base/no_destructor.h"
 #include "base/strings/string_number_conversions.h"
@@ -821,6 +824,14 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
                              : std::string("none"));
         break;
       }
+      case ArktEngineEventKindExtensionInstalled:
+        LOG(WARNING) << "ARKT selftest extensionInstalled id="
+                     << base::SysNSStringToUTF8(event.extensionID ?: @"nil")
+                     << " name="
+                     << base::SysNSStringToUTF8(event.extensionName ?: @"nil")
+                     << " tab=" << (event.tab ? "set" : "nil")
+                     << " browser=" << (event.browser ? "set" : "nil");
+        break;
     }
   }
   if (windows_changed) {
@@ -1545,6 +1556,18 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
                      << " setting=" << permission.setting;
       }
     }
+  } else if (command == "install-crx") {
+    // #592: "install-crx <absolute path of a packed .crx>", a user's .crx
+    // installed into the tab's profile with its prompt accepted, so Chromium
+    // continues to its post-install dialog.
+    LOG(WARNING) << "ARKT selftest install-crx " << argument;
+    arkt::InstallCrxForSelfTest(
+        tab, base::FilePath(argument),
+        base::BindOnce([](const std::string& error) {
+          LOG(WARNING) << "ARKT selftest install-crx answered "
+                       << (error.empty() ? std::string("installed")
+                                         : "failed: " + error);
+        }));
   } else if (command == "uninstall") {
     // #721: "uninstall <extension id> [abuse] [nowin] [@<session id>]", as
     // the shell's remove sheet: the report page goes to the window of the

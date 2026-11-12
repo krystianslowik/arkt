@@ -138,8 +138,11 @@ extension ChromiumEngine: EngineImporting {
   public func installExtensionResults(ids: [String]) async -> [ExtensionInstallResult]? {
     // Cancelling the task asks the facade to end the batch early; its completion still runs once, so the
     // continuation is resumed exactly once.
+    // Install events of the batch's ids are the import's (#594): tagged until each installed id's event has arrived,
+    // which may be after the completion (`ChromiumEngine+ExtensionInstalls.swift`).
     let facade = self.facade
-    return await withTaskCancellationHandler {
+    importBatchExtensionIDs.formUnion(ids)
+    let results = await withTaskCancellationHandler {
       await withCheckedContinuation { continuation in
         facade.installExtensions(ids) { results in
           continuation.resume(returning: results.map(ExtensionInstallResult.init))
@@ -148,6 +151,8 @@ extension ChromiumEngine: EngineImporting {
     } onCancel: {
       Task { @MainActor in facade.cancelExtensionInstalls() }
     }
+    releaseImportTags(of: ids, after: results)
+    return results
   }
 }
 

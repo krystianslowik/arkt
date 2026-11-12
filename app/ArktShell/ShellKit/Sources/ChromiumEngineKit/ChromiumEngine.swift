@@ -94,6 +94,9 @@ public final class ChromiumEngine: EngineClient, EngineExtensions, EngineDownloa
     didSet { applySavePreference(downloadSavePreference) }
   }
   public var downloadDestinationChooser: DownloadDestinationChooser?
+  /// Install events (#592, `ChromiumEngine+ExtensionInstalls.swift`): ids of an `installExtensionResults` batch whose
+  /// `.installed` is still to come, reported as `.browserImport`.
+  var importBatchExtensionIDs: Set<String> = []
   private var sinkToken: (any NSObjectProtocol)?
 
   public internal(set) var tabIDs: [TabID] = []
