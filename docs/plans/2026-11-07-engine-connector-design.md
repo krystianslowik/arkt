@@ -261,7 +261,7 @@ files, 15 upstream files outside 0001-0004 (24 in all, 9 of them in 0001-0004), 
 | E3b's `TabDialogManager` guard, landed early (#846) | 15 | 20 (sheet file) | 7 | landed (#852, 0015) |
 | E2: rows 6-7 added to the generalization theme | 15 | 21-22 | 7 | planned |
 | E2: page context menu (#588): the window lookup generalized and the Views-only items hidden, in one patch (2 files) | 16 | 22 | 8 | landed (0016) |
-| E3a: planned hooks: permission prompt factory, device pickers and permission element, beforeunload (#585 unblocked), low disk (low disk adds no file) | 16-18 | 23-27 | 8-10 | allowed (decision 5) |
+| E3a: planned hooks: permission prompt factory, device pickers and permission element, low disk (low disk adds no file); beforeunload landed as a seam with #585 (no patch file) | 16-18 | 23-27 | 8-10 | allowed (decision 5) |
 | E3b: `ShowWebModalDialogViews` guard and hook (1 file), the `TabDialogManager` hook (in 0015's file, no new file), sheet hooks (about 5-8 files) | 17-20 | 29-36 | 9-12 | allowed (decision 6), up to 40 |
 | toast routing and `SetResizable` hooks | | | | not planned; only within the cap |
 | gated sites that cannot be switched off | | | | only if needed, within the cap |
