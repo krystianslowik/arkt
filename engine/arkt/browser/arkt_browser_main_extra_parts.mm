@@ -12,6 +12,7 @@
 #include "arkt/browser/arkt_extension_dialogs.h"
 #include "arkt/browser/arkt_extensions_container.h"
 #include "arkt/browser/arkt_extensions_menu.h"
+#include "arkt/browser/arkt_javascript_dialog.h"
 #import "arkt/browser/arkt_placeholder_window_host.h"
 #include "arkt/browser/arkt_window_controller.h"
 #include "base/command_line.h"
@@ -282,6 +283,12 @@ void ArktBrowserMainExtraParts::PostProfileInit(Profile* profile,
 
 void ArktBrowserMainExtraParts::PreBrowserStart() {
   Census().Start();
+  // Chromium installed its app-modal dialog factory in PreProfileInit, after
+  // this object's PreProfileInit; wrap it now, before any page can run a
+  // beforeunload handler (#585).
+  if (NativeWindowEnabled()) {
+    UseArktBeforeUnloadDialogs();
+  }
   // --arkt-appearance=light|dark pins the app's appearance for test runs
   // (light and dark checks of native surfaces without touching the system
   // setting). Without it the app follows the system.

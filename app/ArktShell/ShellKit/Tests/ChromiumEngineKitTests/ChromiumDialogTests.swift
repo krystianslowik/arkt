@@ -223,4 +223,175 @@ struct ChromiumDialogTests {
     #expect(dialog.answer?.accepted == false, "the page's call returned")
     #expect(survivor.pendingDialogs.isEmpty)
   }
+
+  // MARK: Leave-site dialogs (#585)
+
+  private func makeHeldTab() throws -> (ChromiumEngine, TabID, ScriptedTab, EventRecorder) {
+    facade.reportsLeaveSiteDialogs = true
+    let (engine, tab, handle) = try makeTab()
+    handle.finishLoad()
+    handle.wouldHoldClose = true
+    facade.flush()
+    return (engine, tab, handle, EventRecorder(engine))
+  }
+
+  private func leaveSiteRequest(_ recorder: EventRecorder, _ tab: TabID) -> JavaScriptDialog? {
+    for case .dialogRequested(let dialog) in recorder.events(for: tab) where dialog.kind == .beforeUnload {
+      return dialog
+    }
+    return nil
+  }
+
+  /// A held close's leave-site dialog reaches the shell as `.beforeUnload` with Chromium's strings, never as an
+  /// alert (whose OK and Escape would both answer Leave).
+  @Test func aLeaveSiteDialogIsReportedAsBeforeUnloadWithTheEnginesStrings() throws {
+    let (engine, tab, _, recorder) = try makeHeldTab()
+    engine.closeTab(tab)
+    facade.flush()
+
+    let dialog = try #require(leaveSiteRequest(recorder, tab), "\(recorder.events(for: tab))")
+    #expect(dialog.title == "Leave site?" && dialog.message == "Changes you made may not be saved.")
+    #expect(dialog.acceptTitle == "Leave" && dialog.cancelTitle == "Cancel")
+    #expect(dialog.defaultPromptText == nil)
+    #expect(engine.snapshot(of: tab)?.isClosing == true)
+  }
+
+  /// Leave lets the held close go on: `.dialogEnded`, then `.tabClosed(reason: .client)` (contract rules 16, 19).
+  @Test func leaveEndsTheDialogBeforeTheTabCloses() throws {
+    let (engine, tab, _, recorder) = try makeHeldTab()
+    engine.closeTab(tab)
+    facade.flush()
+    let dialog = try #require(leaveSiteRequest(recorder, tab))
+
+    engine.respond(to: dialog.id, accepted: true, userInput: nil)
+    facade.flush()
+
+    let tail = Array(recorder.events(for: tab).suffix(2))
+    #expect(tail == [.dialogEnded(tab, dialog.id), .tabClosed(tab, reason: .client)])
+    #expect(engine.snapshot(of: tab) == nil && engine.pendingDialogs.isEmpty)
+  }
+
+  /// Stay cancels the held close: `.dialogEnded`, then `.closeCancelled`, and the tab stays open.
+  @Test func stayEndsTheDialogBeforeTheCloseIsCancelled() throws {
+    let (engine, tab, _, recorder) = try makeHeldTab()
+    engine.closeTab(tab)
+    facade.flush()
+    let dialog = try #require(leaveSiteRequest(recorder, tab))
+
+    engine.respond(to: dialog.id, accepted: false, userInput: nil)
+    facade.flush()
+
+    let tail = Array(recorder.events(for: tab).suffix(2))
+    #expect(tail == [.dialogEnded(tab, dialog.id), .closeCancelled(tab)])
+    #expect(engine.snapshot(of: tab)?.isClosing == false && engine.tabIDs.contains(tab))
+  }
+
+  /// The engine can cancel the close before it reports the dialog's end (a cancelled dialog runs the page's callback
+  /// before the queue closes it). The shell still sees the end first, and once.
+  @Test func aCancelledCloseEndsItsLeaveSiteDialogFirst() throws {
+    let (engine, tab, handle, recorder) = try makeHeldTab()
+    engine.closeTab(tab)
+    facade.flush()
+    let dialog = try #require(leaveSiteRequest(recorder, tab))
+
+    handle.isClosing = false
+    facade.record(ScriptedEvent(.closeCancelled, tab: handle, browser: handle.owner))
+    handle.endLeaveSiteDialog()
+    facade.flush()
+
+    let tail = Array(recorder.events(for: tab).suffix(2))
+    #expect(tail == [.dialogEnded(tab, dialog.id), .closeCancelled(tab)])
+    let ended = recorder.events(for: tab).filter { if case .dialogEnded = $0 { true } else { false } }
+    #expect(ended.count == 1)
+  }
+
+  /// A window close held by two tabs prompts one at a time on the shown tab: the next tab is activated and prompted
+  /// only after Leave.
+  @Test func aHeldWindowClosePromptsOneTabAtATimeOnTheShownTab() throws {
+    facade.reportsLeaveSiteDialogs = true
+    facade.holdsBatches = true
+    let engine = ChromiumEngine(facade: facade)
+    let window = engine.createWindow(host: StubWindowHost())
+    let first = engine.createTab(url: page, in: window)
+    let second = engine.createTab(url: page, in: window)
+    facade.flush()
+    for id in [first, second] {
+      let handle = try #require(engine.handle(of: id) as? ScriptedTab)
+      handle.finishLoad()
+      handle.wouldHoldClose = true
+    }
+    engine.activateTab(first)
+    facade.flush()
+    let recorder = EventRecorder(engine)
+
+    engine.closeWindow(window)
+    facade.flush()
+    let firstDialog = try #require(leaveSiteRequest(recorder, first))
+    #expect(leaveSiteRequest(recorder, second) == nil, "one prompt at a time")
+
+    engine.respond(to: firstDialog.id, accepted: true, userInput: nil)
+    facade.flush()
+    let secondDialog = try #require(leaveSiteRequest(recorder, second), "the next one after Leave")
+    let events = recorder.events
+    let activated = try #require(events.firstIndex(of: .activeTabChanged(second)))
+    let requested = try #require(events.firstIndex(of: .dialogRequested(secondDialog)))
+    #expect(activated < requested, "the tab is shown before its prompt")
+
+    engine.respond(to: secondDialog.id, accepted: false, userInput: nil)
+    facade.flush()
+    #expect(recorder.events(for: second).suffix(2) == [.dialogEnded(second, secondDialog.id), .closeCancelled(second)])
+    #expect(engine.windowIDs.contains(window) && engine.tabIDs == [first, second])
+  }
+
+  /// #897 review: when nobody can show a leave-site dialog, declining it would be Stay, and the window could never
+  /// close. It is answered Leave.
+  @Test func aLeaveSiteDialogNobodyShowsIsAnsweredLeave() throws {
+    facade.holdsBatches = true
+    let survivor = ChromiumEngine(facade: facade)
+    _ = survivor.createWindow(host: StubWindowHost())
+    var gone: ChromiumEngine? = ChromiumEngine(facade: facade)
+    let handle = try #require(gone.flatMap { engine in
+      engine.handle(of: engine.createTab(url: page, in: engine.createWindow(host: StubWindowHost())))
+    } as? ScriptedTab)
+    facade.flush()
+    gone = nil
+
+    let dialog = handle.raiseLeaveSiteDialog()
+    facade.flush()
+
+    #expect(dialog.answer?.accepted == true, "Leave, so the close goes on")
+    #expect(survivor.pendingDialogs.isEmpty)
+  }
+
+  /// #897 review: a tab that moved from instance A's window to instance B's is B's. B reports its dialog; A neither
+  /// reports nor answers it.
+  @Test func aDialogOfATabMovedToAnotherInstancesWindowIsThatInstances() throws {
+    facade.holdsBatches = true
+    let first = ChromiumEngine(facade: facade)
+    let tab = first.createTab(url: page, in: first.createWindow(host: StubWindowHost()))
+    let second = ChromiumEngine(facade: facade)
+    let target = second.createWindow(host: StubWindowHost())
+    facade.flush()
+    let handle = try #require(first.handle(of: tab) as? ScriptedTab)
+    let browser = try #require(facade.browserList.last)
+    handle.move(to: browser)
+    facade.flush()
+    #expect(!first.tabIDs.contains(tab), "gone from the first instance")
+    let moved = try #require(second.tabIDs.first)
+    #expect(second.snapshot(of: moved)?.window == target)
+    let firstRecorder = EventRecorder(first)
+    let recorder = EventRecorder(second)
+
+    let dialog = handle.raiseDialog(.confirm, message: "Sure?")
+    facade.flush()
+
+    #expect(dialog.answer == nil && !dialog.isEnded, "the first instance did not answer it")
+    #expect(first.pendingDialogs.isEmpty && firstRecorder.events.isEmpty)
+    guard case .dialogRequested(let request)? = recorder.events(for: moved).first else {
+      Issue.record("the new owner was not told: \(recorder.events(for: moved))")
+      return
+    }
+    second.respond(to: request.id, accepted: true, userInput: nil)
+    #expect(dialog.answer?.accepted == true)
+  }
 }

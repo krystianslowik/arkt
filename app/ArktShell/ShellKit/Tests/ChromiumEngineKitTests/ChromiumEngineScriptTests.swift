@@ -139,6 +139,7 @@ struct ChromiumEngineScriptTests {
     #expect(recorder.events(for: id).filter { if case .tabClosed = $0 { true } else { false } }.count == 1)
   }
 
+  /// A second close that honours unload handlers does nothing while this client's close is held (contract rule 16).
   @Test func secondCloseWhileHeldDoesNothing() async throws {
     let (engine, window, _) = makeEngine()
     let recorder = EventRecorder(engine)
@@ -147,12 +148,36 @@ struct ChromiumEngineScriptTests {
     tab.finishLoad()
     tab.wouldHoldClose = true
     engine.closeTab(id)
-    engine.closeTab(id, mode: .skipUnloadHandlers)
+    engine.closeTab(id)
     #expect(engine.snapshot(of: id)?.isClosing == true && engine.tabIDs.contains(id))
     #expect(tab.answer(accept: true))
     try await delivered()
     #expect(recorder.events(for: id).last == .tabClosed(id, reason: .client))
     #expect(engine.snapshot(of: id) == nil)
+  }
+
+  /// #585 (finding from #877): `.skipUnloadHandlers` closes a tab whatever close holds it, this client's own
+  /// included, as it does under a held window close (the next test). The shell sends it when the tab's row is gone
+  /// while the leave-site prompt is up (Delete Space, an import merge). If it did nothing, a Stay answered afterwards
+  /// would leave a live tab with no row.
+  @Test func skipUnloadHandlersClosesATabWhoseOwnCloseIsHeld() async throws {
+    let (engine, window, _) = makeEngine()
+    let recorder = EventRecorder(engine)
+    let id = engine.createTab(url: URL(string: "arkt-test://page.test/Held")!, in: window)
+    let tab = try scriptedTab(engine, id)
+    tab.finishLoad()
+    tab.wouldHoldClose = true
+    engine.closeTab(id)
+    #expect(engine.snapshot(of: id)?.isClosing == true)
+
+    engine.closeTab(id, mode: .skipUnloadHandlers)       // the row went while the prompt was up
+
+    #expect(engine.snapshot(of: id) == nil && !engine.tabIDs.contains(id))
+    #expect(recorder.events(for: id).last == .tabClosed(id, reason: .client))
+    #expect(!tab.answer(accept: false), "no prompt is left for a Stay")
+    try await delivered()
+    #expect(!recorder.events(for: id).contains(.closeCancelled(id)))
+    #expect(recorder.events(for: id).filter { if case .tabClosed = $0 { true } else { false } }.count == 1)
   }
 
   // MARK: The initial about:blank (W3-9)

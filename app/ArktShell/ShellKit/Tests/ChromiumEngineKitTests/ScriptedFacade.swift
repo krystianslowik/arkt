@@ -54,15 +54,19 @@ final class ScriptedDialog: NSObject, ArktJavaScriptDialog {
   let title: String
   let message: String
   let defaultPromptText: String?
-  let acceptTitle = "OK"
+  let acceptTitle: String
   let cancelTitle: String?
   private(set) var isEnded = false
   private(set) var answer: (accepted: Bool, userInput: String?)?
   var onEnd: (() -> Void)?
+  /// A leave-site dialog's answer reaches the held close after the end is recorded, as the real facade orders it.
+  var onAnswer: ((Bool) -> Void)?
 
+  /// A leave-site dialog has Chromium's strings: "Leave site?", Leave and Cancel.
   init(kind: ArktDialogKind, tab: any ArktTabHandle, title: String, message: String, defaultPromptText: String?) {
     self.kind = kind; self.tab = tab; self.title = title; self.message = message
     self.defaultPromptText = kind == .prompt ? (defaultPromptText ?? "") : nil
+    acceptTitle = kind == .beforeUnload ? "Leave" : "OK"
     cancelTitle = kind == .alert ? nil : "Cancel"
   }
 
@@ -70,6 +74,7 @@ final class ScriptedDialog: NSObject, ArktJavaScriptDialog {
     guard !isEnded else { return false }
     answer = (accepted, userInput)
     end()
+    onAnswer?(accepted)
     return true
   }
 
@@ -300,6 +305,32 @@ final class ScriptedTab: NSObject, ArktTabHandle {
 
   /// The engine ends the pending dialog (a navigation, a later dialog, the tab closing).
   func endJSDialog() { jsDialog?.end() }
+
+  // MARK: Leave-site dialogs (#585)
+
+  /// The held close's leave-site dialog, when the facade reports them (`reportsLeaveSiteDialogs`).
+  private(set) var leaveSiteDialog: ScriptedDialog?
+
+  /// Chromium's app-modal queue raises the leave-site dialog of a held close: the tab comes forward first, and the
+  /// answer reaches the held close after the dialog's end is recorded.
+  @discardableResult
+  func raiseLeaveSiteDialog() -> ScriptedDialog {
+    owner?.activate(self)
+    let dialog = ScriptedDialog(kind: .beforeUnload, tab: self, title: "Leave site?",
+                                message: "Changes you made may not be saved.", defaultPromptText: nil)
+    dialog.onEnd = { [weak self, unowned dialog] in
+      guard let self else { return }
+      if leaveSiteDialog === dialog { leaveSiteDialog = nil }
+      record(.dialogEnded) { $0.dialog = dialog }
+    }
+    dialog.onAnswer = { [weak self] accept in _ = self?.answerHeldClose(accept: accept) }
+    leaveSiteDialog = dialog
+    record(.dialogRequested) { $0.dialog = dialog }
+    return dialog
+  }
+
+  /// The tab's contents go: the queue ends its dialog without an answer.
+  func endLeaveSiteDialog() { leaveSiteDialog?.end() }
 
   // MARK: Permission requests (#400)
 
@@ -586,7 +617,7 @@ final class ScriptedTab: NSObject, ArktTabHandle {
 
   func close(mode: ArktCloseMode) -> ArktCloseResult {
     // As the real facade (`ScopedSkipUnloadHandlers`), a close that skips unload handlers runs whatever close is
-    // under way, a pending leave-site dialog included; ChromiumEngine guards its own held close (`clientCloseHeld`).
+    // under way, a pending leave-site dialog included; ChromiumEngine lets only `.skipUnloadHandlers` through while its own close is held (`TabLifecycle`).
     guard let owner, !isClosing || mode == .skipUnloadHandlers else {
       return isClosing ? .held : .closed
     }
@@ -602,6 +633,7 @@ final class ScriptedTab: NSObject, ArktTabHandle {
     if wouldHoldClose && mode == .honourUnloadHandlers {
       isClosing = true
       dialog = .tab(.client)
+      if facade.reportsLeaveSiteDialogs { raiseLeaveSiteDialog() }
       return .held
     }
     owner.remove(self, reason: .client)
@@ -717,8 +749,13 @@ final class ScriptedTab: NSObject, ArktTabHandle {
     if live { recoverIfCrashed() }
   }
 
-  /// The dialog's answer (`answerDialogInTab:accept:`).
+  /// The dialog's answer (`answerDialogInTab:accept:`): a reported leave-site dialog ends first.
   func answer(accept: Bool) -> Bool {
+    if let leaveSiteDialog { return leaveSiteDialog.respond(accepted: accept, userInput: nil) }
+    return answerHeldClose(accept: accept)
+  }
+
+  private func answerHeldClose(accept: Bool) -> Bool {
     guard let pending = dialog, let owner else { return false }
     dialog = nil
     switch pending {
@@ -853,6 +890,7 @@ final class ScriptedBrowser: NSObject, ArktBrowserHandle {
     closed.closeReason = reason
     facade.record(closed)
     tab.endJSDialog()           // the manager goes with the contents, after the tab strip reported the removal
+    tab.endLeaveSiteDialog()
     tab.endPermission()
     if active === tab {
       active = nil
@@ -891,6 +929,7 @@ final class ScriptedBrowser: NSObject, ArktBrowserHandle {
         tab.isClosing = true
         tab.dialog = .window
       }
+      promptNextHeldTab()
       return
     }
     finishClose(reason: tabReason, window: windowReason)
@@ -900,7 +939,10 @@ final class ScriptedBrowser: NSObject, ArktBrowserHandle {
     guard isClosingWindow else { return }
     if accept {
       tab.isClosing = false
-      guard !tabList.contains(where: { $0.dialog != nil }) else { return }
+      guard !tabList.contains(where: { $0.dialog != nil }) else {
+        promptNextHeldTab()
+        return
+      }
       isClosingWindow = false
       finishClose(reason: closing.tabs, window: closing.window)
     } else {
@@ -911,6 +953,15 @@ final class ScriptedBrowser: NSObject, ArktBrowserHandle {
         facade.record(ScriptedEvent(.closeCancelled, tab: held, browser: self))
       }
     }
+  }
+
+  /// With reported leave-site dialogs, one held tab at a time: the active one first, the next after Leave.
+  private func promptNextHeldTab() {
+    guard facade.reportsLeaveSiteDialogs else { return }
+    let held = tabList.filter { if case .window? = $0.dialog { true } else { false } }
+    guard !held.contains(where: { $0.leaveSiteDialog != nil }),
+          let next = held.first(where: { $0 === active }) ?? held.first else { return }
+    next.raiseLeaveSiteDialog()
   }
 
   func finishClose(reason: ArktCloseReason, window windowReason: ArktWindowCloseReason) {
@@ -940,6 +991,9 @@ final class ScriptedFacade: NSObject, ArktEngine {
   var titleAfterLoadEnd = false
   /// While set, batches wait for `flush()`.
   var holdsBatches = false
+  /// A held close reports its leave-site dialog (#585), as the real facade does for a window whose host presents
+  /// dialogs. Off: the close is held with `isClosing` alone and `answerDialog` ends it.
+  var reportsLeaveSiteDialogs = false
   var testAPIEnabled = true
   /// The visits navigations record and the browser debug URLs that ran (#784, `ScriptedAddressBar.swift`).
   let history = ScriptedHistory()

@@ -89,7 +89,7 @@ extension ChromiumEngine {
     let host = ObjectIdentifier(browser.host)
     guard let pending = pendingHosts.removeValue(forKey: host) else { return }  // another instance's window
     register(browser, adapter: pending.adapter, as: pending.id)
-    windows[pending.id]?.keepsNewTabPage = [.reopen, .startupURL].contains(pending.kind)
+    if [.reopen, .startupURL].contains(pending.kind) { windows[pending.id]?.newTabPage = .awaitingFirstTab }
     hub.emit(.windowOpened(pending.id))
   }
 
@@ -181,7 +181,9 @@ extension ChromiumEngine {
     switch event.kind {
     case .activeTabChanged: activeTabChanged(id)
     case .closeCancelled:
-      tabs[id]?.clientCloseHeld = false
+      tabs[id]?.lifecycle = .live
+      endLeaveSiteDialogs(of: id)
+      guard tabs[id] != nil else { break }
       hub.emit(.closeCancelled(id))
     case .urlChanged:
       if let phase = tabs[id]?.initialBlank {

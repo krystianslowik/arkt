@@ -144,9 +144,10 @@ typedef NS_ENUM(NSInteger, ArktEngineEventKind) {
   ArktEngineEventKindAudibleChanged = 14,
   // The tab was muted or unmuted (#364). Values: isMuted.
   ArktEngineEventKindMutedChanged = 15,
-  // The page raised an alert, confirm or prompt in a window whose host
-  // presents it (#400). Values: dialog. At most one is pending per tab; a
-  // later one ends the earlier first.
+  // The page raised an alert, confirm or prompt, or its beforeunload handler
+  // a leave-site dialog (#585), in a window whose host presents it (#400).
+  // Values: dialog. At most one is pending per tab; a later one ends the
+  // earlier first.
   ArktEngineEventKindDialogRequested = 16,
   // The dialog is over: the shell answered it, or the engine ended it (a
   // navigation, a later dialog, the tab closing, a confirm or prompt in a
@@ -325,12 +326,17 @@ typedef NS_ENUM(NSInteger, ArktLinkDecision) {
   ArktLinkDecisionCancel = 1,
 };
 
-// What a page's JavaScript dialog is (#400). beforeunload is not one: it
-// keeps Chromium's app-modal Leave site dialog (#265).
+// What a page's JavaScript dialog is (#400).
 typedef NS_ENUM(NSInteger, ArktDialogKind) {
   ArktDialogKindAlert = 0,
   ArktDialogKindConfirm = 1,
   ArktDialogKindPrompt = 2,
+  // The page's beforeunload handler holds a close or a navigation (#585):
+  // Chromium's Leave site (or Reload site) dialog. Accepting leaves: the
+  // close or navigation goes on. Declining stays: a held close reports
+  // CloseCancelled, and a held window close or quit stops. Chromium raises
+  // one at a time, across all windows, and activates the tab first.
+  ArktDialogKindBeforeUnload = 3,
 };
 
 // What a permission request asks for (#400). Other covers the rest; its words
@@ -509,25 +515,28 @@ NS_SWIFT_UI_ACTOR
 @property(nonatomic, readonly) BOOL canResume;
 @end
 
-// A page's alert, confirm or prompt, held until the shell answers it or the
-// engine ends it (#400). Every string is Chromium's.
+// A page's alert, confirm or prompt, or its leave-site dialog (#585), held
+// until the shell answers it or the engine ends it (#400). Every string is
+// Chromium's.
 NS_SWIFT_UI_ACTOR
 @protocol ArktJavaScriptDialog <NSObject>
 @property(nonatomic, readonly) ArktDialogKind kind;
 // The tab whose page raised it; stays valid after the tab has closed.
 @property(nonatomic, readonly) id<ArktTabHandle> tab;
-// "example.com says".
+// "example.com says"; "Leave site?" or "Reload site?" for a leave-site
+// dialog.
 @property(nonatomic, readonly, copy) NSString* title;
 @property(nonatomic, readonly, copy) NSString* message;
 // A prompt's initial text; nil for an alert or a confirm.
 @property(nonatomic, readonly, nullable, copy) NSString* defaultPromptText;
-// OK.
+// OK; Leave or Reload for a leave-site dialog.
 @property(nonatomic, readonly, copy) NSString* acceptTitle;
 // Cancel; nil for an alert, which only has OK.
 @property(nonatomic, readonly, nullable, copy) NSString* cancelTitle;
 // The dialog is over, however it ended.
 @property(nonatomic, readonly) BOOL isEnded;
-// Answers the page's call: `accepted` is OK, `userInput` a prompt's text.
+// Answers the page's call: `accepted` is OK (Leave for a leave-site
+// dialog), `userInput` a prompt's text.
 // Returns NO, and does nothing, when the dialog is already over (the engine
 // ended it first), so an answer that races the end is harmless. Reported with
 // one DialogEnded.
