@@ -126,6 +126,7 @@ source_set("window") {
     "//base:i18n",
     "//chrome/app:command_ids",
     "//chrome/app:generated_resources",
+    "//chrome/browser:chrome_browser_application_mac",
     "//chrome/browser/extensions",
     "//chrome/browser/permissions/system",
     "//chrome/browser/profiles:profile",

@@ -18,18 +18,20 @@ extension ChromiumEngine {
   /// page yet (Chromium may insert it before its navigation starts; it is listed once a page other than the New Tab
   /// page arrives).
   func keepsBack(_ handle: any ArktTabHandle, url: URL?, in window: EngineWindowID) -> Bool {
-    guard windows[window]?.keepsNewTabPage == true else { return false }
-    windows[window]?.keepsNewTabPage = false
-    guard Self.isNewTabPage(url) || Self.isBlank(url) else { return false }
-    windows[window]?.newTabPage = handle
+    guard case .awaitingFirstTab? = windows[window]?.newTabPage else { return false }
+    guard Self.isNewTabPage(url) || Self.isBlank(url) else {
+      windows[window]?.newTabPage = .none
+      return false
+    }
+    windows[window]?.newTabPage = .kept(handle)
     return true
   }
 
   /// Closes the window's kept New Tab page once another tab is in the window, so the window stays open.
   func closeNewTabPage(in window: EngineWindowID) {
-    guard let record = windows[window], let page = record.newTabPage,
+    guard let record = windows[window], let page = record.newTabPage.page,
           record.browser.tabs.contains(where: { $0 !== page }) else { return }
-    windows[window]?.newTabPage = nil
+    windows[window]?.newTabPage = .none
     retired[ObjectIdentifier(page)] = page        // its facade TabClosed is dropped
     _ = page.close(mode: .skipUnloadHandlers)
   }
@@ -38,8 +40,8 @@ extension ChromiumEngine {
   /// when it is.
   func newTabPageNavigated(_ handle: any ArktTabHandle, to url: URL?) {
     guard !Self.isNewTabPage(url), !Self.isBlank(url),
-          let window = windowIDs.first(where: { windows[$0]?.newTabPage === handle }) else { return }
-    windows[window]?.newTabPage = nil
+          let window = windowIDs.first(where: { windows[$0]?.newTabPage.page === handle }) else { return }
+    windows[window]?.newTabPage = .none
     adopt(handle, in: window, origin: .engine, url: url, title: handle.title)
     if let id = tabByHandle[ObjectIdentifier(handle)], windows[window]?.browser.activeTab === handle {
       activeTabChanged(id)
@@ -48,7 +50,7 @@ extension ChromiumEngine {
 
   /// The kept page closed or left its window.
   func forgetNewTabPage(_ handle: any ArktTabHandle) {
-    for window in windowIDs where windows[window]?.newTabPage === handle { windows[window]?.newTabPage = nil }
+    for window in windowIDs where windows[window]?.newTabPage.page === handle { windows[window]?.newTabPage = .none }
   }
 
   /// Chromium's New Tab page (`chrome://newtab/`, `chrome://new-tab-page/`).

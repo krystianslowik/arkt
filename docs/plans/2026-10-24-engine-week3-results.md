@@ -6658,3 +6658,114 @@ reports from the test build (QR code and Lens) were moved from `DiagnosticReport
 throwaway profiles and run logs were deleted. Clipboard runs saved and restored the general pasteboard, every item and
 type, and each restore compared identical. Nothing touched the Keychain (mock keychain only) or
 `/Applications/Arkt.app`.
+
+## #585: leave-site dialog to the shell panel (seam, no patch)
+
+Date 2026-11-12. Branch `engine/585-beforeunload-panel` from `main` at `ceb2afd1`. `$CR` branch `arkt` unchanged at
+`e483001f98` (0001-0016).
+
+### Gate
+
+- Seam, no patch. `TabModalDialogManager::RunBeforeUnloadDialog` hands every beforeunload dialog to
+  `AppModalDialogManager`, whose native dialog factory is public (`SetNativeDialogFactory`). Chromium installs its
+  Cocoa factory in `ChromeBrowserMainParts::PreProfileInit`, after the extra parts' `PreProfileInit`, so the overlay
+  wraps it in `PreBrowserStart`. A leave-site dialog of a tab in an Arkt window with an embedder host becomes an
+  `ArktBeforeUnloadDialog` that goes to the facade as a dialog request; every other app-modal dialog, and one the
+  facade declines, goes to the saved Chromium factory.
+- Facade header: additive. `ArktDialogKindBeforeUnload = 3`, and the comments that said beforeunload is not a dialog
+  updated. Both copies `cmp` identical. Lanes-agree note on #585.
+- `.patches` unchanged (16 lines, 16 commits above `156.0.8078.48`: in sync).
+- Builds: `nice -n 15 autoninja -j 4 -C out/Arkt chrome` (swap above 6 GB). Chromium disk 1.9 TB free throughout;
+  internal disk 37 GB free at the start, 35 GB at the end; swap 15.0 of 16.4 GB at the start, 18.1 of 18.4 GB at the
+  end (other lanes building); load average 8 to 62.
+
+### What landed
+
+- `arkt_javascript_dialog.{h,mm}`: `ArktPageDialog`, the dialog the facade reads and answers, now a base of the
+  tab-modal `ArktJavaScriptDialog` and the new `ArktBeforeUnloadDialog` (an `AppModalDialogView` that owns its
+  controller). The factory activates the tab when the dialog is created (as Chromium's Cocoa dialog does), so the
+  prompt is always on the shown tab and `ActiveTabChanged` comes before `DialogRequested`. The answer records
+  `DialogEnded` first and then reaches the controller (`OnAccept`, or `CancelTerminate` and `OnCancel`), so the shell
+  sees the end before the `TabClosed` or `CloseCancelled` it brings. `CloseAppModalDialog` (the queue ending it: a
+  navigation, the tab closing, shutdown) ends it without an answer. `HandleJavaScriptDialog` (the test API, DevTools)
+  answers through the same path. Strings are Chromium's: "Leave site?" or "Reload site?", "Changes you made may not
+  be saved.", Leave or Reload. No decline title (`cancelTitle` nil, the header allows it for this kind): Chromium's
+  decline button is a plain Cancel and has no "Stay", and the shell's panel from #584 was designed as Stay / Leave, so
+  the shell draws Stay (decision on #585, 2026-11-12).
+- The app-modal queue keeps Chromium's accounting: one prompt at a time across all windows, a window close or a quit
+  prompting its held tabs in turn, the next one only after Leave, Stay cancelling the whole close or quit.
+- Facade: `ArktFacadeJavaScriptDialog` reads any `ArktPageDialog`. On a cancelled window close or quit, Chromium tells
+  only the prompted tab (`BeforeUnloadFired`); the facade now reports `CloseCancelled` for every other tab that showed
+  closing: the window's tabs, and for a quit the tabs of every window the quit had reached
+  (`RecordWindowCloseCancelled`). A quit is told by the facade's own terminating flag (set at
+  `OnClosingAllBrowsers(true)`, cleared by the cancel notification after this call), not by
+  `browser_shutdown::IsTryingToQuit()`: the #911 review found that the second window's Stay missed the first window's
+  tabs, and a diagnostic run showed `IsTryingToQuit()` already false when that Stay was answered, before the dialog's
+  `CancelTerminate` (which resets it too).
+- Swift: `ChromiumEngine+Dialogs.swift` maps the kind to `.beforeUnload`; a leave-site dialog nobody can show is answered
+  Leave (#897 review); a `CloseCancelled` ends the tab's pending leave-site dialog first. `ChromiumEngine` keeps its
+  own close as `TabLifecycle` (`live`, `closeHeld`) and the kept New Tab page as `NewTabPageSlot`; `.skipUnloadHandlers`
+  now closes a tab whose own close is held (below). `ScriptedHarness` maps `.beforeUnload`; `ScriptedFacade` can report
+  leave-site dialogs (`reportsLeaveSiteDialogs`).
+- Self-test embedder: `respond <session id> leave|stay` (answers through the reported dialog object, the shell's path),
+  `close-window`, `quit`, `new-tab <url>`, `new-window <url>`; `dialogRequested` logs the strings and whether the tab
+  is active.
+
+The two pinned tests (#877 finding): `skipUnloadHandlersClosesATabShowingTheWindowCloseDialog` states the intended rule.
+`.skipUnloadHandlers` closes a tab whatever close holds it; the shell sends it when the row is gone (Delete Space, an
+import merge) while the prompt is up, and the real facade closes under `ScopedSkipUnloadHandlers` (run 1, step 5).
+`secondCloseWhileHeldDoesNothing` now covers a second honouring close only. The new
+`skipUnloadHandlersClosesATabWhoseOwnCloseIsHeld` failed on `main` (5 issues: the tab stayed listed, and a Stay
+afterwards would have cancelled the close of a tab with no row).
+
+### Smoke (`out/Arkt/Arkt.app`, `--no-startup-window --arkt-facade-selftest --arkt-engine-test-api --remote-debugging-port`, fresh profiles under `profiles/585-20261112/`, `--use-mock-keychain --mute-audio`, `--host-resolver-rules="MAP * ~NOTFOUND, EXCLUDE 127.0.0.1"`, a loopback fixture server, commands through page titles over DevTools; `hold` sets a beforeunload handler with a user gesture)
+
+| Step | Result |
+|---|---|
+| 1. Client close (`close`), Stay (`respond stay`); re-run on the final build (no decline title) | `held`, `dialogRequested kind=3 active=yes title="Leave site?" message="Changes you made may not be saved." accept="Leave" cancel="(none)"`; then `dialogEnded`, `closeCancelled isClosing=no` (separate batches, in that order); `state` closing=no |
+| 1. Again, Leave | `dialogEnded`, then `tabClosed reason=client` |
+| 2. Held reload, Stay | `title="Reload site?" accept="Reload"`; Stay: `dialogEnded`, no `closeCancelled`, the old page stays |
+| 2. Held reload, Leave | `dialogEnded`, then the page reloads (title back to the fixture's) |
+| 3. Window close, two held tabs (the active one and a background one) | one prompt: `activeTabChanged` for the background tab, then its `dialogRequested`; Stay: `dialogEnded`, then `closeCancelled` for both tabs (`close cancelled with its window` for the other), the window stays |
+| 3. Window close again, Leave, Leave | the second tab is activated and prompted only after the first Leave; then both `tabClosed reason=windowClosing`, `windowClosed` |
+| 4. Extension `chrome.tabs.remove` on a held tab (tabs probe) | prompt; Stay: `closeCancelled`; again with Leave: `tabClosed reason=extension` |
+| 5. `close skip` while the tab's own close shows its prompt | `result=closed`, `tabClosed reason=client`, then `dialogEnded`; no `closeCancelled`; a Stay sent afterwards `answered=no` |
+| 6. Quit with held tabs in two windows, Stay | prompt in the first window; Stay: `closeCancelled` for both tabs of that window, `quit cancelled`, the process stays |
+| 6. Quit again, Leave, Leave | the second window's tab is prompted after the first Leave; every tab `tabClosed reason=appTerminating`, both windows closed |
+| 6b. Quit, held tabs in two windows, Leave in the first, Stay in the second (#911 review) | before the fix: `closeCancelled` only for the second window's tab; the first window's two tabs, which showed closing, got none. After: `closeCancelled` for all three, `quit cancelled` |
+| 6c. Window close Stay with a second window open | `closeCancelled` for the closing window's two tabs only; the other window's tab gets none |
+| 7. Test API `answer <id> cancel` | the same path: `leave-site dialog answered stay`, `dialogEnded`, `closeCancelled` |
+| No engine-drawn dialog | the process's on-screen windows while a prompt is up: only the 900x632 host window (CoreGraphics window list) |
+| `FATAL`, `Check failed`, signals | 0 in every run |
+
+After the quit in step 6 (and in a baseline run that quit with no held tab), the self-test process stayed up after
+`app terminating` and the keep-alive release; it was stopped by its PID. Not related to this change.
+
+### Deliberate break
+
+`UseArktBeforeUnloadDialogs()` commented out in `PreBrowserStart`, rebuilt (89 s, `FAILED:` 0): `close` on a held tab
+gave `result=held` and no `dialogRequested`, and Chromium's own Cocoa alert came up (a layer-8 260x218 window of the
+process); `answer cancel` dismissed it. Restored and rebuilt (74 s, `FAILED:` 0): the prompt is the shell's again, no
+second window.
+
+| Step | Result |
+|---|---|
+| Builds | first two stopped on compile errors (Chromium style: inline virtual bodies; a reference to a temporary), then `The build has finished successfully.`, `FAILED:` 0 on every later build |
+| `gn check out/Arkt "//arkt/*"` | `Header dependency check OK` (new dependency `//chrome/browser:chrome_browser_application_mac`) |
+
+### Patch budget
+
+Unchanged: 16 patch files, 8 seam and hook patch files, 22 upstream files outside 0001-0004. `.patches` 16 lines, 16
+`arkt` commits: in sync. Facade header copies `cmp` identical. Design section 3 (E3a) records beforeunload as a seam.
+
+### Left open
+
+- The shell panel itself (Cmd-W, the window close button and Quit in the real app, Stay as the primary, Escape) needs
+  the shell build that hosts this engine and real input: #910 (needs the user).
+- #889 (one phase for `ArktFacadeTab`) stays its own change; this one did not need those fields reshaped.
+
+### Cleanup
+
+Every engine run and the fixture server stopped by exact PID (`ps -p` prints nothing for each). No crash reports from
+these runs. Throwaway profiles under `profiles/585-20261112/` deleted after the runs. Nothing touched the Keychain
+(mock keychain only), the clipboard or `/Applications/Arkt.app`.

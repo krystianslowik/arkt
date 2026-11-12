@@ -29,10 +29,20 @@ public final class ChromiumEngine: EngineClient, EngineExtensions, EngineDownloa
     let handle: any ArktTabHandle
     /// Fields from events. `isClosing` and `wouldHoldClose` are overlaid from the handle in `snapshot(of:)`.
     var snapshot: TabSnapshot
-    /// This client's close answered `held`; a second `closeTab` does nothing until it is answered.
-    var clientCloseHeld = false
+    var lifecycle = TabLifecycle.live
     /// Set for a client tab created without a URL until its first page load ends (`ChromiumEngine+Batches`).
     var initialBlank: InitialBlank?
+  }
+
+  /// Where this client's own close of a listed tab stands (#585, from #877). A close the engine started, or a window
+  /// close or a quit, shows in the handle's `isClosing` instead.
+  enum TabLifecycle: Equatable {
+    /// No close of this client's is held.
+    case live
+    /// This client's close answered `held` (a leave-site prompt, an unload handler, a nested loop), until
+    /// `.tabClosed` or `.closeCancelled`. A second close that honours unload handlers does nothing;
+    /// `.skipUnloadHandlers` still closes the tab, whatever close holds it.
+    case closeHeld
   }
 
   /// A tab created without a URL loads Chromium's `about:blank` first. Its load start arrives before the first
@@ -51,13 +61,23 @@ public final class ChromiumEngine: EngineClient, EngineExtensions, EngineDownloa
     let browser: any ArktBrowserHandle
     let adapter: WindowHostAdapter
     var activeTab: TabID?
-    /// A Dock reopen's or startup window until its first tab arrives: a New Tab page as that tab is kept as
-    /// `newTabPage`.
-    var keepsNewTabPage = false
-    /// Chromium's New Tab page in a Dock reopen's or startup window (#299), neither listed nor announced: the shell shows an
-    /// empty window. It keeps the `Browser` open (a `Browser` closes with its last tab) until another tab joins the
-    /// window, then closes; a navigation away from it lists it (`ChromiumEngine+NewTabPage`).
-    var newTabPage: (any ArktTabHandle)?
+    var newTabPage = NewTabPageSlot.none
+  }
+
+  /// Chromium's New Tab page in a Dock reopen's or startup window (#299), neither listed nor announced: the shell
+  /// shows an empty window. It keeps the `Browser` open (a `Browser` closes with its last tab) until another tab joins
+  /// the window, then closes; a navigation away from it lists it (`ChromiumEngine+NewTabPage`).
+  enum NewTabPageSlot {
+    /// Any other window, or one whose first tab has arrived and was not kept.
+    case none
+    /// A Dock reopen's or startup window until its first tab arrives: a New Tab page as that tab is kept.
+    case awaitingFirstTab
+    /// The kept page.
+    case kept(any ArktTabHandle)
+
+    var page: (any ArktTabHandle)? {
+      if case .kept(let page) = self { page } else { nil }
+    }
   }
 
   let facade: any ArktEngine
@@ -179,19 +199,22 @@ public final class ChromiumEngine: EngineClient, EngineExtensions, EngineDownloa
   public func closeTab(_ id: TabID) { closeTab(id, mode: .honourUnloadHandlers) }
 
   public func closeTab(_ id: TabID, mode: CloseMode) {
-    // A close under way answers a second one, except `.skipUnloadHandlers`: a tab of a window whose close is held
-    // reports closing, and a tab the shell drops then must still close (W3-7 B, W3-9).
-    guard let record = tabs[id], !record.clientCloseHeld,
-          mode == .skipUnloadHandlers || !record.handle.isClosing else { return }
+    // A close under way answers a second one, except `.skipUnloadHandlers`: a tab the shell drops while its close is
+    // held (its own, its window's, a quit's) must still close, or a Stay would leave a live tab with no row (W3-7 B,
+    // W3-9, #585). The facade closes it under `ScopedSkipUnloadHandlers`, ending its leave-site dialog.
+    guard let record = tabs[id] else { return }
+    if mode == .honourUnloadHandlers {
+      guard record.lifecycle == .live, !record.handle.isClosing else { return }
+    }
     switch record.handle.close(mode: mode.facade) {
     case .closed:
       retired[ObjectIdentifier(record.handle)] = record.handle
       removeTab(id)
       hub.emit(.tabClosed(id, reason: .client))
     case .held:
-      tabs[id]?.clientCloseHeld = true
+      tabs[id]?.lifecycle = .closeHeld
     @unknown default:
-      tabs[id]?.clientCloseHeld = true
+      tabs[id]?.lifecycle = .closeHeld
     }
   }
 
@@ -225,7 +248,7 @@ public final class ChromiumEngine: EngineClient, EngineExtensions, EngineDownloa
   public func snapshot(of id: TabID) -> TabSnapshot? {
     guard let record = tabs[id] else { return nil }
     var snapshot = record.snapshot
-    snapshot.isClosing = record.clientCloseHeld || record.handle.isClosing
+    snapshot.isClosing = record.lifecycle == .closeHeld || record.handle.isClosing
     snapshot.wouldHoldClose = record.handle.wouldHoldClose
     return snapshot
   }

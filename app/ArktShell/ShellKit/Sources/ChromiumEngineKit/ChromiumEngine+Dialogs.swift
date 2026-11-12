@@ -7,13 +7,14 @@ import EngineAPI
 extension ChromiumEngine {
   /// Chromium's `TabModalDialogManager` decides when a dialog shows and when it ends; the facade reports each request
   /// with the page's values and each end with one `DialogEnded`. Every instance over the facade sees every request
-  /// (#882). A dialog of a tab this instance does not list is not reported here; it is answered `accepted: false` at
-  /// once, so the page's call returns and never hangs, only when nobody can show it (`nobodyShows`). A tab in another
-  /// live instance's window is that instance's.
+  /// (#882). A dialog of a tab this instance does not list is not reported here; it is answered at once, so the page's
+  /// call returns and never hangs, only when nobody can show it (`nobodyShows`): `accepted: false`, except a leave-site
+  /// dialog, which is answered Leave, since Stay would keep its close (a window's, a quit) from ever finishing (#897
+  /// review). A tab in another live instance's window is that instance's.
   func dialogRequested(_ event: any ArktEngineEvent) {
     guard let dialog = event.dialog, dialogByHandle[ObjectIdentifier(dialog)] == nil else { return }
     guard let tab = tabByHandle[ObjectIdentifier(dialog.tab)], tabs[tab] != nil else {
-      if nobodyShows(dialog.tab) { _ = dialog.respond(accepted: false, userInput: nil) }
+      if nobodyShows(dialog.tab) { _ = dialog.respond(accepted: dialog.kind == .beforeUnload, userInput: nil) }
       return
     }
     endDialogs(of: tab)             // Chromium ends the earlier one first; this only guards the order
@@ -55,6 +56,14 @@ extension ChromiumEngine {
     for pending in pendingDialogs.values where pending.tab == tab { finishDialog(pending.id) }
   }
 
+  /// A cancelled close is over with its leave-site dialog: the engine may report the cancel before the dialog's end
+  /// (the page's callback runs before the dialog closes), and the shell sees the end first (contract rules 16, 19).
+  func endLeaveSiteDialogs(of tab: TabID) {
+    for pending in pendingDialogs.values where pending.tab == tab && pending.handle.kind == .beforeUnload {
+      finishDialog(pending.id)
+    }
+  }
+
   private func finishDialog(_ id: DialogID) {
     guard let pending = pendingDialogs.removeValue(forKey: id) else { return }
     dialogByHandle[ObjectIdentifier(pending.handle)] = nil
@@ -68,6 +77,7 @@ extension JavaScriptDialog.Kind {
     case .alert: self = .alert
     case .confirm: self = .confirm
     case .prompt: self = .prompt
+    case .beforeUnload: self = .beforeUnload
     @unknown default: self = .alert
     }
   }

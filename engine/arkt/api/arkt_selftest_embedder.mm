@@ -262,6 +262,8 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
   NSInteger _windowCount;
   // When each tab's close was asked for (session id), for held durations.
   std::map<int32_t, NSDate*> _closeStarts;
+  // The pending dialog of each tab (session id), for `respond`.
+  std::map<int32_t, id<ArktJavaScriptDialog>> _dialogs;
   // --arkt-menu-probe (W3-8).
   id _launchObserver;
   NSMenu* _probeFileMenu;
@@ -716,11 +718,27 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
                      << " muted=" << (event.isMuted ? "yes" : "no");
         break;
       case ArktEngineEventKindDialogRequested:
-        // Nobody draws it here; the self-test's `answer` command ends it.
+        // Nobody draws it here; the self-test's `answer` or `respond` command
+        // ends it.
+        _dialogs[tab] = event.dialog;
         LOG(WARNING) << "ARKT selftest dialogRequested tab=" << tab
-                     << " kind=" << event.dialog.kind;
+                     << " kind=" << event.dialog.kind << " active="
+                     << (event.tab.isActive ? "yes" : "no") << " title=\""
+                     << base::SysNSStringToUTF8(event.dialog.title)
+                     << "\" message=\""
+                     << base::SysNSStringToUTF8(event.dialog.message)
+                     << "\" accept=\""
+                     << base::SysNSStringToUTF8(event.dialog.acceptTitle)
+                     << "\" cancel=\""
+                     << (event.dialog.cancelTitle
+                             ? base::SysNSStringToUTF8(event.dialog.cancelTitle)
+                             : std::string("(none)"))
+                     << "\"";
         break;
       case ArktEngineEventKindDialogEnded:
+        if (_dialogs[tab] == event.dialog) {
+          _dialogs.erase(tab);
+        }
         LOG(WARNING) << "ARKT selftest dialogEnded tab=" << tab;
         break;
       case ArktEngineEventKindPermissionRequested:
@@ -1299,6 +1317,43 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
     LOG(WARNING) << "ARKT selftest answer tab=" << sessionId
                  << " accept=" << (accept ? "yes" : "no")
                  << " answered=" << (answered ? "yes" : "no");
+  } else if (command == "respond") {
+    // respond <session id> leave|stay: the shell's answer, through the
+    // reported dialog object (#585).
+    int32_t sessionId = 0;
+    base::StringToInt(argument, &sessionId);
+    auto found = _dialogs.find(sessionId);
+    const bool leave = words.size() > 2 && words[2] == "leave";
+    BOOL answered = found != _dialogs.end() &&
+                    [found->second respondAccepted:leave userInput:nil];
+    LOG(WARNING) << "ARKT selftest respond tab=" << sessionId
+                 << " leave=" << (leave ? "yes" : "no")
+                 << " answered=" << (answered ? "yes" : "no");
+  } else if (command == "close-window") {
+    // The shell's window close (-[ArktBrowserHandle close]).
+    LOG(WARNING) << "ARKT selftest close-window window="
+                 << tab.browser.windowId;
+    [tab.browser close];
+  } else if (command == "quit") {
+    // Quit as the shell's Quit item does.
+    LOG(WARNING) << "ARKT selftest quit";
+    [NSApp performSelector:@selector(terminate:) withObject:nil afterDelay:0];
+  } else if (command == "new-tab") {
+    // A background tab at `argument` in this tab's window.
+    id<ArktTabHandle> created = [tab.browser
+        createTabWithURL:[NSURL URLWithString:base::SysUTF8ToNSString(argument)]
+                  active:NO];
+    LOG(WARNING) << "ARKT selftest new-tab tab=" << created.sessionId;
+  } else if (command == "new-window") {
+    // A second shell window with one tab at `argument`.
+    ArktSelfTestWindowHost* host = [self newHostWithFrame:NSZeroRect];
+    id<ArktBrowserHandle> browser = [_engine createBrowserWithHost:host];
+    [host.window orderFront:nil];
+    id<ArktTabHandle> created = [browser
+        createTabWithURL:[NSURL URLWithString:base::SysUTF8ToNSString(argument)]
+                  active:YES];
+    LOG(WARNING) << "ARKT selftest new-window window=" << browser.windowId
+                 << " tab=" << created.sessionId;
   } else if (command == "ctx-pick") {
     std::string prefix;
     for (size_t i = 1; i < words.size(); ++i) {

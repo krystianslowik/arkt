@@ -57,6 +57,7 @@
 #include "chrome/browser/ui/browser_tabstrip.h"  // nogncheck
 #include "chrome/browser/ui/browser_window/public/browser_collection_observer.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+#include "chrome/browser/lifetime/browser_shutdown.h"
 #include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
 #include "chrome/browser/ui/tabs/tab_close_types_data.h"
 #include "chrome/browser/ui/tabs/tab_enums.h"
@@ -578,19 +579,19 @@ ArktTerminationStatus CrashStatusOf(content::WebContents* contents) {
 }
 @end
 
-// A page's alert, confirm or prompt (#400): plain values read once when the
-// request arrives, and the shell's one answer. The request is the overlay's
-// self-owned ArktJavaScriptDialog, reached through a weak pointer that
-// Chromium's manager invalidates when it ends the dialog.
+// A page's alert, confirm or prompt (#400), or its leave-site dialog (#585):
+// plain values read once when the request arrives, and the shell's one
+// answer. The request is the overlay's self-owned ArktPageDialog, reached
+// through a weak pointer that dies when Chromium ends the dialog.
 @interface ArktFacadeJavaScriptDialog : NSObject <ArktJavaScriptDialog>
-- (instancetype)initWithRequest:(base::WeakPtr<arkt::ArktJavaScriptDialog>)request
+- (instancetype)initWithRequest:(base::WeakPtr<arkt::ArktPageDialog>)request
                             tab:(id<ArktTabHandle>)tab;
 // The request is over (answered or ended by the engine).
 - (void)markEnded;
 @end
 
 @implementation ArktFacadeJavaScriptDialog {
-  base::WeakPtr<arkt::ArktJavaScriptDialog> _request;
+  base::WeakPtr<arkt::ArktPageDialog> _request;
   BOOL _ended;
 }
 
@@ -602,20 +603,23 @@ ArktTerminationStatus CrashStatusOf(content::WebContents* contents) {
 @synthesize acceptTitle = _acceptTitle;
 @synthesize cancelTitle = _cancelTitle;
 
-- (instancetype)initWithRequest:(base::WeakPtr<arkt::ArktJavaScriptDialog>)request
+- (instancetype)initWithRequest:(base::WeakPtr<arkt::ArktPageDialog>)request
                             tab:(id<ArktTabHandle>)tab {
   if ((self = [super init])) {
     _request = request;
     _tab = tab;
-    switch (request->type()) {
-      case content::JAVASCRIPT_DIALOG_TYPE_ALERT:
+    switch (request->kind()) {
+      case arkt::ArktPageDialog::Kind::kAlert:
         _kind = ArktDialogKindAlert;
         break;
-      case content::JAVASCRIPT_DIALOG_TYPE_CONFIRM:
+      case arkt::ArktPageDialog::Kind::kConfirm:
         _kind = ArktDialogKindConfirm;
         break;
-      case content::JAVASCRIPT_DIALOG_TYPE_PROMPT:
+      case arkt::ArktPageDialog::Kind::kPrompt:
         _kind = ArktDialogKindPrompt;
+        break;
+      case arkt::ArktPageDialog::Kind::kBeforeUnload:
+        _kind = ArktDialogKindBeforeUnload;
         break;
     }
     _title = base::SysUTF16ToNSString(request->title());
@@ -624,12 +628,11 @@ ArktTerminationStatus CrashStatusOf(content::WebContents* contents) {
       _defaultPromptText =
           base::SysUTF16ToNSString(request->default_prompt_text());
     }
-    // The strings the Views dialog's buttons use (DialogDelegate): an alert
-    // only has OK.
-    _acceptTitle = base::SysUTF16ToNSString(l10n_util::GetStringUTF16(IDS_APP_OK));
-    if (_kind != ArktDialogKindAlert) {
-      _cancelTitle =
-          base::SysUTF16ToNSString(l10n_util::GetStringUTF16(IDS_APP_CANCEL));
+    // Chromium's button strings: OK (Leave or Reload for a leave-site
+    // dialog), and Cancel, which an alert and a leave-site dialog have not.
+    _acceptTitle = base::SysUTF16ToNSString(request->accept_title());
+    if (std::optional<std::u16string> cancel = request->cancel_title()) {
+      _cancelTitle = base::SysUTF16ToNSString(*cancel);
     }
   }
   return self;
@@ -1179,6 +1182,10 @@ NSArray<id<ArktSitePermission>>* SitePermissionObjects(
 - (void)insertFinished:(BOOL)inserted;
 // The contents' beforeunload outcome (WebContentsObserver::BeforeUnloadFired).
 - (void)beforeUnloadFired:(BOOL)proceed;
+// Another tab's leave-site dialog cancelled the window close or quit that
+// showed this tab closing (#585): CloseCancelled, unless a close of the tab's
+// own is still held.
+- (void)windowCloseCancelled;
 // WebContentsDelegate::UpdateTargetURL for the tab's contents (#114).
 - (void)reportTargetURL:(const GURL&)url;
 // A duplicate the shell parks (#380) lives as bare contents outside every tab
@@ -1375,13 +1382,14 @@ class Facade : public BrowserCollectionObserver,
 
   // A page's alert, confirm or prompt in an Arkt window with an embedder host
   // (#400), called by Chromium's TabModalDialogManager from inside
-  // RunJavaScriptDialog (or when a pending alert's tab comes forward). True
-  // takes the dialog: DialogRequested goes to the shell, which answers with
-  // -respondAccepted:userInput: or lets the engine end it. False leaves it to
-  // Chromium's Views dialog: the tab has no handle, or its window's host is
-  // the placeholder (nobody would show the dialog).
+  // RunJavaScriptDialog (or when a pending alert's tab comes forward), or its
+  // leave-site dialog (#585), called by the app-modal dialog queue when the
+  // dialog comes up. True takes the dialog: DialogRequested goes to the
+  // shell, which answers with -respondAccepted:userInput: or lets the engine
+  // end it. False leaves it to Chromium's own dialog: the tab has no handle,
+  // or its window's host is the placeholder (nobody would show the dialog).
   bool PresentJavaScriptDialog(content::WebContents* contents,
-                               base::WeakPtr<ArktJavaScriptDialog> request) {
+                               base::WeakPtr<ArktPageDialog> request) {
     tabs::TabInterface* tab =
         contents ? tabs::TabInterface::MaybeGetFromContents(contents)
                  : nullptr;
@@ -1684,6 +1692,41 @@ class Facade : public BrowserCollectionObserver,
     ++in_notification_;
     Record(event);
     --in_notification_;
+  }
+
+  // A leave-site dialog cancelled a window close or a quit (#585): `prompted`
+  // reported its CloseCancelled. Chromium cancels the whole close without
+  // telling the other tabs (UnloadController::CancelWindowClose,
+  // BrowserCloseManager::CancelBrowserClose), and they reported closing while
+  // their window was attempting to close (-isClosing), so each reports
+  // CloseCancelled too: every tab of `browser`, and for a quit every tab of a
+  // window the quit had reached. Called from the prompted tab's
+  // BeforeUnloadFired, before Chromium resets those windows.
+  void RecordWindowCloseCancelled(ArktFacadeTab* prompted,
+                                  BrowserWindowInterface* browser) {
+    // A quit is told by the facade's own flag, set when Chromium starts
+    // closing all browsers (OnClosingAllBrowsers) and cleared only by the
+    // cancel notification that follows this call.
+    // browser_shutdown::IsTryingToQuit() is not enough: it read false when a
+    // Stay in the second window of a quit was answered, before the dialog's
+    // CancelTerminate (#911 review), and CancelTerminate resets it anyway.
+    const bool quitting = terminating_ || browser_shutdown::IsTryingToQuit();
+    GlobalBrowserCollection::GetInstance()->ForEach(
+        [&](BrowserWindowInterface* each) {
+          if (each != browser &&
+              !(quitting &&
+                UnloadController::From(each)->is_attempting_to_close_browser())) {
+            return true;
+          }
+          TabStripModel* model = each->GetTabStripModel();
+          for (int i = 0; i < model->count(); ++i) {
+            ArktFacadeTab* tab = HandleForTab(model->GetTabAtIndex(i));
+            if (tab && tab != prompted) {
+              [tab windowCloseCancelled];
+            }
+          }
+          return true;
+        });
   }
 
   // A held close (of the tab, or of its window or the application) was
@@ -3052,9 +3095,25 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
     // its stale close types, and isClosing would stay true.
     contents->RemoveUserData(TabCloseTypesData::UserDataKey());
   }
+  const bool window_close = window && window->IsAttemptingToClose();
   _closing = NO;
   _closingByClient = NO;
   LOG(WARNING) << "ARKT: facade close cancelled session id " << _sessionId;
+  arkt::g_facade->RecordCloseCancelled(self);
+  if (window_close) {
+    arkt::g_facade->RecordWindowCloseCancelled(self,
+                                               _browser.browserInterface);
+  }
+}
+
+- (void)windowCloseCancelled {
+  content::WebContents* contents = self.contents;
+  if (!_tab || !contents || _closing ||
+      TabCloseTypesData::FromWebContents(contents)) {
+    return;
+  }
+  LOG(WARNING) << "ARKT: facade close cancelled with its window, session id "
+               << _sessionId;
   arkt::g_facade->RecordCloseCancelled(self);
 }
 

@@ -220,7 +220,7 @@ guard or a generalization, classified:
 | Item | Class | Batch | Status |
 |---|---|---|---|
 | Low-disk notice | hook (planned) | E3a | E1 landed the guard only (0013, row 1). The hook goes in `storage_pressure_bubble_view.cc`, the file 0013 already patches: instead of returning early, it hands the notice to the overlay. No new upstream file. The overlay's own disk watcher is the fallback |
-| beforeunload ("Leave site?", #585) | hook (planned), only if no overlay seam works | E3a | planned; #585 is unblocked by decision 5 |
+| beforeunload ("Leave site?", #585) | seam (no patch) | E3a | landed with #585: the overlay wraps `AppModalDialogManager`'s native dialog factory, so no hook was needed |
 | Named permission prompt factory, replacing `set_view_factory_for_testing` (section 6) | hook (planned) | E3a | planned |
 | Device pickers (`ui/views/permissions/chooser_bubble_ui.cc:303`), embedded permission element | hook (planned), only if the E3a gate finds no factory seam | E3a | planned |
 | In-tab sheets: a guard and hook at each of the two tab-modal choke points, plus hooks in sheet factories | guard + hook | E3b | planned (decision 6). The `TabDialogManager` guard landed early as 0015 (#852). Up to 40 upstream files in total (section 2.5) |
@@ -261,7 +261,7 @@ files, 15 upstream files outside 0001-0004 (24 in all, 9 of them in 0001-0004), 
 | E3b's `TabDialogManager` guard, landed early (#846) | 15 | 20 (sheet file) | 7 | landed (#852, 0015) |
 | E2: rows 6-7 added to the generalization theme | 15 | 21-22 | 7 | planned |
 | E2: page context menu (#588): the window lookup generalized and the Views-only items hidden, in one patch (2 files) | 16 | 22 | 8 | landed (0016) |
-| E3a: planned hooks: permission prompt factory, device pickers and permission element, beforeunload (#585 unblocked), low disk (low disk adds no file) | 16-18 | 23-27 | 8-10 | allowed (decision 5) |
+| E3a: planned hooks: permission prompt factory, device pickers and permission element, low disk (low disk adds no file); beforeunload landed as a seam with #585 (no patch file) | 16-18 | 23-27 | 8-10 | allowed (decision 5) |
 | E3b: `ShowWebModalDialogViews` guard and hook (1 file), the `TabDialogManager` hook (in 0015's file, no new file), sheet hooks (about 5-8 files) | 17-20 | 29-36 | 9-12 | allowed (decision 6), up to 40 |
 | toast routing and `SetResizable` hooks | | | | not planned; only within the cap |
 | gated sites that cannot be switched off | | | | only if needed, within the cap |
@@ -387,6 +387,7 @@ only where no seam exists.
 2. Device pickers (WebUSB, HID, Serial, Bluetooth) and the embedded permission element: a factory seam if the gate
    finds one; otherwise a hook at `chooser_bubble_ui.cc:303`.
 3. beforeunload ("Leave site?", #585, unblocked by decision 5): an overlay seam if one works; otherwise a hook.
+   Landed as a seam: the overlay wraps the app-modal native dialog factory (#585).
 4. Low disk: the hook in `storage_pressure_bubble_view.cc` (already patched by 0013) hands the notice to the overlay;
    the shell draws it.
 5. The rest of the table below, each through a facade event.
@@ -399,7 +400,7 @@ Bubbles and prompts the shell must build:
 | Embedded permission element | `ui/views/permissions/embedded_permission_prompt_content_scrim_view.cc:232` | Views, unparented (#265) |
 | File System Access usage | `ui/views/file_system_access/file_system_access_usage_bubble_view.cc:457`, `:548` | only from a page action; dereferences |
 | Pointer and keyboard lock prompts, quiet permission indicator | #265 | Views, or the full prompt |
-| beforeunload ("Leave site?") | `TabModalDialogManager::RunBeforeUnloadDialog` (#585) | app-modal |
+| beforeunload ("Leave site?") | `TabModalDialogManager::RunBeforeUnloadDialog` (#585) | the shell's panel (#585), through the app-modal factory seam |
 | Low-disk notice | `ui/views/storage/storage_pressure_bubble_view.cc` | dropped by 0013's guard |
 | Password save and update, passkeys | #632 | not checked |
 | Card and address save | `AutofillBubbleHandler`; `ArktAutofillBubbleHandler` is a no-op (#575) | nothing shown |
