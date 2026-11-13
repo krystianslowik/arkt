@@ -44,6 +44,7 @@
 #include "chrome/browser/ui/tabs/tab_strip_user_gesture_details.h"
 #include "chrome/browser/ui/toolbar/toolbar_action_view_model.h"
 #include "chrome/browser/ui/unload_controller.h"
+#include "chrome/browser/ui/views/eye_dropper/eye_dropper.h"
 #include "chrome/browser/ui/views/new_tab_footer/footer_controller.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
@@ -1703,8 +1704,18 @@ void ArktBrowserWindow::ConfirmBrowserCloseWithPendingDownloads(
     int download_count,
     DownloadCloseType dialog_type,
     base::OnceCallback<void(bool)> callback) {
-  // No dialog this week (known gap): the close waits, as in Webium.
-  ARKT_STUB("BrowserWindow");
+  // On Mac only the last incognito or guest window of its profile gets here
+  // (UnloadController::CanCloseWithInProgressDownloads lets every other window
+  // close and its downloads keep running; a quit asks in AppController). With
+  // no dialog the close used to wait forever. Default (#589): close, and the
+  // profile's downloads are cancelled with it. Answered on the next turn:
+  // UnloadController stores the callback that this answer runs only after
+  // this call returns.
+  LOG(WARNING) << "ARKT: close with " << download_count
+               << " pending download(s), type " << static_cast<int>(dialog_type)
+               << ": closing";
+  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+      FROM_HERE, base::BindOnce(std::move(callback), /*proceed=*/true));
 }
 
 void ArktBrowserWindow::ShowAppMenu() {
@@ -1745,8 +1756,9 @@ void ArktBrowserWindow::ShowEmojiPanel() {
 std::unique_ptr<content::EyeDropper> ArktBrowserWindow::OpenEyeDropper(
     content::RenderFrameHost* frame,
     content::EyeDropperListener* listener) {
-  ARKT_STUB("BrowserWindow");
-  return nullptr;
+  // Chromium's own Mac eye dropper (NSColorSampler, no Views), as
+  // BrowserView::OpenEyeDropper. It serves the page's EyeDropper API (#589).
+  return ShowEyeDropper(frame, listener);
 }
 
 void ArktBrowserWindow::ShowCaretBrowsingDialog() {

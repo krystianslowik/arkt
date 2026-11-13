@@ -29,6 +29,7 @@
 #include "arkt/browser/arkt_javascript_dialog.h"
 #include "arkt/browser/arkt_link_activation.h"
 #include "arkt/browser/arkt_permission_prompt.h"
+#include "arkt/browser/arkt_stub_probe.h"
 #import "arkt/browser/arkt_tab_container_view.h"
 #include "base/check.h"
 #include "base/check_op.h"
@@ -4952,6 +4953,19 @@ void RunDialogProbeForSelfTest(id<ArktTabHandle> tab,
     SetFileChooserFolderForSelfTest(contents, base::FilePath(argument));
   } else if (probe == "file-panel") {
     CheckFilePanelsForSelfTest(contents);
+  } else if (probe == "stubs") {
+    CallStubsForSelfTest(contents);
+  } else if (probe == "stub-command") {
+    RunStubCommandForSelfTest(contents, argument);
+  } else if (probe == "incognito") {
+    OpenIncognitoForSelfTest(contents, GURL(argument));
+  } else if (probe == "incognito-download") {
+    StartIncognitoDownloadForSelfTest(contents, GURL(argument),
+                                      words.size() > 2 ? words[2] : "");
+  } else if (probe == "incognito-close") {
+    CloseIncognitoForSelfTest(contents);
+  } else if (probe == "incognito-state") {
+    LogIncognitoForSelfTest(contents);
   }
 }
 
