@@ -7381,3 +7381,153 @@ Unchanged: 16 patch files, 8 seam and hook patch files, 22 upstream files outsid
 Every engine run stopped by exact PID (runs 1 to 3, break, restore). No crash reports from these runs. Throwaway
 profiles under `profiles/586-20261113/` deleted after the runs. Nothing touched the Keychain (mock keychain only), the
 clipboard, a user file (the chooser opened on the fixture folder and was cancelled) or `/Applications/Arkt.app`.
+
+## #589: the remaining Views stubs, eyedropper, close with pending downloads (seam, no patch)
+
+Date 2026-11-13. Branch `engine/589-views-stub-sweep` from `main` at `d8561d15`. `$CR` branch `arkt` unchanged
+(0001-0016).
+
+### Gate
+
+- Seam, no patch. The eyedropper is Chromium's own Mac eye dropper (`ShowEyeDropper`,
+  `//chrome/browser/ui/views/eye_dropper`, `NSColorSampler` with no Views), called from
+  `ArktBrowserWindow::OpenEyeDropper` as `BrowserView::OpenEyeDropper` does. The pending-downloads close is
+  `ArktBrowserWindow::ConfirmBrowserCloseWithPendingDownloads` answering its callback. Every other stub stays a stub;
+  this task classifies them and adds a no-crash check.
+- Facade header: unchanged (`cmp` identical). The self-test probes go through the facade's internal
+  `RunDialogProbeForSelfTest`, as #586's.
+- `.patches` unchanged (16 lines, 16 `arkt` commits: in sync).
+- Builds: `nice -n 15 autoninja -j 4 -C out/Arkt chrome`; swap 16.9 of 17.4 GB at the start; Chromium disk 1.9 TB free,
+  internal disk 42 GB free; load average 3.7 to 6.1.
+
+### Where the pending-downloads close is reached
+
+From Chromium 156 source, then live:
+
+- A regular window never asks. `UnloadController::CanCloseWithInProgressDownloads` returns early on Mac for a profile
+  that is not off the record: the window closes and its downloads keep running.
+- A quit never reaches the window. `BrowserCloseManager::CheckForDownloadsInProgress` skips the check on Mac; the
+  app delegate (`AppController`, `-shouldQuitWithInProgressDownloads`) asks first with its own AppKit alert
+  (Chromium's `IDS_ABANDON_DOWNLOAD_DIALOG_*` copy), before any window closes.
+- So only the last incognito or guest window of its profile, closing while that profile has a download running,
+  calls `ConfirmBrowserCloseWithPendingDownloads` (`DownloadCloseType::kLastWindowInIncognitoProfile` or
+  `kLastWindowInGuestSession`). In Arkt today an incognito Chromium window comes from `chrome.windows.create`
+  with `incognito: true` or Chromium's New Incognito Window command; the shell's own incognito windows do not use an
+  off-the-record profile yet (#557, #705).
+- Before: the stub never answered. `cancel_download_confirmation_state_` stayed `kWaitingForResponse`, so that close
+  and every later close of the window were refused: the window could not be closed until the app quit.
+- Now (defined default, pending the maintainer's pick on #589): close, and the profile's downloads are cancelled with
+  it. The answer is posted to the next turn: `UnloadController` stores the callback it runs only after
+  `ConfirmBrowserCloseWithPendingDownloads` returns, so a synchronous answer would run an empty callback.
+
+### Stub classification
+
+28 stubs on `main` at `d8561d15` (19 in `arkt_browser_window.mm`, 9 in `arkt_browser_window_parts.mm`). The issue's
+30 was counted earlier; since 2026-11-05 `GetAutofillBubbleHandler` (#575, PR #769) and `GetAcceleratorProvider`
+(E1, PR #800) stopped being stubs. "Command" is the Chromium command that reaches the stub when the shell or an
+extension sends it (run 11: enabled or not on an Arkt window); "No-crash" is the direct call in the `stubs` probe.
+
+| Stub | Class | Owner or reason | Command (enabled) | No-crash |
+|---|---|---|---|---|
+| `OpenEyeDropper` | native (this task) | Chromium's `NSColorSampler` eye dropper | page `EyeDropper` API | open stays pending while the sampler is up |
+| `ConfirmBrowserCloseWithPendingDownloads` | native default (this task) | close and cancel; ask is a maintainer pick | close of the last incognito window | window closes |
+| `Deactivate` | matches Chromium on Mac | `NativeWidgetMac::Deactivate` is not implemented either | - | yes |
+| `DisableTabStripEditingForTesting` | test only | no product caller | - | yes |
+| `SetFocusToLocationBar` | native in the shell | the shell's address and command bar | `IDC_FOCUS_LOCATION` (yes) | yes |
+| `FocusToolbar` | native in the shell | no Chromium toolbar | `IDC_FOCUS_TOOLBAR` (yes) | yes |
+| `FocusAppMenu` | native in the shell | the macOS menu bar | `IDC_FOCUS_MENU_BAR` (yes) | yes |
+| `ShowAppMenu` | native in the shell | the macOS menu bar | `IDC_SHOW_APP_MENU` (yes) | yes |
+| `ShowUpdateChromeDialog` | native in the shell | updates are the shell's (#126, sidebar banner #648) | `IDC_UPGRADE_DIALOG` (yes; relaunches, see below) | yes |
+| `ShowIntentPickerBubble` | known gap | Arkt installs no web apps | - | yes |
+| `ShowBookmarkBubble` | known gap | Arkt has no Chromium bookmarks UI; pins are the shell's | `IDC_BOOKMARK_THIS_TAB` (yes) | yes |
+| `ShowTranslateBubble` | covered | #908, #652; returns `kBrowserWindowNotValid` | `IDC_SHOW_TRANSLATE` (no) | yes |
+| `ShowAvatarBubbleFromAvatarButton` | known gap | profiles: #610, #101 | `IDC_SHOW_AVATAR_MENU` (yes) | yes |
+| `ShowHatsDialog` | never | Chrome surveys | - | yes |
+| `ShowCaretBrowsingDialog` | known gap | caret browsing | `IDC_CARET_BROWSING_TOGGLE` (no) | yes |
+| `CreateTabSearchBubble` | native in the shell | the command bar's open tabs | `IDC_TAB_SEARCH` (yes) | yes |
+| `ShowIncognitoClearBrowsingDataDialog` | known gap | incognito: #557 | - | yes |
+| `ShowIncognitoHistoryDisclaimerDialog` | known gap | incognito: #557 | - | yes |
+| `ShowChromeLabs` | never | Chrome Labs | `IDC_SHOW_CHROME_LABS` (yes) | yes |
+| `ExclusiveAccessContext::UpdateExclusiveAccessBubble` | covered | the full screen hint and exit control: #613; answers its hide callback `kNotShown` | - | yes, callback run |
+| `LocationBar::FocusLocation` | native in the shell | address and command bar | `IDC_FOCUS_LOCATION` (yes) | yes |
+| `LocationBar::FocusSearch` | native in the shell | address and command bar | `IDC_FOCUS_SEARCH` (yes) | yes |
+| `LocationBar::GetChipController` | native in the shell | permission prompts are the shell's (#133, #583); returns null | - | yes (null) |
+| `FindBar::Show` | native in the shell | the shell's find bar; `FindResult` events still reach the facade | `IDC_FIND` (yes) | yes |
+| `SidePanelUI::Show` (entry id) | known gap | side panel host: connector design E2 item 4 | `IDC_SHOW_READING_MODE_SIDE_PANEL` (yes) | yes |
+| `SidePanelUI::Show` (entry key) | known gap | as above | - | yes |
+| `SidePanelUI::ShowFrom` | known gap | as above | - | yes |
+| `SidePanelUI::Toggle` | known gap | as above | - | yes |
+
+The other #122 surfaces named in #589 (intent picker, bookmark bubble, translate, update dialog, caret browsing, tab
+search, incognito dialogs, surveys, Chrome Labs, avatar bubble, app menu, exclusive access bubble) are rows above.
+The tab-sharing and sign-in QR infobars are #478's (moved from #122 on 2026-11-03), not stubs here: they are drawn by
+the infobar presenter, which logs `not drawn (not a confirm infobar)` for both.
+
+`IDC_UPGRADE_DIALOG` does not reach the stub on 156: `chrome::OpenUpdateChromeDialog` calls `chrome::AttemptRelaunch`
+while `kFewerUpdateConfirmations` is on, so the command quits and relaunches the app (run 1; the relaunched instance
+was stopped by its PID). The shell's menu does not send it.
+
+### What landed
+
+- `ArktBrowserWindow::OpenEyeDropper` returns `ShowEyeDropper(frame, listener)`; `//chrome/browser/ui/views/eye_dropper`
+  joins the window target's deps.
+- `ArktBrowserWindow::ConfirmBrowserCloseWithPendingDownloads` logs the count and type and posts `callback(true)`.
+- `arkt_stub_probe.{h,mm}` (new, self-test only) and self-test commands: `stubs` (calls every remaining stub directly),
+  `stub-command <name>` (the Chromium command, when enabled), `incognito <url>`, `incognito-download <url> <file>` (an
+  incognito download to a forced path, so it never asks), `incognito-close` (`BrowserWindow::Close`, as the close
+  button), `incognito-state`; and in the self-test embedder `eyedropper` (the page's `EyeDropper().open()` with a user
+  gesture, the result in the page title), `app-windows`, `app-esc`.
+- Separate commit (carry-over from the #923 review): a ShellKit test pins `InfobarMetrics.rowHeight` at 40 with a
+  pointer to the engine's `kArktInfobarRowHeight`; the file-panel probe's header says it cancels every open or save
+  panel in the process.
+
+### Smoke (`out/Arkt/Arkt.app`, `--no-startup-window --arkt-facade-selftest --arkt-engine-test-api`, fresh profiles under `profiles/589-20261113/` with the download folder inside the profile, `--use-mock-keychain --mute-audio`, `--host-resolver-rules="MAP * ~NOTFOUND, EXCLUDE 127.0.0.1"`, a loopback fixture server whose download sends 64 KB and then one byte a second, commands through page titles)
+
+| Step | Result |
+|---|---|
+| `stubs` (run 11) | 25 distinct `ARKT: stub` lines (the two `SidePanelUI::Show` overloads share one), every call returned, `tab alive=yes`; the exclusive access hide callback ran |
+| `stub-command` x13 (run 11) | 11 enabled and run, `caret` and `translate` disabled; tab alive after each |
+| Incognito window, download running, close, before (run 5, stub) | `ConfirmBrowserCloseWithPendingDownloads` stub logged; 3 s later `windows=1 downloads=1 closing=no visible=yes`; a second close: the same |
+| The same, after (runs 8 and 11) | `close with 1 pending download(s), type 2: closing`; `windowClosed reason=1`; `windows=0 downloads=0`; the partial file removed |
+| Regular window closed with a regular download running (run 11) | `windowClosed reason=1`; no `pending download` line; the `.crdownload` kept growing after the close |
+| Quit with an incognito download running (run 7) | `AppController`'s alert (`_NSAlertPanel`, level 8, key); the stub not reached; stopped by PID |
+| `eyedropper`, before (run 9, break) | `rejected AbortError` at once |
+| `eyedropper`, after (runs 6, 8, 11) | `opened`, no rejection while the sampler is up; the sampler is the system's `ColorSampler` XPC service, not a window of the app, so `app-esc` (key window `none`) cannot answer it; a pick needs real input |
+| `FATAL`, `Check failed`, `DCHECK`, signals (run 11) | 0 |
+
+Also seen: a download in an incognito Arkt window that does not force a path opens a Save panel (an out-of-process
+`NSSavePanel` sheet on the incognito window, folder: the profile's download folder) even with
+`download.prompt_for_download` false; the panel counts as a running download until it is answered. Not changed here.
+
+### Deliberate break
+
+`ConfirmBrowserCloseWithPendingDownloads` without its `PostTask` and `OpenEyeDropper` returning `nullptr`, rebuilt
+(69 s, `FAILED:` 0), run 9: after the close `windows=1 downloads=1 closing=no visible=yes`; `eyedropper rejected
+AbortError` at once. Restored and rebuilt (76 s, `FAILED:` 0): run 11 above.
+
+| Step | Result |
+|---|---|
+| Builds | 70, 75, 74, 71, 72 (fix), 69 (break), 76 (restore), 71 (format), 73 (probe tidy) s; `FAILED:` 0 each |
+| `gn check out/Arkt "//arkt/*"` | `Header dependency check OK` |
+| ShellKit `swift test --filter InfobarMetricsTests` | 1 test passed; with `rowHeight` 41: 1 issue, `Expectation failed: InfobarMetrics.rowHeight == 40`; restored: passed |
+
+### Patch budget
+
+Unchanged: 16 patch files, 8 seam and hook patch files, 22 upstream files outside 0001-0004. `.patches` 16 lines, 16
+`arkt` commits: in sync. Facade header copies `cmp` identical.
+
+### Left open
+
+- The pending-downloads close follows a default (close and cancel the private downloads). Asking with a shell sheet
+  needs a facade event and a design pick (maintainer decision on #589).
+- The eyedropper's pick and Esc need real input in the system sampler: #926 (needs the user).
+- Quit with downloads running asks with Chromium's own alert and copy, not the shell's dialog system.
+- The incognito download Save panel above.
+
+### Cleanup
+
+Every engine run stopped by exact PID (runs 1 to 12; run 12 is a sanity run on the last build; run 1's relaunched instance too). One crash report, from run 4
+(a self-test probe called `-[NSSavePanel ok:]` on an out-of-process panel, which throws; the probe was removed), moved
+to the artifacts folder. The `ColorSampler` XPC service the eyedropper runs started was left to launchd (idle).
+Throwaway profiles under `profiles/589-20261113/` deleted after the runs; the fixture server stopped. Nothing touched
+the Keychain (mock keychain only), the clipboard, `~/Downloads` or `/Applications/Arkt.app`.

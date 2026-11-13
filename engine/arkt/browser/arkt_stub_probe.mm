@@ -211,7 +211,6 @@ void RunStubCommandForSelfTest(content::WebContents* contents,
       {"chrome-labs", IDC_SHOW_CHROME_LABS},
       {"upgrade", IDC_UPGRADE_DIALOG},
       {"reading-mode", IDC_SHOW_READING_MODE_SIDE_PANEL},
-      {"incognito-window", IDC_NEW_INCOGNITO_WINDOW},
   };
   auto it = kCommands.find(name);
   if (it == kCommands.end()) {
