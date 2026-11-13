@@ -101,6 +101,8 @@ public final class InMemoryEngine: EngineClient, EngineExtensions, EngineImporti
   public var heldGlobalShortcuts: Set<ExtensionShortcut> = []
   /// Calls to `uninstallExtension`, in order, known ids or not (#720).
   public internal(set) var uninstalledExtensions: [ExtensionUninstall] = []
+  /// The extension's own action context items, by extension id (`setExtensionContextItems`, #915).
+  var extensionContextItems: [String: [EngineMenuItem]] = [:]
   /// Context menu commands run through `performExtensionContextCommand`, in order.
   public internal(set) var performedExtensionContextCommands: [(command: EngineMenuCommand, actionID: String,
                                                                 window: EngineWindowID)] = []

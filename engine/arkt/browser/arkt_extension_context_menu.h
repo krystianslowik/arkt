@@ -54,6 +54,17 @@ enum class ExtensionContextCommand {
   kRemove = 9,
 };
 
+// The commands of the extension's own chrome.contextMenus items for its action
+// (#915), arkt_engine.h's ArktExtensionContextCommandCustomFirst and
+// CustomLast: item n of Chromium's ContextMenuMatcher (its command id
+// IDC_EXTENSIONS_CONTEXT_CUSTOM_FIRST + n) is kExtensionContextCustomFirst + n.
+// An ExtensionMenuItem's command holds such a value as ExtensionContextCommand.
+inline constexpr int kExtensionContextCustomFirst = 1000;
+inline constexpr int kExtensionContextCustomLast = 2000;
+
+// Whether `command` is in that range.
+bool IsExtensionContextCustomCommand(int command);
+
 // One item of an extension action's context menu, as plain values.
 struct ExtensionMenuItem {
   enum class Kind { kCommand, kSeparator, kSubmenu };
@@ -100,7 +111,11 @@ ExtensionSiteAccess GetExtensionSiteAccess(
 // ExtensionContextMenuModel had it when this object was made: the model
 // captures the active tab's origin then, and its site access commands do
 // nothing once the tab has moved to another origin. The items are the ones
-// design/extensions fixes, with the model's enabled and checked state.
+// design/extensions fixes, with the model's enabled and checked state, and
+// after the header the extension's own items for the action context (#915),
+// between two separators, as the model's ContextMenuMatcher lists them:
+// submenus, checkbox and radio items with their check marks, separators,
+// enabled state, invisible ones left out.
 class ArktExtensionContextMenu {
  public:
   // Null when the profile has no enabled extension `id`.
@@ -115,9 +130,11 @@ class ArktExtensionContextMenu {
   const std::vector<ExtensionMenuItem>& items() const { return items_; }
 
   // Runs a command the shell's menu offered: Options, Pin or Unpin, Move Up,
-  // Move Down and the site access choices. False when it ran nothing (an
-  // unknown or disabled command, the extension gone, or Header, Manage and
-  // Remove, which are the shell's).
+  // Move Down, the site access choices and the extension's own items. False
+  // when it ran nothing (an unknown or disabled command, the extension gone,
+  // Header, Manage and Remove, which are the shell's, or an extension item
+  // chosen after another tab became active: chrome.contextMenus.onClicked
+  // gets the tab the menu was built for or nothing).
   bool Execute(int command);
 
   // The menu as a native NSMenu, for the action's own fallback (a click while
@@ -132,13 +149,15 @@ class ArktExtensionContextMenu {
                            const extensions::Extension& extension);
   void BuildItems(const extensions::Extension& extension);
   bool IsOffered(ExtensionContextCommand command) const;
+  bool ExecuteCustom(int command);
   bool ExecuteFromNativeMenu(int command);
 
   raw_ptr<BrowserWindowInterface> browser_;
   raw_ptr<Profile> profile_;
   extensions::ExtensionId id_;
   bool is_pinned_ = false;
-  // The active tab's origin when the menu was built.
+  // The active tab and its origin when the menu was built.
+  base::WeakPtr<content::WebContents> web_contents_;
   url::Origin origin_;
   std::unique_ptr<extensions::ExtensionContextMenuModel> model_;
   std::vector<ExtensionMenuItem> items_;

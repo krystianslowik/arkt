@@ -221,6 +221,11 @@ final class ScriptedMenuItem: NSObject, ArktMenuItem {
     kind = .command; self.title = title; self.command = command.rawValue; self.isEnabled = isEnabled
     self.isChecked = isChecked; children = []
   }
+  /// An extension's own item (#915), whose command is in the custom range.
+  init(title: String, rawCommand: Int, isEnabled: Bool = true, isChecked: Bool = false) {
+    kind = .command; self.title = title; command = rawCommand; self.isEnabled = isEnabled
+    self.isChecked = isChecked; children = []
+  }
   init(title: String, children: [ScriptedMenuItem]) {
     kind = .submenu; self.title = title; command = 0; isEnabled = true; isChecked = false; self.children = children
   }

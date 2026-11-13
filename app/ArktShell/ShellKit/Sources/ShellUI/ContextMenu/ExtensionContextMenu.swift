@@ -5,7 +5,9 @@ import EngineAPI
 /// `EngineMenuBuilder` from the engine's item tree, so Chromium's site access semantics stay authoritative and every
 /// title and enabled or checked state is the engine's. The design table fixes the items: the name as a disabled
 /// header, Options..., Pin or Unpin, Move Up and Move Down (pinned only, each disabled at its end), the site access
-/// submenu (host permissions only), Manage Extension... and Remove from Arkt....
+/// submenu (host permissions only), Manage Extension... and Remove from Arkt.... The extension's own
+/// `chrome.contextMenus` items for its action come right after the header, between separators, as the engine lists
+/// them (#915); the shell draws them like every other item and sends them back to the engine.
 ///
 /// A chosen item goes back to the engine through `performExtensionContextCommand`, except `manage` and `remove`,
 /// which the shell runs itself (`ExtensionContextCommand`): `onManage` opens the extension's entry in Settings,

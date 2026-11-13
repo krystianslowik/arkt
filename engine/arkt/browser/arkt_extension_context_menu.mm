@@ -3,12 +3,15 @@
 #import <AppKit/AppKit.h>
 
 #include <algorithm>
+#include <optional>
 #include <utility>
+#include <vector>
 
 #include "base/logging.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/strcat.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/extensions/context_menu_matcher.h"
 #include "chrome/browser/extensions/extension_context_menu_model.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
@@ -20,6 +23,7 @@
 #include "extensions/browser/permissions_manager.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/permissions/permissions_data.h"
+#include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/base/models/menu_model.h"
 
 // Receives native menu choices and forwards the item's command.
@@ -42,6 +46,7 @@ namespace arkt {
 
 namespace {
 
+using extensions::ContextMenuMatcher;
 using extensions::ExtensionContextMenuModel;
 using UserSiteAccess = extensions::PermissionsManager::UserSiteAccess;
 
@@ -140,6 +145,122 @@ bool FindCommand(ui::MenuModel* model,
   return false;
 }
 
+// Chromium's command id of the extension's own item n.
+int ChromiumCustomCommandId(int command) {
+  return ContextMenuMatcher::ConvertToExtensionsCustomCommandId(
+      command - kExtensionContextCustomFirst);
+}
+
+// The facade's command of Chromium's `command_id`, or -1 out of range.
+int ArktCustomCommand(int command_id) {
+  const int command = kExtensionContextCustomFirst + command_id -
+                      ContextMenuMatcher::ConvertToExtensionsCustomCommandId(0);
+  return IsExtensionContextCustomCommand(command) ? command : -1;
+}
+
+// Drops leading, trailing and doubled separators (left by invisible items).
+void TrimSeparators(std::vector<ExtensionMenuItem>* items) {
+  std::vector<ExtensionMenuItem> kept;
+  for (auto& item : *items) {
+    if (item.kind == ExtensionMenuItem::Kind::kSeparator &&
+        (kept.empty() ||
+         kept.back().kind == ExtensionMenuItem::Kind::kSeparator)) {
+      continue;
+    }
+    kept.push_back(std::move(item));
+  }
+  if (!kept.empty() &&
+      kept.back().kind == ExtensionMenuItem::Kind::kSeparator) {
+    kept.pop_back();
+  }
+  *items = std::move(kept);
+}
+
+// The extension's own items at [begin, end) of `model` (the
+// ContextMenuMatcher's), with the state the model reports. Titles as Chrome's
+// Mac menus draw them: a single "&" marks a mnemonic and is dropped, "&&" is
+// a literal "&".
+std::vector<ExtensionMenuItem> CustomItems(ui::MenuModel* model,
+                                           size_t begin,
+                                           size_t end) {
+  std::vector<ExtensionMenuItem> items;
+  for (size_t i = begin; i < end; ++i) {
+    if (!model->IsVisibleAt(i)) {
+      continue;
+    }
+    const ui::MenuModel::ItemType type = model->GetTypeAt(i);
+    if (type == ui::MenuModel::TYPE_SEPARATOR) {
+      items.push_back(Separator());
+      continue;
+    }
+    const int command = ArktCustomCommand(model->GetCommandIdAt(i));
+    if (command < 0 || !ContextMenuMatcher::IsExtensionsCustomCommandId(
+                           model->GetCommandIdAt(i))) {
+      continue;
+    }
+    std::u16string title = base::SysNSStringToUTF16(
+        l10n_util::FixUpWindowsStyleLabel(model->GetLabelAt(i)));
+    if (type == ui::MenuModel::TYPE_SUBMENU) {
+      ui::MenuModel* submenu = model->GetSubmenuModelAt(i);
+      ExtensionMenuItem holder;
+      holder.kind = ExtensionMenuItem::Kind::kSubmenu;
+      holder.title = std::move(title);
+      holder.enabled = model->IsEnabledAt(i);
+      holder.command = static_cast<ExtensionContextCommand>(command);
+      if (submenu) {
+        holder.children = CustomItems(submenu, 0, submenu->GetItemCount());
+        TrimSeparators(&holder.children);
+      }
+      if (!holder.children.empty()) {
+        items.push_back(std::move(holder));
+      }
+      continue;
+    }
+    if (type != ui::MenuModel::TYPE_COMMAND &&
+        type != ui::MenuModel::TYPE_CHECK &&
+        type != ui::MenuModel::TYPE_RADIO) {
+      continue;
+    }
+    items.push_back(CommandItem(
+        std::move(title), static_cast<ExtensionContextCommand>(command),
+        model->IsEnabledAt(i), model->IsItemCheckedAt(i)));
+  }
+  TrimSeparators(&items);
+  return items;
+}
+
+// The extension's own items in `model`'s top level: from its first custom
+// command to its last, separators between them included.
+std::vector<ExtensionMenuItem> TopLevelCustomItems(ui::MenuModel* model) {
+  std::optional<size_t> first;
+  size_t last = 0;
+  for (size_t i = 0; i < model->GetItemCount(); ++i) {
+    if (model->GetTypeAt(i) != ui::MenuModel::TYPE_SEPARATOR &&
+        ContextMenuMatcher::IsExtensionsCustomCommandId(
+            model->GetCommandIdAt(i))) {
+      first = first.value_or(i);
+      last = i;
+    }
+  }
+  return first ? CustomItems(model, *first, last + 1)
+               : std::vector<ExtensionMenuItem>();
+}
+
+// Finds the item with `command` in `items` and its submenus.
+const ExtensionMenuItem* FindItem(const std::vector<ExtensionMenuItem>& items,
+                                  ExtensionContextCommand command) {
+  for (const auto& item : items) {
+    if (item.kind == ExtensionMenuItem::Kind::kCommand &&
+        item.command == command) {
+      return &item;
+    }
+    if (const ExtensionMenuItem* found = FindItem(item.children, command)) {
+      return found;
+    }
+  }
+  return nullptr;
+}
+
 NSMenu* NativeMenu(const std::vector<ExtensionMenuItem>& items,
                    NSString* title,
                    ArktExtensionContextMenuTarget* target) {
@@ -175,6 +296,11 @@ ExtensionMenuItem::ExtensionMenuItem(const ExtensionMenuItem&) = default;
 ExtensionMenuItem& ExtensionMenuItem::operator=(const ExtensionMenuItem&) =
     default;
 ExtensionMenuItem::~ExtensionMenuItem() = default;
+
+bool IsExtensionContextCustomCommand(int command) {
+  return command >= kExtensionContextCustomFirst &&
+         command <= kExtensionContextCustomLast;
+}
 
 std::vector<extensions::ExtensionId> PinnedExtensionIds(Profile* profile) {
   ToolbarActionsModel* model = InitializedModel(profile);
@@ -271,6 +397,7 @@ ArktExtensionContextMenu::ArktExtensionContextMenu(
   ToolbarActionsModel* toolbar = InitializedModel(profile_);
   is_pinned_ = toolbar && toolbar->IsActionPinned(id_);
   if (content::WebContents* active = ActiveWebContents(browser_)) {
+    web_contents_ = active->GetWeakPtr();
     origin_ = url::Origin::Create(active->GetLastCommittedURL());
   }
   // Chromium's toolbar context menu: the toolbar source with the pin item,
@@ -291,6 +418,16 @@ void ArktExtensionContextMenu::BuildItems(
   header.title = base::UTF8ToUTF16(extension.name());
   header.command = ExtensionContextCommand::kHeader;
   items_.push_back(header);
+
+  // The extension's own items, after the name as in Chrome.
+  std::vector<ExtensionMenuItem> custom = TopLevelCustomItems(model_.get());
+  if (!custom.empty()) {
+    items_.push_back(Separator());
+    for (auto& item : custom) {
+      items_.push_back(std::move(item));
+    }
+    items_.push_back(Separator());
+  }
 
   items_.push_back(
       CommandItem(kOptionsTitle, ExtensionContextCommand::kOptions,
@@ -366,21 +503,47 @@ void ArktExtensionContextMenu::BuildItems(
 
 bool ArktExtensionContextMenu::IsOffered(
     ExtensionContextCommand command) const {
-  for (const auto& item : items_) {
-    if (item.kind == ExtensionMenuItem::Kind::kCommand &&
-        item.command == command) {
-      return item.enabled;
-    }
-    for (const auto& child : item.children) {
-      if (child.command == command) {
-        return child.enabled;
-      }
-    }
+  const ExtensionMenuItem* item = FindItem(items_, command);
+  return item && item->enabled;
+}
+
+bool ArktExtensionContextMenu::ExecuteCustom(int raw_command) {
+  const int command_id = ChromiumCustomCommandId(raw_command);
+  if (!IsOffered(static_cast<ExtensionContextCommand>(raw_command)) ||
+      !ContextMenuMatcher::IsExtensionsCustomCommandId(command_id) ||
+      !extensions::ExtensionRegistry::Get(profile_)
+           ->enabled_extensions()
+           .GetByID(id_)) {
+    LOG(WARNING) << "ARKT: extension context item " << raw_command
+                 << " not offered for " << id_;
+    return false;
   }
-  return false;
+  // The model sends onClicked with the window's active tab at this moment;
+  // only the tab the menu was built for may get it.
+  content::WebContents* active = ActiveWebContents(browser_);
+  if (!active || active != web_contents_.get()) {
+    LOG(WARNING) << "ARKT: extension context item " << raw_command
+                 << " chosen after the active tab changed";
+    return false;
+  }
+  // Live: the extension may have removed, hidden or disabled the item since
+  // (the matcher reports a removed item as invisible).
+  if (!model_->IsCommandIdVisible(command_id) ||
+      !model_->IsCommandIdEnabled(command_id)) {
+    LOG(WARNING) << "ARKT: extension context item " << raw_command
+                 << " gone, hidden or disabled since the menu was built";
+    return false;
+  }
+  LOG(WARNING) << "ARKT: extension context item " << raw_command << " for "
+               << id_;
+  model_->ExecuteCommand(command_id, 0);
+  return true;
 }
 
 bool ArktExtensionContextMenu::Execute(int raw_command) {
+  if (IsExtensionContextCustomCommand(raw_command)) {
+    return ExecuteCustom(raw_command);
+  }
   if (raw_command < static_cast<int>(ExtensionContextCommand::kHeader) ||
       raw_command > static_cast<int>(ExtensionContextCommand::kRemove)) {
     return false;

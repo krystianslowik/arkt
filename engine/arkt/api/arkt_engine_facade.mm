@@ -2952,6 +2952,10 @@ static_assert(static_cast<int>(ExtensionContextCommand::kRemove) ==
               ArktExtensionContextCommandRemove);
 static_assert(static_cast<int>(ExtensionContextCommand::kSiteAccessOnAllSites) ==
               ArktExtensionContextCommandSiteAccessOnAllSites);
+static_assert(kExtensionContextCustomFirst ==
+              ArktExtensionContextCommandCustomFirst);
+static_assert(kExtensionContextCustomLast ==
+              ArktExtensionContextCommandCustomLast);
 
 // An extension context menu's items as facade values (#593).
 NSArray<id<ArktMenuItem>>* FacadeMenuItems(
@@ -4573,7 +4577,10 @@ void DeliverImportResult(void (^completion)(id<ArktImportResult>),
           },
           static_cast<ArktFacadeBrowser*>(browser),
           base::SysNSStringToUTF8(actionId),
-          static_cast<int>(std::clamp<NSInteger>(command, -1, 1000))));
+          // Out of range is no command: a clamp would land on a real item.
+          command < 0 || command > ArktExtensionContextCommandCustomLast
+              ? -1
+              : static_cast<int>(command)));
 }
 
 - (void)uninstallExtension:(NSString*)extensionID
