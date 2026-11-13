@@ -231,6 +231,21 @@ typedef NS_ENUM(NSInteger, ArktEngineEventKind) {
   // state. Sent only for tabs whose last committed origin the change matches;
   // one call of this facade that changes settings reports once per tab.
   ArktEngineEventKindPageInfoChanged = 30,
+  // An extension was installed in the embedder profile for the first time
+  // (#592), from ExtensionRegistryObserver::OnExtensionInstalled. Values:
+  // extensionID, extensionName. Profile-wide: `tab` and `browser` are nil.
+  // Sent when the install is not an update (an extension the profile already
+  // has), its location is ManifestLocation::kInternal (the Chrome Web Store, a
+  // user's .crx, a batch of -installExtensions:completion:) and it is neither
+  // a theme nor an app. Unpacked, command-line, external, policy and
+  // component extensions send nothing. Its order against the
+  // ExtensionActionsChanged that lists its action is not guaranteed. On an
+  // Arkt window the engine drops Chromium's post-install dialog only for an
+  // install this event reported, so a dropped dialog always has its event;
+  // other post-install dialogs (an update's) keep Chromium's sheet, and an
+  // install that skips its post-install UI (a batch) sends the event with no
+  // dialog to drop.
+  ArktEngineEventKindExtensionInstalled = 31,
 };
 
 // Why a tab's page process went away (#577), folded from
@@ -484,6 +499,10 @@ NS_SWIFT_UI_ACTOR
 @property(nonatomic, readonly) BOOL zoomIsUserInitiated;
 // TabFullscreenChanged; NO on every other kind (#577).
 @property(nonatomic, readonly) BOOL isTabFullscreen;
+// ExtensionInstalled; nil on every other kind (#592). The id, and the
+// extension's name as Chromium shows it in its UI.
+@property(nonatomic, readonly, nullable, copy) NSString* extensionID;
+@property(nonatomic, readonly, nullable, copy) NSString* extensionName;
 @end
 
 // One download as plain values, read when the event was recorded (#132).

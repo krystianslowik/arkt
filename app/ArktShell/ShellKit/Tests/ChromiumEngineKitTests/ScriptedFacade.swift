@@ -40,6 +40,8 @@ final class ScriptedEvent: NSObject, ArktEngineEvent {
   var zoomIsDefault = false
   var zoomIsUserInitiated = false
   var isTabFullscreen = false
+  var extensionID: String?
+  var extensionName: String?
 
   init(_ kind: ArktEngineEventKind, tab: (any ArktTabHandle)?, browser: (any ArktBrowserHandle)?) {
     self.kind = kind; self.tab = tab; self.browser = browser
@@ -1389,6 +1391,25 @@ final class ScriptedFacade: NSObject, ArktEngine {
       return ScriptedExtensionResult(id, answer.status, answer.reason)
     }
     Task { @MainActor in completion(results) }
+  }
+
+  /// Ends the held batch with the scripted answers (an id not in `extensionAnswers` is installed).
+  func finishHeldExtensionBatch() {
+    guard let held = heldBatch else { return }
+    heldBatch = nil
+    let results: [any ArktExtensionInstallResult] = held.ids.map { id in
+      let answer = extensionAnswers[id] ?? (.installed, nil)
+      return ScriptedExtensionResult(id, answer.status, answer.reason)
+    }
+    Task { @MainActor in held.completion(results) }
+  }
+
+  /// The profile installed an extension (#592): one profile-wide `ExtensionInstalled`, no tab or window.
+  func recordExtensionInstalled(_ id: String?, name: String?) {
+    let event = ScriptedEvent(.extensionInstalled, tab: nil, browser: nil)
+    event.extensionID = id
+    event.extensionName = name
+    record(event)
   }
 
   /// What the real facade does: every id not yet confirmed fails with "cancelled", then the completion runs.

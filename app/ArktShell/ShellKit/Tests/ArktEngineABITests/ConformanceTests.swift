@@ -128,6 +128,8 @@ final class TestEvent: NSObject, ArktEngineEvent {
   var zoomIsDefault = false
   var zoomIsUserInitiated = false
   var isTabFullscreen = false
+  var extensionID: String?
+  var extensionName: String?
   init(_ kind: ArktEngineEventKind, tab: (any ArktTabHandle)?, browser: (any ArktBrowserHandle)?) {
     self.kind = kind; self.tab = tab; self.browser = browser
   }
@@ -1340,5 +1342,20 @@ struct InfobarABITests {
     #expect(engine.importedBookmarkPaths == [["Reading", "Later"]])
     #expect(historyResult?.lastVisitTime == Date(timeIntervalSince1970: 20))
     #expect(bookmarkResult?.lastVisitTime == nil && bookmarkResult?.written == 1)
+  }
+}
+
+/// The install event (#592): a profile-wide kind with its own number and two plain values, nil on every other kind.
+@MainActor
+struct ExtensionInstalledABITests {
+  @Test func theKindKeepsItsHeaderNumberAndItsValuesAreNilElsewhere() {
+    #expect(ArktEngineEventKind.extensionInstalled.rawValue == 31)
+    let other = TestEvent(.extensionActionsChanged, tab: nil, browser: nil)
+    #expect(other.extensionID == nil && other.extensionName == nil)
+    let installed = TestEvent(.extensionInstalled, tab: nil, browser: nil)
+    installed.extensionID = String(repeating: "a", count: 32)
+    installed.extensionName = "Clips"
+    #expect(installed.tab == nil && installed.browser == nil)
+    #expect(installed.extensionID?.count == 32 && installed.extensionName == "Clips")
   }
 }

@@ -18,6 +18,7 @@
 #include "arkt/browser/arkt_browser_window.h"
 #include "arkt/browser/arkt_extension_batch_install.h"
 #include "arkt/browser/arkt_extension_calls.h"
+#include "arkt/browser/arkt_extension_installs.h"
 #include "arkt/browser/arkt_extension_uninstall.h"
 #include "arkt/browser/arkt_extensions_container.h"
 #include "arkt/browser/arkt_extensions_menu.h"
@@ -411,6 +412,8 @@ const char* KindName(ArktEngineEventKind kind) {
       return "TabFullscreenChanged";
     case ArktEngineEventKindPageInfoChanged:
       return "PageInfoChanged";
+    case ArktEngineEventKindExtensionInstalled:
+      return "ExtensionInstalled";
   }
   return "unknown";
 }
@@ -480,6 +483,8 @@ ArktTerminationStatus CrashStatusOf(content::WebContents* contents) {
 @property(nonatomic) BOOL zoomIsDefault;
 @property(nonatomic) BOOL zoomIsUserInitiated;
 @property(nonatomic) BOOL isTabFullscreen;
+@property(nonatomic, nullable, copy) NSString* extensionID;
+@property(nonatomic, nullable, copy) NSString* extensionName;
 @end
 
 @implementation ArktFacadeEvent
@@ -512,6 +517,8 @@ ArktTerminationStatus CrashStatusOf(content::WebContents* contents) {
 @synthesize zoomIsDefault = _zoomIsDefault;
 @synthesize zoomIsUserInitiated = _zoomIsUserInitiated;
 @synthesize isTabFullscreen = _isTabFullscreen;
+@synthesize extensionID = _extensionID;
+@synthesize extensionName = _extensionName;
 @end
 
 // One download as plain values (#132), read from a snapshot when the change
@@ -1285,6 +1292,11 @@ class Facade : public BrowserCollectionObserver,
         });
     if (Profile* profile = EmbedderProfile()) {
       downloads_ = std::make_unique<DownloadWatcher>(profile, this);
+      // First installs the shell reports in place of Chromium's post-install
+      // dialog (#592).
+      extension_installs_ = std::make_unique<ExtensionInstallWatcher>(
+          profile, base::BindRepeating(&Facade::ExtensionInstalled,
+                                       base::Unretained(this)));
       // The previous run's exit type is fixed when the profile's service is
       // made (#577); Chromium's own acknowledgement (the first tab of a window
       // made outside the startup flow, which every shell window is) does not
@@ -1644,6 +1656,17 @@ class Facade : public BrowserCollectionObserver,
         [pending_ removeObjectAtIndex:static_cast<NSUInteger>(i)];
       }
     }
+  }
+
+  // The profile installed an extension (#592), from inside the registry's
+  // OnExtensionInstalled: one profile-wide ExtensionInstalled.
+  void ExtensionInstalled(const std::string& extension_id,
+                          const std::u16string& name) {
+    ArktFacadeEvent* event = [[ArktFacadeEvent alloc] init];
+    event.kind = ArktEngineEventKindExtensionInstalled;
+    event.extensionID = base::SysUTF8ToNSString(extension_id);
+    event.extensionName = base::SysUTF16ToNSString(name);
+    RecordFromNotification(event);
   }
 
   // A tab's page info changed (#583): a settings change matched its site
@@ -2162,6 +2185,7 @@ class Facade : public BrowserCollectionObserver,
 
   const raw_ptr<FacadeDelegate> delegate_;
   std::unique_ptr<DownloadWatcher> downloads_;
+  std::unique_ptr<ExtensionInstallWatcher> extension_installs_;
   std::unique_ptr<PageInfoHub> page_info_;
   bool last_session_crashed_ = false;
   base::FilePath unanswered_marker_;
@@ -4764,6 +4788,20 @@ void AdoptHeldBrowser(BrowserWindowInterface* browser) {
   if (g_facade) {
     g_facade->AdoptHeld(browser);
   }
+}
+
+void InstallCrxForSelfTest(id<ArktTabHandle> tab,
+                           const base::FilePath& crx_path,
+                           bool prompt_updates,
+                           base::OnceCallback<void(const std::string&)> done) {
+  content::WebContents* contents =
+      [tab isKindOfClass:[ArktFacadeTab class]]
+          ? static_cast<ArktFacadeTab*>(tab).contents
+          : nullptr;
+  InstallCrxForSelfTest(
+      contents ? Profile::FromBrowserContext(contents->GetBrowserContext())
+               : nullptr,
+      contents, crx_path, prompt_updates, std::move(done));
 }
 
 void SetFacadeTerminating(bool terminating) {

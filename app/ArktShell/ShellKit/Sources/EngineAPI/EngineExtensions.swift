@@ -324,7 +324,9 @@ public enum EngineExtensionEvent: Equatable, Sendable {
   /// An extension was installed, in place of Chromium's post-install text. Its order against the
   /// `.extensionActionsChanged` that lists its action (and its pin, when it pins on install) is not guaranteed: in
   /// Chromium `OnExtensionLoaded` adds the action before `OnExtensionInstalled` fires. `OnExtensionInstalled` also
-  /// fires for an update (`is_update`); the engine filters those out and reports only first installs.
+  /// fires for an update (`is_update`); the engine filters those out and reports only first installs. ChromiumEngine
+  /// reports first installs from the Web Store, a user's .crx and an import's batch (#592), not themes or apps;
+  /// unpacked, external, policy and component extensions report nothing.
   case installed(InstalledExtension)
   /// `extensionCommands` changed: a shortcut or scope set, an extension with commands added or removed.
   case commandsChanged
