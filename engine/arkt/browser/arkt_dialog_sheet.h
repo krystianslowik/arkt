@@ -91,8 +91,8 @@ typedef NS_ENUM(NSInteger, ArktDialogSheetDefault) {
 - (void)beginOnWindow:(NSWindow*)parent;
 // Shows the content as a non-modal child window of `anchor`'s window, at the
 // view's top-leading corner (top-trailing in right-to-left UI), following the
-// view's frame and the window's size. Takes key focus only when the parent
-// window is key. Never runs a modal loop.
+// view's frame, its superview's frame and the window's size. Takes key focus
+// only when the parent window is key. Never runs a modal loop.
 - (void)beginPanelOnView:(NSView*)anchor rightToLeft:(BOOL)rightToLeft;
 // Ends the sheet without calling any callback. Safe to call twice.
 - (void)close;

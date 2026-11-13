@@ -7251,3 +7251,133 @@ Unchanged: 16 patch files, 8 seam and hook patch files, 22 upstream files outsid
 Every engine run and the loopback server stopped by exact PID. Throwaway profiles under `profiles/598-20261113/`
 deleted after the runs. No global hot key left registered (step 9 cleared it, and the process exited). Nothing touched
 the Keychain (mock keychain only), the clipboard or `/Applications/Arkt.app`.
+
+## #586: tab-modal dialogs below the infobar rows, file chooser, docked DevTools (seam, no patch)
+
+Date 2026-11-13. Branch `engine/586-tab-modal-infobars` from `main` at `8f552f2f`. `$CR` branch `arkt` unchanged
+(0001-0016).
+
+### Gate
+
+- Seam, no patch. Every Chromium tab-modal dialog that reaches an Arkt window goes through
+  `WebContentsModalDialogManager` to the window's `ArktModalDialogHost` (`constrained_window::ShowWebModal`, so the
+  extension dialogs `ShowWebModalDialog` shows, print preview, and the other `ShowWebModalDialogViews` callers); the
+  host positions the dialog itself, so it can leave the rows' height free. The `TabDialogManager` path stays
+  cancelled by patch 0015.
+- The host view stays the tab's container (or the card): the host observes that view's frame, which is what makes a
+  dialog follow the container when the embedder moves it without a window resize (#261 review). The rows' height is
+  an inset asked on every placement, not a different host view.
+- Facade header: unchanged (`cmp` identical). The self-test probes go through the facade's internal header
+  (`RunDialogProbeForSelfTest`, as `InstallCrxForSelfTest`).
+- `.patches` unchanged (16 lines, 16 `arkt` commits: in sync).
+- Builds: `nice -n 15 autoninja -j 4 -C out/Arkt chrome`; swap 16.9 of 17.4 GB at the start and the end; Chromium disk
+  1.9 TB free, internal disk 42 GB free; load average 3.9 to 5.4.
+
+### What landed
+
+- `ArktModalDialogHost` takes a second block, the height of the tab's infobar rows at the top of the host view.
+  `GetDialogPosition` starts at that height, `GetMaximumDialogSize` leaves it out, and `Attach` puts the dialog's top
+  edge there. The attach log line gains `inset N`.
+- `ArktBrowserWindow::DialogTopInsetFor`: the height of the tab's infobar stack when the stack sits in the dialog
+  host view; 0 with no rows, in HTML fullscreen (the stack is taken out, #577) or when another tab is mounted. A stack
+  the shell presents is hidden but keeps its height (the shell draws its strip over that space), so it counts. Row
+  changes already end in `OnCardResized`, which re-places every dialog that is up.
+- The overlay's permission panel (the fallback when the host does not present the request: placeholder windows, no
+  event sink) anchors to the tab's page view when that view sits in the host view, so it starts below the rows;
+  `ArktDialogSheet` follows the anchor's superview's frame too, so a page view anchor still follows a container that
+  moves without a window resize.
+- `arkt_dialog_probe.{h,mm}` (new, self-test only) and self-test commands `infobars <n>` (test confirm infobars that do
+  not expire), `tab-modal` (`constrained_window::ShowWebModal` of a `ui::DialogModel`, as the extension dialogs),
+  `geometry` (the rows, the page's top and every child window and sheet of the tab's window, in screen points, with
+  `below_rows=yes|no`), `file-folder <path>`, `file-click`, `file-panel` (each open or save panel's parent, then
+  cancelled); `chrome-command` gains `print`, `devtools` and `devtools-toggle`.
+- Separate commit (carry-over from the #922 review), in `SetExtensionCommandShortcut`'s rollback after a refused global
+  registration: a command whose shortcut the user had cleared gets the cleared state back
+  (`UpdateKeybindingPrefs(id, name, "")`), so an update cannot bring the manifest's suggestion back; and a restored
+  global holder whose hot key does not register again is logged.
+
+### Smoke (`out/Arkt/Arkt.app`, fresh profiles under `profiles/586-20261113/`, `--use-mock-keychain --mute-audio`, `--host-resolver-rules="MAP * ~NOTFOUND, EXCLUDE 127.0.0.1"`, a local `file://` fixture page, `--remote-debugging-port`; runs 1, 2 and the break runs with `--no-startup-window --arkt-facade-selftest --arkt-engine-test-api`, commands through page titles over DevTools)
+
+The self-test window is a host-mode window with event sinks: the shell side presents the rows (the stack is hidden and
+keeps its height), as in the app. Rows are 40 pt; the container is 900x600 at 120,150 on screen, so its top is at 750.
+
+| Step (run 1) | Result |
+|---|---|
+| `tab-modal`, 0 rows | top 750, page top 750, gap 0, centred, `below_rows=yes` |
+| Dialog up, `infobars 1`, then `3`, then `0` | the dialog re-attaches with each row (`inset 40`, `80`, `120`, back to `0`); geometry: top 710 / 630 / 750, each equal to the page top, `below_rows=yes` |
+| 3 rows first, then `tab-modal` | attached at `inset 120`, top 630 = page top |
+| `layout 60` (container moved inside the card, no window resize), dialog up with 3 rows | follows: top 570 = page top, `inset 120` |
+| `chrome-command print` with 3 rows | print preview attached at `inset 120`, 850x455, top 630 = page top; `infobars 1`: grows to 850x535 with the freed height, top 710 = page top |
+| Navigation with a dialog up | dialog detached and closed, rows kept |
+| `FATAL`, `Check failed`, `DCHECK`, signals | 0 |
+
+Run 3 (placeholder host: a plain launch of the fixture with `--enable-automation`, no self-test, no event sink, so the
+engine draws its own rows and the overlay draws the permission panel): one row ("controlled by automated test
+software"); the card is 1200x880, its top at 1077, the page view's top at 1037.
+
+| Step (run 3) | Result |
+|---|---|
+| Notification request (button clicked with a user gesture over DevTools) | panel shown, `child=1`, top 1025: 12 pt (its inset) under the page's top, below the row |
+| `window.print()` | print preview attached at `inset 40`, top 1037 = the page's top |
+| Reload | panel closed (`permission prompt closed`), preview detached |
+
+File chooser (run 2): `file-folder` points the chooser at the fixture folder, `file-click` clicks an
+`<input type=file>` with a user gesture, `file-panel` inspects and cancels.
+
+| Step (run 2) | Result |
+|---|---|
+| 0 rows | `NSOpenPanel ... sheet=yes parent <Arkt window> attached to tab window=yes app modal=no folder <fixture>`; cancelled; the tab answers `state`, `crash=0` |
+| 3 rows | the same; the panel is a sheet of the window, frame 880x448 at 130,242, its top at 690, inside the rows' area (630 to 750) |
+
+So the file chooser was already parented to the Arkt window: Chromium's in-process `SelectFileDialogBridge` begins
+the panel as a sheet of the owning `NSWindow`. No fix. With a shell download handler installed, `ArktSaveDialog`
+passes `owning_window` unchanged to the platform dialog for every non-save type, so the shell path is the same.
+
+DevTools dock matrix (run 2): `chrome-command devtools` opens DevTools for the tab in its own window. The front-end
+URL has no `can_dock=true` and its dock controller reports `canDock: false, side: undocked`:
+`DevToolsWindow::Create` only docks when the browser has a `DevtoolsUIController` that can dock, which a Views
+`BrowserView` provides and an Arkt window does not.
+
+| Step (run 2) | Result |
+|---|---|
+| Dock side bottom, right, left, undocked (the front-end's `DockController.setDockSide`, what the menu items call) | the front-end records the side; the browser keeps DevTools in its own window; the tab answers `state` after each |
+| Cmd-Shift-D twice (key events into the DevTools front-end over DevTools) | no dock change, no new window, tab alive |
+| `InspectorFrontendHost.setIsDocked(true)`, then `false` (the binding docking calls) | both answer; `SetIsDocked` turns the request into undocked (`can_dock_` false; DCHECK is off in `out/Arkt`) |
+| `chrome-command devtools-toggle` | enabled; DevTools stays open (toggle closes only a docked DevTools), tab alive |
+| `FATAL`, `Check failed`, `DCHECK`, signals | 0 |
+
+### Deliberate break
+
+`ArktModalDialogHost::TopInset` returned 0, rebuilt (69 s, `FAILED:` 0): with 3 rows the dialog's top was 750 with the
+page's top at 630 (`gap=-120 below_rows=no`); with 1 row, 750 against 710 (`gap=-40 below_rows=no`). Restored and
+rebuilt (69 s, `FAILED:` 0): the same steps give `gap=0 below_rows=yes` both times.
+
+| Step | Result |
+|---|---|
+| Builds | first 82 s, stack-hidden fix 79 s, panel log 78 s, break 69 s, restore 69 s, format 72 s; `FAILED:` 0 each |
+| `gn check out/Arkt "//arkt/*"` | `Header dependency check OK` |
+
+### Patch budget
+
+Unchanged: 16 patch files, 8 seam and hook patch files, 22 upstream files outside 0001-0004. `.patches` 16 lines, 16
+`arkt` commits: in sync. Facade header copies `cmp` identical.
+
+### Left open
+
+- Docked DevTools: a known gap for the preview, as #586 planned. DevTools opens undocked in its own window and every
+  dock request stays undocked, with no crash.
+- Window sheets (the extension install, uninstall and other `ui::DialogModel` sheets the overlay shows with
+  `beginOnWindow:`, and the file chooser) are window-modal: AppKit hangs them from the window's top edge, over the
+  rows' area, as on any Mac window. Only the shell's window delegate (`window:willPositionSheet:usingRect:`) can move
+  them: #924.
+- The overlay permission panel following a row that closes while the panel is up was not run live (it follows the
+  page view's frame, which the row change sets); the shell draws the panel in the app (#581).
+- The carry-over's rollback was not run live: a refused global registration needs a second profile in the process
+  holding the same hot key (as in #598).
+- A Chromium tab-modal dialog under the shell-drawn rows on the shell window, with real input: #925 (needs the user).
+
+### Cleanup
+
+Every engine run stopped by exact PID (runs 1 to 3, break, restore). No crash reports from these runs. Throwaway
+profiles under `profiles/586-20261113/` deleted after the runs. Nothing touched the Keychain (mock keychain only), the
+clipboard, a user file (the chooser opened on the fixture folder and was cancelled) or `/Applications/Arkt.app`.

@@ -273,9 +273,13 @@ ArktBrowserWindow::ArktBrowserWindow(BrowserWindowInterface* browser,
   exclusive_access_context_ =
       std::make_unique<ArktExclusiveAccessContext>(this);
   base::WeakPtr<ArktBrowserWindow> weak = weak_factory_.GetWeakPtr();
-  modal_dialog_host_ = std::make_unique<ArktModalDialogHost>(^NSView* {
-    return weak ? weak->DialogHostViewFor(nullptr) : nil;
-  });
+  modal_dialog_host_ = std::make_unique<ArktModalDialogHost>(
+      ^NSView* {
+        return weak ? weak->DialogHostViewFor(nullptr) : nil;
+      },
+      ^CGFloat {
+        return weak ? weak->DialogTopInsetFor(nullptr) : 0;
+      });
   location_bar_ = std::make_unique<ArktStubLocationBar>(browser_);
   side_panel_ui_ = std::make_unique<ArktSidePanelUI>(browser_);
   // BrowserWindowFeatures creates the NTP footer controller for BrowserView
@@ -574,6 +578,35 @@ NSView* ArktBrowserWindow::DialogHostViewFor(
     }
   }
   return host_.cardView;
+}
+
+CGFloat ArktBrowserWindow::DialogTopInsetFor(
+    content::WebContents* contents) const {
+  NSView* host = DialogHostViewFor(contents);
+  if (!contents) {
+    contents = browser_->GetTabStripModel()->GetActiveWebContents();
+  }
+  auto it =
+      contents ? infobar_presenters_.find(contents) : infobar_presenters_.end();
+  NSView* stack = it != infobar_presenters_.end() ? it->second->stack() : nil;
+  // The rows are laid out at the top of the container or the card
+  // (ArktLayoutBelowTopBar), and taken out of it in HTML fullscreen. A stack
+  // the shell presents is hidden but keeps its height: the shell draws its
+  // strip over that space.
+  if (!host || !stack || stack.superview != host) {
+    return 0;
+  }
+  return NSHeight(stack.frame);
+}
+
+NSView* ArktBrowserWindow::PromptAnchorViewFor(
+    content::WebContents* contents) const {
+  NSView* host = DialogHostViewFor(contents);
+  NSView* page = contents ? contents->GetNativeView().GetNativeNSView() : nil;
+  // The page view is laid out below the rows, so the panel follows them; it
+  // also follows the view moving inside the host (ArktDialogSheet observes
+  // the anchor's superview too).
+  return page && page.superview == host ? page : host;
 }
 
 // static
@@ -1422,9 +1455,13 @@ ArktBrowserWindow::GetWebContentsModalDialogHostFor(
       tab_modal_dialog_hosts_[web_contents];
   if (!host) {
     base::WeakPtr<ArktBrowserWindow> weak = weak_factory_.GetWeakPtr();
-    host = std::make_unique<ArktModalDialogHost>(^NSView* {
-      return weak ? weak->DialogHostViewFor(web_contents) : nil;
-    });
+    host = std::make_unique<ArktModalDialogHost>(
+        ^NSView* {
+          return weak ? weak->DialogHostViewFor(web_contents) : nil;
+        },
+        ^CGFloat {
+          return weak ? weak->DialogTopInsetFor(web_contents) : 0;
+        });
   }
   return host.get();
 }

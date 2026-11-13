@@ -113,6 +113,34 @@ bool FindHolder(Profile* profile,
   return false;
 }
 
+// The user cleared the command's shortcut (Chrome's shortcuts page, or the
+// facade's clear): no key, but the cleared state is kept so an update of the
+// extension does not assign its suggestion again.
+bool ClearedByUser(CommandService* service,
+                   const extensions::ExtensionId& extension_id,
+                   const std::string& command_name) {
+  for (auto type : {extensions::ActionInfo::Type::kBrowser,
+                    extensions::ActionInfo::Type::kPage,
+                    extensions::ActionInfo::Type::kAction}) {
+    bool active = false;
+    extensions::Command command;
+    if (service->GetExtensionActionCommand(
+            extension_id, type, CommandService::ACTIVE_OR_USER_MODIFIED,
+            &command, &active) &&
+        command.command_name() == command_name) {
+      return !active;
+    }
+  }
+  ui::CommandMap named;
+  return service->GetNamedCommands(extension_id,
+                                   CommandService::ACTIVE_OR_USER_MODIFIED,
+                                   CommandService::ANY_SCOPE, &named) &&
+         named.contains(command_name) &&
+         service->FindCommandByName(extension_id, command_name)
+                 .accelerator()
+                 .key_code() == ui::VKEY_UNKNOWN;
+}
+
 }  // namespace
 
 ExtensionCommandInfo::ExtensionCommandInfo() = default;
@@ -171,6 +199,8 @@ ExtensionShortcutResult SetExtensionCommandShortcut(
   const extensions::Command current =
       service->FindCommandByName(extension_id, command_name);
   const bool action = extensions::Command::IsActionRelatedCommand(command_name);
+  const bool cleared = current.accelerator().key_code() == ui::VKEY_UNKNOWN &&
+                       ClearedByUser(service, extension_id, command_name);
   if (shortcut.empty()) {
     // As Chrome's shortcuts page clears one (UpdateKeybindingPrefs with no
     // keystroke): the cleared state counts as the user's, so an update of
@@ -221,12 +251,25 @@ ExtensionShortcutResult SetExtensionCommandShortcut(
         service->AddKeybindingPref(current.accelerator(), extension_id,
                                    command_name, /*allow_overrides=*/true,
                                    current.global());
+      } else if (cleared) {
+        // Removal also dropped the user's cleared state; without it an
+        // update of the extension would assign its suggestion again.
+        service->UpdateKeybindingPrefs(extension_id, command_name,
+                                       std::string());
       }
       // Nothing changed for the command the conflict would have replaced
       // either.
       if (!holder_id.empty()) {
         service->AddKeybindingPref(accelerator, holder_id, holder_name,
                                    /*allow_overrides=*/true, holder_global);
+        if (holder_global && registry &&
+            !registry->IsAcceleratorRegistered(accelerator)) {
+          LOG(WARNING) << "ARKT: extension shortcut "
+                       << ui::Command::AcceleratorToString(accelerator)
+                       << " of " << holder_id << " " << holder_name
+                       << " restored, but its global hot key did not "
+                          "register again";
+        }
       }
       return ExtensionShortcutResult::kGlobalShortcutTaken;
     }

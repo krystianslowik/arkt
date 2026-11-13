@@ -820,12 +820,20 @@ NSColor* SheetAccentTextColor() {
                                               object:parent
                                                queue:nil
                                           usingBlock:place]];
-  anchor.postsFrameChangedNotifications = YES;
-  [_panelTokens
-      addObject:[center addObserverForName:NSViewFrameDidChangeNotification
-                                    object:anchor
-                                     queue:nil
-                                usingBlock:place]];
+  // The anchor's superview too: a page view anchor keeps its frame when the
+  // embedder moves its container without a window resize (#586).
+  NSMutableArray<NSView*>* followed = [NSMutableArray arrayWithObject:anchor];
+  if (anchor.superview) {
+    [followed addObject:anchor.superview];
+  }
+  for (NSView* view in followed) {
+    view.postsFrameChangedNotifications = YES;
+    [_panelTokens
+        addObject:[center addObserverForName:NSViewFrameDidChangeNotification
+                                      object:view
+                                       queue:nil
+                                  usingBlock:place]];
+  }
 
   // Input protection, as Chrome's bubble: the allow answers are not
   // pressable for a moment after the prompt appears.

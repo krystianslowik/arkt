@@ -130,8 +130,9 @@ std::string FrameString(NSRect frame) {
 
 }  // namespace
 
-ArktModalDialogHost::ArktModalDialogHost(NSView* (^view)(void))
-    : view_([view copy]) {}
+ArktModalDialogHost::ArktModalDialogHost(NSView* (^view)(void),
+                                         CGFloat (^top_inset)(void))
+    : view_([view copy]), top_inset_([top_inset copy]) {}
 
 ArktModalDialogHost::~ArktModalDialogHost() {
   if (frame_token_) {
@@ -176,6 +177,10 @@ NSView* ArktModalDialogHost::HostView() {
   return view;
 }
 
+CGFloat ArktModalDialogHost::TopInset(NSView* view) const {
+  return std::clamp(top_inset_(), CGFloat{0}, NSHeight(view.bounds));
+}
+
 gfx::NativeView ArktModalDialogHost::GetHostView() const {
   return gfx::NativeView(view_());
 }
@@ -184,13 +189,13 @@ gfx::Point ArktModalDialogHost::GetDialogPosition(const gfx::Size& size) {
   NSView* view = HostView();
   return gfx::Point(
       std::max(0, (static_cast<int>(NSWidth(view.bounds)) - size.width()) / 2),
-      0);
+      static_cast<int>(TopInset(view)));
 }
 
 gfx::Size ArktModalDialogHost::GetMaximumDialogSize() {
   NSView* view = HostView();
   return gfx::Size(static_cast<int>(NSWidth(view.bounds)),
-                   static_cast<int>(NSHeight(view.bounds)));
+                   static_cast<int>(NSHeight(view.bounds) - TopInset(view)));
 }
 
 void ArktModalDialogHost::AddObserver(
@@ -288,14 +293,16 @@ void ArktModalDialogHost::Attach(views::Widget* widget) {
   }
   NSRect host = [parent convertRectToScreen:[view convertRect:view.bounds
                                                        toView:nil]];
+  // Below the tab's infobar rows (#586): they sit at the view's top.
+  const CGFloat inset = TopInset(view);
   NSRect frame = dialog.frame;
   // Top centre on the view; inside it horizontally when it fits.
   CGFloat x = NSMidX(host) - NSWidth(frame) / 2;
   if (NSWidth(frame) <= NSWidth(host)) {
     x = std::clamp(x, NSMinX(host), NSMaxX(host) - NSWidth(frame));
   }
-  NSPoint origin = NSMakePoint(std::round(x),
-                               std::round(NSMaxY(host) - NSHeight(frame)));
+  NSPoint origin = NSMakePoint(
+      std::round(x), std::round(NSMaxY(host) - inset - NSHeight(frame)));
   bool moved = !NSEqualPoints(origin, frame.origin);
   if (moved) {
     [dialog setFrameOrigin:origin];
@@ -311,7 +318,7 @@ void ArktModalDialogHost::Attach(views::Widget* widget) {
     LOG(WARNING) << "ARKT: tab-modal dialog attached window "
                  << dialog.windowNumber << " parent " << parent.windowNumber
                  << " frame " << FrameString(dialog.frame) << " host view "
-                 << FrameString(host);
+                 << FrameString(host) << " inset " << static_cast<int>(inset);
   }
 }
 

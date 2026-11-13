@@ -1617,17 +1617,42 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
                  << " id=" << command_id
                  << " enabled=" << (enabled ? "yes" : "no")
                  << " tab=" << tab.sessionId << " now=" << tab.zoomPercent;
+  } else if (command == "infobars" || command == "tab-modal" ||
+             command == "geometry" || command == "file-folder" ||
+             command == "file-panel") {
+    // #586: infobars <n> leaves n test infobar rows on the tab; tab-modal
+    // shows a Chromium tab-modal dialog on it; geometry logs where the rows,
+    // the page and each child window of the tab's window are; file-folder
+    // <path> sets where a file chooser opens; file-panel logs each open or
+    // save panel's parent window and cancels it.
+    arkt::RunDialogProbeForSelfTest(tab, words);
+  } else if (command == "file-click") {
+    // #586: clicks the page's file input (made if it has none), with a user
+    // gesture as a click gives it.
+    [self evaluate:@"(() => { let input = "
+                   @"document.querySelector('input[type=file]'); "
+                   @"if (!input) { input = document.createElement('input'); "
+                   @"input.type = 'file'; document.body.append(input); } "
+                   @"input.click(); return 'clicked'; })()"
+             inTab:tab
+       userGesture:YES
+             label:"file-click"];
   } else if (command == "chrome-command") {
     // E1 crash guards: Chromium commands the shell does not send today, sent
     // through the host as a menu item would send them:
-    // copy-url|close-tab|cut|copy|paste|pin.
+    // copy-url|close-tab|cut|copy|paste|pin; #586: print|devtools|
+    // devtools-toggle.
     const int command_id = argument == "copy-url"    ? IDC_COPY_URL
                            : argument == "close-tab" ? IDC_CLOSE_TAB
                            : argument == "cut"       ? IDC_CUT
                            : argument == "copy"      ? IDC_COPY
                            : argument == "paste"     ? IDC_PASTE
                            : argument == "pin"       ? IDC_WINDOW_PIN_TAB
-                                                     : 0;
+                           : argument == "print"     ? IDC_PRINT
+                           : argument == "devtools"  ? IDC_DEV_TOOLS
+                           : argument == "devtools-toggle"
+                               ? IDC_DEV_TOOLS_TOGGLE
+                               : 0;
     id<ArktWindowHost> host = tab.browser.host;
     BOOL enabled = command_id && host.validateCommand &&
                    host.validateCommand(command_id);

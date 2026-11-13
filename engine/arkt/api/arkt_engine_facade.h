@@ -4,6 +4,7 @@
 #import <Foundation/Foundation.h>
 
 #include <string>
+#include <vector>
 
 #import "arkt/api/arkt_engine.h"
 #include "base/files/file_path.h"
@@ -58,6 +59,13 @@ void InstallCrxForSelfTest(id<ArktTabHandle> tab,
                            const base::FilePath& crx_path,
                            bool prompt_updates,
                            base::OnceCallback<void(const std::string&)> done);
+
+// Self-test only (#586): the dialog probes of arkt_dialog_probe.h for the
+// contents of `tab`, a facade tab handle. `words` is the self-test command
+// line: infobars <n> | tab-modal | geometry | file-folder <path> |
+// file-panel.
+void RunDialogProbeForSelfTest(id<ArktTabHandle> tab,
+                               const std::vector<std::string>& words);
 
 }  // namespace arkt
 

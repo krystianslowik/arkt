@@ -16,6 +16,7 @@
 #include "arkt/api/arkt_import_writer.h"
 #include "arkt/api/arkt_page_info.h"
 #include "arkt/browser/arkt_browser_window.h"
+#include "arkt/browser/arkt_dialog_probe.h"
 #include "arkt/browser/arkt_extension_batch_install.h"
 #include "arkt/browser/arkt_extension_calls.h"
 #include "arkt/browser/arkt_extension_commands.h"
@@ -4925,6 +4926,33 @@ void InstallCrxForSelfTest(id<ArktTabHandle> tab,
       contents ? Profile::FromBrowserContext(contents->GetBrowserContext())
                : nullptr,
       contents, crx_path, prompt_updates, std::move(done));
+}
+
+void RunDialogProbeForSelfTest(id<ArktTabHandle> tab,
+                               const std::vector<std::string>& words) {
+  content::WebContents* contents =
+      [tab isKindOfClass:[ArktFacadeTab class]]
+          ? static_cast<ArktFacadeTab*>(tab).contents
+          : nullptr;
+  if (!contents || words.empty()) {
+    return;
+  }
+  const std::string& probe = words[0];
+  const std::string argument = words.size() > 1 ? words[1] : std::string();
+  if (probe == "infobars") {
+    int count = 0;
+    if (base::StringToInt(argument, &count) && count >= 0) {
+      SetTestInfobarsForSelfTest(contents, count);
+    }
+  } else if (probe == "tab-modal") {
+    ShowTabModalForSelfTest(contents);
+  } else if (probe == "geometry") {
+    LogDialogGeometryForSelfTest(contents);
+  } else if (probe == "file-folder") {
+    SetFileChooserFolderForSelfTest(contents, base::FilePath(argument));
+  } else if (probe == "file-panel") {
+    CheckFilePanelsForSelfTest(contents);
+  }
 }
 
 void SetFacadeTerminating(bool terminating) {
