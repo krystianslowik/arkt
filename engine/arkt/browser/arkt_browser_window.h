@@ -75,11 +75,10 @@ class ArktBrowserWindow : public BrowserWindow,
     return extensions_container_.get();
   }
   // Where a permission prompt for `contents` anchors (issue #260): the
-  // tab's container in host mode, the card otherwise, as for tab-modal
-  // dialogs.
-  NSView* PromptAnchorViewFor(content::WebContents* contents) const {
-    return DialogHostViewFor(contents);
-  }
+  // tab's page view, below its infobar rows (#586), when it sits in the view
+  // tab-modal dialogs use; that view otherwise (the tab's container in host
+  // mode, the card).
+  NSView* PromptAnchorViewFor(content::WebContents* contents) const;
   // The facade put the tab's contents view in its container (host mode):
   // the tab's infobars go to the top of that container (Task W3-10).
   void OnTabContentsViewAdopted(content::WebContents* contents);
@@ -317,6 +316,11 @@ class ArktBrowserWindow : public BrowserWindow,
   // has mounted it in this window, else the host's card (Decision 6).
   // nullptr means the active tab.
   NSView* DialogHostViewFor(content::WebContents* contents) const;
+  // The height of `contents`' infobar rows at the top of
+  // DialogHostViewFor(contents), so tab-modal dialogs sit below them (#586);
+  // 0 when the rows are not in that view (none, HTML fullscreen, another
+  // tab mounted). nullptr means the active tab.
+  CGFloat DialogTopInsetFor(content::WebContents* contents) const;
   // Builds an event for the tab at `index` that carries its title and URL, and
   // stores them in `entries_[index]`.
   ArktTabEvent* EntryEvent(ArktTabEventKind kind,

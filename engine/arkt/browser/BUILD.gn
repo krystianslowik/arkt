@@ -84,6 +84,8 @@ source_set("window") {
     "arkt_browser_window.mm",
     "arkt_browser_window_parts.h",
     "arkt_browser_window_parts.mm",
+    "arkt_dialog_probe.h",
+    "arkt_dialog_probe.mm",
     "arkt_dialog_sheet.h",
     "arkt_dialog_sheet.mm",
     "arkt_extension_batch_install.h",
