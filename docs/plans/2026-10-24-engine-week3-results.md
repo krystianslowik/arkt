@@ -7176,7 +7176,8 @@ Cmd-Q, none with Chrome command tags). Without `=bookmarks` that probe stops on 
 | 10. Clear `run-probe`, set `unset` Ctrl+Shift+J, `menu-key` cleared at install; install v1.1 (update) | after the update: `run-probe` none, `menu-key` none, `unset` Ctrl+Shift+J; version 1.1 |
 | 11. `chrome.runtime.reload()` | listing unchanged; J dispatches (page, window); U opens and closes the popup |
 | 12. Relaunch on the same profile | listing unchanged; J dispatches |
-| `FATAL`, `Check failed`, `DCHECK`, signals | 0 in runs 1 to 5 |
+| 13. Clean quit (run 6, no `--remote-debugging-port`, a `file://` page that sends its own commands): install, Ctrl+Shift+Y page and window, Ctrl+Shift+U (popup open), `quit` | Command+T cleared, two `dispatched`, popup opened; the process exited 0 after `keep-alive released (embedder flushed)` |
+| `FATAL`, `Check failed`, `DCHECK`, signals | 0 in runs 1 to 6 |
 
 A first version of the clear used `RemoveKeybindingPrefs` alone: an update then brought a cleared suggestion back
 (`run-probe` Ctrl+Shift+Y after v1.1, run 1), because removal also clears the suggestion's "was assigned" mark. Chrome's
@@ -7210,6 +7211,9 @@ Unchanged: 16 patch files, 8 seam and hook patch files, 22 upstream files outsid
 - `ArktExtensionShortcutResultGlobalShortcutTaken` is reported only when the engine's global listener refuses the
   registration (another profile of this process holds it); Carbon's non-exclusive registration does not tell whether
   another application has the same hot key.
+- `MainMenuHasAccelerator` folds an upper-case letter into Shift, but not a shifted digit or symbol: a menu item
+  written as "1" with Command and Shift does not match Cmd+Shift+1 (Chromium spells it "!" with Command). The shell's
+  menu has no such item today (every Shift item is a letter).
 - An action command in a host window whose shell has not listed the window's actions yet (no action menu) does
   nothing and logs `has no action in this window`.
 
