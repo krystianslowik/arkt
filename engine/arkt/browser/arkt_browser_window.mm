@@ -8,6 +8,7 @@
 #include "arkt/browser/arkt_autofill_bubble_handler.h"
 #include "arkt/browser/arkt_browser_window_parts.h"
 #include "arkt/browser/arkt_extension_calls.h"
+#include "arkt/browser/arkt_extension_keybinding_registry.h"
 #include "arkt/browser/arkt_extensions_bridge.h"
 #include "arkt/browser/arkt_extensions_container.h"
 #include "arkt/browser/arkt_extensions_menu.h"
@@ -41,6 +42,7 @@
 #include "chrome/browser/ui/exclusive_access/fullscreen_controller.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_user_gesture_details.h"
+#include "chrome/browser/ui/toolbar/toolbar_action_view_model.h"
 #include "chrome/browser/ui/unload_controller.h"
 #include "chrome/browser/ui/views/new_tab_footer/footer_controller.h"
 #include "chrome/common/pref_names.h"
@@ -310,6 +312,8 @@ ArktBrowserWindow::ArktBrowserWindow(BrowserWindowInterface* browser,
 }
 
 ArktBrowserWindow::~ArktBrowserWindow() {
+  // Before the features: it holds the browser's TabListInterface.
+  keybinding_registry_.reset();
   // As WebUIBrowserWindow does: features that reach into the window go first.
   browser_->GetFeatures().TearDownPreBrowserWindowDestruction();
 
@@ -357,6 +361,10 @@ void ArktBrowserWindow::BindHost() {
                                   }
                                   BrowserActiveStateManager::From(browser_)
                                       ->DidBecomeActive();
+                                  // The profile's registry for the active
+                                  // window (#598).
+                                  KeybindingRegistry()->OnWindowKeyChanged(
+                                      true);
                                 }]];
   [notification_tokens_
       addObject:[center addObserverForName:NSWindowDidResignKeyNotification
@@ -365,6 +373,10 @@ void ArktBrowserWindow::BindHost() {
                                 usingBlock:^(NSNotification*) {
                                   BrowserActiveStateManager::From(browser_)
                                       ->DidBecomeInactive();
+                                  if (keybinding_registry_) {
+                                    keybinding_registry_->OnWindowKeyChanged(
+                                        false);
+                                  }
                                 }]];
   [notification_tokens_
       addObject:[center
@@ -429,6 +441,19 @@ void ArktBrowserWindow::BindHost() {
   }
 
   base::WeakPtr<ArktBrowserWindow> weak = weak_factory_.GetWeakPtr();
+  // Extension shortcuts with the focus outside the page (#598). A local
+  // monitor sees the key down before the window and the main menu do, as
+  // Chrome's command dispatcher offers it to the extension accelerators
+  // before the menu; the main menu's own keys are still the menu's
+  // (MainMenuHasAccelerator).
+  key_monitor_ = [NSEvent
+      addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown
+                                   handler:^NSEvent*(NSEvent* event) {
+                                     return weak && weak->HandleNonPageKeyDown(
+                                                        event)
+                                                ? nil
+                                                : event;
+                                   }];
   host_.closeRequested = ^{
     if (weak) {
       weak->Close();
@@ -482,6 +507,10 @@ void ArktBrowserWindow::UnbindHost() {
   }
   if (mounted_) {
     Unmount(mounted_);
+  }
+  if (key_monitor_) {
+    [NSEvent removeMonitor:key_monitor_];
+    key_monitor_ = nil;
   }
   host_.closeRequested = nil;
   host_.validateCommand = nil;
@@ -1408,9 +1437,60 @@ BrowserView* ArktBrowserWindow::AsBrowserView() {
 content::KeyboardEventProcessingResult
 ArktBrowserWindow::PreHandleKeyboardEvent(
     const input::NativeWebKeyboardEvent& event) {
-  // The main menu sees Cmd key equivalents after the page did not handle them
-  // (HandleKeyboardEvent), so nothing is reserved here.
+  // Extension shortcuts go before the page, as in Chrome (BrowserView hands
+  // them to its focus manager here, #598). The main menu sees its Cmd key
+  // equivalents after the page did not handle them (HandleKeyboardEvent), so
+  // nothing else is reserved here.
+  if (event.GetType() == input::NativeWebKeyboardEvent::Type::kRawKeyDown &&
+      event.os_event &&
+      KeybindingRegistry()->HandleKeyDown(event.os_event.Get())) {
+    return content::KeyboardEventProcessingResult::HANDLED;
+  }
   return content::KeyboardEventProcessingResult::NOT_HANDLED;
+}
+
+ArktExtensionKeybindingRegistry* ArktBrowserWindow::KeybindingRegistry() {
+  if (!keybinding_registry_) {
+    keybinding_registry_ = std::make_unique<ArktExtensionKeybindingRegistry>(
+        browser_,
+        base::BindRepeating(
+            [](base::WeakPtr<ArktBrowserWindow> window,
+               const extensions::ExtensionId& id) -> ToolbarActionViewModel* {
+              return window ? window->extensions_container()->GetActionForId(id)
+                            : nullptr;
+            },
+            weak_factory_.GetWeakPtr()));
+  }
+  return keybinding_registry_.get();
+}
+
+bool ArktBrowserWindow::HandleNonPageKeyDown(NSEvent* event) {
+  NSWindow* window = host_.window;
+  if (!window || event.windowNumber != window.windowNumber ||
+      browser_->IsDeleteScheduled()) {
+    return false;
+  }
+  // Every extension shortcut but a media key has Command, Control or Option
+  // (ui::Command::ParseImpl); plain typing never reaches the registry.
+  if (!(event.modifierFlags &
+        (NSEventModifierFlagCommand | NSEventModifierFlagControl |
+         NSEventModifierFlagOption))) {
+    return false;
+  }
+  // A page's key downs go through PreHandleKeyboardEvent.
+  NSResponder* responder = window.firstResponder;
+  if ([responder isKindOfClass:[NSView class]]) {
+    NSView* view = static_cast<NSView*>(responder);
+    TabStripModel* model = browser_->GetTabStripModel();
+    for (int i = 0; i < model->count(); ++i) {
+      NSView* page =
+          model->GetWebContentsAt(i)->GetNativeView().GetNativeNSView();
+      if (page && [view isDescendantOf:page]) {
+        return false;
+      }
+    }
+  }
+  return KeybindingRegistry()->HandleKeyDown(event);
 }
 
 bool ArktBrowserWindow::HandleKeyboardEvent(

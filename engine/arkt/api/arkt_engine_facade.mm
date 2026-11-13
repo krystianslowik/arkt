@@ -18,19 +18,20 @@
 #include "arkt/browser/arkt_browser_window.h"
 #include "arkt/browser/arkt_extension_batch_install.h"
 #include "arkt/browser/arkt_extension_calls.h"
+#include "arkt/browser/arkt_extension_commands.h"
 #include "arkt/browser/arkt_extension_installs.h"
 #include "arkt/browser/arkt_extension_uninstall.h"
 #include "arkt/browser/arkt_extensions_container.h"
 #include "arkt/browser/arkt_extensions_menu.h"
-#include "arkt/browser/arkt_javascript_dialog.h"
 #import "arkt/browser/arkt_infobar_view.h"
 #include "arkt/browser/arkt_infobars.h"
+#include "arkt/browser/arkt_javascript_dialog.h"
 #include "arkt/browser/arkt_link_activation.h"
 #include "arkt/browser/arkt_permission_prompt.h"
 #import "arkt/browser/arkt_tab_container_view.h"
 #include "base/check.h"
-#include "base/command_line.h"
 #include "base/check_op.h"
+#include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/functional/bind.h"
@@ -40,8 +41,8 @@
 #include "base/no_destructor.h"
 #include "base/process/kill.h"
 #include "base/scoped_observation.h"
-#include "base/strings/sys_string_conversions.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/bind_post_task.h"
 #include "base/task/sequenced_task_runner.h"
@@ -414,6 +415,8 @@ const char* KindName(ArktEngineEventKind kind) {
       return "PageInfoChanged";
     case ArktEngineEventKindExtensionInstalled:
       return "ExtensionInstalled";
+    case ArktEngineEventKindExtensionCommandsChanged:
+      return "ExtensionCommandsChanged";
   }
   return "unknown";
 }
@@ -1172,6 +1175,38 @@ NSArray<id<ArktSitePermission>>* SitePermissionObjects(
 @synthesize siteAccess = _siteAccess;
 @end
 
+// One extension command (#598).
+@interface ArktFacadeExtensionCommand : NSObject <ArktExtensionCommand>
+@property(nonatomic, copy) NSString* extensionID;
+@property(nonatomic, copy) NSString* commandName;
+@property(nonatomic, copy) NSString* extensionName;
+@property(nonatomic, copy) NSString* commandDescription;
+@property(nonatomic, nullable, copy) NSString* shortcut;
+@property(nonatomic) BOOL isGlobal;
+@end
+
+@implementation ArktFacadeExtensionCommand
+@synthesize extensionID = _extensionID;
+@synthesize commandName = _commandName;
+@synthesize extensionName = _extensionName;
+@synthesize commandDescription = _commandDescription;
+@synthesize shortcut = _shortcut;
+@synthesize isGlobal = _isGlobal;
+@end
+
+// The answer to setExtensionCommandShortcut (#598).
+@interface ArktFacadeShortcutChange : NSObject <ArktExtensionShortcutChange>
+@property(nonatomic) ArktExtensionShortcutResult result;
+@property(nonatomic, nullable, copy) NSString* conflictExtensionID;
+@property(nonatomic, nullable, copy) NSString* conflictCommandName;
+@end
+
+@implementation ArktFacadeShortcutChange
+@synthesize result = _result;
+@synthesize conflictExtensionID = _conflictExtensionID;
+@synthesize conflictCommandName = _conflictCommandName;
+@end
+
 // One item of an extension action's context menu (#593).
 @interface ArktFacadeMenuItem : NSObject <ArktMenuItem>
 @property(nonatomic) ArktMenuItemKind kind;
@@ -1296,6 +1331,10 @@ class Facade : public BrowserCollectionObserver,
       // dialog (#592).
       extension_installs_ = std::make_unique<ExtensionInstallWatcher>(
           profile, base::BindRepeating(&Facade::ExtensionInstalled,
+                                       base::Unretained(this)));
+      // Keyboard command changes (#598).
+      extension_commands_ = std::make_unique<ExtensionCommandsWatcher>(
+          profile, base::BindRepeating(&Facade::ExtensionCommandsChanged,
                                        base::Unretained(this)));
       // The previous run's exit type is fixed when the profile's service is
       // made (#577); Chromium's own acknowledgement (the first tab of a window
@@ -1667,6 +1706,14 @@ class Facade : public BrowserCollectionObserver,
     event.extensionID = base::SysUTF8ToNSString(extension_id);
     event.extensionName = base::SysUTF16ToNSString(name);
     RecordFromNotification(event);
+  }
+
+  // The profile's extension commands changed (#598), on a task of the
+  // watcher's own: one profile-wide ExtensionCommandsChanged.
+  void ExtensionCommandsChanged() {
+    ArktFacadeEvent* event = [[ArktFacadeEvent alloc] init];
+    event.kind = ArktEngineEventKindExtensionCommandsChanged;
+    Record(event);
   }
 
   // A tab's page info changed (#583): a settings change matched its site
@@ -2186,6 +2233,7 @@ class Facade : public BrowserCollectionObserver,
   const raw_ptr<FacadeDelegate> delegate_;
   std::unique_ptr<DownloadWatcher> downloads_;
   std::unique_ptr<ExtensionInstallWatcher> extension_installs_;
+  std::unique_ptr<ExtensionCommandsWatcher> extension_commands_;
   std::unique_ptr<PageInfoHub> page_info_;
   bool last_session_crashed_ = false;
   base::FilePath unanswered_marker_;
@@ -4581,6 +4629,74 @@ void DeliverImportResult(void (^completion)(id<ArktImportResult>),
           command < 0 || command > ArktExtensionContextCommandCustomLast
               ? -1
               : static_cast<int>(command)));
+}
+
+- (NSArray<id<ArktExtensionCommand>>*)extensionCommands {
+  arkt::CheckFacadeEntry();
+  NSMutableArray<id<ArktExtensionCommand>>* result = [NSMutableArray array];
+  for (const arkt::ExtensionCommandInfo& info :
+       arkt::ListExtensionCommands(arkt::EmbedderProfile())) {
+    ArktFacadeExtensionCommand* command =
+        [[ArktFacadeExtensionCommand alloc] init];
+    command.extensionID = base::SysUTF8ToNSString(info.extension_id);
+    command.commandName = base::SysUTF8ToNSString(info.name);
+    command.extensionName = base::SysUTF16ToNSString(info.extension_name);
+    command.commandDescription = base::SysUTF16ToNSString(info.description);
+    command.shortcut =
+        info.shortcut.empty() ? nil : base::SysUTF8ToNSString(info.shortcut);
+    command.isGlobal = info.global;
+    [result addObject:command];
+  }
+  return result;
+}
+
+- (id<ArktExtensionShortcutChange>)
+    setExtensionCommandShortcut:(nullable NSString*)shortcut
+                     forCommand:(NSString*)commandName
+                    ofExtension:(NSString*)extensionID
+                         global:(BOOL)global
+              replacingConflict:(BOOL)replacingConflict {
+  arkt::CheckFacadeEntry();
+  std::string conflict_extension;
+  std::string conflict_command;
+  const arkt::ExtensionShortcutResult result =
+      arkt::SetExtensionCommandShortcut(
+          arkt::EmbedderProfile(), base::SysNSStringToUTF8(extensionID),
+          base::SysNSStringToUTF8(commandName),
+          shortcut ? base::SysNSStringToUTF8(shortcut) : std::string(), global,
+          replacingConflict, &conflict_extension, &conflict_command);
+  ArktFacadeShortcutChange* change = [[ArktFacadeShortcutChange alloc] init];
+  switch (result) {
+    case arkt::ExtensionShortcutResult::kApplied:
+      change.result = ArktExtensionShortcutResultApplied;
+      break;
+    case arkt::ExtensionShortcutResult::kConflict:
+      change.result = ArktExtensionShortcutResultConflict;
+      change.conflictExtensionID = base::SysUTF8ToNSString(conflict_extension);
+      change.conflictCommandName = base::SysUTF8ToNSString(conflict_command);
+      break;
+    case arkt::ExtensionShortcutResult::kNotAllowed:
+      change.result = ArktExtensionShortcutResultNotAllowed;
+      break;
+    case arkt::ExtensionShortcutResult::kUnknownCommand:
+      change.result = ArktExtensionShortcutResultUnknownCommand;
+      break;
+    case arkt::ExtensionShortcutResult::kGlobalShortcutTaken:
+      change.result = ArktExtensionShortcutResultGlobalShortcutTaken;
+      break;
+  }
+  LOG(WARNING) << "ARKT: facade setExtensionCommandShortcut "
+               << base::SysNSStringToUTF8(extensionID) << " "
+               << base::SysNSStringToUTF8(commandName) << " \""
+               << (shortcut ? base::SysNSStringToUTF8(shortcut) : "")
+               << "\" global=" << (global ? 1 : 0)
+               << " replacing=" << (replacingConflict ? 1 : 0)
+               << " result=" << static_cast<int>(change.result)
+               << (conflict_command.empty()
+                       ? ""
+                       : " conflict=" + conflict_extension + " " +
+                             conflict_command);
+  return change;
 }
 
 - (void)uninstallExtension:(NSString*)extensionID

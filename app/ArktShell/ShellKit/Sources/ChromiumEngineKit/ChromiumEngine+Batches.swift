@@ -73,6 +73,7 @@ extension ChromiumEngine {
     case .downloadUpdated: downloadUpdated(event)
     case .downloadRemoved: downloadRemoved(event)
     case .extensionInstalled: extensionInstalled(event)
+    case .extensionCommandsChanged: hub.emit(EngineExtensionEvent.commandsChanged)
     default: tabChanged(event)
     }
   }

@@ -82,6 +82,7 @@ source_set("embedder") {
     "//services/network/public/mojom",
     "//skia",
     "//ui/base",
+    "//ui/events:events_base",
     "//ui/gfx",
     "//ui/gfx/codec",
     "//ui/shell_dialogs",

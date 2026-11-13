@@ -31,6 +31,8 @@ NS_ASSUME_NONNULL_BEGIN
 @protocol ArktDownloadItem;
 @protocol ArktEngineEvent;
 @protocol ArktExtensionAction;
+@protocol ArktExtensionCommand;
+@protocol ArktExtensionShortcutChange;
 @protocol ArktExtensionInstallResult;
 @protocol ArktHistoryEntry;
 @protocol ArktImportBookmark;
@@ -246,6 +248,13 @@ typedef NS_ENUM(NSInteger, ArktEngineEventKind) {
   // install that skips its post-install UI (a batch) sends the event with no
   // dialog to drop.
   ArktEngineEventKindExtensionInstalled = 31,
+  // extensionCommands changed (#598): a shortcut or scope was set or cleared
+  // (through this facade, an extension update, or the engine clearing a
+  // suggestion a main-menu item holds), or an extension with commands was
+  // loaded or unloaded (installed, enabled, disabled, updated, removed). No
+  // values; profile-wide, `tab` and `browser` are nil. The changes of one task
+  // are merged into one event, sent on a later task.
+  ArktEngineEventKindExtensionCommandsChanged = 32,
 };
 
 // Why a tab's page process went away (#577), folded from
@@ -754,6 +763,59 @@ NS_SWIFT_UI_ACTOR
 @property(nonatomic, readonly) BOOL hasOptionsPage;
 // Its site access on the window's active tab.
 @property(nonatomic, readonly) ArktExtensionSiteAccess siteAccess;
+@end
+
+// One chrome.commands command of an enabled extension (#598), as Chrome's
+// keyboard shortcuts page lists it: an extension's action command first, then
+// its named commands.
+NS_SWIFT_UI_ACTOR
+@protocol ArktExtensionCommand <NSObject>
+@property(nonatomic, readonly, copy) NSString* extensionID;
+// The manifest's command name: _execute_action for the action (or
+// _execute_browser_action, _execute_page_action), else the extension's own.
+@property(nonatomic, readonly, copy) NSString* commandName;
+// The extension's name as Chromium shows it.
+@property(nonatomic, readonly, copy) NSString* extensionName;
+// The manifest's description, or Chromium's "Activate the extension" for the
+// action.
+@property(nonatomic, readonly, copy) NSString* commandDescription;
+// The shortcut in Chromium's form, Ctrl, Alt, Command and Shift in that
+// order, then the key, joined by "+" (ui::Command::AcceleratorToString), for
+// example "Command+Shift+Y" or "Ctrl+Alt+Comma" (Ctrl is the Control key,
+// Alt the Option key). Keys: A to Z, 0 to 9, Comma, Period, Up, Down, Left,
+// Right, Insert, Delete, Home, End, PageUp, PageDown, Space, Tab,
+// MediaNextTrack, MediaPrevTrack, MediaPlayPause, MediaStop. Nil when the
+// command has no shortcut.
+@property(nonatomic, readonly, nullable, copy) NSString* shortcut;
+// Works while other applications are active (Chromium's global scope).
+@property(nonatomic, readonly) BOOL isGlobal;
+@end
+
+// The answer to setExtensionCommandShortcut (#598).
+typedef NS_ENUM(NSInteger, ArktExtensionShortcutResult) {
+  // The command has the shortcut and scope now (or already had them).
+  ArktExtensionShortcutResultApplied = 0,
+  // Another command has the shortcut; nothing changed. See conflict*.
+  ArktExtensionShortcutResultConflict = 1,
+  // Chromium does not accept the shortcut for this command
+  // (extensions::Command::StringToAccelerator: an unknown key or form, no
+  // Command, Control or Option on a non-media key, Option with Command or
+  // Control, a media key with modifiers or on an action command), or global
+  // scope for an action command; nothing changed.
+  ArktExtensionShortcutResultNotAllowed = 2,
+  // No enabled extension with that id has that command.
+  ArktExtensionShortcutResultUnknownCommand = 3,
+  // A global shortcut the engine's global listener could not register;
+  // the command keeps what it had.
+  ArktExtensionShortcutResultGlobalShortcutTaken = 4,
+};
+
+NS_SWIFT_UI_ACTOR
+@protocol ArktExtensionShortcutChange <NSObject>
+@property(nonatomic, readonly) ArktExtensionShortcutResult result;
+// The command that has the shortcut, on Conflict only.
+@property(nonatomic, readonly, nullable, copy) NSString* conflictExtensionID;
+@property(nonatomic, readonly, nullable, copy) NSString* conflictCommandName;
 @end
 
 // One back or forward history entry of a tab.
@@ -1359,6 +1421,33 @@ NS_SWIFT_UI_ACTOR
                              forAction:(NSString*)actionId
                              inBrowser:(id<ArktBrowserHandle>)browser
     NS_SWIFT_NAME(performExtensionContextCommand(_:forAction:in:));
+
+// Extension keyboard commands (#598), of the profile the engine started with:
+// every command of its enabled extensions, sorted by extension name, with the
+// shortcut and scope the profile has for them. A command's shortcut works in
+// every Arkt window of the profile, with the page or anything else of the
+// window focused, before the page sees the key (as in Chrome), except a key an
+// item of the main menu has as its key equivalent: the menu keeps it. A
+// manifest suggestion for such a key is not assigned (the engine clears it,
+// see ExtensionCommandsChanged), so the command starts without a shortcut.
+@property(nonatomic, readonly, copy)
+    NSArray<id<ArktExtensionCommand>>* extensionCommands;
+// Sets (nil clears) a command's shortcut, in ArktExtensionCommand's form, and
+// its scope, through Chromium's CommandService, as Chrome's shortcuts page
+// does: the shortcut is the user's from then on, so an update of the
+// extension keeps it. Synchronous; ExtensionCommandsChanged follows when
+// something changed. With `replacingConflict` NO, a shortcut another command
+// has answers Conflict and changes nothing; with YES that command loses it
+// first. Media keys may be shared, as in Chrome. The engine checks only
+// extension commands: conflicts with Arkt's own shortcuts are the shell's to
+// check first. `global` is ignored when clearing.
+- (id<ArktExtensionShortcutChange>)
+    setExtensionCommandShortcut:(nullable NSString*)shortcut
+                     forCommand:(NSString*)commandName
+                    ofExtension:(NSString*)extensionID
+                         global:(BOOL)global
+              replacingConflict:(BOOL)replacingConflict
+    NS_SWIFT_NAME(setExtensionCommandShortcut(_:forCommand:ofExtension:global:replacingConflict:));
 
 // Downloads (#132), of the profile the engine started with. The events are
 // DownloadCreated, DownloadUpdated and DownloadRemoved (no tab, no window).

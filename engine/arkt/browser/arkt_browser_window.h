@@ -30,6 +30,7 @@ namespace arkt {
 class ArktAcceleratorProvider;
 class ArktAutofillBubbleHandler;
 class ArktExclusiveAccessContext;
+class ArktExtensionKeybindingRegistry;
 class ArktExtensionsContainer;
 class ArktInfobarPresenter;
 class ArktModalDialogHost;
@@ -179,6 +180,13 @@ class ArktBrowserWindow : public BrowserWindow,
   bool HandleKeyboardEvent(const input::NativeWebKeyboardEvent& event) override;
   // Hands a key down the page did not handle to the host (Esc, #313).
   bool ForwardUnhandledKeyDown(NSEvent* event);
+  // The window's extension keyboard shortcuts (#598), made on first use.
+  ArktExtensionKeybindingRegistry* KeybindingRegistry();
+  // The window's key monitor: a key down of this window whose first
+  // responder is not a page (the sidebar, a shell field) goes to the
+  // extension shortcuts here; a page's key downs reach them through
+  // PreHandleKeyboardEvent. Returns whether a shortcut took it.
+  bool HandleNonPageKeyDown(NSEvent* event);
   std::unique_ptr<FindBar> CreateFindBar() override;
   web_modal::WebContentsModalDialogHost* GetWebContentsModalDialogHost()
       override;
@@ -357,6 +365,9 @@ class ArktBrowserWindow : public BrowserWindow,
   // Bounds set while the show is held, applied again at release.
   gfx::Rect bounds_pending_;
   bool closed_by_extension_ = false;
+  std::unique_ptr<ArktExtensionKeybindingRegistry> keybinding_registry_;
+  // The local key-down monitor of BindHost (HandleNonPageKeyDown).
+  id __strong key_monitor_;
 
   base::WeakPtrFactory<ArktBrowserWindow> weak_factory_{this};
 };

@@ -209,6 +209,31 @@ final class ScriptedAction: NSObject, ArktExtensionAction {
   }
 }
 
+/// One extension command the scripted facade lists (#598).
+final class ScriptedExtensionCommand: NSObject, ArktExtensionCommand {
+  let extensionID: String
+  let commandName: String
+  let extensionName: String
+  let commandDescription: String
+  let shortcut: String?
+  let isGlobal: Bool
+  init(extensionID: String, commandName: String, extensionName: String, commandDescription: String,
+       shortcut: String?, isGlobal: Bool) {
+    self.extensionID = extensionID; self.commandName = commandName; self.extensionName = extensionName
+    self.commandDescription = commandDescription; self.shortcut = shortcut; self.isGlobal = isGlobal
+  }
+}
+
+/// The scripted facade's answer to `setExtensionCommandShortcut` (#598).
+final class ScriptedShortcutChange: NSObject, ArktExtensionShortcutChange {
+  let result: ArktExtensionShortcutResult
+  let conflictExtensionID: String?
+  let conflictCommandName: String?
+  init(result: ArktExtensionShortcutResult, conflictExtensionID: String? = nil, conflictCommandName: String? = nil) {
+    self.result = result; self.conflictExtensionID = conflictExtensionID; self.conflictCommandName = conflictCommandName
+  }
+}
+
 /// One context menu item the scripted facade returns (#593).
 final class ScriptedMenuItem: NSObject, ArktMenuItem {
   let kind: ArktMenuItemKind
@@ -1407,6 +1432,26 @@ final class ScriptedFacade: NSObject, ArktEngine {
       return ScriptedExtensionResult(id, answer.status, answer.reason)
     }
     Task { @MainActor in held.completion(results) }
+  }
+
+  /// The profile's extension commands (#598), as `extensionCommands` returns them.
+  var extensionCommandList: [ScriptedExtensionCommand] = []
+  var extensionCommands: [any ArktExtensionCommand] { extensionCommandList }
+  /// What `setExtensionCommandShortcut` answers; nothing changes in `extensionCommandList`.
+  var shortcutAnswer = ScriptedShortcutChange(result: .applied)
+  /// What each `setExtensionCommandShortcut` call received, in order.
+  private(set) var shortcutCalls:
+    [(shortcut: String?, commandName: String, extensionID: String, global: Bool, replacing: Bool)] = []
+
+  func setExtensionCommandShortcut(_ shortcut: String?, forCommand commandName: String, ofExtension extensionID: String,
+                                   global: Bool, replacingConflict: Bool) -> any ArktExtensionShortcutChange {
+    shortcutCalls.append((shortcut, commandName, extensionID, global, replacingConflict))
+    return shortcutAnswer
+  }
+
+  /// The profile's commands changed (#598): one profile-wide `ExtensionCommandsChanged`, no tab or window.
+  func recordExtensionCommandsChanged() {
+    record(ScriptedEvent(.extensionCommandsChanged, tab: nil, browser: nil))
   }
 
   /// The profile installed an extension (#592): one profile-wide `ExtensionInstalled`, no tab or window.

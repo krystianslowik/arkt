@@ -17,8 +17,10 @@
 #include "base/strings/string_split.h"
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "ui/base/accelerators/command.h"
 #import "ui/base/cocoa/nsmenu_additions.h"
 #include "ui/base/window_open_disposition.h"
+#include "ui/events/keycodes/keyboard_code_conversion_mac.h"
 
 namespace {
 
@@ -832,6 +834,12 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
                      << " tab=" << (event.tab ? "set" : "nil")
                      << " browser=" << (event.browser ? "set" : "nil");
         break;
+      case ArktEngineEventKindExtensionCommandsChanged:
+        LOG(WARNING) << "ARKT selftest extensionCommandsChanged tab="
+                     << (event.tab ? "set" : "nil")
+                     << " browser=" << (event.browser ? "set" : "nil");
+        [self logExtensionCommands];
+        break;
     }
   }
   if (windows_changed) {
@@ -941,6 +949,106 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
                               isARepeat:NO
                                 keyCode:53];
     [window sendEvent:event];
+  }
+}
+
+// #598: the profile's extension commands as the shell reads them.
+- (void)logExtensionCommands {
+  NSArray<id<ArktExtensionCommand>>* commands = _engine.extensionCommands;
+  LOG(WARNING) << "ARKT selftest ext-commands count=" << commands.count;
+  for (id<ArktExtensionCommand> command in commands) {
+    LOG(WARNING) << "ARKT selftest ext-command "
+                 << base::SysNSStringToUTF8(command.extensionID) << " "
+                 << base::SysNSStringToUTF8(command.commandName) << " \""
+                 << base::SysNSStringToUTF8(command.commandDescription)
+                 << "\" of \"" << base::SysNSStringToUTF8(command.extensionName)
+                 << "\" shortcut="
+                 << (command.shortcut
+                         ? base::SysNSStringToUTF8(command.shortcut)
+                         : std::string("none"))
+                 << " global=" << (command.isGlobal ? "yes" : "no");
+  }
+}
+
+// #598: a key down for `shortcut` (Chromium's form) in `tab`'s window, made
+// in this process and given only to this process. "page" makes the page the
+// first responder and hands the event to the window's sendEvent: (the page
+// path, PreHandleKeyboardEvent); "sidebar" makes the window itself the first
+// responder and posts the event to this application's queue, where the
+// window's local key monitor sees it before AppKit dispatches it. Never the
+// system event queue, so no other app can receive it.
+- (void)sendShortcut:(const std::string&)shortcut
+               toTab:(id<ArktTabHandle>)tab
+                mode:(const std::string&)mode {
+  NSWindow* window = tab.browser.host.window;
+  const ui::Accelerator accelerator =
+      ui::Command::StringToAccelerator(shortcut);
+  if (!window || accelerator.key_code() == ui::VKEY_UNKNOWN) {
+    LOG(WARNING) << "ARKT selftest ext-key " << shortcut << " not sent";
+    return;
+  }
+  NSEventModifierFlags flags = 0;
+  if (accelerator.IsShiftDown()) {
+    flags |= NSEventModifierFlagShift;
+  }
+  if (accelerator.IsCtrlDown()) {
+    flags |= NSEventModifierFlagControl;
+  }
+  if (accelerator.IsAltDown()) {
+    flags |= NSEventModifierFlagOption;
+  }
+  if (accelerator.IsCmdDown()) {
+    flags |= NSEventModifierFlagCommand;
+  }
+  unichar shifted = 0;
+  unichar plain = 0;
+  const int key_code = ui::MacKeyCodeForWindowsKeyCode(accelerator.key_code(),
+                                                       flags, &shifted, &plain);
+  NSString* characters = [NSString stringWithCharacters:&shifted length:1];
+  NSString* unmodified = [NSString stringWithCharacters:&plain length:1];
+  if (mode == "page") {
+    NSView* page = nil;
+    NSMutableArray<NSView*>* queue =
+        [NSMutableArray arrayWithObject:tab.containerView];
+    while (queue.count && !page) {
+      NSView* view = queue.firstObject;
+      [queue removeObjectAtIndex:0];
+      if ([NSStringFromClass([view class])
+              isEqualToString:@"RenderWidgetHostViewCocoa"]) {
+        page = view;
+      }
+      [queue addObjectsFromArray:view.subviews];
+    }
+    [window makeFirstResponder:page];
+  } else {
+    [window makeFirstResponder:nil];
+  }
+  NSResponder* responder = window.firstResponder;
+  LOG(WARNING) << "ARKT selftest ext-key " << shortcut << " mode=" << mode
+               << " keyCode=" << key_code
+               << " appActive=" << (NSApp.isActive ? "yes" : "no")
+               << " key=" << (window.isKeyWindow ? "yes" : "no")
+               << " responder="
+               << base::SysNSStringToUTF8(
+                      responder ? NSStringFromClass([responder class])
+                                : @"none");
+  for (NSEventType type : {NSEventTypeKeyDown, NSEventTypeKeyUp}) {
+    NSEvent* event =
+        [NSEvent keyEventWithType:type
+                               location:NSZeroPoint
+                          modifierFlags:flags
+                              timestamp:NSProcessInfo.processInfo.systemUptime
+                           windowNumber:window.windowNumber
+                                context:nil
+                             characters:characters
+            charactersIgnoringModifiers:unmodified
+                              isARepeat:NO
+                                keyCode:static_cast<unsigned short>(key_code)];
+    if (mode == "page") {
+      [window sendEvent:event];
+    } else {
+      [NSApp postEvent:event atStart:NO];
+    }
   }
 }
 
@@ -1320,6 +1428,37 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
     [_engine performExtensionContextCommand:picked
                                   forAction:base::SysUTF8ToNSString(argument)
                                   inBrowser:tab.browser];
+  } else if (command == "ext-commands") {
+    [self logExtensionCommands];
+  } else if (command == "ext-set") {
+    // ext-set <extension id> <command> <shortcut, or - to clear>
+    // [global] [replace]
+    std::string shortcut = words.size() > 3 ? words[3] : "-";
+    bool global = false;
+    bool replace = false;
+    for (size_t i = 4; i < words.size(); ++i) {
+      global |= words[i] == "global";
+      replace |= words[i] == "replace";
+    }
+    id<ArktExtensionShortcutChange> change = [_engine
+        setExtensionCommandShortcut:shortcut == "-"
+                                        ? nil
+                                        : base::SysUTF8ToNSString(shortcut)
+                         forCommand:base::SysUTF8ToNSString(
+                                        words.size() > 2 ? words[2] : "")
+                        ofExtension:base::SysUTF8ToNSString(argument)
+                             global:global
+                  replacingConflict:replace];
+    LOG(WARNING) << "ARKT selftest ext-set result=" << change.result
+                 << " conflict="
+                 << base::SysNSStringToUTF8(change.conflictExtensionID ?: @"-")
+                 << " "
+                 << base::SysNSStringToUTF8(change.conflictCommandName ?: @"-");
+  } else if (command == "ext-key") {
+    // ext-key <shortcut> page|sidebar
+    [self sendShortcut:argument
+                 toTab:tab
+                  mode:words.size() > 2 ? words[2] : "page"];
   } else if (command == "menu-check") {
     [self menuCheckIn:tab.browser.host.window];
   } else if (command == "run") {

@@ -403,6 +403,27 @@ final class TestImportBookmark: NSObject, ArktImportBookmark {
 
 /// A facade that records events and delivers them as one batch on `flush()`, as the real facade does from a posted
 /// task.
+final class TestExtensionCommand: NSObject, ArktExtensionCommand {
+  let extensionID = "commands-probe"
+  let commandName: String
+  let extensionName = "Commands Probe"
+  let commandDescription = "Run it"
+  let shortcut: String?
+  let isGlobal: Bool
+  init(commandName: String, shortcut: String?, isGlobal: Bool) {
+    self.commandName = commandName; self.shortcut = shortcut; self.isGlobal = isGlobal
+  }
+}
+
+final class TestShortcutChange: NSObject, ArktExtensionShortcutChange {
+  let result: ArktExtensionShortcutResult
+  let conflictExtensionID: String?
+  let conflictCommandName: String?
+  init(result: ArktExtensionShortcutResult, conflictExtensionID: String?, conflictCommandName: String?) {
+    self.result = result; self.conflictExtensionID = conflictExtensionID; self.conflictCommandName = conflictCommandName
+  }
+}
+
 final class TestEngine: NSObject, ArktEngine {
   private var lastId: Int32 = 0
   private var pending: [any ArktEngineEvent] = []
@@ -533,6 +554,22 @@ final class TestEngine: NSObject, ArktEngine {
   }
 
   func cancelExtensionInstalls() {}
+
+  /// One command with a shortcut, one without (#598).
+  var extensionCommands: [any ArktExtensionCommand] {
+    [TestExtensionCommand(commandName: "_execute_action", shortcut: "Ctrl+Shift+U", isGlobal: false),
+     TestExtensionCommand(commandName: "run-probe", shortcut: nil, isGlobal: false)]
+  }
+
+  private(set) var shortcutCalls: [(String?, String, String, Bool, Bool)] = []
+  /// Answers Conflict for "Command+T", Applied otherwise.
+  func setExtensionCommandShortcut(_ shortcut: String?, forCommand commandName: String, ofExtension extensionID: String,
+                                   global: Bool, replacingConflict: Bool) -> any ArktExtensionShortcutChange {
+    shortcutCalls.append((shortcut, commandName, extensionID, global, replacingConflict))
+    return shortcut == "Command+T" && !replacingConflict
+      ? TestShortcutChange(result: .conflict, conflictExtensionID: "other", conflictCommandName: "open")
+      : TestShortcutChange(result: .applied, conflictExtensionID: nil, conflictCommandName: nil)
+  }
 
   private(set) var uninstalledExtensions: [(String, Bool, Int32?)] = []
   /// As the header asks: the completion runs on a later main-thread turn, never inside the call.
@@ -877,6 +914,32 @@ struct ConformanceTests {
     let own = ArktExtensionContextCommand.customFirst.rawValue + 3
     engine.performExtensionContextCommand(own, forAction: "action-probe", in: browser)
     #expect(facade.performedContextCommands.map(\.0) == [own])
+  }
+
+  @Test func extensionCommandsGoThroughTheProtocol() {
+    let facade = TestEngine()
+    let engine: any ArktEngine = facade
+    #expect(engine.extensionCommands.map(\.commandName) == ["_execute_action", "run-probe"])
+    #expect(engine.extensionCommands.map(\.shortcut) == ["Ctrl+Shift+U", nil])
+    let conflict = engine.setExtensionCommandShortcut("Command+T", forCommand: "run-probe",
+                                                      ofExtension: "commands-probe", global: false,
+                                                      replacingConflict: false)
+    #expect(conflict.result == .conflict)
+    #expect(conflict.conflictExtensionID == "other" && conflict.conflictCommandName == "open")
+    let cleared = engine.setExtensionCommandShortcut(nil, forCommand: "run-probe", ofExtension: "commands-probe",
+                                                     global: true, replacingConflict: false)
+    #expect(cleared.result == .applied && cleared.conflictCommandName == nil)
+    #expect(facade.shortcutCalls.map(\.0) == ["Command+T", nil])
+    #expect(facade.shortcutCalls.map(\.3) == [false, true])
+  }
+
+  @Test func theCommandsEventAndShortcutAnswersHaveFixedValues() {
+    #expect(ArktEngineEventKind.extensionCommandsChanged.rawValue == 32)
+    #expect(ArktExtensionShortcutResult.applied.rawValue == 0)
+    #expect(ArktExtensionShortcutResult.conflict.rawValue == 1)
+    #expect(ArktExtensionShortcutResult.notAllowed.rawValue == 2)
+    #expect(ArktExtensionShortcutResult.unknownCommand.rawValue == 3)
+    #expect(ArktExtensionShortcutResult.globalShortcutTaken.rawValue == 4)
   }
 
   @Test func uninstallReachesTheFacadeWithItsFlagAndWindowAndAnswersLater() async throws {
