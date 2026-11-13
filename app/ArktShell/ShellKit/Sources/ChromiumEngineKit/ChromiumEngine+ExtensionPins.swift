@@ -19,15 +19,17 @@ extension ChromiumEngine {
     facade.movePinnedExtension(extensionID, to: index)
   }
 
-  /// The items of Chromium's `ExtensionContextMenuModel` for the window's active tab, as the design lists them. The
-  /// facade keeps that model for `performExtensionContextCommand`, so a site access choice made after the tab moved
-  /// to another site does nothing. Empty for a window the engine does not list.
+  /// The items of Chromium's `ExtensionContextMenuModel` for the window's active tab, as the design lists them, with
+  /// the extension's own action items after the header (#915). The facade keeps that model for
+  /// `performExtensionContextCommand`, so a site access choice made after the tab moved to another site, or an
+  /// extension item chosen after another tab became active, does nothing. Empty for a window the engine does not list.
   public func extensionContextMenu(forAction id: String, in window: EngineWindowID) -> [EngineMenuItem] {
     guard let browser = windows[window]?.browser else { return [] }
     return facade.extensionContextMenu(forAction: id, in: browser).map(EngineMenuItem.init(facade:))
   }
 
-  /// Passed through as chosen; the facade ignores Header, Manage and Remove, which the shell runs itself.
+  /// Passed through as chosen, the extension's own items (`ExtensionContextCommand.customRange`, #915) included; the
+  /// facade ignores Header, Manage and Remove, which the shell runs itself.
   public func performExtensionContextCommand(_ command: EngineMenuCommand, forAction id: String,
                                              in window: EngineWindowID) {
     guard let browser = windows[window]?.browser else { return }

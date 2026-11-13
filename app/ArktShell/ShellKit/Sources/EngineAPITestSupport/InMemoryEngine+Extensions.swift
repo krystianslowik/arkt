@@ -55,8 +55,11 @@ extension InMemoryEngine {
 
   public func extensionContextMenu(forAction id: String, in window: EngineWindowID) -> [EngineMenuItem] {
     guard let action = extensionActions(in: window).first(where: { $0.id == id }) else { return [] }
-    var menu = [
-      EngineMenuItem(title: action.name, command: ExtensionContextCommand.header, isEnabled: false),
+    var menu = [EngineMenuItem(title: action.name, command: ExtensionContextCommand.header, isEnabled: false)]
+    if let own = extensionContextItems[action.extensionID], !own.isEmpty {
+      menu += [.separator] + own + [.separator]
+    }
+    menu += [
       EngineMenuItem(title: "Options...", command: ExtensionContextCommand.options, isEnabled: action.hasOptionsPage),
       EngineMenuItem(title: action.isPinned ? "Unpin" : "Pin",
                      command: ExtensionContextCommand.togglePin),
@@ -99,9 +102,29 @@ extension InMemoryEngine {
     case ExtensionContextCommand.siteAccessOnThisSite: setSiteAccess(.onThisSite, of: extensionID)
     case ExtensionContextCommand.siteAccessOnAllSites: setSiteAccess(.onAllSites, of: extensionID)
     case ExtensionContextCommand.options, ExtensionContextCommand.manage, ExtensionContextCommand.remove: break
+    case _ where ExtensionContextCommand.isCustom(command):
+      guard Self.offers(command, in: extensionContextItems[extensionID] ?? []) else { return }
     default: return
     }
     performedExtensionContextCommands.append((command, id, window))
+  }
+
+  /// Sets the extension's own action context items (#915), listed after the header of its menu in every window, as
+  /// a driver stands in for `chrome.contextMenus`. Use `ExtensionContextCommand.custom(_:)` commands; an empty list
+  /// removes them. Running one records it, when the list offers it enabled.
+  public func setExtensionContextItems(_ items: [EngineMenuItem], forExtension extensionID: String) {
+    extensionContextItems[extensionID] = items.isEmpty ? nil : items
+  }
+
+  /// Whether `items` (submenus included) hold an enabled command item for `command`.
+  private static func offers(_ command: EngineMenuCommand, in items: [EngineMenuItem]) -> Bool {
+    items.contains { item in
+      switch item.kind {
+      case .command(let own): own == command && item.isEnabled
+      case .submenu(let children): offers(command, in: children)
+      case .separator: false
+      }
+    }
   }
 
   private func setSiteAccess(_ access: ExtensionSiteAccess, of extensionID: String) {

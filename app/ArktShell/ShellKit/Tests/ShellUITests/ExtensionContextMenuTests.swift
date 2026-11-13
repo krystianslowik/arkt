@@ -168,6 +168,54 @@ struct ExtensionContextMenuTests {
     #expect(engine.performedExtensionContextCommands.isEmpty)
   }
 
+  // MARK: The extension's own items (#915)
+
+  @Test func extensionsOwnItemsShowAfterTheNameWithTheirState() throws {
+    let (engine, window) = Self.engine([Self.action("a", "Alpha", options: true)])
+    engine.setExtensionContextItems([
+      EngineMenuItem(title: "Run Probe", command: C.custom(0)),
+      EngineMenuItem(title: "Follow This Site", command: C.custom(1), isChecked: true),
+      EngineMenuItem(title: "Mode A", command: C.custom(2), isChecked: true),
+      EngineMenuItem(title: "Mode B", command: C.custom(3)),
+      .separator,
+      .submenu("More", [EngineMenuItem(title: "Child One", command: C.custom(5)),
+                        EngineMenuItem(title: "Child Off", command: C.custom(6), isEnabled: false)]),
+    ], forExtension: "a")
+    let menu = try #require(Self.menu(engine, window, "a"))
+    #expect(titles(menu) == ["Alpha", "-", "Run Probe", "Follow This Site", "Mode A", "Mode B", "-", "More", "-",
+                             "Options...", "Pin", "-", "Manage Extension...", "Remove from Arkt..."])
+    #expect(menu.items[2...5].map(\.state) == [.off, .on, .on, .off])
+    let more = try #require(item(menu, "More")?.submenu)
+    #expect(titles(more) == ["Child One", "Child Off"])
+    #expect(more.items.map(\.isEnabled) == [true, false])
+  }
+
+  @Test func choosingAnExtensionsOwnItemGoesToTheEngine() throws {
+    let (engine, window) = Self.engine([Self.action("a", "Alpha")])
+    engine.setExtensionContextItems([
+      EngineMenuItem(title: "Run Probe", command: C.custom(0)),
+      .submenu("More", [EngineMenuItem(title: "Child One", command: C.custom(2))]),
+    ], forExtension: "a")
+    let menu = try #require(Self.menu(engine, window, "a"))
+    menu.performActionForItem(at: menu.indexOfItem(withTitle: "Run Probe"))
+    let more = try #require(item(menu, "More")?.submenu)
+    more.performActionForItem(at: more.indexOfItem(withTitle: "Child One"))
+    #expect(engine.performedExtensionContextCommands.map(\.command) == [C.custom(0), C.custom(2)])
+    #expect(engine.performedExtensionContextCommands.allSatisfy { $0.actionID == "a" && $0.window == window })
+  }
+
+  @Test func changedItemsShowTheNextTimeTheMenuOpens() throws {
+    let (engine, window) = Self.engine([Self.action("a", "Alpha")])
+    engine.setExtensionContextItems([EngineMenuItem(title: "Pause", command: C.custom(0))], forExtension: "a")
+    #expect(titles(try #require(Self.menu(engine, window, "a"))).prefix(3) == ["Alpha", "-", "Pause"])
+    engine.setExtensionContextItems([EngineMenuItem(title: "Resume", command: C.custom(0)),
+                                     EngineMenuItem(title: "Mute Site", command: C.custom(1))], forExtension: "a")
+    #expect(titles(try #require(Self.menu(engine, window, "a"))).prefix(5)
+      == ["Alpha", "-", "Resume", "Mute Site", "-"])
+    engine.setExtensionContextItems([], forExtension: "a")
+    #expect(titles(try #require(Self.menu(engine, window, "a"))).prefix(2) == ["Alpha", "Options..."])
+  }
+
   @Test func headerDoesNothing() throws {
     let (engine, window) = Self.engine([Self.action("a", "A")])
     let menu = try #require(Self.menu(engine, window, "a"))

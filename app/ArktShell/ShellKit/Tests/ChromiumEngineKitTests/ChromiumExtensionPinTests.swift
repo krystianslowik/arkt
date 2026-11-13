@@ -153,6 +153,43 @@ struct ChromiumExtensionPinTests {
       == [try ScriptedHarness.scriptedBrowser(engine, second).windowId])
   }
 
+  @Test func theExtensionsOwnItemsPassThroughUnchanged() throws {
+    let (engine, first, _) = try makeEngine()
+    facade.contextMenus["alpha"] = [
+      ScriptedMenuItem(title: "Alpha", command: .header, isEnabled: false),
+      ScriptedMenuItem.separator(),
+      ScriptedMenuItem(title: "Run Probe", rawCommand: 1000),
+      ScriptedMenuItem(title: "Follow This Site", rawCommand: 1002, isChecked: true),
+      ScriptedMenuItem(title: "More", children: [ScriptedMenuItem(title: "Child Off", rawCommand: 1006,
+                                                                  isEnabled: false)]),
+      ScriptedMenuItem.separator(),
+      ScriptedMenuItem(title: "Options...", command: .options),
+    ]
+    let menu = engine.extensionContextMenu(forAction: "alpha", in: first)
+    #expect(menu == [
+      EngineMenuItem(title: "Alpha", command: ExtensionContextCommand.header, isEnabled: false),
+      .separator,
+      EngineMenuItem(title: "Run Probe", command: ExtensionContextCommand.custom(0)),
+      EngineMenuItem(title: "Follow This Site", command: ExtensionContextCommand.custom(2), isChecked: true),
+      .submenu("More", [EngineMenuItem(title: "Child Off", command: ExtensionContextCommand.custom(6),
+                                       isEnabled: false)]),
+      .separator,
+      EngineMenuItem(title: "Options...", command: ExtensionContextCommand.options),
+    ])
+  }
+
+  @Test func aChosenCustomItemReachesTheFacadeUnchanged() throws {
+    let (engine, first, _) = try makeEngine()
+    engine.performExtensionContextCommand(ExtensionContextCommand.custom(4), forAction: "alpha", in: first)
+    #expect(facade.performedContextCommands.map(\.command) == [1004])
+    #expect(facade.performedContextCommands.map(\.actionId) == ["alpha"])
+  }
+
+  @Test func theCustomRangeMatchesTheFacades() {
+    #expect(ArktExtensionContextCommand.customFirst.rawValue == ExtensionContextCommand.customRange.lowerBound)
+    #expect(ArktExtensionContextCommand.customLast.rawValue == ExtensionContextCommand.customRange.upperBound)
+  }
+
   @Test func theCommandValuesMatchTheShells() {
     let pairs: [(ArktExtensionContextCommand, EngineMenuCommand)] = [
       (.header, ExtensionContextCommand.header), (.options, ExtensionContextCommand.options),

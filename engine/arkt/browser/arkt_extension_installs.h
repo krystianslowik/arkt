@@ -40,7 +40,8 @@ std::u16string ExtensionNameForDisplay(const extensions::Extension& extension);
 // display name of each install ReportsExtensionInstall accepts, from inside
 // OnExtensionInstalled. Each reported id is also kept as pending until its
 // post-install dialog takes it (TakeReportedInstall); an update or an
-// uninstall of that extension, or the registry's shutdown, drops it first.
+// uninstall of that extension, the registry's shutdown or the watcher's
+// destruction drops it first. UI thread only.
 class ExtensionInstallWatcher : public extensions::ExtensionRegistryObserver {
  public:
   using Callback = base::RepeatingCallback<void(const std::string& id,

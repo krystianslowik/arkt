@@ -697,6 +697,14 @@ typedef NS_ENUM(NSInteger, ArktExtensionContextCommand) {
   // performExtensionContextCommand ignores them.
   ArktExtensionContextCommandManage = 8,
   ArktExtensionContextCommandRemove = 9,
+  // The extension's own chrome.contextMenus items for its action (#915) use
+  // the commands from CustomFirst to CustomLast: its item n (Chromium's
+  // IDC_EXTENSIONS_CONTEXT_CUSTOM_FIRST + n) is CustomFirst + n. They come
+  // right after the header and run through performExtensionContextCommand,
+  // which fires chrome.contextMenus.onClicked for the tab that was active
+  // when the menu was built.
+  ArktExtensionContextCommandCustomFirst = 1000,
+  ArktExtensionContextCommandCustomLast = 2000,
 };
 
 typedef NS_ENUM(NSInteger, ArktMenuItemKind) {
@@ -1345,6 +1353,8 @@ NS_SWIFT_UI_ACTOR
     NS_SWIFT_NAME(extensionContextMenu(forAction:in:));
 // Runs a command the user chose from that menu. Nothing for an unknown action
 // or command, a disabled item, or Header, Manage and Remove (the shell's).
+// An extension's own item (CustomFirst to CustomLast) runs only while the tab
+// that was active when the menu was built is still the active one.
 - (void)performExtensionContextCommand:(NSInteger)command
                              forAction:(NSString*)actionId
                              inBrowser:(id<ArktBrowserHandle>)browser

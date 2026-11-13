@@ -59,6 +59,7 @@ A native `NSMenu`, drawn by AppKit like the tab menus (`design/tab-context-menus
 | Item | Enabled | Notes |
 |---|---|---|
 | (extension name) | disabled header | |
+| (the extension's own items) | as the extension sets them | its `chrome.contextMenus` items for the `action` context (#915), right after the name as in Chrome, with a separator before and after; only when it has any. Titles, check marks (checkbox and radio items), submenus, separators and enabled state are the extension's, drawn as plain AppKit items; hidden items are left out; Chromium caps the top level at six |
 | Options... | extension has an options page | opens it in a tab |
 | Unpin / Pin | always | the title follows the state |
 | Move Up, Move Down | pinned only; each disabled at its end | |

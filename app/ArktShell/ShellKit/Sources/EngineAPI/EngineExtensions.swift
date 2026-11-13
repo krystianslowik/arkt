@@ -121,6 +121,11 @@ public enum ExtensionSiteAccess: Equatable, Sendable {
 /// only to this menu, which the Chromium engine maps to `ExtensionContextMenuModel` entries. A chosen item goes back
 /// through `performExtensionContextCommand`. The shell runs `manage` (Settings, Extensions) and `remove` (the remove
 /// sheet) itself; the engine runs the rest.
+///
+/// The extension's own `chrome.contextMenus` items for its action (#915) use the commands in `customRange`: the engine
+/// lists them right after the header, between separators, with their submenus, check marks and enabled state, and
+/// runs them itself (Chromium fires `chrome.contextMenus.onClicked` for the tab that was active when the menu was
+/// built). Their commands are meaningful only to the menu they came in; the shell passes them back unchanged.
 public enum ExtensionContextCommand {
   /// The extension's name, the menu's disabled header; running it does nothing.
   public static let header = EngineMenuCommand(rawValue: 0)
@@ -139,6 +144,17 @@ public enum ExtensionContextCommand {
   public static let manage = EngineMenuCommand(rawValue: 8)
   /// Remove from Arkt...: the shell's remove sheet.
   public static let remove = EngineMenuCommand(rawValue: 9)
+
+  /// The commands of the extension's own items (#915), the facade's `ArktExtensionContextCommandCustomFirst` to
+  /// `CustomLast`: item `n` of the extension's list is `custom(n)`. Above the fixed ten; 1001 commands, Chromium's own
+  /// limit per menu.
+  public static let customRange: ClosedRange<Int> = 1000...2000
+  /// The command of the extension's own item `index`.
+  public static func custom(_ index: Int) -> EngineMenuCommand {
+    EngineMenuCommand(rawValue: customRange.lowerBound + index)
+  }
+  /// Whether `command` is one of the extension's own items.
+  public static func isCustom(_ command: EngineMenuCommand) -> Bool { customRange.contains(command.rawValue) }
 }
 
 // MARK: - Keyboard commands (#591)

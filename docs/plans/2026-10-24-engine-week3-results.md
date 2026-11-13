@@ -6992,3 +6992,104 @@ Unchanged: 16 patch files, 8 seam and hook patch files, 22 upstream files outsid
 Every engine run ended by its own `quit` command under a 60 s `alarm`; `pgrep` on each profile path prints nothing. No
 crash reports from these runs. Throwaway profiles under `profiles/592-20261113*/` deleted after the runs. Nothing
 touched the Keychain (mock keychain only), the clipboard or `/Applications/Arkt.app`.
+
+## #915: the extension's own `chrome.contextMenus` items in the action context menu (seam, no patch)
+
+Date 2026-11-13. Branch `engine/915-action-context-items` from `main` at `03018350`. `$CR` branch `arkt` unchanged at
+`e483001f98` (0001-0016).
+
+### Gate
+
+- Seam, no patch. The items are already in the model the overlay keeps for the menu (#593):
+  `ExtensionContextMenuModel::InitMenu` calls `AppendExtensionItems` right after the name, and its `ContextMenuMatcher`
+  adds the extension's items for the action (`MenuItemMatchesAction`, at most `ACTION_MENU_TOP_LEVEL_LIMIT`, six, at
+  the top) to the model itself, with nested `SimpleMenuModel`s for submenus. Running one through the model's
+  `ExecuteCommand` reaches `MenuManager::ExecuteCommand`, which computes `checked` and `wasChecked`, adds the tab and
+  dispatches `chrome.contextMenus.onClicked`.
+- Facade header: additive. `ArktExtensionContextCommand` gains `CustomFirst = 1000` and `CustomLast = 2000`; the
+  extension's item n (Chromium's `IDC_EXTENSIONS_CONTEXT_CUSTOM_FIRST + n`) is `1000 + n`. Chromium's 49000-based ids
+  never cross the facade. No existing member changed. Both copies `cmp` identical. Gate note on #915.
+- `.patches` unchanged (16 lines, 16 commits above `156.0.8078.48`: in sync).
+- Builds: `nice -n 15 autoninja -j 4 -C out/Arkt chrome` (swap 16.5 of 17.4 GB at the start, 16.6 at the end).
+  Chromium disk 1.9 TB free throughout; internal disk 43 GB free; load average 5 to 7.
+
+### What landed
+
+- `arkt_extension_context_menu.{h,mm}`: `ArktExtensionContextMenu` walks the model's top level from its first to its
+  last custom command (`ContextMenuMatcher::IsExtensionsCustomCommandId`), separators between them included, and
+  recurses into submenus. Each item carries the model's state: title, type (normal, checkbox, radio, separator,
+  submenu), enabled, checked; invisible items are left out, and leading, trailing and doubled separators are dropped.
+  Titles go through `l10n_util::FixUpWindowsStyleLabel`, as Chrome's Mac menu controller does for every label (a
+  single `&` is a mnemonic marker, `&&` a literal `&`). The items come right after the header, between two
+  separators, only when the extension has any. The engine-drawn fallback menu (an action disabled on the tab) gets
+  them through the same list.
+- Running one (`Execute` with a custom command): it must be an enabled command item of the menu as built (submenus
+  searched too), the tab active when the menu was built must still be the active one (otherwise ignored and logged:
+  Chrome's model sends `onClicked` with the tab active at the time of the choice), and the model must still report
+  it visible and enabled (the matcher reports a removed item as invisible). Then the model's `ExecuteCommand`.
+- Facade: the argument for `performExtensionContextCommand` outside `[0, CustomLast]` becomes -1 (no command) instead
+  of being clamped to `[-1, 1000]`, which would have landed on a real item. `static_assert`s tie the overlay's range
+  to the header's.
+- Swift: `ExtensionContextCommand.customRange`, `custom(_:)`, `isCustom(_:)`; `ChromiumEngine` passes the commands
+  through unchanged (as before); `InMemoryEngine.setExtensionContextItems(_:forExtension:)` stands in for
+  `chrome.contextMenus` in shell tests. The shell's `ExtensionContextMenu` already sent every command other than
+  Manage and Remove to the engine.
+- `engine/test-extensions/menu-probe` (new): a normal item, a checkbox, a radio group, a submenu with a separator, an
+  enabled and a disabled child and a `&&` title, and a hidden item; `onClicked` records `menuItemId`,
+  `parentMenuItemId`, `checked`, `wasChecked`, the tab id and URL in `storage.local` and counts them on the badge.
+- Design: `design/extensions/README.md`, "The context menu", gains the row for the extension's own items.
+- Separate commit (carry-over from the #919 review): `ExtensionInstallWatcher` erases its profile's pending ids in its
+  destructor too, and the pending set checks `DCHECK_CURRENTLY_ON(content::BrowserThread::UI)`.
+
+### Smoke (`out/Arkt/Arkt.app`, `--no-startup-window --arkt-facade-selftest --arkt-engine-test-api --arkt-extensions-menu-dump --remote-debugging-port`, fresh profiles under `profiles/915-20261113/`, `--use-mock-keychain --mute-audio`, `--host-resolver-rules="MAP * ~NOTFOUND, EXCLUDE 127.0.0.1"`, a loopback fixture server, `menu-probe` unpacked, `ext-menu` / `ext-pick` through page titles over DevTools, the probe driven and read through its service worker)
+
+| Step | Result |
+|---|---|
+| 1. `ext-menu` on the http page | 15 items: name (off), -, Run Probe, Follow This Site (checked), - (Chromium's separator before a radio group), Mode A (checked), Mode B, -, More > [Child One, -, Save & Share, Child Off (off)], -, Options... (off), Pin, -, Manage Extension..., Remove from Arkt.... Hidden Item absent; `&&` shows as `&` |
+| 1. Commands | Run Probe 1000, Follow 1001, Mode A 1002, Mode B 1003, Child One 1005, Save & Share 1007, Child Off 1008 (More is 1004, a holder) |
+| 2. `ext-pick` 1000, 1001, 1003, 1005, 1007 | one `onClicked` each, tab 1126602057 (the page), in order: `run`; `follow` `checked=false wasChecked=true`; `mode-b` `checked=true wasChecked=false`; `more-one` `parentMenuItemId=more`; `more-save` |
+| 2. `ext-pick` 1008 (disabled), 1004 (submenu holder), 2001 and -5 (out of range) | `not offered` / `ignored`, no `onClicked` |
+| 3. `ext-menu` again | Follow unchecked, Mode B checked, Mode A unchecked |
+| 2b. Checkbox picked again (run 2) | `follow` `checked=true wasChecked=false` |
+| 4. Menu built on the page, a second tab made active, then `ext-pick` 1000 | `chosen after the active tab changed`, `ignored`, click count unchanged (5) |
+| 5. Menu built on the second tab, `ext-pick` 1000 | `run` with tab 1126602058, `two.html` |
+| 6. While closed: `update` (title, `checked: false`, `enabled: true`, `visible: true`), `remove("mode-b")`, `create("added")`; `ext-menu` | 16 items: Pause Probe, Follow unchecked, Mode A only, Child Off enabled, Hidden Item shown, Added Later; ids renumbered for the new menu |
+| 7. Menu built, `added` removed, then `ext-pick` 1009 | `gone, hidden or disabled since the menu was built`, `ignored`, no `onClicked` |
+| 8. `removeAll`, `ext-menu` | 6 items, the #593 layout: name, Options..., Pin, -, Manage Extension..., Remove from Arkt... |
+| 9. Action disabled on the tab, `run` | `extension context menu fallback ... 15 items`: the same items as a native menu at the action's anchor, closed by the dump timer |
+| Chromium's top-level cap (run 1, an older probe with six visible top-level items before More) | More and everything after it left out by the matcher, as in Chrome |
+| `FATAL`, `Check failed`, `DCHECK`, signals | 0 in every run |
+
+With these flags the self-test's `quit` left the process running after `lifetime keep-alive released`, also with no
+extension loaded and no menu built (runs 4 to 7; cause not investigated, every run had `--remote-debugging-port`, which
+#592's quitting runs did not); those runs were stopped by PID. Run 2 was stopped by PID while its fallback menu was still open (no dump flag): the SIGTERM watchdog wrote a
+crash report, which I deleted; every later run used `--arkt-extensions-menu-dump`.
+
+### Deliberate break
+
+`ArktExtensionContextMenu::Execute` returned `false` for a custom command instead of calling `ExecuteCustom`, rebuilt
+(71 s, `FAILED:` 0): `ext-menu` still listed 15 items, `ext-pick` 1000 and 1001 were `ignored` and the probe recorded
+no click. Restored and rebuilt (68 s, `FAILED:` 0): both `ran`, two clicks with the page's tab. A first attempt
+(`if (false && ...)`) stopped on `-Wunreachable-code`.
+
+| Step | Result |
+|---|---|
+| Builds | 83 s, 79 s (live check tightened), break 71 s, restore 68 s, final (format only) 68 s; `FAILED:` 0 each |
+| `gn check out/Arkt "//arkt/*"` | `Header dependency check OK` |
+
+### Patch budget
+
+Unchanged: 16 patch files, 8 seam and hook patch files, 22 upstream files outside 0001-0004. `.patches` 16 lines, 16
+`arkt` commits: in sync. Facade header copies `cmp` identical.
+
+### Left open
+
+- The shell's menu against this engine with real input (right-click on an action in the Extensions panel) needs the
+  shell build that hosts the engine (#912).
+- Icons: Chrome's action menu shows no icons for these items either; none are drawn.
+
+### Cleanup
+
+Every engine run and the fixture server stopped by exact PID (`ps -p` prints nothing for each). The one crash report
+(run 2, SIGTERM watchdog with a native menu open) deleted. Throwaway profiles under `profiles/915-20261113/` deleted
+after the runs. Nothing touched the Keychain (mock keychain only), the clipboard or `/Applications/Arkt.app`.
