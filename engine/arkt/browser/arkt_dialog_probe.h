@@ -35,6 +35,8 @@ void SetFileChooserFolderForSelfTest(content::WebContents* contents,
 
 // Logs every open or save panel of the app: its parent window, whether it is
 // a sheet of the tab's window, and the folder it shows; then cancels it.
+// Every open or save panel in the process is cancelled, not only the tab's:
+// use it only in a self-test run with no other panel up.
 void CheckFilePanelsForSelfTest(content::WebContents* contents);
 
 }  // namespace arkt
