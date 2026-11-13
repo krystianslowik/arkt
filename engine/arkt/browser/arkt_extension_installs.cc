@@ -12,6 +12,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/profiles/profile.h"
+#include "content/public/browser/browser_thread.h"
 #include "extensions/browser/crx_installer.h"
 #include "extensions/browser/install/crx_install_error.h"
 #include "extensions/browser/extension_dialog_auto_confirm.h"
@@ -26,8 +27,10 @@ namespace {
 
 // Reported installs waiting for their post-install dialog, per profile. The
 // profile pointer is only a key and never dereferenced; the watcher clears
-// its profile's entry on the registry's shutdown.
+// its profile's entry on the registry's shutdown and when it goes away. UI
+// thread only.
 std::map<uintptr_t, std::set<std::string>>& ReportedInstalls() {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   static base::NoDestructor<std::map<uintptr_t, std::set<std::string>>>
       reported;
   return *reported;
@@ -82,7 +85,12 @@ ExtensionInstallWatcher::ExtensionInstallWatcher(Profile* profile,
   }
 }
 
-ExtensionInstallWatcher::~ExtensionInstallWatcher() = default;
+ExtensionInstallWatcher::~ExtensionInstallWatcher() {
+  // Nothing reports or takes this profile's installs once the watcher is
+  // gone, so its pending ids would only wait for a profile that a later one
+  // could reuse the address of.
+  ReportedInstalls().erase(profile_key_);
+}
 
 void ExtensionInstallWatcher::OnExtensionInstalled(
     content::BrowserContext* browser_context,
