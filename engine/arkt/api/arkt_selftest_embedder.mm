@@ -1619,12 +1619,20 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
                  << " tab=" << tab.sessionId << " now=" << tab.zoomPercent;
   } else if (command == "infobars" || command == "tab-modal" ||
              command == "geometry" || command == "file-folder" ||
-             command == "file-panel") {
+             command == "file-panel" || command == "stubs" ||
+             command == "stub-command" || command == "incognito" ||
+             command == "incognito-download" || command == "incognito-close" ||
+             command == "incognito-state") {
     // #586: infobars <n> leaves n test infobar rows on the tab; tab-modal
     // shows a Chromium tab-modal dialog on it; geometry logs where the rows,
     // the page and each child window of the tab's window are; file-folder
     // <path> sets where a file chooser opens; file-panel logs each open or
-    // save panel's parent window and cancels it.
+    // save panel's parent window and cancels it. #589: stubs calls every
+    // Views stub the window keeps; stub-command <name> runs the Chromium
+    // command that reaches one; incognito <url> opens an incognito window at
+    // a URL; incognito-download <url> <file> starts an incognito download
+    // saved to <file> without asking; incognito-close closes the incognito
+    // window as its close button does; incognito-state logs what is left.
     arkt::RunDialogProbeForSelfTest(tab, words);
   } else if (command == "file-click") {
     // #586: clicks the page's file input (made if it has none), with a user
@@ -1688,6 +1696,52 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
              inTab:tab
        userGesture:YES
              label:"fullscreen"];
+  } else if (command == "eyedropper") {
+    // #589: the page's EyeDropper API, with a user gesture as a click gives
+    // it. When the sampler ends, the page title reports the picked color or
+    // the rejection ("eyedropper picked #rrggbb" or "eyedropper rejected
+    // AbortError").
+    [self evaluate:@"(() => { new EyeDropper().open().then("
+                   @"r => document.title = 'eyedropper picked ' + r.sRGBHex, "
+                   @"e => document.title = 'eyedropper rejected ' + e.name); "
+                   @"return 'opened'; })()"
+              inTab:tab
+        userGesture:YES
+              label:"eyedropper"];
+  } else if (command == "app-windows") {
+    // #589: every window of the app, to find a system picker's window.
+    for (NSWindow* window in NSApp.windows) {
+      LOG(WARNING) << "ARKT selftest app-window "
+                   << base::SysNSStringToUTF8(NSStringFromClass([window class]))
+                   << " number=" << window.windowNumber
+                   << " level=" << window.level
+                   << " visible=" << (window.visible ? "yes" : "no")
+                   << " key=" << (window.keyWindow ? "yes" : "no");
+    }
+    LOG(WARNING) << "ARKT selftest app-windows done";
+  } else if (command == "app-esc") {
+    // #589: an Esc key down and up posted to this app's event queue (to its
+    // key window), never to another app.
+    NSWindow* key = NSApp.keyWindow;
+    LOG(WARNING) << "ARKT selftest app-esc key="
+                 << (key ? base::SysNSStringToUTF8(
+                               NSStringFromClass([key class]))
+                         : std::string("none"));
+    const NSEventType types[] = {NSEventTypeKeyDown, NSEventTypeKeyUp};
+    for (NSEventType type : types) {
+      NSEvent* event =
+          [NSEvent keyEventWithType:type
+                                 location:NSZeroPoint
+                            modifierFlags:0
+                                timestamp:NSProcessInfo.processInfo.systemUptime
+                             windowNumber:key.windowNumber
+                                  context:nil
+                               characters:@"\x1b"
+              charactersIgnoringModifiers:@"\x1b"
+                                isARepeat:NO
+                                  keyCode:53];
+      [NSApp postEvent:event atStart:NO];
+    }
   } else if (command == "session") {
     // #577: the crashed-session prompt's state; "dismiss" answers it.
     if (argument == "dismiss") {
