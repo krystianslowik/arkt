@@ -146,12 +146,14 @@ public enum ExtensionContextCommand {
   public static let remove = EngineMenuCommand(rawValue: 9)
 
   /// The commands of the extension's own items (#915), the facade's `ArktExtensionContextCommandCustomFirst` to
-  /// `CustomLast`: item `n` of the extension's list is `custom(n)`. Above the fixed ten; 1001 commands, Chromium's own
-  /// limit per menu.
+  /// `CustomLast`: item `n` of the extension's list is `custom(n)`. Above the fixed ten. Chromium assigns at most 1000
+  /// ids per menu (49000 to 49999, so up to 1999 here); 2000 is accepted, as Chromium accepts 50000, but never assigned.
   public static let customRange: ClosedRange<Int> = 1000...2000
-  /// The command of the extension's own item `index`.
+  /// The command of the extension's own item `index`, which must be in `0...1000`.
   public static func custom(_ index: Int) -> EngineMenuCommand {
-    EngineMenuCommand(rawValue: customRange.lowerBound + index)
+    precondition((0...(customRange.upperBound - customRange.lowerBound)).contains(index),
+                 "custom item \(index) is outside the custom range")
+    return EngineMenuCommand(rawValue: customRange.lowerBound + index)
   }
   /// Whether `command` is one of the extension's own items.
   public static func isCustom(_ command: EngineMenuCommand) -> Bool { customRange.contains(command.rawValue) }

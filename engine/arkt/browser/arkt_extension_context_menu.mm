@@ -193,13 +193,19 @@ std::vector<ExtensionMenuItem> CustomItems(ui::MenuModel* model,
       items.push_back(Separator());
       continue;
     }
+    // Negative unless the id is one of the extension's
+    // (IsExtensionsCustomCommandId).
     const int command = ArktCustomCommand(model->GetCommandIdAt(i));
-    if (command < 0 || !ContextMenuMatcher::IsExtensionsCustomCommandId(
-                           model->GetCommandIdAt(i))) {
+    if (command < 0) {
       continue;
     }
-    std::u16string title = base::SysNSStringToUTF16(
-        l10n_util::FixUpWindowsStyleLabel(model->GetLabelAt(i)));
+    // As Chrome's Mac menu controller (addItemToMenu): the fixup only where
+    // the model allows mnemonics, which the matcher's models always do.
+    std::u16string title =
+        model->MayHaveMnemonicsAt(i)
+            ? base::SysNSStringToUTF16(
+                  l10n_util::FixUpWindowsStyleLabel(model->GetLabelAt(i)))
+            : model->GetLabelAt(i);
     if (type == ui::MenuModel::TYPE_SUBMENU) {
       ui::MenuModel* submenu = model->GetSubmenuModelAt(i);
       ExtensionMenuItem holder;
@@ -247,6 +253,9 @@ std::vector<ExtensionMenuItem> TopLevelCustomItems(ui::MenuModel* model) {
 }
 
 // Finds the item with `command` in `items` and its submenus.
+// The children of a disabled submenu holder are searched too: the shell's
+// menu and the native fallback disable the holder, so they cannot be reached
+// from either, and Chrome's model has the same gap.
 const ExtensionMenuItem* FindItem(const std::vector<ExtensionMenuItem>& items,
                                   ExtensionContextCommand command) {
   for (const auto& item : items) {
