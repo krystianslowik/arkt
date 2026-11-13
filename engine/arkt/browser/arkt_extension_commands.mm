@@ -182,7 +182,11 @@ ExtensionShortcutResult SetExtensionCommandShortcut(
   }
   const ui::Accelerator accelerator =
       extensions::Command::StringToAccelerator(shortcut, command_name);
-  if (accelerator.key_code() == ui::VKEY_UNKNOWN || (global && action)) {
+  // Global scope on a key the main menu holds would take the key from the
+  // menu (a system hot key comes before Arkt's menu and windows), so it is
+  // refused like Chrome refuses global scope on an action command.
+  if (accelerator.key_code() == ui::VKEY_UNKNOWN || (global && action) ||
+      (global && MainMenuHasAccelerator(accelerator))) {
     return ExtensionShortcutResult::kNotAllowed;
   }
   if (current.accelerator() == accelerator && current.global() == global) {
@@ -190,6 +194,7 @@ ExtensionShortcutResult SetExtensionCommandShortcut(
   }
   extensions::ExtensionId holder_id;
   std::string holder_name;
+  bool holder_global = false;
   if (!accelerator.IsMediaKey() &&
       FindHolder(profile, accelerator, extension_id, command_name, &holder_id,
                  &holder_name)) {
@@ -198,6 +203,7 @@ ExtensionShortcutResult SetExtensionCommandShortcut(
       *conflict_command_name = holder_name;
       return ExtensionShortcutResult::kConflict;
     }
+    holder_global = service->FindCommandByName(holder_id, holder_name).global();
     service->RemoveKeybindingPrefs(holder_id, holder_name);
   }
   // As updateExtensionCommand: the old shortcut goes, the new one is the
@@ -215,6 +221,12 @@ ExtensionShortcutResult SetExtensionCommandShortcut(
         service->AddKeybindingPref(current.accelerator(), extension_id,
                                    command_name, /*allow_overrides=*/true,
                                    current.global());
+      }
+      // Nothing changed for the command the conflict would have replaced
+      // either.
+      if (!holder_id.empty()) {
+        service->AddKeybindingPref(accelerator, holder_id, holder_name,
+                                   /*allow_overrides=*/true, holder_global);
       }
       return ExtensionShortcutResult::kGlobalShortcutTaken;
     }
@@ -236,7 +248,11 @@ void ExtensionCommandsWatcher::OnExtensionCommandAdded(
     const extensions::ExtensionId& extension_id,
     const std::string& command_name) {
   if (!g_setting_from_facade) {
-    // Not inside CommandService's own pref update: on a later task.
+    // Not inside CommandService's own pref update: on a later task. This also
+    // sees CommandService moving a user-set action shortcut to the new action
+    // command on an MV2 to MV3 upgrade (RemoveRelinquishedKeybindings); a
+    // main-menu key the user set through the facade is cleared then, though
+    // the menu kept that key anyway.
     base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
         FROM_HERE,
         base::BindOnce(&ExtensionCommandsWatcher::ClearIfMainMenuHolds,

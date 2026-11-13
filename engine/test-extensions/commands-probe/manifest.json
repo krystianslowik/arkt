@@ -18,6 +18,10 @@
       "suggested_key": { "default": "Ctrl+T", "mac": "Command+T" },
       "description": "Asks for a key the main menu holds"
     },
+    "split-key": {
+      "suggested_key": { "default": "Ctrl+Shift+1", "mac": "MacCtrl+Shift+1" },
+      "description": "Asks for the shell's Split View key"
+    },
     "unset": {
       "description": "Has no suggested key"
     }

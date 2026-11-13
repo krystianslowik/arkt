@@ -17,8 +17,8 @@
 #include "extensions/common/command.h"
 #include "extensions/common/extension.h"
 #include "ui/base/accelerators/command.h"
-#import "ui/base/accelerators/platform_accelerator_cocoa.h"
 #include "ui/content_accelerators/accelerator_util.h"
+#include "ui/events/keycodes/keyboard_code_conversion_mac.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 
 namespace arkt {
@@ -78,15 +78,41 @@ bool MainMenuHasAccelerator(const ui::Accelerator& accelerator) {
       accelerator.IsMediaKey()) {
     return false;
   }
-  KeyEquivalentAndModifierMask* equivalent =
-      ui::GetKeyEquivalentAndModifierMaskFromAccelerator(accelerator);
-  if (equivalent.keyEquivalent.length == 0) {
+  NSEventModifierFlags modifiers = 0;
+  if (accelerator.IsShiftDown()) {
+    modifiers |= NSEventModifierFlagShift;
+  }
+  if (accelerator.IsCtrlDown()) {
+    modifiers |= NSEventModifierFlagControl;
+  }
+  if (accelerator.IsAltDown()) {
+    modifiers |= NSEventModifierFlagOption;
+  }
+  if (accelerator.IsCmdDown()) {
+    modifiers |= NSEventModifierFlagCommand;
+  }
+  unichar shifted = 0;
+  unichar plain = 0;
+  if (ui::MacKeyCodeForWindowsKeyCode(accelerator.key_code(), modifiers,
+                                      &shifted, &plain) == -1) {
     return false;
   }
-  return MenuHolds(
-      main_menu,
-      Normalized(equivalent.keyEquivalent,
-                 static_cast<NSEventModifierFlags>(equivalent.modifierMask)));
+  // A menu item may spell a shifted key either way: the character Shift
+  // types without Shift in its mask (Chromium's form, "!" with Control for
+  // Control-Shift-1), or the unshifted character with Shift in its mask (the
+  // shell's Split View items, "1" with Control and Shift). Both count.
+  if (shifted &&
+      MenuHolds(
+          main_menu,
+          Normalized([NSString stringWithCharacters:&shifted length:1],
+                     shifted != plain ? modifiers & ~NSEventModifierFlagShift
+                                      : modifiers))) {
+    return true;
+  }
+  return plain &&
+         MenuHolds(main_menu, Normalized([NSString stringWithCharacters:&plain
+                                                                 length:1],
+                                         modifiers));
 }
 
 ArktExtensionKeybindingRegistry::ArktExtensionKeybindingRegistry(
@@ -113,7 +139,12 @@ ArktExtensionKeybindingRegistry::~ArktExtensionKeybindingRegistry() {
 }
 
 bool ArktExtensionKeybindingRegistry::HandleKeyDown(NSEvent* event) {
-  if (event.type != NSEventTypeKeyDown || event.ARepeat) {
+  // Every extension shortcut but a media key (never a key down) has Command,
+  // Control or Option (ui::Command::ParseImpl): plain typing stops here.
+  if (event.type != NSEventTypeKeyDown || event.ARepeat ||
+      !(event.modifierFlags &
+        (NSEventModifierFlagCommand | NSEventModifierFlagControl |
+         NSEventModifierFlagOption))) {
     return false;
   }
   input::NativeWebKeyboardEvent keyboard_event(
@@ -128,25 +159,25 @@ bool ArktExtensionKeybindingRegistry::HandleAccelerator(
     return false;
   }
   if (MainMenuHasAccelerator(accelerator)) {
-    LOG(WARNING) << "ARKT: extension shortcut "
-                 << ui::Command::AcceleratorToString(accelerator)
-                 << " left to the main menu";
+    VLOG(1) << "ARKT: extension shortcut "
+            << ui::Command::AcceleratorToString(accelerator)
+            << " left to the main menu";
     return false;
   }
   auto action = action_accelerators_.find(accelerator);
   if (action != action_accelerators_.end()) {
     ToolbarActionViewModel* model = action_lookup_.Run(action->second);
     const bool can_handle = model && model->CanHandleAccelerators();
-    LOG(WARNING) << "ARKT: extension shortcut "
-                 << ui::Command::AcceleratorToString(accelerator) << " action "
-                 << action->second
-                 << (can_handle ? " runs" : " has no action in this window");
+    VLOG(1) << "ARKT: extension shortcut "
+            << ui::Command::AcceleratorToString(accelerator) << " action "
+            << action->second
+            << (can_handle ? " runs" : " has no action in this window");
     return can_handle && model->TryHandleAcceleratorPress();
   }
   const bool ran = NotifyEventTargets(accelerator);
-  LOG(WARNING) << "ARKT: extension shortcut "
-               << ui::Command::AcceleratorToString(accelerator)
-               << (ran ? " dispatched" : " found no target");
+  VLOG(1) << "ARKT: extension shortcut "
+          << ui::Command::AcceleratorToString(accelerator)
+          << (ran ? " dispatched" : " found no target");
   return ran;
 }
 

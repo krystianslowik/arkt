@@ -180,7 +180,8 @@ class ArktBrowserWindow : public BrowserWindow,
   bool HandleKeyboardEvent(const input::NativeWebKeyboardEvent& event) override;
   // Hands a key down the page did not handle to the host (Esc, #313).
   bool ForwardUnhandledKeyDown(NSEvent* event);
-  // The window's extension keyboard shortcuts (#598), made on first use.
+  // The window's extension keyboard shortcuts (#598), made on first use;
+  // nullptr once the window is being destroyed.
   ArktExtensionKeybindingRegistry* KeybindingRegistry();
   // The window's key monitor: a key down of this window whose first
   // responder is not a page (the sidebar, a shell field) goes to the
@@ -366,6 +367,8 @@ class ArktBrowserWindow : public BrowserWindow,
   gfx::Rect bounds_pending_;
   bool closed_by_extension_ = false;
   std::unique_ptr<ArktExtensionKeybindingRegistry> keybinding_registry_;
+  // Set first in the destructor: KeybindingRegistry() answers nullptr.
+  bool keys_torn_down_ = false;
   // The local key-down monitor of BindHost (HandleNonPageKeyDown).
   id __strong key_monitor_;
 

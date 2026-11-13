@@ -7179,6 +7179,38 @@ Cmd-Q, none with Chrome command tags). Without `=bookmarks` that probe stops on 
 | 13. Clean quit (run 6, no `--remote-debugging-port`, a `file://` page that sends its own commands): install, Ctrl+Shift+Y page and window, Ctrl+Shift+U (popup open), `quit` | Command+T cleared, two `dispatched`, popup opened; the process exited 0 after `keep-alive released (embedder flushed)` |
 | `FATAL`, `Check failed`, `DCHECK`, signals | 0 in runs 1 to 6 |
 
+### Review round (run 7)
+
+Changes after the #922 review: `MainMenuHasAccelerator` matches a shifted key both ways a menu item can spell it (the
+shifted character without Shift, as Chromium writes Control-Shift-1 as "!" with Control, and the unshifted character
+with Shift, as the shell's Switch to Split View items do), still walking every item, enabled or not; the setter
+answers NotAllowed for global scope on a key the main menu holds, and on a failed global registration it restores the
+shortcut of the command a replaced conflict took it from; the window's key monitor leaves a key alone while the first
+responder has marked text (an input method composing); the registry skips key downs without Command, Control or
+Option before building an accelerator; per-key lines moved to `VLOG(1)`; the window answers no registry once its
+destructor has started. `--arkt-menu-probe` gains View > Switch to Split View 1 (Control-Shift-1, written "1" with
+Control and Shift), and the probe asks for MacCtrl+Shift+1 (`split-key`). The self-test's `ext-key` gains
+`page-queue`: the page is first responder and the event goes through the application's queue, so the monitor, the
+window, the page and `PreHandleKeyboardEvent` all see it.
+
+Run 7: `--vmodule=arkt_extension_keybinding_registry=1`, otherwise as above.
+
+| Step | Result |
+|---|---|
+| Install | Command+T (`menu-key`) and Ctrl+Shift+1 (`split-key`) each `is a main-menu key; left unassigned`; listing shows both without a shortcut |
+| Ctrl+Shift+Y, `page-queue` | one `dispatched` line, one `run-probe` record; the page did not see the key |
+| `split-key` set to Ctrl+Shift+1 through the facade | Applied (kept, the shell's choice) |
+| Ctrl+Shift+1, `page` | `left to the main menu`; the page gets the key (the self-test window sends only Command keys to the menu after the page; the shell's window reserves its Split View keys before the page) |
+| Ctrl+Shift+1, `sidebar` | `left to the main menu`, then Switch to Split View 1 runs |
+| Ctrl+Shift+1, `page-queue` | Switch to Split View 1 runs (the menu takes the key equivalent before the window); no extension command |
+| Global on Ctrl+Shift+1; global on Command+T | NotAllowed, NotAllowed |
+| Ctrl+Shift+Comma; Ctrl+Shift+9 global, then cleared | Applied; Applied (registered) and cleared within about 3 s |
+| `FATAL`, `Check failed`, `DCHECK` | 0 |
+
+The rollback of a replaced conflict after a refused global registration was not run live: a refusal needs a second
+profile in the process holding the same hot key.
+
+
 A first version of the clear used `RemoveKeybindingPrefs` alone: an update then brought a cleared suggestion back
 (`run-probe` Ctrl+Shift+Y after v1.1, run 1), because removal also clears the suggestion's "was assigned" mark. Chrome's
 page clears through `UpdateKeybindingPrefs` with no keystroke, which keeps the mark; the engine now does the same
@@ -7194,7 +7226,7 @@ Restored and rebuilt (69 s, `FAILED:` 0): both paths dispatch, the page sees not
 
 | Step | Result |
 |---|---|
-| Builds | first 68 s after one include fix, nits 68 s, clear fix 68 s, break 71 s, restore 69 s; `FAILED:` 0 each |
+| Builds | first 68 s after one include fix, nits 68 s, clear fix 68 s, break 71 s, restore 69 s, format 77 s, review round 82 s; `FAILED:` 0 each |
 | `gn check out/Arkt "//arkt/*"` | `Header dependency check OK` |
 
 ### Patch budget
@@ -7211,9 +7243,6 @@ Unchanged: 16 patch files, 8 seam and hook patch files, 22 upstream files outsid
 - `ArktExtensionShortcutResultGlobalShortcutTaken` is reported only when the engine's global listener refuses the
   registration (another profile of this process holds it); Carbon's non-exclusive registration does not tell whether
   another application has the same hot key.
-- `MainMenuHasAccelerator` folds an upper-case letter into Shift, but not a shifted digit or symbol: a menu item
-  written as "1" with Command and Shift does not match Cmd+Shift+1 (Chromium spells it "!" with Command). The shell's
-  menu has no such item today (every Shift item is a letter).
 - An action command in a host window whose shell has not listed the window's actions yet (no action menu) does
   nothing and logs `has no action in this window`.
 

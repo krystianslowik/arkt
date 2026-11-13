@@ -801,7 +801,8 @@ typedef NS_ENUM(NSInteger, ArktExtensionShortcutResult) {
   // (extensions::Command::StringToAccelerator: an unknown key or form, no
   // Command, Control or Option on a non-media key, Option with Command or
   // Control, a media key with modifiers or on an action command), or global
-  // scope for an action command; nothing changed.
+  // scope for an action command or for a key the main menu holds (a system hot
+  // key would take it before the menu); nothing changed.
   ArktExtensionShortcutResultNotAllowed = 2,
   // No enabled extension with that id has that command.
   ArktExtensionShortcutResultUnknownCommand = 3,
@@ -1429,7 +1430,11 @@ NS_SWIFT_UI_ACTOR
 // window focused, before the page sees the key (as in Chrome), except a key an
 // item of the main menu has as its key equivalent: the menu keeps it. A
 // manifest suggestion for such a key is not assigned (the engine clears it,
-// see ExtensionCommandsChanged), so the command starts without a shortcut.
+// see ExtensionCommandsChanged), so the command starts without a shortcut,
+// and global scope on such a key is refused (NotAllowed). A global shortcut
+// works in every application through a system hot key. Keys the shell handles
+// outside its main menu (its window's own keys) are the shell's to keep out
+// of the conflict flow; the engine cannot see them.
 @property(nonatomic, readonly, copy)
     NSArray<id<ArktExtensionCommand>>* extensionCommands;
 // Sets (nil clears) a command's shortcut, in ArktExtensionCommand's form, and

@@ -491,6 +491,22 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
   file.submenu = _probeFileMenu;
   [main addItem:file];
 
+  // #598: a key equivalent spelled as the shell's Split View items spell
+  // theirs, the unshifted character with Control and Shift.
+  NSMenuItem* view = [[NSMenuItem alloc] initWithTitle:@"View"
+                                                action:nil
+                                         keyEquivalent:@""];
+  view.submenu = [[NSMenu alloc] initWithTitle:@"View"];
+  NSMenuItem* split =
+      [[NSMenuItem alloc] initWithTitle:@"Switch to Split View 1"
+                                 action:@selector(menuProbeSplitView:)
+                          keyEquivalent:@"1"];
+  split.keyEquivalentModifierMask =
+      NSEventModifierFlagControl | NSEventModifierFlagShift;
+  split.target = self;
+  [view.submenu addItem:split];
+  [main addItem:view];
+
   if (has("bookmarks")) {
     _probeBookmarksItem = [[NSMenuItem alloc] initWithTitle:@"Bookmarks"
                                                      action:nil
@@ -527,6 +543,10 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
 
 - (void)menuProbeNewTab:(id)sender {
   LOG(WARNING) << "ARKT menuprobe action New Tab";
+}
+
+- (void)menuProbeSplitView:(id)sender {
+  LOG(WARNING) << "ARKT menuprobe action Switch to Split View 1";
 }
 
 - (void)logProbeMenuState {
@@ -975,8 +995,11 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
 // first responder and hands the event to the window's sendEvent: (the page
 // path, PreHandleKeyboardEvent); "sidebar" makes the window itself the first
 // responder and posts the event to this application's queue, where the
-// window's local key monitor sees it before AppKit dispatches it. Never the
-// system event queue, so no other app can receive it.
+// window's local key monitor sees it before AppKit dispatches it;
+// "page-queue" makes the page the first responder and this window the key
+// window of this application, then posts the event the same way, so the
+// monitor, the window, the page and PreHandleKeyboardEvent all see it. Never
+// the system event queue, so no other app can receive it.
 - (void)sendShortcut:(const std::string&)shortcut
                toTab:(id<ArktTabHandle>)tab
                 mode:(const std::string&)mode {
@@ -1006,7 +1029,7 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
                                                        flags, &shifted, &plain);
   NSString* characters = [NSString stringWithCharacters:&shifted length:1];
   NSString* unmodified = [NSString stringWithCharacters:&plain length:1];
-  if (mode == "page") {
+  if (mode == "page" || mode == "page-queue") {
     NSView* page = nil;
     NSMutableArray<NSView*>* queue =
         [NSMutableArray arrayWithObject:tab.containerView];
@@ -1022,6 +1045,9 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
     [window makeFirstResponder:page];
   } else {
     [window makeFirstResponder:nil];
+  }
+  if (mode == "page-queue") {
+    [window makeKeyWindow];
   }
   NSResponder* responder = window.firstResponder;
   LOG(WARNING) << "ARKT selftest ext-key " << shortcut << " mode=" << mode
@@ -1047,6 +1073,8 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
     if (mode == "page") {
       [window sendEvent:event];
     } else {
+      // "page-queue" and "sidebar": through the application's queue, so the
+      // window's local key monitor sees the event first.
       [NSApp postEvent:event atStart:NO];
     }
   }

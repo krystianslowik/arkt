@@ -401,8 +401,6 @@ final class TestImportBookmark: NSObject, ArktImportBookmark {
   let folderPath = ["Reading", "Later"]
 }
 
-/// A facade that records events and delivers them as one batch on `flush()`, as the real facade does from a posted
-/// task.
 final class TestExtensionCommand: NSObject, ArktExtensionCommand {
   let extensionID = "commands-probe"
   let commandName: String
@@ -424,6 +422,8 @@ final class TestShortcutChange: NSObject, ArktExtensionShortcutChange {
   }
 }
 
+/// A facade that records events and delivers them as one batch on `flush()`, as the real facade does from a posted
+/// task.
 final class TestEngine: NSObject, ArktEngine {
   private var lastId: Int32 = 0
   private var pending: [any ArktEngineEvent] = []

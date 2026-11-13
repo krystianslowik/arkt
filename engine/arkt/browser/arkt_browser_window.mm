@@ -312,7 +312,10 @@ ArktBrowserWindow::ArktBrowserWindow(BrowserWindowInterface* browser,
 }
 
 ArktBrowserWindow::~ArktBrowserWindow() {
-  // Before the features: it holds the browser's TabListInterface.
+  // Before the features: it holds the browser's TabListInterface. Nothing
+  // makes a new one from here on (the key monitor and observers go in
+  // UnbindHost below).
+  keys_torn_down_ = true;
   keybinding_registry_.reset();
   // As WebUIBrowserWindow does: features that reach into the window go first.
   browser_->GetFeatures().TearDownPreBrowserWindowDestruction();
@@ -363,8 +366,10 @@ void ArktBrowserWindow::BindHost() {
                                       ->DidBecomeActive();
                                   // The profile's registry for the active
                                   // window (#598).
-                                  KeybindingRegistry()->OnWindowKeyChanged(
-                                      true);
+                                  if (ArktExtensionKeybindingRegistry* registry =
+                                          KeybindingRegistry()) {
+                                    registry->OnWindowKeyChanged(true);
+                                  }
                                 }]];
   [notification_tokens_
       addObject:[center addObserverForName:NSWindowDidResignKeyNotification
@@ -1442,7 +1447,7 @@ ArktBrowserWindow::PreHandleKeyboardEvent(
   // equivalents after the page did not handle them (HandleKeyboardEvent), so
   // nothing else is reserved here.
   if (event.GetType() == input::NativeWebKeyboardEvent::Type::kRawKeyDown &&
-      event.os_event &&
+      event.os_event && KeybindingRegistry() &&
       KeybindingRegistry()->HandleKeyDown(event.os_event.Get())) {
     return content::KeyboardEventProcessingResult::HANDLED;
   }
@@ -1450,7 +1455,7 @@ ArktBrowserWindow::PreHandleKeyboardEvent(
 }
 
 ArktExtensionKeybindingRegistry* ArktBrowserWindow::KeybindingRegistry() {
-  if (!keybinding_registry_) {
+  if (!keybinding_registry_ && !keys_torn_down_) {
     keybinding_registry_ = std::make_unique<ArktExtensionKeybindingRegistry>(
         browser_,
         base::BindRepeating(
@@ -1479,6 +1484,11 @@ bool ArktBrowserWindow::HandleNonPageKeyDown(NSEvent* event) {
   }
   // A page's key downs go through PreHandleKeyboardEvent.
   NSResponder* responder = window.firstResponder;
+  // An input method composing in a shell field keeps its keys.
+  if ([responder conformsToProtocol:@protocol(NSTextInputClient)] &&
+      [static_cast<id<NSTextInputClient>>(responder) hasMarkedText]) {
+    return false;
+  }
   if ([responder isKindOfClass:[NSView class]]) {
     NSView* view = static_cast<NSView*>(responder);
     TabStripModel* model = browser_->GetTabStripModel();
@@ -1490,7 +1500,8 @@ bool ArktBrowserWindow::HandleNonPageKeyDown(NSEvent* event) {
       }
     }
   }
-  return KeybindingRegistry()->HandleKeyDown(event);
+  ArktExtensionKeybindingRegistry* registry = KeybindingRegistry();
+  return registry && registry->HandleKeyDown(event);
 }
 
 bool ArktBrowserWindow::HandleKeyboardEvent(
