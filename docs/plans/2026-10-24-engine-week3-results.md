@@ -7416,7 +7416,7 @@ From Chromium 156 source, then live:
   off-the-record profile yet (#557, #705).
 - Before: the stub never answered. `cancel_download_confirmation_state_` stayed `kWaitingForResponse`, so that close
   and every later close of the window were refused: the window could not be closed until the app quit.
-- Now (defined default, pending the maintainer's pick on #589): close, and the profile's downloads are cancelled with
+- Now (maintainer decision on #589, 2026-11-13: no prompt): close, and the profile's downloads are cancelled with
   it. The answer is posted to the next turn: `UnloadController` stores the callback it runs only after
   `ConfirmBrowserCloseWithPendingDownloads` returns, so a synchronous answer would run an empty callback.
 
@@ -7430,7 +7430,7 @@ extension sends it (run 11: enabled or not on an Arkt window); "No-crash" is the
 | Stub | Class | Owner or reason | Command (enabled) | No-crash |
 |---|---|---|---|---|
 | `OpenEyeDropper` | native (this task) | Chromium's `NSColorSampler` eye dropper | page `EyeDropper` API | open stays pending while the sampler is up |
-| `ConfirmBrowserCloseWithPendingDownloads` | native default (this task) | close and cancel; ask is a maintainer pick | close of the last incognito window | window closes |
+| `ConfirmBrowserCloseWithPendingDownloads` | native default (this task) | close and cancel, no prompt (decision on #589) | close of the last incognito window | window closes |
 | `Deactivate` | matches Chromium on Mac | `NativeWidgetMac::Deactivate` is not implemented either | - | yes |
 | `DisableTabStripEditingForTesting` | test only | no product caller | - | yes |
 | `SetFocusToLocationBar` | native in the shell | the shell's address and command bar | `IDC_FOCUS_LOCATION` (yes) | yes |
@@ -7489,6 +7489,7 @@ was stopped by its PID). The shell's menu does not send it.
 | `stub-command` x13 (run 11) | 11 enabled and run, `caret` and `translate` disabled; tab alive after each |
 | Incognito window, download running, close, before (run 5, stub) | `ConfirmBrowserCloseWithPendingDownloads` stub logged; 3 s later `windows=1 downloads=1 closing=no visible=yes`; a second close: the same |
 | The same, after (runs 8 and 11) | `close with 1 pending download(s), type 2: closing`; `windowClosed reason=1`; `windows=0 downloads=0`; the partial file removed |
+| Twice in one session (run 13): a second incognito window with a new download, closed | the same lines again for the second window; `windows=0 downloads=0` both times |
 | Regular window closed with a regular download running (run 11) | `windowClosed reason=1`; no `pending download` line; the `.crdownload` kept growing after the close |
 | Quit with an incognito download running (run 7) | `AppController`'s alert (`_NSAlertPanel`, level 8, key); the stub not reached; stopped by PID |
 | `eyedropper`, before (run 9, break) | `rejected AbortError` at once |
@@ -7518,15 +7519,15 @@ Unchanged: 16 patch files, 8 seam and hook patch files, 22 upstream files outsid
 
 ### Left open
 
-- The pending-downloads close follows a default (close and cancel the private downloads). Asking with a shell sheet
-  needs a facade event and a design pick (maintainer decision on #589).
+- The pending-downloads close follows the maintainer's decision on #589 (close and cancel the private downloads, no
+  prompt); no sheet is planned.
 - The eyedropper's pick and Esc need real input in the system sampler: #926 (needs the user).
-- Quit with downloads running asks with Chromium's own alert and copy, not the shell's dialog system.
+- Quit with downloads running asks with Chromium's own alert and copy until #928 shows it through Arkt's dialog system.
 - The incognito download Save panel above.
 
 ### Cleanup
 
-Every engine run stopped by exact PID (runs 1 to 12; run 12 is a sanity run on the last build; run 1's relaunched instance too). One crash report, from run 4
+Every engine run stopped by exact PID (runs 1 to 13; runs 12 and 13 are on the last build; run 1's relaunched instance too). One crash report, from run 4
 (a self-test probe called `-[NSSavePanel ok:]` on an out-of-process panel, which throws; the probe was removed), moved
 to the artifacts folder. The `ColorSampler` XPC service the eyedropper runs started was left to launchd (idle).
 Throwaway profiles under `profiles/589-20261113/` deleted after the runs; the fixture server stopped. Nothing touched
