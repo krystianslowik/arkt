@@ -4792,6 +4792,7 @@ void AdoptHeldBrowser(BrowserWindowInterface* browser) {
 
 void InstallCrxForSelfTest(id<ArktTabHandle> tab,
                            const base::FilePath& crx_path,
+                           bool prompt_updates,
                            base::OnceCallback<void(const std::string&)> done) {
   content::WebContents* contents =
       [tab isKindOfClass:[ArktFacadeTab class]]
@@ -4800,7 +4801,7 @@ void InstallCrxForSelfTest(id<ArktTabHandle> tab,
   InstallCrxForSelfTest(
       contents ? Profile::FromBrowserContext(contents->GetBrowserContext())
                : nullptr,
-      contents, crx_path, std::move(done));
+      contents, crx_path, prompt_updates, std::move(done));
 }
 
 void SetFacadeTerminating(bool terminating) {

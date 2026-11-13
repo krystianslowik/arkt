@@ -234,14 +234,17 @@ typedef NS_ENUM(NSInteger, ArktEngineEventKind) {
   // An extension was installed in the embedder profile for the first time
   // (#592), from ExtensionRegistryObserver::OnExtensionInstalled. Values:
   // extensionID, extensionName. Profile-wide: `tab` and `browser` are nil.
-  // Sent for the installs Chromium follows with its post-install dialog: a
-  // ManifestLocation::kInternal extension (the Chrome Web Store, a user's
-  // .crx, a batch of -installExtensions:completion:) that is neither a theme
-  // nor an app. Not sent for an update (an extension the profile already
-  // has), nor for unpacked, command-line, external, policy or component
-  // extensions. Its order against the ExtensionActionsChanged that lists its
-  // action is not guaranteed. On an Arkt window Chromium's post-install dialog
-  // is not shown; this event replaces it.
+  // Sent when the install is not an update (an extension the profile already
+  // has), its location is ManifestLocation::kInternal (the Chrome Web Store, a
+  // user's .crx, a batch of -installExtensions:completion:) and it is neither
+  // a theme nor an app. Unpacked, command-line, external, policy and
+  // component extensions send nothing. Its order against the
+  // ExtensionActionsChanged that lists its action is not guaranteed. On an
+  // Arkt window the engine drops Chromium's post-install dialog only for an
+  // install this event reported, so a dropped dialog always has its event;
+  // other post-install dialogs (an update's) keep Chromium's sheet, and an
+  // install that skips its post-install UI (a batch) sends the event with no
+  // dialog to drop.
   ArktEngineEventKindExtensionInstalled = 31,
 };
 

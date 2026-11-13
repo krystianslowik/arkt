@@ -1557,12 +1557,17 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
       }
     }
   } else if (command == "install-crx") {
-    // #592: "install-crx <absolute path of a packed .crx>", a user's .crx
-    // installed into the tab's profile with its prompt accepted, so Chromium
-    // continues to its post-install dialog.
-    LOG(WARNING) << "ARKT selftest install-crx " << argument;
+    // #592: "install-crx <absolute path of a packed .crx> [prompt]", a
+    // user's .crx installed into the tab's profile with its prompt accepted,
+    // so Chromium continues to its post-install dialog. "prompt": an update
+    // also goes through the prompt and the post-install dialog, as a Web
+    // Store update does (chrome://extensions updates without either).
+    const bool prompt_updates =
+        std::find(words.begin(), words.end(), "prompt") != words.end();
+    LOG(WARNING) << "ARKT selftest install-crx " << argument
+                 << (prompt_updates ? " prompt" : "");
     arkt::InstallCrxForSelfTest(
-        tab, base::FilePath(argument),
+        tab, base::FilePath(argument), prompt_updates,
         base::BindOnce([](const std::string& error) {
           LOG(WARNING) << "ARKT selftest install-crx answered "
                        << (error.empty() ? std::string("installed")

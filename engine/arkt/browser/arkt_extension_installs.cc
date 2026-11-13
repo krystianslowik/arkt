@@ -1,11 +1,14 @@
 #include "arkt/browser/arkt_extension_installs.h"
 
+#include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <utility>
 
 #include "base/logging.h"
 #include "base/memory/scoped_refptr.h"
+#include "base/no_destructor.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/profiles/profile.h"
@@ -18,6 +21,43 @@
 #include "extensions/common/mojom/manifest.mojom-shared.h"
 
 namespace arkt {
+
+namespace {
+
+// Reported installs waiting for their post-install dialog, per profile. The
+// profile pointer is only a key and never dereferenced; the watcher clears
+// its profile's entry on the registry's shutdown.
+std::map<uintptr_t, std::set<std::string>>& ReportedInstalls() {
+  static base::NoDestructor<std::map<uintptr_t, std::set<std::string>>>
+      reported;
+  return *reported;
+}
+
+void ForgetReportedInstall(uintptr_t profile, const std::string& id) {
+  auto it = ReportedInstalls().find(profile);
+  if (it == ReportedInstalls().end()) {
+    return;
+  }
+  it->second.erase(id);
+  if (it->second.empty()) {
+    ReportedInstalls().erase(it);
+  }
+}
+
+}  // namespace
+
+bool TakeReportedInstall(Profile* profile, const std::string& extension_id) {
+  if (!profile) {
+    return false;
+  }
+  const uintptr_t key = reinterpret_cast<uintptr_t>(profile);
+  auto it = ReportedInstalls().find(key);
+  if (it == ReportedInstalls().end() || !it->second.contains(extension_id)) {
+    return false;
+  }
+  ForgetReportedInstall(key, extension_id);
+  return true;
+}
 
 bool ReportsExtensionInstall(const extensions::Extension& extension,
                              bool is_update) {
@@ -34,7 +74,8 @@ std::u16string ExtensionNameForDisplay(const extensions::Extension& extension) {
 
 ExtensionInstallWatcher::ExtensionInstallWatcher(Profile* profile,
                                                  Callback callback)
-    : callback_(std::move(callback)) {
+    : profile_key_(reinterpret_cast<uintptr_t>(profile)),
+      callback_(std::move(callback)) {
   if (extensions::ExtensionRegistry* registry =
           extensions::ExtensionRegistry::Get(profile)) {
     observation_.Observe(registry);
@@ -55,13 +96,27 @@ void ExtensionInstallWatcher::OnExtensionInstalled(
                << " location=" << static_cast<int>(extension->location())
                << " update=" << is_update
                << (reports ? " reported" : " not reported");
+  // An earlier report of this id no longer waits for a dialog: an update's
+  // dialog keeps Chromium's sheet.
+  ForgetReportedInstall(profile_key_, extension->id());
   if (reports) {
+    ReportedInstalls()[profile_key_].insert(extension->id());
     callback_.Run(extension->id(), ExtensionNameForDisplay(*extension));
+  }
+}
+
+void ExtensionInstallWatcher::OnExtensionUninstalled(
+    content::BrowserContext* browser_context,
+    const extensions::Extension* extension,
+    extensions::UninstallReason reason) {
+  if (extension) {
+    ForgetReportedInstall(profile_key_, extension->id());
   }
 }
 
 void ExtensionInstallWatcher::OnShutdown(
     extensions::ExtensionRegistry* registry) {
+  ReportedInstalls().erase(profile_key_);
   observation_.Reset();
 }
 
@@ -69,6 +124,7 @@ void InstallCrxForSelfTest(
     Profile* profile,
     content::WebContents* contents,
     const base::FilePath& crx_path,
+    bool prompt_updates,
     base::OnceCallback<void(const std::string& error)> done) {
   if (!profile || !contents) {
     std::move(done).Run("no profile or tab");
@@ -81,7 +137,9 @@ void InstallCrxForSelfTest(
       extensions::CrxInstaller::Create(profile, std::move(prompt));
   installer->set_error_on_unsupported_requirements(true);
   installer->set_off_store_install_allow_reason(
-      extensions::CrxInstaller::OffStoreInstallAllowedFromSettingsPage);
+      prompt_updates
+          ? extensions::CrxInstaller::OffStoreInstallAllowedInTest
+          : extensions::CrxInstaller::OffStoreInstallAllowedFromSettingsPage);
   installer->set_install_immediately(true);
   auto accept = std::make_unique<extensions::ScopedTestDialogAutoConfirm>(
       extensions::ScopedTestDialogAutoConfirm::ACCEPT);

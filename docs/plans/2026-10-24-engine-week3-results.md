@@ -6895,7 +6895,9 @@ Date 2026-11-13. Branch `engine/592-post-install-event` from `main` at `aaa87844
   container). The hook receives no extension id and the dialog sets no internal name, so the overlay recognises it by
   its title: `IDS_EXTENSION_INSTALLED_HEADING` with the display name of an extension the window's profile has
   (`GetFixupExtensionNameForUIDisplay`, `AdjustStringForLocaleDirection`, as `ConfigurePostInstallDialogModel` builds
-  it), and neither OK nor Cancel (the desktop dialog has none). Any other dialog model still gets the sheet.
+  it), and neither OK nor Cancel (the desktop dialog has none). It is dropped only when the matched extension is an
+  install the facade reported and whose dialog has not come yet (review of #919, finding 1), so a dropped dialog
+  always has its event; any other dialog model, an update's post-install dialog included, still gets the sheet.
 - Facade header: additive. `ArktEngineEventKindExtensionInstalled = 31`; `ArktEngineEvent` gains `extensionID` and
   `extensionName` (nil on every other kind). No existing member changed. Both copies `cmp` identical. Gate note on
   #592.
@@ -6903,7 +6905,10 @@ Date 2026-11-13. Branch `engine/592-post-install-event` from `main` at `aaa87844
 - Builds: `nice -n 15 autoninja -j 4 -C out/Arkt chrome` (swap 16.5 of 17.4 GB at the start). Chromium disk 1.9 TB
   free throughout; internal disk 44 GB free at the start; load average 5 to 7. First build 97 s, `FAILED:` 0.
 - `gn check out/Arkt "//arkt/*"`: first `Can't include this header` for `crx_installer.h`; with the
-  `//extensions/browser:crx_installer` dependency `Header dependency check OK`; rebuilt (16 s, `FAILED:` 0). Line wraps only after run 3, rebuilt (68 s, `FAILED:` 0).
+  `//extensions/browser:crx_installer` dependency `Header dependency check OK`; rebuilt (16 s, `FAILED:` 0). Line
+  wraps only after run 3, rebuilt (68 s, `FAILED:` 0).
+- Review round (pending gate, `prompt` option): the first build stopped on the `chromium-rawptr` plugin (a raw
+  `const void*` member; now an integer key), then 75 s and 82 s, `FAILED:` 0; `gn check` OK.
 
 ### What landed
 
@@ -6913,10 +6918,13 @@ Date 2026-11-13. Branch `engine/592-post-install-event` from `main` at `aaa87844
   observer) and `InstallCrxForSelfTest` (below).
 - Facade: the watcher on the embedder profile, created with the download watcher; each accepted install records one
   profile-wide `ExtensionInstalled` (no tab, no browser) from inside the notification, delivered in the next batch.
-- `arkt_extension_dialogs.mm`: `ShowModalDialog` drops the post-install model on an Arkt window and logs
-  `post-install dialog not shown <id>`. The model goes without a host, so its destroying callback (the
-  pinned-by-default hint, which needs a `BrowserView` and which 0006 guards) never runs. Chromium's "has been added ...
-  Window menu" text is gone.
+- `arkt_extension_dialogs.mm`: `ShowModalDialog` drops the post-install model on an Arkt window when one of the
+  extensions its title names (more than one when installed extensions share a name) is a pending reported install,
+  uses that up (`TakeReportedInstall`), and logs `post-install dialog not shown <id>`. The watcher adds each reported
+  id to the pending set; an update or an uninstall of that extension, or the registry's shutdown, removes it, so a
+  report whose install showed no dialog (a batch) cannot later swallow an update's dialog. The model goes without a
+  host, so its destroying callback (the pinned-by-default hint, which needs a `BrowserView` and which 0006 guards)
+  never runs. Chromium's "has been added ... Window menu" text is gone.
 - Swift: `ChromiumEngine.observeExtensions` (the protocol default delivered nothing until now, so neither `.installed`
   nor `.commandsChanged` could reach the shell from this engine) and the `.installed` mapping. Ids of an
   `installExtensionResults` batch are tagged `.browserImport` (#594): every id is tagged when the batch starts, an id
@@ -6927,8 +6935,11 @@ Date 2026-11-13. Branch `engine/592-post-install-event` from `main` at `aaa87844
 - Self-test embedder: `install-crx <path>` installs a packed .crx the way chrome://extensions installs a dropped one
   (`CrxInstaller` with an `ExtensionInstallPrompt`, off-store allowed from the settings page); the prompt is accepted
   by a `ScopedTestDialogAutoConfirm` held until the installer finishes, so Chromium continues to
-  `ExtensionInstallUI::OnInstallSuccess` and its post-install dialog, the same path a Web Store install takes. The
-  events log prints `extensionInstalled`.
+  `ExtensionInstallUI::OnInstallSuccess` and its post-install dialog, the same path a Web Store install takes. That
+  path updates an installed extension without a prompt or post-install UI (`CheckUpdateFromSettingsPage`, which is why
+  run 2 saw no dialog for the reinstall); `install-crx <path> prompt` allows off-store as for a test instead, so an
+  update also goes through the prompt and `OnInstallSuccess`, as a Web Store update does. The auto-confirm is
+  process-wide while held. The events log prints `extensionInstalled`.
 - `engine/test-extensions/install-probe` (new): an action and nothing else; packed locally for each run with the
   engine's own `--pack-extension` (the .crx and key stay under `arkt-artifacts/592/`).
 
@@ -6938,6 +6949,8 @@ Date 2026-11-13. Branch `engine/592-post-install-event` from `main` at `aaa87844
 |---|---|---|
 | 1 | `--load-extension` action probe (unpacked), then `install-crx` install probe | unpacked: `extension installed ... location=8 update=0 not reported`; crx: `location=1 update=0 reported`, one batch `ExtensionActionsChanged,ExtensionInstalled`, `extensionInstalled id=bmjf... name=Arkt install probe tab=nil browser=nil`, `post-install dialog not shown bmjf...`; no `dialog sheet shown` |
 | 2 | `install-crx` twice (the second is an update of the same version) | first as run 1, one `ExtensionInstalled`; second `update=1 not reported`, no dialog reached the hook, no sheet; 1 `ExtensionInstalled` in the whole run |
+| 4 (pending gate) | unpacked probe, `install-crx` v1, v1 again, v2 (same key) | v1: one `ExtensionInstalled`, `post-install dialog not shown`; v1 again and v2 (`update=1 not reported`): no dialog reached the hook (the chrome://extensions update path) |
+| 5 (pending gate) | as run 4, each `install-crx ... prompt` | v1: one `ExtensionInstalled`, dialog dropped; v1 again and v2: `update=1 not reported`, `dialog sheet shown` each time (Chromium's post-install text kept), no event |
 | 3 (restored build) | as run 1 | the same as run 1: unpacked `not reported`, crx `reported`, one `ExtensionInstalled`, `post-install dialog not shown`, no `dialog sheet shown` |
 | all | `FATAL`, `Check failed`, `DCHECK` | 0 |
 
@@ -6965,10 +6978,13 @@ Unchanged: 16 patch files, 8 seam and hook patch files, 22 upstream files outsid
 
 ### Left open
 
-- Which installs report: this pull request reports the installs Chromium itself follows with its dialog. External
-  (sideloaded), policy-installed, unpacked, theme and app installs report nothing; question on #592.
-- No icon: the registry path has no decoded bitmap, `InstalledExtension.iconPNG` stays nil (the toast shows none).
-- A reinstall over the same version shows nothing at all (Chromium showed no dialog there either in run 2).
+- Decided on #919: first installs at `kInternal` except themes and apps report; external (sideloaded),
+  policy-installed, unpacked, command-line and component installs report nothing.
+- No icon (decided on #919, for now): the registry path has no decoded bitmap, `InstalledExtension.iconPNG` stays nil
+  (the toast shows none).
+- An update (a newer version, or the same version again) reports nothing. From chrome://extensions it shows nothing
+  (Chromium's own path); through a prompt (run 5, as a Web Store update) it keeps Chromium's sheet. Decision on #919:
+  updates keep the native sheet for now.
 - The shell's toast against this engine with a real Web Store install needs the shell build that hosts the engine.
 
 ### Cleanup

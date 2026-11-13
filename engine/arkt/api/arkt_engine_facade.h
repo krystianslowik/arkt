@@ -56,6 +56,7 @@ void SetFacadeTerminating(bool terminating);
 // for the contents of `tab`, a facade tab handle, in its profile.
 void InstallCrxForSelfTest(id<ArktTabHandle> tab,
                            const base::FilePath& crx_path,
+                           bool prompt_updates,
                            base::OnceCallback<void(const std::string&)> done);
 
 }  // namespace arkt
