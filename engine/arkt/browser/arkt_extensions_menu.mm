@@ -73,13 +73,12 @@ class ArktExtensionActionDelegate : public ExtensionActionDelegate {
 
   void DetachFromModel() override { model_ = nullptr; }
 
-  void RegisterCommand() override {
-    static bool logged = false;
-    if (!logged) {
-      logged = true;
-      LOG(WARNING) << "ARKT: extension action keyboard commands not supported";
-    }
-  }
+  // The window's ArktExtensionKeybindingRegistry lists the action command
+  // with the extension's other commands and runs this action's
+  // TryHandleAcceleratorPress (#598), as Android's registry does; Chrome's
+  // desktop delegate registers it with the window's focus manager instead,
+  // which an Arkt window does not have.
+  void RegisterCommand() override {}
 
   void UnregisterCommand() override {}
 

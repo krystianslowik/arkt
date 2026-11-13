@@ -116,7 +116,9 @@ extension InMemoryEngine {
     extensionContextItems[extensionID] = items.isEmpty ? nil : items
   }
 
-  /// Whether `items` (submenus included) hold an enabled command item for `command`.
+  /// Whether `items` (submenus included) hold an enabled command item for `command`. The children of a disabled
+  /// submenu holder count too, as in the engine and in Chrome's model: the shell's menu disables the holder, so they
+  /// cannot be reached from it.
   private static func offers(_ command: EngineMenuCommand, in items: [EngineMenuItem]) -> Bool {
     items.contains { item in
       switch item.kind {

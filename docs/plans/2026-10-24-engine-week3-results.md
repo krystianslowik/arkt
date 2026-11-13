@@ -7093,3 +7093,161 @@ Unchanged: 16 patch files, 8 seam and hook patch files, 22 upstream files outsid
 Every engine run and the fixture server stopped by exact PID (`ps -p` prints nothing for each). The one crash report
 (run 2, SIGTERM watchdog with a native menu open) deleted. Throwaway profiles under `profiles/915-20261113/` deleted
 after the runs. Nothing touched the Keychain (mock keychain only), the clipboard or `/Applications/Arkt.app`.
+
+## #598: chrome.commands in Arkt windows (seam, no patch)
+
+Date 2026-11-13. Branch `engine/598-extension-commands` from `main` at `6fc585e1`. `$CR` branch `arkt` unchanged
+(0001-0016).
+
+### Gate
+
+- Seam, no patch. Chrome keeps a window's extension shortcuts in `ExtensionKeybindingRegistryViews`, which needs a
+  `views::FocusManager` (week-2 grep 8). The overlay subclasses the platform-independent
+  `extensions::ExtensionKeybindingRegistry` the way Android does (`extension_keybinding_registry_android.cc`): named
+  commands and the action command, both from `CommandService`. Global commands stay with the profile's
+  `ExtensionCommandsGlobalRegistry`, a profile-keyed service created with the profile, which does not depend on Views.
+- Facade header: additive. `ArktExtensionCommand`, `ArktExtensionShortcutChange`, `ArktExtensionShortcutResult`,
+  `-extensionCommands`, `-setExtensionCommandShortcut:forCommand:ofExtension:global:replacingConflict:` and event kind
+  `ExtensionCommandsChanged = 32`. No existing member changed. Both copies `cmp` identical. Gate note on #598.
+- `.patches` unchanged (16 lines, 16 `arkt` commits: in sync).
+- Builds: `nice -n 15 autoninja -j 4 -C out/Arkt chrome`; swap 16.6 of 17.4 GB at the start, 16.9 at the end;
+  Chromium disk 1.9 TB free, internal disk 43 GB free; load average 4.5 to 6.2.
+- #591 review note: `kKeyTab` is in `ui::Command::ParseImpl` at the pin (`command.cc`, lines 282 and 318), so `.tab`
+  is exposed. User-set global shortcuts are not limited: only `CommandService::CanAutoAssign` (a manifest suggestion)
+  restricts a global one to Cmd+Shift+[0-9]. Global listening on the Mac is Carbon `RegisterEventHotKey` (and the
+  media keys listener): no Accessibility permission, released when the process exits.
+
+### What landed
+
+- `arkt_extension_keybinding_registry.{h,mm}` (new): `ArktExtensionKeybindingRegistry`, owned by `ArktBrowserWindow`
+  (made when the window first becomes key or sees a key), with `TabListInterface::From(browser)` for
+  `onCommand`'s tab. A named command goes to `NotifyEventTargets`; the action command runs the window's action view
+  model (`TryHandleAcceleratorPress`: the popup, or closes the open one), found through the window's
+  `ExtensionsContainer`. Key window changes set it as the global registry's `registry_for_active_window`, as
+  `ExtensionKeybindingRegistryViews` does. `MainMenuHasAccelerator`: whether a main-menu item (enabled or not) has the
+  key as its key equivalent.
+- `ArktBrowserWindow`: `PreHandleKeyboardEvent` asks the registry for a raw key down with the page focused (before the
+  page, where Chrome's `BrowserView` processes extension accelerators). A local key-down monitor, installed with the
+  host and removed with it, asks the registry for a key down of this window whose first responder is not inside a tab's
+  page view (the sidebar, a shell field), with Command, Control or Option held. Neither path takes a key the main
+  menu holds.
+- `arkt_extensions_menu.mm`: the `RegisterCommand()` stub and its "not supported" warning are gone; the delegate's
+  `RegisterCommand`/`UnregisterCommand` are documented no-ops (the window registry lists the action command).
+- `arkt_extension_commands.{h,mm}` (new): the listing (as Chrome's shortcuts page builds it, `ConstructCommands`:
+  action command first, "Activate the extension" as its description, named commands with the saved shortcut and
+  scope), the setter (through `CommandService`: `RemoveKeybindingPrefs` + `AddKeybindingPref`, and
+  `UpdateKeybindingPrefs` with no keystroke to clear, as `developerPrivate.updateExtensionCommand` does), and
+  `ExtensionCommandsWatcher` (changes merged into one event per task; a shortcut `CommandService` assigns on its own,
+  a manifest suggestion or Chrome's shortcuts page, that a main-menu item holds is cleared the way the user clears
+  one, so it stays unassigned across updates). Chrome on the Mac already refuses a suggestion its own menu holds
+  (`IsChromeAccelerator`), but only for items carrying Chrome command tags; Arkt's shell items do not.
+- Facade: the two calls and the event; the self-test gains `ext-commands`, `ext-set` and `ext-key` (a key down made in
+  this process: `-[NSWindow sendEvent:]` with the page focused, `-[NSApp postEvent:atStart:]` with the window itself
+  as first responder, so the window's monitor sees it).
+- Swift: `ChromiumEngine+ExtensionCommands.swift` (`extensionCommands`, `setExtensionCommandShortcut`, Chromium's
+  shortcut form both ways), `.extensionCommandsChanged` becomes `.commandsChanged`. Tests:
+  `ChromiumExtensionCommandTests` (new, 10 tests, every key times every modifier set round trips), two
+  `ConformanceTests`.
+- `engine/test-extensions/commands-probe` (new): `_execute_action` (Control+Shift+U), `run-probe` (Control+Shift+Y),
+  `menu-key` (asks for Command+T), `unset` (no suggestion); records each `onCommand` with its tab and each popup
+  opening in `storage.local`.
+- Separate commit (carry-over from the #920 review): the `customRange` comment, `MayHaveMnemonicsAt` before the title
+  fixup, the redundant condition in `CustomItems` dropped, a bounds check in `custom(_:)`, a comment that a disabled
+  submenu holder's children are not reachable.
+
+### Smoke (`out/Arkt/Arkt.app`, `--no-startup-window --arkt-facade-selftest --arkt-menu-probe=bookmarks --arkt-engine-test-api --remote-debugging-port`, fresh profiles under `profiles/598-20261113/`, `--use-mock-keychain --mute-audio`, `--host-resolver-rules="MAP * ~NOTFOUND, EXCLUDE 127.0.0.1"`, a loopback drive page, `commands-probe` packed and installed with `install-crx`, commands through page titles over DevTools, the probe read through its service worker)
+
+`--arkt-menu-probe` puts in a shell-like main menu (Archive Tab Cmd-W, Close Window Shift-Cmd-W, New Tab Cmd-T, Quit
+Cmd-Q, none with Chrome command tags). Without `=bookmarks` that probe stops on `bookmark_menu_bridge.mm:62`
+(`menu_root_`; the bookmark menu bridge needs the Bookmarks item, nothing this change touches); the one crash report from that run is in `598/crash/`.
+
+| Step | Result |
+|---|---|
+| Registry for the window | `tab list=yes global registry=yes` |
+| 1. Install v1.0 | one `ExtensionInstalled`, one `ExtensionCommandsChanged`; `menu-key`'s Command+T `is a main-menu key; left unassigned`; listing: `_execute_action` Ctrl+Shift+U, `menu-key` none, `run-probe` Ctrl+Shift+Y, `unset` none |
+| 2. Ctrl+Shift+Y, page focused / window focused | `dispatched` both; probe: two `run-probe` with the page's tab id and URL; the page's own keydown listener saw neither |
+| 3. Ctrl+Shift+U (page), again (page), again (window) | popup opens (`TriggerPopup ... by_user=1`, probe records `popup`), closes (`popup closed (hidden)`), opens |
+| 4. Set `run-probe` Ctrl+Shift+J | Applied, one change event; J dispatches at once (no relaunch); Y now reaches the page |
+| 5. Set `unset` Ctrl+Shift+J, then with replace | Conflict naming `run-probe`; then Applied, `run-probe` none |
+| 6. Alt+Command+Y; `_execute_action` global; `_execute_action` MediaPlayPause; unknown id; unknown command | NotAllowed, NotAllowed, NotAllowed, UnknownCommand, UnknownCommand |
+| 7. `run-probe` Ctrl+Tab; MediaPlayPause | Applied each; Ctrl+Tab dispatches page and window focused |
+| 8. `run-probe` Command+T (the shell's choice) | Applied and kept; the key is `left to the main menu`, New Tab runs (both paths) |
+| 9. `run-probe` Ctrl+Shift+9 global, then cleared | Applied (registered with the global listener), cleared about 3 s later; in-window the key reached the page (a global command is the global listener's) |
+| 10. Clear `run-probe`, set `unset` Ctrl+Shift+J, `menu-key` cleared at install; install v1.1 (update) | after the update: `run-probe` none, `menu-key` none, `unset` Ctrl+Shift+J; version 1.1 |
+| 11. `chrome.runtime.reload()` | listing unchanged; J dispatches (page, window); U opens and closes the popup |
+| 12. Relaunch on the same profile | listing unchanged; J dispatches |
+| 13. Clean quit (run 6, no `--remote-debugging-port`, a `file://` page that sends its own commands): install, Ctrl+Shift+Y page and window, Ctrl+Shift+U (popup open), `quit` | Command+T cleared, two `dispatched`, popup opened; the process exited 0 after `keep-alive released (embedder flushed)` |
+| `FATAL`, `Check failed`, `DCHECK`, signals | 0 in runs 1 to 6 |
+
+### Review round (run 7)
+
+Changes after the #922 review: `MainMenuHasAccelerator` matches a shifted key both ways a menu item can spell it (the
+shifted character without Shift, as Chromium writes Control-Shift-1 as "!" with Control, and the unshifted character
+with Shift, as the shell's Switch to Split View items do), still walking every item, enabled or not; the setter
+answers NotAllowed for global scope on a key the main menu holds, and on a failed global registration it restores the
+shortcut of the command a replaced conflict took it from; the window's key monitor leaves a key alone while the first
+responder has marked text (an input method composing); the registry skips key downs without Command, Control or
+Option before building an accelerator; per-key lines moved to `VLOG(1)`; the window answers no registry once its
+destructor has started. `--arkt-menu-probe` gains View > Switch to Split View 1 (Control-Shift-1, written "1" with
+Control and Shift), and the probe asks for MacCtrl+Shift+1 (`split-key`). The self-test's `ext-key` gains
+`page-queue`: the page is first responder and the event goes through the application's queue, so the monitor, the
+window, the page and `PreHandleKeyboardEvent` all see it.
+
+Run 7: `--vmodule=arkt_extension_keybinding_registry=1`, otherwise as above.
+
+| Step | Result |
+|---|---|
+| Install | Command+T (`menu-key`) and Ctrl+Shift+1 (`split-key`) each `is a main-menu key; left unassigned`; listing shows both without a shortcut |
+| Ctrl+Shift+Y, `page-queue` | one `dispatched` line, one `run-probe` record; the page did not see the key |
+| `split-key` set to Ctrl+Shift+1 through the facade | Applied (kept, the shell's choice) |
+| Ctrl+Shift+1, `page` | `left to the main menu`; the page gets the key (the self-test window sends only Command keys to the menu after the page; the shell's window reserves its Split View keys before the page) |
+| Ctrl+Shift+1, `sidebar` | `left to the main menu`, then Switch to Split View 1 runs |
+| Ctrl+Shift+1, `page-queue` | Switch to Split View 1 runs (the menu takes the key equivalent before the window); no extension command |
+| Global on Ctrl+Shift+1; global on Command+T | NotAllowed, NotAllowed |
+| Ctrl+Shift+Comma; Ctrl+Shift+9 global, then cleared | Applied; Applied (registered) and cleared within about 3 s |
+| `FATAL`, `Check failed`, `DCHECK` | 0 |
+
+The rollback of a replaced conflict after a refused global registration was not run live: a refusal needs a second
+profile in the process holding the same hot key.
+
+
+A first version of the clear used `RemoveKeybindingPrefs` alone: an update then brought a cleared suggestion back
+(`run-probe` Ctrl+Shift+Y after v1.1, run 1), because removal also clears the suggestion's "was assigned" mark. Chrome's
+page clears through `UpdateKeybindingPrefs` with no keystroke, which keeps the mark; the engine now does the same
+(step 10).
+
+### Deliberate break
+
+`PreHandleKeyboardEvent` asked `keyCode == 0xFFFF` instead of the registry, rebuilt (71 s, `FAILED:` 0): Ctrl+Shift+J
+with the page focused reached the page (`CSKeyJ`) and dispatched nothing; with the window focused it still dispatched.
+Restored and rebuilt (69 s, `FAILED:` 0): both paths dispatch, the page sees nothing. Swift: `facadeForm` wrote
+"Option" for `.option`: `everyKeyAndModifierSetRoundTripsThroughChromiumsForm` (432 issues) and
+`theFormListsModifiersInChromiumsOrder` failed; restored, all pass.
+
+| Step | Result |
+|---|---|
+| Builds | first 68 s after one include fix, nits 68 s, clear fix 68 s, break 71 s, restore 69 s, format 77 s, review round 82 s; `FAILED:` 0 each |
+| `gn check out/Arkt "//arkt/*"` | `Header dependency check OK` |
+
+### Patch budget
+
+Unchanged: 16 patch files, 8 seam and hook patch files, 22 upstream files outside 0001-0004. `.patches` 16 lines, 16
+`arkt` commits: in sync. Facade header copies `cmp` identical.
+
+### Left open
+
+- Real key presses: the shell window with the engine (#912) and a physical keyboard, for the page path, the sidebar
+  path, and a global shortcut pressed in another app (synthetic input cannot reach Carbon hot keys).
+- The shell's Settings recorder (#597) needs shortcut handling suspended while recording, or a global shortcut fires
+  while the user types it (Chrome's `developerPrivate.setShortcutHandlingSuspended`); not in `EngineExtensions` yet.
+- `ArktExtensionShortcutResultGlobalShortcutTaken` is reported only when the engine's global listener refuses the
+  registration (another profile of this process holds it); Carbon's non-exclusive registration does not tell whether
+  another application has the same hot key.
+- An action command in a host window whose shell has not listed the window's actions yet (no action menu) does
+  nothing and logs `has no action in this window`.
+
+### Cleanup
+
+Every engine run and the loopback server stopped by exact PID. Throwaway profiles under `profiles/598-20261113/`
+deleted after the runs. No global hot key left registered (step 9 cleared it, and the process exited). Nothing touched
+the Keychain (mock keychain only), the clipboard or `/Applications/Arkt.app`.
