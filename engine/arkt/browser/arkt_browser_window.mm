@@ -1710,7 +1710,12 @@ void ArktBrowserWindow::ConfirmBrowserCloseWithPendingDownloads(
   // no dialog the close used to wait forever. Default (#589): close, and the
   // profile's downloads are cancelled with it. Answered on the next turn:
   // UnloadController stores the callback that this answer runs only after
-  // this call returns.
+  // this call returns. The callback is bound to UnloadController's
+  // weak_factory_, which UnloadController::ProcessPendingTabs invalidates on
+  // every run: a ProcessPendingTabs between this post and the task drops the
+  // answer silently. When the private window is the app's last window the type
+  // is kBrowserShutdown and download_count counts every profile's downloads,
+  // regular ones included (OkToCloseWithInProgressDownloads).
   LOG(WARNING) << "ARKT: close with " << download_count
                << " pending download(s), type " << static_cast<int>(dialog_type)
                << ": closing";
