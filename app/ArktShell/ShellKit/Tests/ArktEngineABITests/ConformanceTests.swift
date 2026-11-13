@@ -868,6 +868,17 @@ struct ConformanceTests {
     #expect(facade.performedContextCommands.map(\.0) == [ArktExtensionContextCommand.togglePin.rawValue])
   }
 
+  @Test func anExtensionsOwnItemGoesThroughTheProtocolInItsRange() {
+    let facade = TestEngine()
+    let engine: any ArktEngine = facade
+    let browser = engine.createBrowser(host: TestWindowHost())
+    #expect(ArktExtensionContextCommand.customFirst.rawValue == 1000)
+    #expect(ArktExtensionContextCommand.customLast.rawValue == 2000)
+    let own = ArktExtensionContextCommand.customFirst.rawValue + 3
+    engine.performExtensionContextCommand(own, forAction: "action-probe", in: browser)
+    #expect(facade.performedContextCommands.map(\.0) == [own])
+  }
+
   @Test func uninstallReachesTheFacadeWithItsFlagAndWindowAndAnswersLater() async throws {
     let facade = TestEngine()
     let engine: any ArktEngine = facade

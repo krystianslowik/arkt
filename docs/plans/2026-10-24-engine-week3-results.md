@@ -7060,9 +7060,9 @@ Date 2026-11-13. Branch `engine/915-action-context-items` from `main` at `030183
 | Chromium's top-level cap (run 1, an older probe with six visible top-level items before More) | More and everything after it left out by the matcher, as in Chrome |
 | `FATAL`, `Check failed`, `DCHECK`, signals | 0 in every run |
 
-The self-test's `quit` leaves the process running after `lifetime keep-alive released` whenever
-`--remote-debugging-port` is set, also with no extension loaded and no menu built (runs 4 to 7); those runs were stopped
-by PID. Run 2 was stopped by PID while its fallback menu was still open (no dump flag): the SIGTERM watchdog wrote a
+With these flags the self-test's `quit` left the process running after `lifetime keep-alive released`, also with no
+extension loaded and no menu built (runs 4 to 7; cause not investigated, every run had `--remote-debugging-port`, which
+#592's quitting runs did not); those runs were stopped by PID. Run 2 was stopped by PID while its fallback menu was still open (no dump flag): the SIGTERM watchdog wrote a
 crash report, which I deleted; every later run used `--arkt-extensions-menu-dump`.
 
 ### Deliberate break
