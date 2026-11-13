@@ -7369,12 +7369,12 @@ Unchanged: 16 patch files, 8 seam and hook patch files, 22 upstream files outsid
 - Window sheets (the extension install, uninstall and other `ui::DialogModel` sheets the overlay shows with
   `beginOnWindow:`, and the file chooser) are window-modal: AppKit hangs them from the window's top edge, over the
   rows' area, as on any Mac window. Only the shell's window delegate (`window:willPositionSheet:usingRect:`) can move
-  them.
+  them: #924.
 - The overlay permission panel following a row that closes while the panel is up was not run live (it follows the
   page view's frame, which the row change sets); the shell draws the panel in the app (#581).
 - The carry-over's rollback was not run live: a refused global registration needs a second profile in the process
   holding the same hot key (as in #598).
-- Real input with the shell window (#912).
+- A Chromium tab-modal dialog under the shell-drawn rows on the shell window, with real input: #925 (needs the user).
 
 ### Cleanup
 
