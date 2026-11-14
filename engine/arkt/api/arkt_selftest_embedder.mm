@@ -269,6 +269,8 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
   std::map<int32_t, NSDate*> _closeStarts;
   // The pending dialog of each tab (session id), for `respond`.
   std::map<int32_t, id<ArktJavaScriptDialog>> _dialogs;
+  // Each tab's last infobar list (#478), for infobar-act.
+  std::map<int32_t, NSArray<id<ArktInfobar>>*> _infobarLists;
   // --arkt-menu-probe (W3-8).
   id _launchObserver;
   NSMenu* _probeFileMenu;
@@ -779,6 +781,28 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
         // no sink that presents them.
         LOG(WARNING) << "ARKT selftest infobarsChanged tab=" << tab
                      << " count=" << event.infobars.count;
+        _infobarLists[tab] = event.infobars;
+        // #478: every row's values, as the shell gets them.
+        for (NSUInteger i = 0; i < event.infobars.count; ++i) {
+          id<ArktInfobar> infobar = event.infobars[i];
+          LOG(WARNING) << "ARKT selftest infobar tab=" << tab << " index=" << i
+                       << " id=" << infobar.infobarId
+                       << " kind=" << static_cast<int>(infobar.kind)
+                       << " message=\""
+                       << base::SysNSStringToUTF8(infobar.message) << "\""
+                       << " ok=\""
+                       << base::SysNSStringToUTF8(infobar.okTitle ?: @"(none)")
+                       << "\" enabled=" << (infobar.okEnabled ? "yes" : "no")
+                       << " cancel=\""
+                       << base::SysNSStringToUTF8(infobar.cancelTitle
+                                                      ?: @"(none)")
+                       << "\" enabled="
+                       << (infobar.cancelEnabled ? "yes" : "no") << " close="
+                       << (infobar.closeAccessibilityLabel ? "yes" : "no")
+                       << " link="
+                       << (infobar.linkTitle ? "yes" : "no")
+                       << " icon=" << (infobar.iconPNG ? "yes" : "no");
+        }
         break;
       case ArktEngineEventKindFindResult:
         LOG(WARNING) << "ARKT selftest findResult tab=" << tab
@@ -938,12 +962,25 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
 // window's sendEvent: in this process. It never enters the system event
 // queue, so no other window or app can receive it.
 - (void)sendEscapeToTab:(id<ArktTabHandle>)tab {
+  [self sendKey:53 characters:@"\x1b" toTab:tab];
+}
+
+// #478: an F6 into the focused page, as sendEscapeToTab: sends Esc.
+- (void)sendF6ToTab:(id<ArktTabHandle>)tab {
+  [self sendKey:97 characters:@"\uF709" toTab:tab];
+}
+
+// A key down and up delivered to the tab's own window in this process.
+- (void)sendKey:(unsigned short)keyCode
+     characters:(NSString*)characters
+          toTab:(id<ArktTabHandle>)tab {
   NSWindow* window = tab.browser.host.window;
   NSResponder* responder = window.firstResponder;
   const bool in_page =
       [responder isKindOfClass:[NSView class]] &&
       [static_cast<NSView*>(responder) isDescendantOf:tab.containerView];
-  LOG(WARNING) << "ARKT selftest esc send tab=" << tab.sessionId
+  LOG(WARNING) << "ARKT selftest key " << keyCode
+               << " send tab=" << tab.sessionId
                << " loading=" << (tab.isLoading ? "yes" : "no")
                << " appActive=" << (NSApp.isActive ? "yes" : "no")
                << " key=" << (window.isKeyWindow ? "yes" : "no")
@@ -964,10 +1001,10 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
                               timestamp:NSProcessInfo.processInfo.systemUptime
                            windowNumber:window.windowNumber
                                 context:nil
-                             characters:@"\x1b"
-            charactersIgnoringModifiers:@"\x1b"
+                             characters:characters
+            charactersIgnoringModifiers:characters
                               isARepeat:NO
-                                keyCode:53];
+                                keyCode:keyCode];
     [window sendEvent:event];
   }
 }
@@ -1617,12 +1654,56 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
                  << " id=" << command_id
                  << " enabled=" << (enabled ? "yes" : "no")
                  << " tab=" << tab.sessionId << " now=" << tab.zoomPercent;
-  } else if (command == "infobars" || command == "tab-modal" ||
+  } else if (command == "infobar-act") {
+    // #478: infobar-act <index> ok|cancel|close acts on the tab's reported
+    // row as the shell's button does.
+    int index = -1;
+    base::StringToInt(argument, &index);
+    const std::string action = words.size() > 2 ? words[2] : "";
+    NSArray<id<ArktInfobar>>* list = _infobarLists[tab.sessionId];
+    BOOL acted = NO;
+    if (index >= 0 && static_cast<NSUInteger>(index) < list.count) {
+      ArktInfobarAction mapped = action == "cancel" ? ArktInfobarActionCancel
+                                 : action == "close" ? ArktInfobarActionClose
+                                                     : ArktInfobarActionOk;
+      acted = [list[index] actWithAction:mapped linkIndex:0];
+    }
+    LOG(WARNING) << "ARKT selftest infobar-act tab=" << tab.sessionId
+                 << " index=" << index << " action=" << action
+                 << " acted=" << (acted ? "yes" : "no");
+  } else if (command == "tab-share") {
+    // #478: the page shares its own tab (getDisplayMedia with
+    // preferCurrentTab), with a user gesture. Run with
+    // --auto-accept-this-tab-capture so no picker shows; never a screen or a
+    // window. The page title reports "tab-share sharing browser", "tab-share
+    // rejected <name>" or, when the capture ends, "tab-share ended".
+    // tab-share stop ends the capture from the page.
+    NSString* script =
+        argument == "stop"
+            ? @"(() => { const s = window.__arktShare; if (!s) return 'none'; "
+              @"s.getTracks().forEach(t => t.stop()); window.__arktShare = "
+              @"null; return 'stopped'; })()"
+            : @"(() => { navigator.mediaDevices.getDisplayMedia({video: "
+              @"true, preferCurrentTab: true, selfBrowserSurface: "
+              @"'include'}).then(s => { window.__arktShare = s; "
+              @"const t = s.getVideoTracks()[0]; t.onended = () => "
+              @"document.title = 'tab-share ended'; document.title = "
+              @"'tab-share sharing ' + t.getSettings().displaySurface; }, "
+              @"e => document.title = 'tab-share rejected ' + e.name); "
+              @"return 'asked'; })()";
+    [self evaluate:script
+             inTab:tab
+       userGesture:YES
+             label:"tab-share"];
+  } else if (command == "infobars" || command == "nonconfirm-infobar" ||
+             command == "tab-modal" ||
              command == "geometry" || command == "file-folder" ||
              command == "file-panel" || command == "stubs" ||
              command == "stub-command" || command == "incognito" ||
              command == "incognito-download" || command == "incognito-close" ||
              command == "incognito-state") {
+    // #478: nonconfirm-infobar [remove] adds (or removes) an infobar with no
+    // confirm delegate, as the sign-in QR code infobar.
     // #586: infobars <n> leaves n test infobar rows on the tab; tab-modal
     // shows a Chromium tab-modal dialog on it; geometry logs where the rows,
     // the page and each child window of the tab's window are; file-folder
@@ -1685,6 +1766,11 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
     [self performSelector:@selector(sendEscapeToTab:)
                withObject:tab
                afterDelay:delay_ms / 1000.0];
+  } else if (command == "f6") {
+    // #478: focuses the page, then sends it an F6 on the next turn; the host
+    // logs it if the page did not use it (unhandledKeyDown).
+    [tab focus];
+    [self performSelector:@selector(sendF6ToTab:) withObject:tab afterDelay:0];
   } else if (command == "fullscreen") {
     // #577: HTML fullscreen of the page's body, with a user gesture as a
     // click gives it; "exit" leaves it from script.

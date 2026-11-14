@@ -18,6 +18,7 @@
 #include "components/infobars/content/content_infobar_manager.h"
 #include "components/infobars/core/confirm_infobar_delegate.h"
 #include "components/infobars/core/infobar.h"
+#include "components/infobars/core/infobar_delegate.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/base/models/dialog_model.h"
 
@@ -43,6 +44,17 @@ class TestInfobarDelegate : public ConfirmInfoBarDelegate {
 
  private:
   const int number_;
+};
+
+// An infobar with no confirm delegate, as the sign-in QR code infobar (#478).
+class NonConfirmInfobarDelegate : public infobars::InfoBarDelegate {
+ public:
+  infobars::InfoBarDelegate::InfoBarIdentifier GetIdentifier() const override {
+    return SIGNIN_QRCODE_INFOBAR_DELEGATE;
+  }
+  bool ShouldExpire(const NavigationDetails& details) const override {
+    return false;
+  }
 };
 
 std::string ScreenRect(NSRect rect) {
@@ -83,6 +95,32 @@ void SetTestInfobarsForSelfTest(content::WebContents* contents, int count) {
   }
   LOG(WARNING) << "ARKT selftest infobars removed=" << old.size()
                << " added=" << count << " now=" << manager->infobars().size();
+}
+
+void SetNonConfirmInfobarForSelfTest(content::WebContents* contents,
+                                     bool add) {
+  auto* manager =
+      contents ? infobars::ContentInfoBarManager::FromWebContents(contents)
+               : nullptr;
+  if (!manager) {
+    LOG(WARNING) << "ARKT selftest nonconfirm-infobar: no infobar manager";
+    return;
+  }
+  infobars::InfoBar* existing = nullptr;
+  for (infobars::InfoBar* infobar : manager->infobars()) {
+    if (infobar->delegate()->GetIdentifier() ==
+        infobars::InfoBarDelegate::SIGNIN_QRCODE_INFOBAR_DELEGATE) {
+      existing = infobar;
+    }
+  }
+  if (add && !existing) {
+    manager->AddInfoBar(std::make_unique<infobars::InfoBar>(
+        std::make_unique<NonConfirmInfobarDelegate>()));
+  } else if (!add && existing) {
+    manager->RemoveInfoBar(existing);
+  }
+  LOG(WARNING) << "ARKT selftest nonconfirm-infobar " << (add ? "add" : "remove")
+               << " now=" << manager->infobars().size();
 }
 
 void ShowTabModalForSelfTest(content::WebContents* contents) {

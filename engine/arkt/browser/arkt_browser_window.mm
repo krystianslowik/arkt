@@ -1564,9 +1564,17 @@ bool ArktBrowserWindow::HandleKeyboardEvent(
 }
 
 bool ArktBrowserWindow::ForwardUnhandledKeyDown(NSEvent* event) {
-  // Only Esc for now (#313: Esc goes to the page first, then to a Peek).
+  // Esc (#313: Esc goes to the page first, then to a Peek) and F6 (#478: the
+  // keyboard into the tab's infobar strip), neither with a modifier.
   constexpr unsigned short kEscapeKeyCode = 53;
-  if (event.keyCode != kEscapeKeyCode ||
+  constexpr unsigned short kF6KeyCode = 97;
+  const bool forwarded =
+      event.keyCode == kEscapeKeyCode ||
+      (event.keyCode == kF6KeyCode &&
+       !(event.modifierFlags &
+         (NSEventModifierFlagCommand | NSEventModifierFlagControl |
+          NSEventModifierFlagOption | NSEventModifierFlagShift)));
+  if (!forwarded ||
       ![host_ respondsToSelector:@selector(unhandledKeyDown:inTab:)]) {
     return false;
   }

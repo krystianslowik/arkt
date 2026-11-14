@@ -397,6 +397,11 @@ typedef NS_ENUM(NSInteger, ArktInfobarKind) {
   ArktInfobarKindReload = 3,
 };
 
+// The height in points of one infobar row (#478). The engine reserves it per
+// infobar at the top of the tab's container while the shell draws the row over
+// that band, so both sides take it from here.
+enum { ArktInfobarRowHeight = 40 };
+
 // What the shell does on an infobar (#400).
 typedef NS_ENUM(NSInteger, ArktInfobarAction) {
   // The OK (or only) button.
@@ -1048,8 +1053,9 @@ NS_SWIFT_UI_ACTOR
 // returns. Not implemented: every link navigates.
 - (ArktLinkDecision)decideLinkActivation:(id<ArktLinkActivation>)activation
     NS_SWIFT_NAME(decideLinkActivation(_:));
-// A key down that the page of `tab` did not handle (an Esc the page did not
-// use), from a task posted after the engine finished with the event.
+// A key down that the page of `tab` did not handle (an Esc, or an F6 without
+// modifiers (#478), the page did not use), from a task posted after the
+// engine finished with the event.
 - (void)unhandledKeyDown:(NSEvent*)event
                    inTab:(nullable id<ArktTabHandle>)tab
     NS_SWIFT_NAME(unhandledKeyDown(_:in:));
