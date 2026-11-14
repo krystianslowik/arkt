@@ -255,6 +255,42 @@ struct FakeChromiumProfileTests {
     #expect(manifest.extraColumns.isEmpty && manifest.missingColumns.isEmpty)
   }
 
+  @Test func extraHistoryIsWrittenAfterTheFixedEntries() throws {
+    let dir = try makeDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let plain = try FakeChromiumProfile.make(at: dir)
+    let recent = ChromiumTime.webKit(fromUnixSeconds: 1_800_000_000)
+    let extra = FixtureManifest.HistoryEntry(
+      url: "https://recent.example/", title: "Recent",
+      visits: [.init(webkitTime: recent, transition: 1 | 0x1000_0000 | 0x2000_0000)])
+    let manifest = try FakeChromiumProfile.make(at: dir, options: .init(extraHistory: [extra]))
+
+    #expect(manifest.history == plain.history + [extra])
+    #expect(manifest.visitCount == plain.visitCount + 1)
+    #expect(try rows(manifest.historyURL, "SELECT count(*) FROM urls") == [["\(plain.history.count + 1)"]])
+    let id = plain.history.count + 1
+    #expect(try rows(manifest.historyURL, "SELECT url, typed_count, last_visit_time FROM urls WHERE id=\(id)")
+      == [["https://recent.example/", "1", "\(recent)"]])
+    #expect(try rows(manifest.historyURL, "SELECT visit_time FROM visits WHERE url=\(id)") == [["\(recent)"]])
+  }
+
+  @Test func extraExtensionsAreListedInBothPreferencesFiles() throws {
+    let dir = try makeDirectory()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let plain = try FakeChromiumProfile.make(at: dir)
+    let extra = FixtureManifest.ExtensionEntry(
+      id: "dddddddddddddddddddddddddddddddd", kind: .webStore, name: "Second Web Store Extension", version: "2.0")
+    let manifest = try FakeChromiumProfile.make(at: dir, options: .init(extraExtensions: [extra]))
+
+    #expect(manifest.extensions == plain.extensions + [extra])
+    for url in [manifest.preferencesURL, manifest.securePreferencesURL] {
+      let json = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+      let settings = try #require((json["extensions"] as? [String: Any])?["settings"] as? [String: [String: Any]])
+      #expect(settings.count == plain.extensions.count + 1)
+      #expect(settings[extra.id]?["from_webstore"] as? Bool == true)
+    }
+  }
+
   @Test func makingTwiceInTheSameDirectoryReplacesFiles() throws {
     let dir = try makeDirectory()
     defer { try? FileManager.default.removeItem(at: dir) }

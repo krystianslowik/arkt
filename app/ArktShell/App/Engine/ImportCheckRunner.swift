@@ -2,9 +2,12 @@
 import AppKit
 import ArcImport
 import ChromiumEngineKit
+import CoreBridge
 import EngineAPI
 import EngineAPITestSupport
 import Foundation
+import Persistence
+import ShellUI
 
 /// The engine check for the import writes (#512, #511), against the real engine. Runs with `--arkt-import-check=import` or
 /// `=verify` and `--arkt-engine-test-api`; the shell's session is not started. `ARKT_IMPORT_FIXTURE_DIR` names a profile
@@ -16,7 +19,13 @@ import Foundation
 /// watermark and must write nothing. `verify` skips the import and only loads the page, for the run
 /// after a relaunch. `=extensions` (#513) installs the Web Store ids of `ARKT_EXTENSION_IDS` (comma separated) twice
 /// through `installExtensionResults`, pressing "Install" on the batch sheet from inside the process, and prints the
-/// results and the ids the engine reports as extension actions. Prints one `ARKT_IMPORT` line per step and quits through the application's own terminate.
+/// results and the ids the engine reports as extension actions. `=sheet` (#517) runs the whole import the way File > Import
+/// Browser Data... does, minus the Keychain: `ProfileImportCoordinator` over `ARKT_ARC_DIR`'s `User Data` with the
+/// fixture's key and the import record in `ARKT_DATA_DIR`'s database, behind `BrowserDataImportModel` and the real
+/// `BrowserDataImportSheet` on a runner window; the process ticks every type and presses Import through the model. It
+/// prints the coordinator's events, the consent counts and each row's result, then the cookie page, the password store
+/// count and what chrome://history and chrome://bookmarks show. Prints one `ARKT_IMPORT` line per step and quits
+/// through the application's own terminate.
 @MainActor
 final class ImportCheckRunner {
   static let switchName = "--arkt-import-check"
@@ -54,6 +63,13 @@ final class ImportCheckRunner {
       }
       if phase == "history-retry" {
         try await importSyntheticHistoryAgain(into: engine)
+        return 0
+      }
+      if phase == "sheet" {
+        try await importThroughSheet(into: engine)
+        try await showCookies(in: engine)
+        print("ARKT_IMPORT passwords (empty batch) \(describe(await engine.importPasswords([])))")
+        try await showImportedPages(in: engine)
         return 0
       }
       if phase == "import" { try await importFixture(into: engine) }
@@ -212,6 +228,136 @@ final class ImportCheckRunner {
       let actions = engine.extensionActions(in: window)
       print("ARKT_IMPORT extension actions \(actions.count): \(actions.map(\.name).joined(separator: ", "))")
     }
+    engine.closeWindow(window)
+    host.window.orderOut(nil)
+  }
+
+  /// `=sheet`: the import sheet over the coordinator, on the real engine. Refuses to run without `ARKT_ARC_DIR` and
+  /// `ARKT_DATA_DIR`, so it never reads the real data folders.
+  private static func importThroughSheet(into engine: ChromiumEngine) async throws {
+    let environment = ProcessInfo.processInfo.environment
+    guard let arc = environment["ARKT_ARC_DIR"], environment["ARKT_DATA_DIR"] != nil else {
+      throw RunnerError("set ARKT_ARC_DIR to the fixture and ARKT_DATA_DIR to a throwaway folder")
+    }
+    let location = try await AppEnvironment.databaseLocation()
+    let database = try await openDatabase(at: location.databaseURL)
+    let scratch = location.directory.appending(path: "ImportScratch", directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+    let coordinator = ProfileImportCoordinator(
+      engine: engine, importRecord: SettingsStore(database: database), keyProvider: FixtureKey(),
+      configuration: ProfileImportConfiguration(scratchParent: scratch))
+    let model = BrowserDataImportModel(
+      coordinator: PrintingImporter(coordinator),
+      root: URL(fileURLWithPath: arc, isDirectory: true).appending(path: "User Data", directoryHint: .isDirectory),
+      spaces: nil)
+
+    let host = RunnerWindowHost(index: 0)
+    let window = engine.createWindow(host: host)
+    host.window.makeKeyAndOrderFront(nil)
+    let sheet = BrowserDataImportSheet(source: model)
+    sheet.begin(on: host.window)
+    model.start()
+    try await EngineContract.waitUntil(timeout: .seconds(30)) { model.state.phase == .consent }
+    let kinds = BrowserDataKind.allCases
+    print("ARKT_IMPORT consent counts " + kinds.map { "\($0.identifier)=\(model.state.counts[$0])" }.joined(separator: " "))
+    print("ARKT_IMPORT consent sheet: \(sheet.window?.contentView.map(sheetText) ?? "")")
+    for kind in kinds where kind != .spacesAndTabs { model.setSelected(kind, true) }
+    print("ARKT_IMPORT selected " + kinds.filter(model.state.selection.contains).map(\.identifier).joined(separator: ","))
+    let started = Date()
+    model.beginImport()
+    try await EngineContract.waitUntil(timeout: .seconds(180)) { model.state.phase == .result }
+    print("ARKT_IMPORT result after \(Int(Date().timeIntervalSince(started))) s")
+    for kind in kinds { print("ARKT_IMPORT row \(kind.identifier) \(model.state.rows[kind].map { "\($0)" } ?? "none")") }
+    print("ARKT_IMPORT result \(model.state.result)")
+    print("ARKT_IMPORT result sheet: \(sheet.window?.contentView.map(sheetText) ?? "")")
+    model.finish()
+    engine.closeWindow(window)
+    host.window.orderOut(nil)
+  }
+
+  @concurrent
+  private static func openDatabase(at url: URL) async throws -> ArktDatabase { try ArktDatabase.open(at: url) }
+
+  /// Passes the coordinator through and prints every event (counts and fixed phrases only).
+  @MainActor
+  private final class PrintingImporter: ProfileImporting {
+    let inner: any ProfileImporting
+    init(_ inner: any ProfileImporting) { self.inner = inner }
+
+    func run(root: URL, consent: @escaping @MainActor (ProfileDataCounts) async -> ImportSelection?) throws
+      -> AsyncStream<ProfileImportEvent> {
+      Self.printing(try inner.run(root: root, consent: consent))
+    }
+
+    func retry(root: URL, after summary: ProfileImportSummary) throws -> AsyncStream<ProfileImportEvent> {
+      Self.printing(try inner.retry(root: root, after: summary))
+    }
+
+    func cancel() { inner.cancel() }
+
+    private static func printing(_ stream: AsyncStream<ProfileImportEvent>) -> AsyncStream<ProfileImportEvent> {
+      AsyncStream(bufferingPolicy: .unbounded) { continuation in
+        let task = Task { @MainActor in
+          for await event in stream {
+            print("ARKT_IMPORT event \(event)")
+            continuation.yield(event)
+          }
+          continuation.finish()
+        }
+        continuation.onTermination = { _ in task.cancel() }
+      }
+    }
+  }
+
+  /// chrome://history and chrome://bookmarks in a runner tab: what the pages themselves list. Each script stores its
+  /// answer on `window` and a later call reads it, so no call depends on a promise being awaited.
+  private static func showImportedPages(in engine: ChromiumEngine) async throws {
+    let host = RunnerWindowHost(index: 1)
+    let window = engine.createWindow(host: host)
+    host.window.makeKeyAndOrderFront(nil)
+    // Closing a window's last tab closes the window, so one blank tab stays open until the end.
+    let keeper = engine.createTab(url: URL(string: "about:blank")!, in: window)
+    let pages: [(URL, String)] = [
+      (URL(string: "chrome://history/")!, """
+        (() => { const find = (root, tag) => { for (const el of root.querySelectorAll('*')) {
+            if (el.tagName === tag) return el;
+            if (el.shadowRoot) { const hit = find(el.shadowRoot, tag); if (hit) return hit; } } return null; };
+          const list = find(document, 'HISTORY-LIST');
+          const data = (list && list.historyData_) || [];
+          return data.length + ': ' + data.map(e => e.title || e.url).join(' | '); })()
+        """),
+      (URL(string: "chrome://bookmarks/")!, """
+        (() => { if (window.arktAnswer === undefined) { window.arktAnswer = '0: waiting';
+          chrome.bookmarks.getTree(tree => { const titles = [];
+            const walk = n => { if (n.url) titles.push(n.title); (n.children || []).forEach(walk); };
+            tree.forEach(walk); window.arktAnswer = titles.length + ': ' + titles.join(' | '); }); }
+          return window.arktAnswer; })()
+        """),
+    ]
+    for (url, script) in pages {
+      let tab = engine.createTab(url: url, in: window)
+      do {
+        try await EngineContract.waitUntil(timeout: .seconds(15)) {
+          engine.snapshot(of: tab).map { !$0.isLoading } ?? false
+        }
+      } catch {
+        print("ARKT_IMPORT \(url.absoluteString) still loading after 15 s: \(engine.snapshot(of: tab).map { "\($0)" } ?? "no tab")")
+      }
+      var answer = "no answer"
+      for _ in 0..<50 {
+        do {
+          let seen = try await engine.evaluateScript(script, in: tab, userGesture: false)
+          answer = seen.map { "\($0)" } ?? "undefined"
+          if case .string(let text)? = seen, !text.hasPrefix("0:") { break }
+        } catch {
+          answer = "script error: \(error)"
+        }
+        try await Task.sleep(for: .milliseconds(200))
+      }
+      print("ARKT_IMPORT \(url.absoluteString) \(answer)")
+      engine.closeTab(tab, mode: .skipUnloadHandlers)
+    }
+    engine.closeTab(keeper, mode: .skipUnloadHandlers)
     engine.closeWindow(window)
     host.window.orderOut(nil)
   }
