@@ -7603,7 +7603,7 @@ Date 2026-11-13. Branch `engine/478-infobar-strip` from `main` at `b1e8024d`. `$
 | `FATAL`, `Check failed`, `DCHECK` (runs 1 and 4) | 0 |
 
 `quit` ends the windows and logs `keep-alive released`, but the process stays (runs 1 and 2; run 2 started no
-capture), as in earlier lanes with `--remote-debugging-port`; every run was stopped by its PID.
+capture), as in earlier lanes with `--remote-debugging-port`; every run was stopped by its PID: #934.
 
 ### Deliberate breaks
 
@@ -7631,6 +7631,14 @@ capture), as in earlier lanes with `--remote-debugging-port`; every run was stop
   `LittleArktDialogTests`, `PermissionPresenterTests`, `ConformanceTests`, `ChromiumInfobarTests`: 0 failures.
 - 20 runs of `InfobarKeyboardTests` and `InfobarPresenterTests` (52 tests each) under the machine's own load (load
   average 4.9 to 6.7, no load added): 20 passed, 0 failed.
+- Review of #933: while the strip holds the keyboard it is the key window, so the window commands `NSWindow` implements
+  (Close Window, Minimize, Zoom, Enter Full Screen) resolved to the strip's panel. `InfobarWindow` now forwards them and
+  their menu validation to the browser window. F6 is one check (`InfobarPanel.isStripShortcut`) for both windows.
+  `InfobarKeyboardTests` 20 (4 new: the window commands reach the parent, other items stay the panel's, another window
+  taking the keyboard drops the ring, the shortcut). Break: the validation forwarding off, 4 failures (`performClose:
+  is enabled as the browser window says`, and the same for the other three); restored, 20 passed. GUI with both leak
+  guards and `LittleArktDialogTests`: 94 run, 0 failures. 20 runs of the keyboard and presenter suites (56 tests each,
+  load average 5.0 to 6.7): 20 passed.
 
 ### Patch budget
 

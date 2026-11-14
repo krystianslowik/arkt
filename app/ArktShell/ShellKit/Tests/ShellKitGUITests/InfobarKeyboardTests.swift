@@ -9,9 +9,25 @@ import XCTest
 /// Down between rows; Return, Enter and Space press; Esc and F6 give the keyboard back to the page. The strip never
 /// takes the keyboard on its own, and its keys go to the strip, not to a focused field. Keys are delivered to the
 /// strip's stack view in the process; nothing is posted to the system.
+/// A browser window stand-in that records the window commands instead of closing, minimizing, zooming or going full
+/// screen, and enables them for the menu.
+@MainActor
+private final class RecordingWindow: NSWindow {
+  var actions: [Selector] = []
+  var validated: [Selector] = []
+  override func performClose(_ sender: Any?) { actions.append(#selector(performClose(_:))) }
+  override func performMiniaturize(_ sender: Any?) { actions.append(#selector(performMiniaturize(_:))) }
+  override func performZoom(_ sender: Any?) { actions.append(#selector(performZoom(_:))) }
+  override func toggleFullScreen(_ sender: Any?) { actions.append(#selector(toggleFullScreen(_:))) }
+  override func validateMenuItem(_ item: NSMenuItem) -> Bool {
+    if let action = item.action { validated.append(action) }
+    return true
+  }
+}
+
 @MainActor
 final class InfobarKeyboardTests: XCTestCase {
-  private var window: NSWindow!
+  private var window: RecordingWindow!
   private var page: NSView!
   private var field: NSTextField!
   private var engine: InMemoryEngine!
@@ -24,7 +40,7 @@ final class InfobarKeyboardTests: XCTestCase {
   override func setUp() async throws {
     _ = NSApplication.shared
     NSApp.setActivationPolicy(.accessory)
-    window = NSWindow(contentRect: NSRect(x: 200, y: 200, width: 700, height: 500), styleMask: [.titled],
+    window = RecordingWindow(contentRect: NSRect(x: 200, y: 200, width: 700, height: 500), styleMask: [.titled],
                       backing: .buffered, defer: false)
     page = NSView(frame: NSRect(x: 0, y: 0, width: 700, height: 500))
     field = NSTextField(frame: NSRect(x: 20, y: 20, width: 200, height: 24))
@@ -280,5 +296,63 @@ final class InfobarKeyboardTests: XCTestCase {
     presenter.refresh()
     XCTAssertNil(presenter.strip(for: tab))
     XCTAssertEqual(pageFocused, [], "the tab is off screen: its page does not take the keyboard")
+  }
+
+  // MARK: The browser window's commands while the strip holds the keyboard (#478 review)
+
+  private static let windowCommands: [Selector] = [
+    #selector(NSWindow.performClose(_:)), #selector(NSWindow.performMiniaturize(_:)),
+    #selector(NSWindow.performZoom(_:)), #selector(NSWindow.toggleFullScreen(_:)),
+  ]
+
+  func testCloseMinimizeZoomAndFullScreenReachTheBrowserWindowNotTheStrip() throws {
+    engine.raiseInfobar(in: tab, message: "One")
+    presenter.focusStrip(of: tab, holding: nil)
+    let panel = try strip().panel
+    XCTAssertTrue(panel.parent === window)
+    for action in Self.windowCommands {
+      let item = NSMenuItem(title: "", action: action, keyEquivalent: "")
+      XCTAssertTrue(panel.validateMenuItem(item), "\(action) is enabled as the browser window says")
+      XCTAssertTrue(NSApp.sendAction(action, to: panel, from: item), "\(action) is taken")
+    }
+    XCTAssertEqual(window.validated, Self.windowCommands, "the browser window validated each item")
+    XCTAssertEqual(window.actions, Self.windowCommands, "and ran each command")
+    XCTAssertTrue(panel.isVisible, "the strip itself did not close")
+  }
+
+  func testOtherMenuItemsAreStillValidatedByTheStripItself() throws {
+    engine.raiseInfobar(in: tab, message: "One")
+    let panel = try strip().panel
+    let item = NSMenuItem(title: "", action: #selector(NSWindow.makeKeyAndOrderFront(_:)), keyEquivalent: "")
+    _ = panel.validateMenuItem(item)
+    XCTAssertEqual(window.validated, [], "only the window commands go to the browser window")
+  }
+
+  // MARK: Losing the keyboard to another window
+
+  func testAnotherWindowTakingTheKeyboardDropsTheRingAndLeavesThePageAlone() throws {
+    engine.raiseInfobar(in: tab, message: "One")
+    presenter.focusStrip(of: tab, holding: nil)
+    try strip().panel.resignKey()
+    XCTAssertNil(try strip().keyboardFocus)
+    XCTAssertEqual(try rings(), [])
+    XCTAssertFalse(try strip().stack.acceptsFirstResponder)
+    XCTAssertEqual(pageFocused, [], "the window that took the keyboard keeps it")
+  }
+
+  // MARK: The shortcut
+
+  func testOnlyAPlainF6IsTheStripShortcut() throws {
+    func key(_ code: UInt16, _ flags: NSEvent.ModifierFlags) throws -> NSEvent {
+      try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0,
+                                     windowNumber: 0, context: nil, characters: "", charactersIgnoringModifiers: "",
+                                     isARepeat: false, keyCode: code))
+    }
+    XCTAssertTrue(InfobarPanel.isStripShortcut(try key(Key.f6, [])))
+    XCTAssertTrue(InfobarPanel.isStripShortcut(try key(Key.f6, [.function])), "Fn-F6 on a Mac keyboard")
+    for flags: NSEvent.ModifierFlags in [.command, .control, .option, .shift] {
+      XCTAssertFalse(InfobarPanel.isStripShortcut(try key(Key.f6, flags)), "\(flags)")
+    }
+    XCTAssertFalse(InfobarPanel.isStripShortcut(try key(Key.escape, [])))
   }
 }

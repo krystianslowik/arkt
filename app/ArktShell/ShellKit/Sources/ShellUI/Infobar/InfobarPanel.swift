@@ -37,13 +37,48 @@ final class InfobarStackView: NSView {
   }
 }
 
-private final class InfobarWindow: NSPanel {
+/// The strip's panel. While F6 has put the keyboard in it, it is the key window, so menu items with no target look here
+/// first: the window commands `NSWindow` implements (Close Window, Minimize, Zoom, Enter Full Screen) go to the
+/// browser window the strip belongs to, as if that window were key (#478 review).
+final class InfobarWindow: NSPanel {
   /// The strip lost the keyboard to another window (a click on the page or elsewhere).
   var onResignKey: (@MainActor () -> Void)?
   override var canBecomeKey: Bool { true }
   override func resignKey() {
     super.resignKey()
     onResignKey?()
+  }
+
+  static let parentActions: Set<Selector> = [
+    #selector(NSWindow.performClose(_:)), #selector(NSWindow.performMiniaturize(_:)),
+    #selector(NSWindow.performZoom(_:)), #selector(NSWindow.toggleFullScreen(_:)),
+  ]
+
+  override func performClose(_ sender: Any?) {
+    guard let parent else { return super.performClose(sender) }
+    parent.performClose(sender)
+  }
+
+  override func performMiniaturize(_ sender: Any?) {
+    guard let parent else { return super.performMiniaturize(sender) }
+    parent.performMiniaturize(sender)
+  }
+
+  override func performZoom(_ sender: Any?) {
+    guard let parent else { return super.performZoom(sender) }
+    parent.performZoom(sender)
+  }
+
+  override func toggleFullScreen(_ sender: Any?) {
+    guard let parent else { return super.toggleFullScreen(sender) }
+    parent.toggleFullScreen(sender)
+  }
+
+  override func validateMenuItem(_ item: NSMenuItem) -> Bool {
+    if let parent, let action = item.action, Self.parentActions.contains(action) {
+      return parent.validateMenuItem(item)
+    }
+    return super.validateMenuItem(item)
   }
 }
 
@@ -196,6 +231,12 @@ final class InfobarPanel: AnchoredPanel {
     }
     showKeyboardFocus()
     return true
+  }
+
+  /// The key that puts the keyboard in the strip and takes it out again: F6 with no Command, Control, Option or Shift
+  /// (the Fn key that most Mac keyboards need for it does not count).
+  static func isStripShortcut(_ event: NSEvent) -> Bool {
+    event.keyCode == KeyCode.f6 && event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty
   }
 
   private enum KeyCode {

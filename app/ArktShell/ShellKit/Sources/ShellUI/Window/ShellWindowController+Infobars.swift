@@ -17,8 +17,7 @@ extension ShellWindowController {
 
   /// An F6 the page did not use puts the keyboard in that tab's infobar strip (#478); false when it shows none.
   func focusInfobarStrip(_ event: NSEvent, in tab: TabID?) -> Bool {
-    guard event.keyCode == 97,
-          event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty else { return false }
+    guard InfobarPanel.isStripShortcut(event) else { return false }
     return infobarStrips.focusStrip(of: tab, holding: window?.firstResponder)
   }
 
