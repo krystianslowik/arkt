@@ -179,7 +179,7 @@ struct DistributionConfigurationTests {
   }
 
   @Test func contractRunnerAndProbeFilesAreEngineAndTestSwitchesOnly() throws {
-    for name in ["EngineContractRunner", "ContractPageServer", "StandInShell", "ReentrancyProbe"] {
+    for name in ["EngineContractRunner", "ContractPageServer", "StandInShell", "ReentrancyProbe", "ImportCheckRunner"] {
       let source = try Self.text("App/Engine/\(name).swift")
       let first = source.split(separator: "\n").first.map(String.init)
       #expect(first == "#if ARKT_CHROMIUM_ENGINE && ARKT_TEST_SWITCHES", "\(name).swift starts with \(first ?? "nothing")")

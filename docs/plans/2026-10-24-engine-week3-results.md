@@ -7660,3 +7660,136 @@ Unchanged: 16 patch files, 8 seam and hook patch files, 22 upstream files outsid
 Runs 1 to 4 stopped by exact PID. No crash reports from these runs. Throwaway profiles under `profiles/478-20261113/`
 deleted after the runs; the fixture server stopped. Nothing touched the Keychain (mock keychain only), the clipboard,
 Screen Recording or `/Applications/Arkt.app`.
+
+## #517: import a fake profile end to end (seam, no patch)
+
+Date 2026-11-14. Branch `engine/517-import-smoke` from `main` at `c11ef1f0`. `$CR` branch `arkt` unchanged (0001-0016);
+no overlay or facade change.
+
+### Gate
+
+- Seam only: every write path exists (#511, #512, #513, #565, #566). What was missing is test-only: the existing
+  `--arkt-import-check` phases call `engine.importX` directly, so nothing ran the coordinator (#515) or the sheet (#552)
+  on the real engine. `AppSession.importFromArc()` is not usable for this: it reads the real Keychain item.
+- Facade header unchanged; `.patches` unchanged (16 lines, 16 `arkt` commits: in sync).
+- `nice -n 20 autoninja -C out/Arkt chrome -n`: `ninja: no work to do.`, so no Chromium build. SSD 1.9 TB free; swap
+  16.3-16.4 of 17.4 GB used throughout, about 1 GB free, memory free 43-51 %.
+
+### What landed
+
+- Fixture (`CoreTestSupport`, additive): `FakeChromiumProfile.Options.extraHistory` and `extraExtensions`, next to
+  `extraCookies` and `extraLogins`, and public `init`s on `FixtureManifest.HistoryEntry`, `Visit` and `ExtensionEntry`.
+  The fixed visits are from 2024, past the 90 days an import keeps, and the fixed extensions hold one Web Store id.
+  Tests first: `extraHistoryIsWrittenAfterTheFixedEntries`, `extraExtensionsAreListedInBothPreferencesFiles`.
+- `arkt-make-import-fixture` (ArktCore executable): writes the fixture to `<new folder>/User Data/Default` with two
+  history entries visited 3, 24 and 48 hours ago, two `127.0.0.1` cookies that expire in 2100 (one HttpOnly) and a second
+  Web Store id, and prints the counts. It refuses a folder that exists.
+- Runner phase `--arkt-import-check=sheet` (Engine configuration, `ARKT_TEST_SWITCHES` only): `ProfileImportCoordinator`
+  over `$ARKT_ARC_DIR/User Data` with the fixture's invented key (never `KeychainSafeStorageKeyProvider`), the import
+  record in `ARKT_DATA_DIR`'s own `Arkt.sqlite` (`SettingsStore`), the snapshot copy under `ARKT_DATA_DIR`; behind
+  `BrowserDataImportModel` and the real `BrowserDataImportSheet` on a runner window. The process ticks every type and
+  presses Import through the model's actions (no synthetic input), prints every coordinator event, the consent counts,
+  each row and the sheet's text, then `document.cookie` on a loopback page, the password store count (an empty
+  `importPasswords` batch), and what chrome://history and chrome://bookmarks list (read from the pages:
+  `history-list`'s entries, `chrome.bookmarks.getTree`). It refuses to run without `ARKT_ARC_DIR` and `ARKT_DATA_DIR`.
+
+### Build and tests
+
+| Step | Result | Numbers |
+|---|---|---|
+| `nice -n 20 swift test -j 2 --scratch-path <artifacts>/build/engine-517 --filter FakeChromiumProfileTests` (`app/ArktCore`), before the change | the two new tests do not compile (`initializer is inaccessible`, `extra argument 'extraHistory'`) | 13 passed before the tests were added |
+| Same filter plus `ExtensionListReaderTests`, after | passed | 27 tests in 2 suites |
+| `nice -n 20 swift test -j 2 --scratch-path <artifacts>/build/engine-517` (`app/ArktCore`, full) | passed | 581 tests (145, 123, 70, 8, 235), 0 failures |
+| `xcodegen generate`, then `nice -n 20 xcodebuild -project ArktShell.xcodeproj -scheme ArktShell -configuration Engine -jobs 2 -derivedDataPath <artifacts>/517/dd-engine CONFIGURATION_BUILD_DIR=<artifacts>/517/embed PRODUCT_BUNDLE_IDENTIFIER=dev.arkt.Arkt.try517 ARKT_ENGINE_APP=$CR/out/Arkt/Arkt.app build` | `BUILD SUCCEEDED`, `Engine framework copied: Arkt Framework.framework 156.0.8078.48` | the first try failed on the untracked, stale `ArktShell.xcodeproj` (`cannot find type 'RecoveryPages'`); after `xcodegen generate` 18 s. `out/Arkt` is not a component build: no dylib clones |
+| Deliberate break: `FakeChromiumProfile.make` without `+ options.extraHistory` | `extraHistoryIsWrittenAfterTheFixedEntries` failed with 5 issues; restored, 15 passed | |
+| `nice -n 20 swift test -j 2 --filter 'LintTests\|IsolationTests'` (`app/ArktShell/ShellKit`) | passed | 13 tests in 4 suites, 60 tests in 7 suites |
+| ShellKit tests, full | not run | ShellKit is untouched; only `App/Engine/ImportCheckRunner.swift` changed in the app |
+
+### Fixture
+
+`nice -n 20 swift run -j 2 --scratch-path <artifacts>/build/engine-517 arkt-make-import-fixture <artifacts>/517/fixture-20261114`:
+
+```
+history urls 5 visits 8 within 90 days 3
+bookmarks 5
+cookies 5 unexpired 2
+logins 3
+extensions webStore 2 unpacked 1 builtIn 1
+```
+
+### Real engine (`dev.arkt.Arkt.try517`, Engine app on `out/Arkt`)
+
+Command (run A on a fresh profile, run B the same again on the same profile and data folder):
+
+```zsh
+ARKT_DATA_DIR=<artifacts>/517/data-runA ARKT_DEFAULTS_SUITE=dev.arkt.try517.runA ARKT_ARC_DIR=<artifacts>/517/fixture-20261114 \
+  <artifacts>/517/embed/ArktShell.app/Contents/MacOS/ArktShell \
+  --user-data-dir=$CHROMIUM_ROOT/profiles/517-20261114/runA --use-mock-keychain --mute-audio --no-first-run \
+  --no-default-browser-check --enable-logging=stderr '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1' \
+  --arkt-engine-test-api --arkt-import-check=sheet & PID=$!
+```
+
+Counts per type (run A):
+
+| Type | Fixture | Consent count | Coordinator (written / skipped / failed) | Row on the sheet | In the profile |
+|---|---|---|---|---|---|
+| History | 5 URLs, 8 visits, 3 within 90 days | 8 | 3 / 5 / 0 (the 5 from 2024 are past the retention) | Imported 8 | `visits` 3 imported + 1 loopback page; `visit_source` 3 rows with source 7; chrome://history lists `Recent Two`, `Recent One` twice and the loopback page |
+| Bookmarks | 5 | 5 | 5 / 0 / 0 | Imported 5 | `Bookmarks` 5 URL nodes under Other bookmarks > Imported (`Reading` kept as a folder); chrome://bookmarks lists `Example`, `Docs`, `Article`, `Other item`, `Synced item` |
+| Cookies | 5 rows, 2 unexpired (127.0.0.1) | 2 | 2 / 0 / 0 | Imported 2 | `Cookies` 2 rows, `value` empty, `encrypted_value` with the `v10` prefix; the page on `127.0.0.1` sees `document.cookie` = `imported=from-fixture` (the HttpOnly one is not visible to script) |
+| Passwords | 3 | 3 | 3 / 0 / 0 | Imported 3 | engine log `import passwords: the store holds 3 logins` (after the import and again for the empty batch); `Login Data` 3 rows, all `v10` |
+| Extensions | 2 Web Store, 1 unpacked, 1 built-in | 2 | 0 / 0 / 2 | Imported 0, "2 couldn't be imported" | engine log `installExtensions 2`, then `extension install failed result=6` twice (`WEBSTORE_REQUEST_ERROR`, the listing fetch refused by the resolver rules) at once; no batch sheet, no download, no `Extensions` folder in the profile |
+
+| Check | Result | Evidence |
+|---|---|---|
+| Fresh profile, mock keychain, no real data | PASS | `--user-data-dir` under `profiles/517-20261114/`, `--use-mock-keychain`; the key is the fixture's invented password; `ARKT_ARC_DIR` and `ARKT_DATA_DIR` on the artifacts SSD; no Keychain query, no real profile path read |
+| Consent sheet | PASS | text read from the live sheet: `Import browser data \| ... \| History \| 8 \| Bookmarks \| 5 \| Extensions \| 2 \| Needs your Mac password \| Cookies \| 2 \| Passwords \| 3 \| ...` |
+| Counts reported by the coordinator equal the fixture | PASS | table above: every importable item written, everything else accounted for as skipped (past the retention) or failed (offline) |
+| Chromium shows the data | PASS | chrome://history, chrome://bookmarks, the loopback cookie and the password store count, table above |
+| Plaintext at rest | PASS | 0 hits of `from-fixture`, `hidden-from-script`, `correct-horse-1`, `no-username-3` in the profile's `Cookies`, `Login Data` and `History` |
+| Re-import (run B) | PASS | every type `written 0`: history skipped 8, bookmarks 5, cookies 2, passwords 3; extensions failed 2 again (not recorded as handled, so a later run offers them again); profile counts unchanged |
+| Snapshot copy removed | PASS | `ImportScratch` empty after both runs |
+| Imported visits not uploaded by sync | PASS (sync off) | `history_sync_metadata` 0 rows, 0 visits with `is_known_to_sync`; the 3 imported visits carry source 7, which patch 0011 (#566) keeps out of `HistorySyncBridge::MaybeCommit` (`HistorySyncBridgeTest.ImportedVisitsNotSynced`, #566 results). An upload with history sync on needs a signed-in account: not run |
+| Extensions through the batch confirmation | partly; real install needs the user | the coordinator passed only the 2 Web Store ids (not the unpacked or built-in one) and both failed cleanly in milliseconds, under the sheet's Imported list. The batch sheet only shows after the Web Store answers the listing fetch, so it cannot appear offline; the sheet and a real install from an import batch are step 2 of #918 (needs the user) |
+| Stderr | PASS | 0 hits of `FATAL`, `Check failed`, `NOTREACHED` in runs A and B; both exit 0 by themselves in about 5 s |
+
+### Findings
+
+- The result sheet says "Everything you chose came over." with both extensions failed: a type whose items all failed
+  is listed under Imported and offers no Retry (`ProfileImportSummary.retryTypes` takes only `.failed` outcomes). The
+  History row says 8 while 3 visits came over (the 5 older than 90 days count as skipped, like visits already there).
+  #935, needs the maintainer's call on the copy.
+- Closing a runner window's last tab closes the window, so the runner keeps a blank tab open while it reads the two
+  pages (first try lost the chrome://bookmarks tab to that).
+- Crashpad: the run updated `settings.dat` in the default engine folder (`~/Library/Application Support/Arkt Dev
+  Engine/Crashpad`), not in `--user-data-dir`, as earlier engine runs did. No report was written.
+
+### Review follow-up (PR #936)
+
+- `=sheet` also refuses an empty `ARKT_ARC_DIR` or `ARKT_DATA_DIR` (an empty value resolved to the current folder) and
+  a launch without `--use-mock-keychain`.
+- `DistributionConfigurationTests.contractRunnerAndProbeFilesAreEngineAndTestSwitchesOnly` now checks
+  `ImportCheckRunner.swift` starts with `#if ARKT_CHROMIUM_ENGINE && ARKT_TEST_SWITCHES`.
+- `nice -n 20 swift test -j 2 --filter 'DistributionConfigurationTests|LintTests'` (`app/ArktShell/ShellKit`): 13 tests
+  in 4 suites and 15 in 2 passed. Break: the runner's first line as `#if ARKT_CHROMIUM_ENGINE` failed
+  `contractRunnerAndProbeFilesAreEngineAndTestSwitchesOnly` and `overridesAndTestSwitchesAreCompiledOutOfDistribution`;
+  restored, both pass. The runner change was checked with `swiftc -parse`; the app was not rebuilt and the `=sheet`
+  run was not repeated.
+
+### Patch budget
+
+Unchanged: 16 patch files. `.patches` 16 lines, 16 `arkt` commits: in sync. Facade header copies `cmp` identical.
+
+### Left open
+
+- #935: the result sheet's wording for failed types and history skipped by age.
+- #918, step 2 (needs the user): the batch sheet and a real Web Store install from an import batch.
+- History sync on with a signed-in account: not run (no account in test runs); the bridge test in #566 covers it.
+
+### Cleanup
+
+Every run (three debugging runs of the page checks on one throwaway profile, then runs A and B) exited by itself
+(`ps -p`). `lsregister -u` on the app and its helpers: 0 records for `dev.arkt.Arkt.try517` and 0 paths under the build
+folder after. Deleted: the throwaway profiles under `profiles/517-20261114/`, the data folders, the fixture, the built
+app and derived data, the SwiftPM build folder and the bundle's preferences file (`dev.arkt.Arkt.try517.plist`); the
+defaults suites had never been written. Nothing touched a real browser profile, the Keychain (mock keychain, invented
+key), the clipboard, the network (resolver rules), `/Applications/Arkt.app` or `~/Applications/ArktTest`.

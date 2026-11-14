@@ -9,6 +9,10 @@ public struct FixtureManifest: Sendable, Equatable {
     /// The full transition value: core type in the low 8 bits, qualifier flags above.
     public let transition: Int32
 
+    public init(webkitTime: Int64, transition: Int32) {
+      self.webkitTime = webkitTime; self.transition = transition
+    }
+
     public var date: Date { ChromiumTime.date(fromWebKit: webkitTime) }
     public var coreTransition: Int32 { transition & 0xFF }
   }
@@ -17,6 +21,11 @@ public struct FixtureManifest: Sendable, Equatable {
     public let url: String
     public let title: String
     public let visits: [Visit]
+
+    public init(url: String, title: String, visits: [Visit]) {
+      self.url = url; self.title = title; self.visits = visits
+    }
+
     public var visitCount: Int { visits.count }
     public var lastVisitWebKitTime: Int64 { visits.map(\.webkitTime).max() ?? 0 }
   }
@@ -74,6 +83,10 @@ public struct FixtureManifest: Sendable, Equatable {
     public let kind: ExtensionKind
     public let name: String
     public let version: String
+
+    public init(id: String, kind: ExtensionKind, name: String, version: String) {
+      self.id = id; self.kind = kind; self.name = name; self.version = version
+    }
   }
 
   public let root: URL
