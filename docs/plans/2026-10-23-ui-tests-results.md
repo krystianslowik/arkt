@@ -1257,3 +1257,178 @@ Executed 4 tests, with 0 failures (0 unexpected) in 111.307 (111.313) seconds. T
 
 `cd app/ArktShell/ShellKit && swift test -j 2 --skip ShellKitGUITests` was not run. ShellKit production and ShellKit
 tests were not changed. ArktCore was not run for the same reason.
+
+### U15 Split View coverage (#180)
+
+Six XCUITest scenarios exercise the imported split, focused navigation, adding and selecting panes, separation,
+page drag, and relaunch and Archive behavior. The sidebar scenario records bounded accessibility snapshots after
+right-click and, if needed, control-click; a missing menu alone does not establish an app defect. Divider drag checks
+only the accessibility value. The unimplemented parity behaviors remain listed in `parity-deferred.txt`, as do the
+new scenarios until their focused CI results are observed.
+
+Local executable tests and app build were not run: full Xcode is unavailable and the standalone toolchain cannot
+build the baseline ShellKit. The full UI suite has a separate import/onboarding timeout tracked in #799. A manual UI
+workflow filter permits a focused run while the default remains the full suite. Results for this head are pending.
+
+#### U15 review follow-up
+
+The pane-key scenario now checks previous as well as next wraparound, and separates the known `fourth` loopback
+page with Ctrl-Shift-minus. It opens that Today row, checks its URL and verifies the Archive count and row. BH-122
+is named by that scenario; the relaunch/Cmd-W case names BH-123. The split context-menu probes pair each input with
+an ordinary Today row's Archive Below menu, dismiss menus with Escape and attach both accessibility snapshots. A
+missing split menu still fails; if the control also fails, the cause remains unknown. Divider drag still checks only
+its value. The remaining portions of multi-behavior rows are listed as partial deferrals so a passing scenario cannot
+hide them. Archive search XCUITest coverage has the open, unassigned follow-up #827; #174 is closed.
+
+These review changes have not been compiled or run in XCUITest: full Xcode is unavailable and the baseline does not
+compile with the local standalone toolchain. The focused run on the earlier remote head does not establish results
+for this revision; menu input, page separation and all other runtime outcomes remain unverified.
+
+Static checks on the review revision: Swift 6.2.4 frontend parse passed (syntax only), `actionlint` passed, UI source
+checks passed, and `scripts/ui-tests/parity-report-test.sh` passed. The existing synthetic xcresult fixture, with test
+names mapped to BH-087, BH-115 and BH-125, was also run against the real spec and deferred file: search remained
+deferred to #827 and both split partials remained visible with a passing fixture result. These are not runtime tests.
+
+#### U15 first focused run and diagnosis
+
+Manual run [42427657005](https://github.com/krystianslowik/arkt/actions/runs/42427657005), UI job
+[128569375004](https://github.com/krystianslowik/arkt/actions/runs/42427657005/job/128569375004), built and
+executed six methods: five passed; `test_BH121_GS033_sidebarSplitRow` timed out on the Option-click condition.
+The exported failure accessibility tree shows no split row, the two `/docs/left` and `/docs/right` fixture pages as
+pinned rows, and the original Today row still present. `rowIdentifier(for:)` assigns split rows their own identifier
+and assigns tabs according to their section; `separateAllTabs` puts panes in the split's place. The test incorrectly
+expected two additional Today rows for this imported pinned split. It now checks both named pinned rows, the pinned
+count increase and unchanged Today count. This evidence supports an assertion defect, not a product bug.
+
+Both regular-row and split-row menu probes now run and attach their AX snapshots before the Option-click assertion;
+menus are dismissed through Escape and missing controls or split menus still fail. The action then recreates a split
+from the focused pinned page and tests the menu separation. A missing input or menu remains a failure, not a skip;
+the cause of a missing menu would remain unknown until the paired probes are inspected. The earlier five passes were
+on remote `eb8d4f3`, before the review follow-up above. The corrected sidebar test and review additions, including
+previous wrap and the BH-122 URL and Archive checks, are **not yet runtime verified**. A fresh focused class run is
+required. No production code changed.
+
+#### U15 second focused run and diagnosis
+
+Manual run [42429649248](https://github.com/krystianslowik/arkt/actions/runs/42429649248), on `833a6b5`,
+built and executed six methods in [UI job 128575643478](https://github.com/krystianslowik/arkt/actions/runs/42429649248/job/128575643478):
+four passed and two failed. The workflow's aggregate success does not mean the informative UI job passed. Normal PR
+run [42429639908](https://github.com/krystianslowik/arkt/actions/runs/42429639908) succeeded with its UI job skipped.
+
+The sidebar Option-click did separate the split. The paired AX attachment shows four pinned tab rows before the
+click, including the two visible split children; the failure tree shows the same four after it, with the split row
+gone and both named pages now plain pinned rows. The earlier `before + 2` diagnosis above overlooked those visible
+children. The test now checks an unchanged count, both named rows, the vanished split and unchanged Today count; the
+menu action's count uses the same correction. This is an assertion defect, not evidence of a product failure.
+
+The pane-key test separated a pane and reduced the pane count to three. Its failure tree shows `/docs/right` as a
+plain pinned row and `fourth` still in the split. New panes are inserted after the focused pane, so after wrap to
+index 3 the focused pane was the original right page, not `fourth`. The test now selects index 2 and checks its
+web view title before the shortcut, then looks for `fourth` among pinned rows. URL and Archive checks remain.
+
+All four paired context-menu probes returned false: neither right-click nor Control-click exposed the regular Today
+row's `Archive Below` item or the split row's `Separate All Tabs` item in the app AX tree. Both target rows had
+nonzero frames; the split menu is constructed in `SidebarContextMenu` and the outline routes secondary input to a
+row menu. The regular control was disabled for this last Today row, so it was a poor positive control. The probe now
+looks for the enabled `Rename` item. These observations do not distinguish input delivery, menu presentation or AX
+exposure from a product defect, and do not prove a split-specific bug. Missing control and split menus remain failures;
+a successful control paired with a missing split menu is needed to diagnose that path. No product issue or production
+change is justified by these observations alone.
+
+The repairs above have not been compiled or executed in XCUITest. Full suites, 20 iterations, deliberate-break and
+worst-case/Reduce Motion checks remain unrun. The manual workflow selector remains pending maintainer ownership.
+
+#### U15 third focused run and remaining diagnosis
+
+Manual run [42435965453](https://github.com/krystianslowik/arkt/actions/runs/42435965453), on `97486f0`,
+built and executed six methods in [UI job 128594784427](https://github.com/krystianslowik/arkt/actions/runs/42435965453/job/128594784427):
+five passed and `test_BH121_GS033_sidebarSplitRow` failed at the regular-row menu assertion. The corrected pane-key
+scenario passed, and the sidebar Option-click assertion was reached and passed. The normal PR gate passed with its
+UI job skipped; it does not establish a passing focused UI run.
+
+All four paired probes returned false: neither `Rename` on the Today row nor `Separate All Tabs` on the split row
+was found after right-click or Control-click. The attached app accessibility snapshots show the app disabled after
+these inputs, but neither item appears in the app tree. That state alone does not establish whether a popup opened,
+whether the query has the right scope, or whether input reached the intended row. Source constructs an enabled Today
+`Rename` and split `Separate All Tabs`, but construction does not prove presentation. The existing toolbar URL bar
+context-menu test uses a real right-click and selects a hittable menu item; it is a candidate independent positive
+control, but was not run in this focused class and does not prove the sidebar input path works.
+
+The harness stops after the first failed assertion. The subsequent split-menu assertion and menu action therefore
+cannot be claimed as executed or passing; menu separation remains unverified. A paired run with a known-working
+real menu control and evidence of the popup's actual accessibility scope or input delivery is needed before choosing
+a repair or filing a product bug. No timeout, menu assertion, workflow selector, or production behavior was changed
+on this evidence. The selector's ownership decision remains pending; partial parity deferrals and #827 remain open.
+
+#### U15 popup presentation diagnostics pending
+
+The sidebar method now probes the sidebar URL bar's `Show Toolbar` context menu using the same item query and
+hittability condition as `ToolbarTests`, alongside the Today `Rename` and split `Separate All Tabs` probes for both
+input methods. It records target properties, item counts, menu-scoped and app accessibility descriptions, and
+screenshots immediately after each click and after the bounded query. Attachments are retained on failure. All probes
+run before the feature assertions. This independent control has not yet been runtime verified in this scenario.
+A focused diagnostic run is pending; the five-of-six result above applies only to `97486f0`. No cause or product
+bug has been established, and the Separate All Tabs assertion and action remain unverified.
+
+
+#### U15 selector decision and completed popup diagnosis
+
+The maintainer confirmed keeping the existing `ui_test_filter` input in `swift-tests.yml` ([decision](https://github.com/krystianslowik/arkt/pull/823#issuecomment-6721409159)). No workflow behavior changes are required for this decision; the earlier ownership hold is resolved.
+
+The completed [single-method diagnostic run](https://github.com/krystianslowik/arkt/actions/runs/42437413210/job/128599279661) at `fe9a0f7` failed at the regular-row menu assertion. Its screenshots establish that both click methods open the row menus, including enabled Rename and Separate All Tabs, while the URL-bar control is both visible and queryable. The row items are absent from the captured app-wide accessibility tree. The sidebar proxy replacing the real outline is a plausible explanation, not an established cause or a verified VoiceOver defect. The action itself was not reached. This is one failed diagnostic method, not a new six-method result; the earlier five-of-six result remains attributed to `97486f0`. The evidence and limits are recorded in the [diagnostic comment](https://github.com/krystianslowik/arkt/pull/823#issuecomment-6716380425).
+
+The remaining work is a verified accessibility scope or legitimate real-input selection that exercises Separate All Tabs and asserts the resulting split/tab state. No product defect or completed action coverage is claimed. The PR stays draft; the existing overlap with #802 still requires an integrated rerun if it lands first.
+
+
+#### U15 native popup keyboard selection candidate
+
+The sidebar method now opens the split's native popup with a real right-click, sends its type-selection key and Return, and asserts the actual separation result. It additionally reopens both original pinned pages and checks their URLs and the unchanged Archive count. The working URL-bar popup remains an input/accessibility positive control, while both row-query results remain attached as diagnostics instead of gating selection on the known missing app-tree item. The silent return when no row item was found is removed; a missing or wrong menu action must fail the split, page, or Archive assertions. No controller action, test-only dispatch, coordinate menu selection, skip or timeout increase is used.
+
+This is a candidate real-input path, not established keyboard behavior or an accessibility fix. Screenshots bracket native type-selection; the next focused run must establish whether Separate All Tabs actually executes. The existing row AX/proxy question and native VoiceOver behavior remain unverified. The six scenarios and partial parity deferrals are preserved. Swift 6.2.4 frontend parsing, UI source lint, actionlint, parity-report fixtures and whitespace checks passed. No local Xcode/app/GUI run occurred. A single full-class manual run using the approved selector will be dispatched after integrating main, so #802's merged changes are included. No runtime pass is claimed here.
+
+#### U15 native selection result and duplicated-page fixture repair
+
+The full-class [run 42481815873](https://github.com/krystianslowik/arkt/actions/runs/42481815873/job/128735250889)
+at `b185d75` built and executed all six methods: five passed; the sidebar method failed its post-menu separation
+condition. The workflow aggregate passed because XCUITest is informative; this is not a passing focused UI job.
+
+The [attachments](https://github.com/krystianslowik/arkt/actions/runs/42481815873/artifacts/13620740034) show the native
+popup before selection and Separate All Tabs highlighted after the `s` key. The final accessibility tree and window
+capture show no split, two plain rows titled `Fixture /docs/left` and one `Fixture /docs/right`. Source tracing
+confirms the fixture error: Option-click on the current plain tab invokes `duplicateIntoSplit`, creating a second
+copy of that page, rather than rejoining the original left and right tabs. The postcondition incorrectly demanded
+one of each title. The failure log repeatedly reaches the left-title count after the no-split, pinned-count and
+Today-count conditions; it does not show a failure to select the menu item.
+
+The repaired fixture records which original page is duplicated, verifies the two-pane and expected title counts
+before opening the menu, and requires those exact counts after separation. It then opens every resulting left/right
+row and checks its URL, retaining the unchanged Archive assertion. The menu is still selected through native keyboard
+input; the AX probes and URL-bar positive control stay intact. No production change, direct controller action,
+coordinate menu selection, skip or timeout increase is added. The row-popup accessibility scope and VoiceOver remain
+unverified. Swift 6.2.4 parsing, actionlint, UI source checks, parity-report fixtures and whitespace checks passed;
+the repaired class has not run locally and needs one new focused CI run. Existing five-of-six evidence stays tied
+to `b185d75`; no repaired-head runtime pass is claimed.
+
+#### U15 completed focused class at `eaae6e8`
+
+The repaired class passed in [manual run 42488694680, UI job 128756163364](https://github.com/krystianslowik/arkt/actions/runs/42488694680/job/128756163364)
+at `eaae6e80a333fef971af6ac83e6d1189d16672e4`: **six methods executed, zero failures**. All six named methods
+passed, including the sidebar's native Separate All Tabs selection, exact duplicate/original title counts, every
+resulting page URL and unchanged Archive count. The divider assertion remains value-only. This is one focused
+class run, not a full UI suite, repeated stress run or deliberate-break result.
+
+The diagnosis is now bounded by observed input and outcomes: both click methods display the native row popup,
+the app-wide accessibility query omits its items, native type-selection highlights Separate All Tabs, and the
+resulting-state checks pass after Return. The earlier assertion queried an unavailable app-tree item; it did not
+establish a failure to present the menu. The proxy/scope explanation and native VoiceOver behavior remain
+unverified. No product accessibility defect or production menu change is claimed.
+
+[Normal PR run 42488688602](https://github.com/krystianslowik/arkt/actions/runs/42488688602) at that same head passed
+Core **576 tests / 45 suites**, pure ShellKit **2524 / 283 suites**, and GUI **2071 reported, 60 skipped, zero
+failures**, plus app build, lint and the required aggregate. Its XCUITest job was skipped; the six-method result
+comes from the separately selected manual job above. Both runs include #802 via the earlier main merge.
+
+The six scenarios have real tests; partial parity deferrals retain their reasons, Archive search links to open
+follow-up #827, and the maintainer approved keeping the workflow selector. The PR can proceed to review with the
+above evidence and limits. This final update changes documentation only; any new-head CI result must be attributed
+separately from the tested `eaae6e8` head.
