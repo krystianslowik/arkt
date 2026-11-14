@@ -232,12 +232,17 @@ final class ImportCheckRunner {
     host.window.orderOut(nil)
   }
 
-  /// `=sheet`: the import sheet over the coordinator, on the real engine. Refuses to run without `ARKT_ARC_DIR` and
-  /// `ARKT_DATA_DIR`, so it never reads the real data folders.
+  /// `=sheet`: the import sheet over the coordinator, on the real engine. Refuses to run without a non-empty
+  /// `ARKT_ARC_DIR` and `ARKT_DATA_DIR` (an empty one would resolve to the current folder), so it never reads the real
+  /// data folders, and without `--use-mock-keychain`, so the passwords it writes never reach the login Keychain.
   private static func importThroughSheet(into engine: ChromiumEngine) async throws {
     let environment = ProcessInfo.processInfo.environment
-    guard let arc = environment["ARKT_ARC_DIR"], environment["ARKT_DATA_DIR"] != nil else {
+    guard let arc = environment["ARKT_ARC_DIR"], !arc.isEmpty,
+          environment["ARKT_DATA_DIR"]?.isEmpty == false else {
       throw RunnerError("set ARKT_ARC_DIR to the fixture and ARKT_DATA_DIR to a throwaway folder")
+    }
+    guard CommandLine.arguments.contains("--use-mock-keychain") else {
+      throw RunnerError("launch with --use-mock-keychain")
     }
     let location = try await AppEnvironment.databaseLocation()
     let database = try await openDatabase(at: location.databaseURL)

@@ -7763,6 +7763,18 @@ Counts per type (run A):
 - Crashpad: the run updated `settings.dat` in the default engine folder (`~/Library/Application Support/Arkt Dev
   Engine/Crashpad`), not in `--user-data-dir`, as earlier engine runs did. No report was written.
 
+### Review follow-up (PR #936)
+
+- `=sheet` also refuses an empty `ARKT_ARC_DIR` or `ARKT_DATA_DIR` (an empty value resolved to the current folder) and
+  a launch without `--use-mock-keychain`.
+- `DistributionConfigurationTests.contractRunnerAndProbeFilesAreEngineAndTestSwitchesOnly` now checks
+  `ImportCheckRunner.swift` starts with `#if ARKT_CHROMIUM_ENGINE && ARKT_TEST_SWITCHES`.
+- `nice -n 20 swift test -j 2 --filter 'DistributionConfigurationTests|LintTests'` (`app/ArktShell/ShellKit`): 13 tests
+  in 4 suites and 15 in 2 passed. Break: the runner's first line as `#if ARKT_CHROMIUM_ENGINE` failed
+  `contractRunnerAndProbeFilesAreEngineAndTestSwitchesOnly` and `overridesAndTestSwitchesAreCompiledOutOfDistribution`;
+  restored, both pass. The runner change was checked with `swiftc -parse`; the app was not rebuilt and the `=sheet`
+  run was not repeated.
+
 ### Patch budget
 
 Unchanged: 16 patch files. `.patches` 16 lines, 16 `arkt` commits: in sync. Facade header copies `cmp` identical.
