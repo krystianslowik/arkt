@@ -7701,7 +7701,9 @@ no overlay or facade change.
 | Same filter plus `ExtensionListReaderTests`, after | passed | 27 tests in 2 suites |
 | `nice -n 20 swift test -j 2 --scratch-path <artifacts>/build/engine-517` (`app/ArktCore`, full) | passed | 581 tests (145, 123, 70, 8, 235), 0 failures |
 | `xcodegen generate`, then `nice -n 20 xcodebuild -project ArktShell.xcodeproj -scheme ArktShell -configuration Engine -jobs 2 -derivedDataPath <artifacts>/517/dd-engine CONFIGURATION_BUILD_DIR=<artifacts>/517/embed PRODUCT_BUNDLE_IDENTIFIER=dev.arkt.Arkt.try517 ARKT_ENGINE_APP=$CR/out/Arkt/Arkt.app build` | `BUILD SUCCEEDED`, `Engine framework copied: Arkt Framework.framework 156.0.8078.48` | the first try failed on the untracked, stale `ArktShell.xcodeproj` (`cannot find type 'RecoveryPages'`); after `xcodegen generate` 18 s. `out/Arkt` is not a component build: no dylib clones |
-| ShellKit tests | not run | ShellKit is untouched; only `App/Engine/ImportCheckRunner.swift` changed in the app |
+| Deliberate break: `FakeChromiumProfile.make` without `+ options.extraHistory` | `extraHistoryIsWrittenAfterTheFixedEntries` failed with 5 issues; restored, 15 passed | |
+| `nice -n 20 swift test -j 2 --filter 'LintTests\|IsolationTests'` (`app/ArktShell/ShellKit`) | passed | 13 tests in 4 suites, 60 tests in 7 suites |
+| ShellKit tests, full | not run | ShellKit is untouched; only `App/Engine/ImportCheckRunner.swift` changed in the app |
 
 ### Fixture
 
