@@ -160,9 +160,10 @@ public final class LittleArktEngineHost: EngineWindowHosting {
   }
 
   /// An Esc the page did not use stops the page while it loads, unless another Esc owner of the window is open
-  /// (KB-055, #757).
+  /// (KB-055, #757). An F6 the page did not use puts the keyboard in the page's infobar strip (#478).
   public func handleUnhandledKeyDown(_ event: NSEvent, in tab: TabID?) -> Bool {
-    controller?.stopLoadingOnEscape(event, in: tab) ?? false
+    guard let controller else { return false }
+    return controller.focusInfobarStrip(event, in: tab) || controller.stopLoadingOnEscape(event, in: tab)
   }
 
   func dispatch(_ command: EngineCommand, disposition: EngineDisposition) {

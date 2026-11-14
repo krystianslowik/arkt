@@ -395,7 +395,16 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
 
   /// The infobars of the page this window shows, while the window is open. The anchor holds the controller weakly.
   private func makeInfobarPresenter() -> InfobarPresenter {
-    InfobarPresenter(engine: engine) { [weak self] tab in self?.pageAnchor(tab) }
+    let presenter = InfobarPresenter(engine: engine) { [weak self] tab in self?.pageAnchor(tab) }
+    presenter.focusPage = { [weak self] tab in self?.engine.focusPage(of: tab) }
+    return presenter
+  }
+
+  /// An F6 the page did not use puts the keyboard in the page's infobar strip (#478); false when it shows none.
+  func focusInfobarStrip(_ event: NSEvent, in tab: TabID?) -> Bool {
+    guard event.keyCode == 97,
+          event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty else { return false }
+    return infobarStrips.focusStrip(of: tab, holding: window.firstResponder)
   }
 
   private func pageAnchor(_ tab: TabID) -> NSView? {

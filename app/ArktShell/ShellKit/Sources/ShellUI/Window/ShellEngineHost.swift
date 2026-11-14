@@ -37,9 +37,12 @@ public final class ShellEngineHost: EngineWindowHosting {
   }
 
   /// An Esc the page did not use closes an open Peek (Esc goes to the page first, decided 2026-10-25); otherwise it
-  /// stops the page while it loads, unless another Esc owner is open (KB-055, #614).
+  /// stops the page while it loads, unless another Esc owner is open (KB-055, #614). An F6 the page did not use puts the
+  /// keyboard in the tab's infobar strip (#478).
   public func handleUnhandledKeyDown(_ event: NSEvent, in tab: TabID?) -> Bool {
-    guard event.keyCode == 53, let controller else { return false }
+    guard let controller else { return false }
+    if controller.focusInfobarStrip(event, in: tab) { return true }
+    guard event.keyCode == 53 else { return false }
     return controller.peek.handleEscape(in: tab) || controller.stopLoadingOnEscape(event, in: tab)
   }
 
