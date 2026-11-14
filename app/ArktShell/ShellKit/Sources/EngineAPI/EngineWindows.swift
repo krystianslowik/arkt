@@ -94,7 +94,8 @@ public protocol EngineWindowHosting: AnyObject {
   /// engine's navigation start: it must not call the engine. To open the link elsewhere, answer `.cancel` and act
   /// after the call returns. Default (`EngineLinks.swift`): `.navigate`.
   func decideLinkActivation(_ activation: EngineLinkActivation) -> EngineLinkDecision
-  /// A key down that a page of this window did not handle (Esc the page did not use), with the tab it was sent to.
+  /// A key down that a page of this window did not handle (an Esc, or an F6 without modifiers, the page did not use),
+  /// with the tab it was sent to.
   /// True when the host took it. Called after the engine finished with the event, never from inside the page's own
   /// handling. Default: false.
   func handleUnhandledKeyDown(_ event: NSEvent, in tab: TabID?) -> Bool

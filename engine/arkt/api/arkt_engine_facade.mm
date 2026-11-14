@@ -4945,6 +4945,8 @@ void RunDialogProbeForSelfTest(id<ArktTabHandle> tab,
     if (base::StringToInt(argument, &count) && count >= 0) {
       SetTestInfobarsForSelfTest(contents, count);
     }
+  } else if (probe == "nonconfirm-infobar") {
+    SetNonConfirmInfobarForSelfTest(contents, argument != "remove");
   } else if (probe == "tab-modal") {
     ShowTabModalForSelfTest(contents);
   } else if (probe == "geometry") {

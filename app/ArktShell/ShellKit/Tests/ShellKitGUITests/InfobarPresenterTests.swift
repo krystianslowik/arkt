@@ -17,6 +17,8 @@ final class InfobarPresenterTests: XCTestCase {
   private var observation: EngineObservation?
   private var shown = true
   private var windowVisible = true
+  /// The messages the presenter asked VoiceOver to read, in order.
+  private var announced: [String] = []
 
   override func setUp() async throws {
     _ = NSApplication.shared
@@ -33,6 +35,7 @@ final class InfobarPresenterTests: XCTestCase {
     presenter = InfobarPresenter(engine: engine, anchor: { [unowned self] _ in shown ? page : nil },
                                  windowIsVisible: { [unowned self] _ in windowVisible })
     presenter.reduceMotion = { true }
+    presenter.announce = { [unowned self] _, message in announced.append(message) }
     observation = engine.observe { [unowned self] in presenter.handle($0) }
   }
 
@@ -401,5 +404,90 @@ final class InfobarPresenterTests: XCTestCase {
     XCTAssertEqual(children?.map { $0.accessibilityIdentifier() }, order, "the icon is not a child: it is decoration")
     XCTAssertEqual(row.okButton?.accessibilityIdentifier(), AXID.Infobar.ok)
     XCTAssertEqual(row.closeButton?.accessibilityIdentifier(), AXID.Infobar.close)
+  }
+
+  // MARK: Seen before (#477 review, #581)
+
+  private func fades(_ layer: CALayer?) -> Bool { layer?.animation(forKey: "infobarFade") != nil }
+
+  func testATabSwitchBringsTheStripBackWithoutAFadeAndAnnouncesNothingAgain() throws {
+    presenter.reduceMotion = { false }
+    engine.raiseInfobar(in: tab, message: "One")
+    XCTAssertTrue(fades(try strip().stack.layer), "a new infobar fades in")
+    XCTAssertEqual(announced, ["One"])
+
+    shown = false
+    presenter.refresh()
+    XCTAssertNil(presenter.strip(for: tab))
+    shown = true
+    presenter.refresh()
+    let back = try strip()
+    XCTAssertFalse(fades(back.stack.layer), "the same infobar on a new strip shows at once")
+    XCTAssertFalse(fades(back.rows[0].layer))
+    XCTAssertEqual(announced, ["One"], "announced once")
+  }
+
+  func testASpaceOrMinimizeRoundTripShowsTheStripAtOnceAndSilently() throws {
+    presenter.reduceMotion = { false }
+    engine.raiseInfobar(in: tab, message: "One")
+    windowVisible = false
+    presenter.refresh()
+    XCTAssertNil(presenter.strip(for: tab))
+    windowVisible = true
+    presenter.refresh()
+    XCTAssertFalse(fades(try strip().stack.layer))
+    XCTAssertEqual(announced, ["One"])
+  }
+
+  func testLeavingHTMLFullscreenAnnouncesNoRowAgainAndOnlyANewRowFades() throws {
+    presenter.reduceMotion = { false }
+    engine.raiseInfobar(in: tab, message: "One")
+    engine.raiseInfobar(in: tab, message: "Two")
+    XCTAssertEqual(announced, ["One", "Two"])
+
+    engine.setTabFullscreen(tab, true)
+    engine.raiseInfobar(in: tab, message: "Three")
+    XCTAssertEqual(announced, ["One", "Two"], "nothing is on screen during fullscreen, so nothing is read")
+    engine.setTabFullscreen(tab, false)
+
+    let strip = try strip()
+    XCTAssertEqual(strip.rows.map(\.infobar.message), ["One", "Two", "Three"])
+    XCTAssertEqual(announced, ["One", "Two", "Three"], "each row is read once")
+    XCTAssertFalse(fades(strip.stack.layer), "the strip brings back rows that were on screen: no fade as a whole")
+    XCTAssertEqual(strip.rows.map { fades($0.layer) }, [false, false, true], "only the new row fades in")
+
+    engine.setTabFullscreen(tab, true)
+    engine.setTabFullscreen(tab, false)
+    XCTAssertEqual(announced, ["One", "Two", "Three"], "a second round trip reads nothing")
+  }
+
+  func testANewInfobarOnAStripThatIsUpIsAnnouncedOnceAndListChangesDoNotRepeatIt() throws {
+    let first = try XCTUnwrap(engine.raiseInfobar(in: tab, message: "One"))
+    engine.raiseInfobar(in: tab, message: "Two")
+    engine.removeInfobar(first)
+    XCTAssertEqual(try strip().rows.map(\.infobar.message), ["Two"])
+    presenter.refresh()
+    XCTAssertEqual(announced, ["One", "Two"])
+  }
+
+  func testAnInfobarRaisedWhileTheTabIsHiddenIsAnnouncedWhenTheTabIsShown() throws {
+    shown = false
+    engine.raiseInfobar(in: tab, message: "Later")
+    XCTAssertEqual(announced, [])
+    shown = true
+    presenter.refresh()
+    XCTAssertEqual(announced, ["Later"])
+    presenter.refresh()
+    XCTAssertEqual(announced, ["Later"])
+  }
+
+  func testAFreshListAfterTheTabsInfobarsAllWentFadesAndIsAnnouncedAgain() throws {
+    presenter.reduceMotion = { false }
+    let id = try XCTUnwrap(engine.raiseInfobar(in: tab, message: "One"))
+    engine.removeInfobar(id)
+    XCTAssertNil(presenter.strip(for: tab))
+    engine.raiseInfobar(in: tab, message: "Again")
+    XCTAssertTrue(fades(try strip().stack.layer), "a new infobar, a new strip: it fades in")
+    XCTAssertEqual(announced, ["One", "Again"])
   }
 }

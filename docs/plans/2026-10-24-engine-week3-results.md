@@ -7532,3 +7532,131 @@ Every engine run stopped by exact PID (runs 1 to 13; runs 12 and 13 are on the l
 to the artifacts folder. The `ColorSampler` XPC service the eyedropper runs started was left to launchd (idle).
 Throwaway profiles under `profiles/589-20261113/` deleted after the runs; the fixture server stopped. Nothing touched
 the Keychain (mock keychain only), the clipboard, `~/Downloads` or `/Applications/Arkt.app`.
+
+## #478: infobar strip keyboard focus, the tab-sharing row, seen-before rows (seam, no patch)
+
+Date 2026-11-13. Branch `engine/478-infobar-strip` from `main` at `b1e8024d`. `$CR` branch `arkt` unchanged
+(0001-0016).
+
+### Gate
+
+- Seam, no patch. Chromium builds the tab-sharing infobar (`TAB_SHARING_INFOBAR_DELEGATE`, 93) as the Views
+  `TabSharingInfoBar` with a non-confirm delegate. Its whole message is the accessible name of its status view
+  (`TabSharingStatusMessageView::SetupMessage`), or the text of a plain label when the capturer is an extension; both
+  are set in the constructor, so no widget is needed. The overlay's infobar presenter reads it, takes Stop sharing as
+  OK and Share this tab instead as Cancel, and acts through `TabSharingInfoBarDelegate::Stop` and
+  `ShareThisTabInstead`, as the Views buttons do. `//chrome/browser/ui/tab_sharing` and
+  `//chrome/browser/ui/views/tab_sharing` join the window target's deps.
+- Facade header (both copies, additive, `cmp` identical, recorded on #478): `enum { ArktInfobarRowHeight = 40 };`, which
+  the engine's `kArktInfobarRowHeight` now takes; and the comment of `-unhandledKeyDown:inTab:` names F6 next to Esc.
+- `.patches` unchanged (16 lines, 16 `arkt` commits: in sync).
+- Builds: `nice -n 15 autoninja -j 4 -C out/Arkt chrome`; swap 16.6 to 17.0 of 17.4-18.4 GB; Chromium disk 1.9 TB free,
+  internal disk 35-40 GB free; load average 5 to 9. The Chromium disk was unmounted for part of the day (not by this
+  task); nothing was built or written while it was gone.
+
+### Maintainer decisions (2026-11-13, on #478)
+
+1. F6 moves the keyboard into the strip of the focused tab, onto its first control; Tab / Shift-Tab and the arrows move;
+   Return or Space presses; Esc or F6 gives the keyboard back to the page; the strip never takes it on its own;
+   `ShellTokens.focusRing`. Tab from the page into the strip: #930.
+2. The tab-sharing row draws Chromium 156's own strings ("Sharing this tab to <host>", "Sharing <tab> to <host>",
+   "Stop sharing", "Share this tab instead"); the quote in the acceptance list predates them.
+3. Row height: one facade constant, used by the engine; the ShellUI test compares against it.
+4. Stop sharing as OK, Share this tab instead as Cancel, no close. The captured-surface-control indicator and the
+   message's switch-to-tab buttons are a gap: #931.
+
+### What landed
+
+- Engine. `arkt_infobars.mm` draws the tab-sharing infobar as a row (`ContentForTabSharing`) and acts on it; any other
+  non-confirm infobar (the sign-in QR code, the alternate-URL bar) is still logged `not drawn (not a confirm
+  infobar)`. `ForwardUnhandledKeyDown` forwards an F6 without modifiers the page did not use, as it does Esc.
+- Self-test (`--arkt-facade-selftest`): `infobarsChanged` logs every row's values; `infobar-act <index>
+  ok|cancel|close` acts through the reported object; `tab-share [stop]` (`getDisplayMedia` with `preferCurrentTab`,
+  run with `--auto-accept-this-tab-capture`, so no picker and never a screen or window); `nonconfirm-infobar [remove]`
+  (a non-confirm infobar under the sign-in QR identifier, 137: the real one needs Chromium's sign-in page and a hybrid
+  passkey transport); `f6` (an F6 into the focused page, as `esc`).
+- Shell. F6: `ShellEngineHost` and `LittleArktEngineHost` hand an unhandled F6 to `InfobarPresenter.focusStrip`, which
+  finds the tab (the engine names none: the tab whose page holds the first responder). The strip panel becomes key and
+  its stack view takes the keys; the controls are reached in reading order and only enabled ones; the ring is the
+  controls' own `KeyboardFocusRingView` (the close button gains one). Keys with Command, Control or Option go on to the
+  menu. When the focused row goes, the focus moves to the row that is left; when the strip goes, or Esc or F6, the
+  page gets the keyboard back (only while the tab is on screen).
+- Shell, #477 review. The presenter keeps, per tab, the infobars that have been on screen: a strip made again for them
+  (tab or Space switch, minimize, HTML fullscreen) shows at once and announces nothing; only an infobar new to the
+  screen fades in and is announced, once. `InfobarMetrics.rowHeight` is checked against the header's
+  `ArktInfobarRowHeight` (read from the ShellKit copy: ShellUI may not import the facade module,
+  `EngineABIIsolationTests`).
+- Separate commit (carry-over from the #927 review): on the posted answer in `ConfirmBrowserCloseWithPendingDownloads`,
+  `ProcessPendingTabs` invalidates the weak-pointer factory the answer is bound to; and with the private window as the
+  app's last window the type is `kBrowserShutdown` and the count includes regular downloads.
+
+### Smoke (`out/Arkt/Arkt.app`, `--no-startup-window --arkt-facade-selftest --arkt-engine-test-api --remote-debugging-port --auto-accept-this-tab-capture`, fresh profiles under `profiles/478-20261113/`, `--use-mock-keychain --mute-audio`, `--host-resolver-rules="MAP * ~NOTFOUND, EXCLUDE 127.0.0.1"`, a loopback fixture server, commands through page titles over DevTools)
+
+| Step | Result |
+|---|---|
+| `tab-share` on tab A, tab B open (run 1) | page title `tab-share sharing browser`; A: `Sharing this tab to http://127.0.0.1:18478`, OK `Stop sharing`, no Cancel, no close, icon; B: `Sharing 127.0.0.1:18478 to http://127.0.0.1:18478`, OK `Stop sharing`, Cancel `Share this tab instead`; no Screen Recording prompt |
+| `infobar-act 0 cancel` on B | both rows replaced (new ids): A `Sharing 127.0.0.1:18478 to this tab` with both buttons, B `Sharing this tab to ...` |
+| `infobar-act 0 ok` on B | both lists empty; A's page title `tab-share ended` |
+| `geometry` while sharing | `rows=1 rows hidden (shell draws them)=yes rows frame 120,710 900x40 page 120,150 900x560` |
+| `nonconfirm-infobar`, then `infobars 1`, then both removed | `infobar 137 not drawn (not a confirm infobar)`; the list holds only the test infobar; removal leaves 0; the tab answers |
+| `f6` (run 4) | `unhandledKeyDown key=97 ... inPage=yes`; `esc` still `key=53`; a page whose keydown listener takes F6 keeps it (title `page took F6`, no `unhandledKeyDown`) |
+| `FATAL`, `Check failed`, `DCHECK` (runs 1 and 4) | 0 |
+
+`quit` ends the windows and logs `keep-alive released`, but the process stays (runs 1 and 2; run 2 started no
+capture), as in earlier lanes with `--remote-debugging-port`; every run was stopped by its PID: #934.
+
+### Deliberate breaks
+
+- Engine: `const bool tab_sharing = (false) && IsTabSharing(delegate);` in `ArktInfobarPresenter::Add`, rebuilt (71 s,
+  `FAILED:` 0), run 3: the capture starts (`tab-share sharing browser`) and the log says `infobar 93 not drawn (not a
+  confirm infobar)`, no `InfobarsChanged`. Restored and rebuilt (72 s, `FAILED:` 0); run 4 above.
+- Shell: the strip's `fadeIn: allNew` set to `true`, and F6 taken out of the strip's exit keys: 4 failures
+  (`testATabSwitchBringsTheStripBackWithoutAFadeAndAnnouncesNothingAgain`,
+  `testASpaceOrMinimizeRoundTripShowsTheStripAtOnceAndSilently`,
+  `testLeavingHTMLFullscreenAnnouncesNoRowAgainAndOnlyANewRowFades`, `testF6AgainGivesTheKeyboardBackToThePage`).
+  `InfobarMetrics.rowHeight` 41: `Expectation failed: InfobarMetrics.rowHeight == CGFloat(engine)`. Restored: passing.
+
+| Step | Result |
+|---|---|
+| Builds | 121, 90, 71 (break), 72 (restore), 67 (f6 command) s; `FAILED:` 0 each (one break build first failed on `-Wunreachable-code`, fixed by the parentheses) |
+| `gn check out/Arkt "//arkt/*"` | `Header dependency check OK` |
+
+### Tests
+
+- ShellKit `swift test --skip ShellKitGUITests`: every bundle passes (Swift Testing runs of 1567, 44, 60, 29, 289, 49,
+  343, 226 and 39 tests), including the font and radius lints and `EngineABIIsolationTests`; 1 new test
+  (`InfobarMetricsTests` reads the header constant, plus its reader check).
+- GUI, `AAWindowLeakGuardTests`, `InfobarKeyboardTests` (16, new), `InfobarPresenterTests` (36, 6 new),
+  `InfobarWindowTests`, `ZzzWindowLeakGuardEndTests`: 72 run, 0 failures. Also run: `JavaScriptDialogPresenterTests`,
+  `LittleArktDialogTests`, `PermissionPresenterTests`, `ConformanceTests`, `ChromiumInfobarTests`: 0 failures.
+- 20 runs of `InfobarKeyboardTests` and `InfobarPresenterTests` (52 tests each) under the machine's own load (load
+  average 4.9 to 6.7, no load added): 20 passed, 0 failed.
+- Review of #933: while the strip holds the keyboard it is the key window, so the window commands `NSWindow` implements
+  (Close Window, Minimize, Zoom, Enter Full Screen) resolved to the strip's panel. `InfobarWindow` now forwards them and
+  their menu validation to the browser window. F6 is one check (`InfobarPanel.isStripShortcut`) for both windows.
+  `InfobarKeyboardTests` 20 (4 new: the window commands reach the parent, other items stay the panel's, another window
+  taking the keyboard drops the ring, the shortcut). Break: the validation forwarding off, 4 failures (`performClose:
+  is enabled as the browser window says`, and the same for the other three); restored, 20 passed. GUI with both leak
+  guards and `LittleArktDialogTests`: 94 run, 0 failures. 20 runs of the keyboard and presenter suites (56 tests each,
+  load average 5.0 to 6.7): 20 passed.
+
+### Patch budget
+
+Unchanged: 16 patch files, 8 seam and hook patch files, 22 upstream files outside 0001-0004. `.patches` 16 lines, 16
+`arkt` commits: in sync. Facade header copies `cmp` identical.
+
+### Left open
+
+- Tab from the page into the strip: #930 (`WebContentsViewMac::TakeFocus` ends in the shell window's key view loop).
+- The captured-surface-control indicator and the switch-to-tab buttons of the tab-sharing message: #931.
+- The sign-in QR infobar: a known gap, not drawn; checked with a stand-in under its identifier, not the real infobar.
+- Real keys, VoiceOver and the shell app on an Engine build with its own bundle id: #932 (needs the user). The keyboard
+  was checked with key events delivered in the process (ShellKit) and on the self-test window (F6 reaching the host).
+- A tab moved to another window comes back as new to that window's presenter: its rows fade in and are announced
+  there again.
+
+### Cleanup
+
+Runs 1 to 4 stopped by exact PID. No crash reports from these runs. Throwaway profiles under `profiles/478-20261113/`
+deleted after the runs; the fixture server stopped. Nothing touched the Keychain (mock keychain only), the clipboard,
+Screen Recording or `/Applications/Arkt.app`.

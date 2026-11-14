@@ -19,6 +19,13 @@ namespace arkt {
 // test ones first). They do not expire on navigation.
 void SetTestInfobarsForSelfTest(content::WebContents* contents, int count);
 
+// #478: adds (`add` true) or removes a stand-in for an infobar with Views of
+// its own and no confirm delegate, under the sign-in QR code infobar's
+// identifier, so the presenter's not-drawn path runs on a live tab. The real
+// sign-in QR infobar only appears on Chromium's sign-in page with a hybrid
+// passkey transport, which a self-test cannot reach.
+void SetNonConfirmInfobarForSelfTest(content::WebContents* contents, bool add);
+
 // Shows a Chromium tab-modal dialog on `contents` the way the extension
 // dialogs do (constrained_window::ShowWebModal of a ui::DialogModel).
 void ShowTabModalForSelfTest(content::WebContents* contents);
