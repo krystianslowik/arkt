@@ -136,7 +136,7 @@ public struct SplitItem: Hashable, Sendable, Codable {
   public var orientation: Orientation
   public var widthFactors: [Double]
   /// The name the user gave the split (#787), drawn instead of its pane titles; nil when it has none. Stored from
-  /// sidebar format 4 and archive snapshot format 2 on, and omitted from the encoding when nil.
+  /// sidebar format 5 and archive snapshot format 3 on, and omitted from the encoding when nil.
   public var title: String?
 
   public init(orientation: Orientation, widthFactors: [Double], title: String? = nil) {

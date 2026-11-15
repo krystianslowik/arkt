@@ -32,7 +32,8 @@ public struct NodeSnapshot: Hashable, Sendable, Codable, Identifiable {
   }
 
   /// The subtree as a format that predates split titles reads it (sidebar format 4, archive snapshot format 2): every
-  /// split in it unnamed, every other field, the node icons included, kept. A `title` key in such a document was never part of its format, so it is not read.
+  /// split in it unnamed, every other field, the node icons included, kept. A `title` key in such a document was never
+  /// part of its format, so it is not read.
   public func withoutSplitTitles() -> NodeSnapshot {
     var copy = self
     if case .split(var split) = kind {

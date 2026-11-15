@@ -219,7 +219,6 @@ final class TabActionsTests: XCTestCase {
     harness.controller.close()
   }
 
-  /// A page title arriving while the field is open leaves the field open (the row reload waits for it).
   // MARK: Rename a split (#787)
 
   /// The split row's title and accessibility label.
@@ -257,6 +256,29 @@ final class TabActionsTests: XCTestCase {
     XCTAssertEqual(try shownTitle(harness, world.split).label, "Research")
     harness.engine.setDocumentTitle(try XCTUnwrap(harness.tab(world.panes[0])), "Page title")
     XCTAssertEqual(try shownTitle(harness, world.split).row, "Research", "a pane's page title never replaces it")
+  }
+
+  /// A pane's page title arriving while the split's field is open leaves the field open and stores nothing; the row
+  /// shows the new pane title once the field closes.
+  func testAPaneTitleDuringASplitRenameDoesNotCloseTheField() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
+    harness.controller.activate(node: world.panes[0])
+    try harness.choose("Rename", on: world.split)
+    let field = try XCTUnwrap(try harness.cell(world.split).renameField)
+    XCTAssertEqual(field.accessibilityLabel(), "Split View name")
+    let editor = try XCTUnwrap(field.currentEditor() as? NSTextView)
+    editor.insertText("Res", replacementRange: editor.selectedRange())
+
+    harness.engine.setDocumentTitle(try XCTUnwrap(harness.tab(world.panes[0])), "Changed")
+
+    XCTAssertNotNil(try harness.cell(world.split).renameField, "the field stays open")
+    XCTAssertEqual(try harness.outline().renamingNode, world.split)
+    XCTAssertNil(harness.source.splitTitle(world.split), "half-typed text is not stored")
+    try harness.cell(world.split).endRename(commit: false)
+    XCTAssertNil(harness.source.splitTitle(world.split))
+    XCTAssertEqual(try shownTitle(harness, world.split).row, "Changed | S1", "the held reload runs on close")
   }
 
   /// Clearing the name shows the pane titles again; committing the pane titles unchanged stores no name.
@@ -305,6 +327,7 @@ final class TabActionsTests: XCTestCase {
     XCTAssertEqual(try shownTitle(harness, world.split).row, "S0 | S1")
   }
 
+  /// A page title arriving while the field is open leaves the field open (the row reload waits for it).
   func testAPageTitleDuringRenameDoesNotCloseTheField() throws {
     let world = try Self.makeWorld()
     let harness = Harness(world.sidebar)

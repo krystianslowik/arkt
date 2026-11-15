@@ -1059,6 +1059,8 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     outlineView.axProxyRows.post(.valueChanged, forRow: row)
     if let container = source.parent(of: id)?.containerNode, case .split? = source.node(container),
        let splitItem = items[container] {
+      // The split being renamed waits like any renamed row: a reload would replace its cell and commit the field.
+      guard container != renamingNode else { renameReloadPending = true; return }
       outlineView.reloadItem(splitItem, reloadChildren: false)   // split titles derive from their panes
       outlineView.axProxyRows.post(.titleChanged, forRow: outlineView.row(forItem: splitItem))
     }
@@ -1110,7 +1112,9 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
       } else {
         syncDisplay(id)
       }
-      if case .split = location { outlineView.reloadItem(parent, reloadChildren: false) }  // title from panes
+      if case .split(let split) = location {                 // title from panes
+        if split == renamingNode { renameReloadPending = true } else { outlineView.reloadItem(parent, reloadChildren: false) }
+      }
     default:
       return
     }
@@ -1817,7 +1821,14 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     // A split's field opens on its row title: its name, else its pane titles (#787).
     renameOriginalTitle = if case .split? = source.node(id) { title(of: id) }
       else { Self.renameText(of: source.node(id)) }
-    let opened = cell.beginRename(flavor: flavor) { [weak self] typed in self?.finishRename(id, typed: typed) }
+    let label = switch source.node(id) {
+    case .split?: "Split View name"
+    case .folder?: "Folder name"
+    default: "Tab name"
+    }
+    let opened = cell.beginRename(flavor: flavor, accessibilityLabel: label) { [weak self] typed in
+      self?.finishRename(id, typed: typed)
+    }
     if !opened { renamingNode = nil }
     return opened
   }
