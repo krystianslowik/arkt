@@ -116,6 +116,9 @@ final class InfobarPanel: AnchoredPanel {
   var postFocusChange: @MainActor (NSButton) -> Void = { control in
     NSAccessibility.post(element: control, notification: .focusedUIElementChanged)
   }
+  /// The control VoiceOver was last told about: its infobar, its index in the row and its label. A row refreshed with
+  /// new buttons keeps the same entry, so a new list that leaves the keyboard where it was tells nothing again.
+  private var announcedFocus: (id: InfobarID, index: Int, label: String?)?
   private var isShown = false
 
   init(infobars: [Infobar], width: CGFloat) {
@@ -163,6 +166,8 @@ final class InfobarPanel: AnchoredPanel {
     guard let row = edge == .first ? reachable.first : reachable.last else { return false }
     keyboardFocus = (row.infobar.id, edge == .first ? 0 : row.keyboardControls.count - 1)
     stack.keyHandler = { [weak self] event in self?.handleKey(event) ?? false }
+    // Before the stack becomes first responder: AppKit's own focus change then already finds the control (#943).
+    stack.focusedControl = keyboardFocusedControl
     panel.makeKey()
     panel.makeFirstResponder(stack)
     showKeyboardFocus()
@@ -190,14 +195,22 @@ final class InfobarPanel: AnchoredPanel {
     return controls.indices.contains(focus.index) ? controls[focus.index] : nil
   }
 
-  /// Draws the ring on the control the keyboard is on, and tells VoiceOver when that control changed (#941): F6 or Tab
-  /// into the strip, every move inside it, a row replaced under it. Nothing is posted when the keyboard leaves.
+  /// Draws the ring on the control the keyboard is on, and tells VoiceOver when the keyboard moved to another control
+  /// (#941): F6 or Tab into the strip, every move inside it, a row going under it. Nothing is posted when the keyboard
+  /// leaves, on a key that moves nothing, or on a new list that leaves it on the same control.
   private func showKeyboardFocus() {
     let focused = keyboardFocusedControl
     for row in rows { row.showKeyboardFocus(on: focused) }
-    let moved = focused !== stack.focusedControl
     stack.focusedControl = focused
-    if moved, let focused { postFocusChange(focused) }
+    guard let focused, let focus = keyboardFocus else {
+      announcedFocus = nil
+      return
+    }
+    let label = focused.accessibilityLabel()
+    if let announced = announcedFocus, announced.id == focus.id, announced.index == focus.index,
+       announced.label == label { return }
+    announcedFocus = (focus.id, focus.index, label)
+    postFocusChange(focused)
   }
 
   /// After a new list: the focus stays on its infobar's row, or moves to the row that took its place; the strip lets

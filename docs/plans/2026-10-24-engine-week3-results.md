@@ -8021,3 +8021,26 @@ Unchanged: 16 patch files. `.patches` 16 lines, in sync. Facade header copies `c
 Both engine runs and the fixture server stopped by exact PID (`ps -p` prints nothing). No crash reports. Throwaway
 profiles under `profiles/941-20261115/` deleted. Nothing touched the Keychain (mock keychain only), the clipboard or
 `/Applications/Arkt.app`.
+
+### Review of #943
+
+- The first version told VoiceOver again whenever the focused control's button object changed. A new list refreshes
+  rows with new buttons, so the same control was announced again after another infobar arrived or a row's values
+  changed. Found by a test the review asked for (`testAListChangeThatKeepsTheFocusedControlTellsVoiceOverNothingAgain`,
+  `[OK, OK]`). The strip now remembers what it announced by infobar, index and label, and posts only when one of them
+  changes. `testLeftAndRightOnAOneControlRowTellVoiceOverNothingAgain` covers a key that goes around to the same
+  control.
+- `focusKeyboard(at:)` sets the stack's focused control before the stack becomes first responder, so AppKit's own
+  focus change already finds the control. Not covered by a test (it needs the moment AppKit posts).
+- The VoiceOver tests also check the strip's window: `panel.accessibilityFocusedUIElement` resolves to the button.
+- The facade comment now says that `Focus()` adds no focus or blur (the traversal itself blurs the old element, as Tab
+  would).
+- Breaks: the announced check removed: both new tests fail (`[OK, OK, OK]`, `[Close, Close, Close]`). The window
+  hand-off picking the strip of the current tab instead of the view's page (`focusStrip(of: currentTab, ...)`):
+  `testTabOutOfASplitPaneReachesThatPanesStrip` fails (`("nil") is not equal to ("Optional("OK")")`, and A's strip
+  holds the keyboard). A no-op `EngineClient.focusPage(of:at:)` default: `testTheDefaultEdgeFocusGivesThePageTheKeyboard`
+  fails at both edges (`XCTAssertTrue failed - first`, `- last`). Restored: passing.
+- After the review: the infobar GUI set 114 run, 0 failures (112 + 2); 20 runs of `AAWindowLeakGuardTests`,
+  `InfobarKeyboardTests`, `InfobarWindowTests`, `ZzzWindowLeakGuardEndTests` (59 tests each, 1-minute load average 5.0
+  to 7.1): 20 passed, 0 failed; ShellKit `--skip ShellKitGUITests` passes (1573, 44, 60, 29, 289, 49, 352, 227, 39); lints 13 + 60; engine rebuilt
+  (`The build has finished successfully.`).

@@ -3880,8 +3880,9 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
   // FocusThroughTabTraversal only moves the page's own focus
   // (SetInitialFocus); -focus makes the contents the first responder first,
   // as a direct selection, so WebContentsViewMac does not traverse a second
-  // time. No focus or blur reaches the element the page had focused before
-  // (#941: checked with focusin and focusout on the self-test).
+  // time. Focus() adds no focus or blur on the element the page had focused
+  // (#941: checked with focusin and focusout on the self-test; the
+  // traversal itself blurs it, as Tab would).
   [self focus];
   if (_parked) {
     return;
