@@ -22,9 +22,16 @@ final class ExtensionsPanelTests: XCTestCase {
     panel.reduceMotion = { false }
   }
 
-  override func tearDown() async throws {
+  // Synchronous: `waitUntil` turns the main run loop, and from inside an async tearDown (itself a job on the main
+  // queue) those turns never run the fade's completion.
+  override func tearDown() {
     panel.hide(keyboard: true)
-    harness.controller.window?.orderOut(nil)
+    // A click, the sidebar hiding or full screen closes the panel with a fade. Its completion takes the panel off the
+    // window and releases it, but it runs on turns of the run loop, which nothing turns between tests, so the last
+    // fading panels outlived the class (#868). Wait for the fades to end; the panel leaves its window when they do.
+    let parent = harness.controller.window
+    waitUntil("the panel faded out") { !(parent?.childWindows ?? []).contains { $0 is DialogWindow } }
+    parent?.orderOut(nil)
     harness = nil
   }
 
@@ -280,7 +287,7 @@ final class ExtensionsPanelTests: XCTestCase {
     let rightClick = try XCTUnwrap(NSEvent.mouseEvent(with: .rightMouseDown, location: .zero, modifierFlags: [],
                                                       timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0,
                                                       clickCount: 1, pressure: 1))
-    XCTAssertEqual(a.menu(for: rightClick)?.items.map(\.title).contains("Unpin from Sidebar"), true)
+    XCTAssertEqual(a.menu(for: rightClick)?.items.map(\.title).contains("Unpin"), true)
     XCTAssertEqual(a.runButton.menu(for: rightClick)?.items.first?.title, "A", "right-click on the main area")
     XCTAssertEqual(a.pinToggle.menu(for: rightClick)?.items.first?.title, "A")
 
@@ -322,15 +329,15 @@ final class ExtensionsPanelTests: XCTestCase {
 
   // MARK: Order without a drag
 
-  func testMoveLeftAndRightAreAccessibilityActionsOfPinnedRows() throws {
+  func testMoveUpAndDownAreAccessibilityActionsOfPinnedRows() throws {
     open([action("a", pinned: true), action("b", pinned: true), action("c", pinned: true), action("d")])
-    XCTAssertEqual(try row("a").accessibilityCustomActions()?.map(\.name), ["Move Right"])
-    XCTAssertEqual(try row("b").accessibilityCustomActions()?.map(\.name), ["Move Left", "Move Right"])
-    XCTAssertEqual(try row("c").accessibilityCustomActions()?.map(\.name), ["Move Left"])
+    XCTAssertEqual(try row("a").accessibilityCustomActions()?.map(\.name), ["Move Down"])
+    XCTAssertEqual(try row("b").accessibilityCustomActions()?.map(\.name), ["Move Up", "Move Down"])
+    XCTAssertEqual(try row("c").accessibilityCustomActions()?.map(\.name), ["Move Up"])
     XCTAssertEqual(try row("d").accessibilityCustomActions()?.map(\.name) ?? [], [])
 
-    let moveRight = try XCTUnwrap(try row("a").accessibilityCustomActions()?.first)
-    XCTAssertTrue(moveRight.handler?() ?? false)
+    let moveDown = try XCTUnwrap(try row("a").accessibilityCustomActions()?.first)
+    XCTAssertTrue(moveDown.handler?() ?? false)
     XCTAssertEqual(engine.pinnedExtensionIDs, ["b", "a", "c"])
     XCTAssertEqual(view.displayedRowIDs, ["b", "a", "c", "d"])
   }
@@ -340,12 +347,12 @@ final class ExtensionsPanelTests: XCTestCase {
     let window = try XCTUnwrap(panel.panel)
     let b = try row("b")
     XCTAssertTrue(window.makeFirstResponder(b.runButton))
-    XCTAssertTrue(view.performKeyEquivalent(with: key(0x7E)))                 // Up: Move Left
+    XCTAssertTrue(view.performKeyEquivalent(with: key(0x7E)))                 // Up: Move Up
     XCTAssertEqual(engine.pinnedExtensionIDs, ["b", "a", "c"])
     XCTAssertTrue(window.firstResponder === b.runButton, "focus stays on the moved row")
     XCTAssertFalse(view.performKeyEquivalent(with: key(0x7B)), "already first")  // Left: nothing to do
-    XCTAssertTrue(view.performKeyEquivalent(with: key(0x7C)))                 // Right: Move Right
-    XCTAssertTrue(view.performKeyEquivalent(with: key(0x7D)))                 // Down: Move Right
+    XCTAssertTrue(view.performKeyEquivalent(with: key(0x7C)))                 // Right: Move Down
+    XCTAssertTrue(view.performKeyEquivalent(with: key(0x7D)))                 // Down: Move Down
     XCTAssertEqual(engine.pinnedExtensionIDs, ["a", "c", "b"])
   }
 

@@ -31,6 +31,7 @@ final class SplitPageInfoTests: XCTestCase {
       controller.rootView.reduceMotion = { true }
       controller.pageInfo.reduceMotion = { true }         // a hide takes the panel down at once
       controller.pageInfo.increaseContrast = { false }
+      controller.pageInfo.deniedInMacOS = { [:] }        // never the host's real location state (#856)
       controller.onArchive = { ids in _ = source.archive(ids, reason: .manual, at: SplitPageInfoTests.now) }
       controller.toolbarSetting.isVisible = true
       layout()

@@ -40,6 +40,8 @@ final class ScriptedEvent: NSObject, ArktEngineEvent {
   var zoomIsDefault = false
   var zoomIsUserInitiated = false
   var isTabFullscreen = false
+  var extensionID: String?
+  var extensionName: String?
 
   init(_ kind: ArktEngineEventKind, tab: (any ArktTabHandle)?, browser: (any ArktBrowserHandle)?) {
     self.kind = kind; self.tab = tab; self.browser = browser
@@ -54,22 +56,27 @@ final class ScriptedDialog: NSObject, ArktJavaScriptDialog {
   let title: String
   let message: String
   let defaultPromptText: String?
-  let acceptTitle = "OK"
+  let acceptTitle: String
   let cancelTitle: String?
   private(set) var isEnded = false
   private(set) var answer: (accepted: Bool, userInput: String?)?
   var onEnd: (() -> Void)?
+  /// A leave-site dialog's answer reaches the held close after the end is recorded, as the real facade orders it.
+  var onAnswer: ((Bool) -> Void)?
 
+  /// A leave-site dialog has Chromium's strings ("Leave site?", Leave) and no decline title: the shell draws Stay.
   init(kind: ArktDialogKind, tab: any ArktTabHandle, title: String, message: String, defaultPromptText: String?) {
     self.kind = kind; self.tab = tab; self.title = title; self.message = message
     self.defaultPromptText = kind == .prompt ? (defaultPromptText ?? "") : nil
-    cancelTitle = kind == .alert ? nil : "Cancel"
+    acceptTitle = kind == .beforeUnload ? "Leave" : "OK"
+    cancelTitle = kind == .alert || kind == .beforeUnload ? nil : "Cancel"
   }
 
   func respond(accepted: Bool, userInput: String?) -> Bool {
     guard !isEnded else { return false }
     answer = (accepted, userInput)
     end()
+    onAnswer?(accepted)
     return true
   }
 
@@ -182,11 +189,75 @@ final class ScriptedAction: NSObject, ArktExtensionAction {
   let isEnabled: Bool
   let canUninstall: Bool
   let canReportAbuse: Bool
+  /// Set by the facade's listing from its profile pins (#593).
+  let isPinned: Bool
+  let hasOptionsPage: Bool
+  let siteAccess: ArktExtensionSiteAccess
   init(actionId: String, name: String, iconPNG: Data? = nil, isEnabled: Bool = true, canUninstall: Bool = true,
-       canReportAbuse: Bool = true) {
+       canReportAbuse: Bool = true, isPinned: Bool = false, hasOptionsPage: Bool = false,
+       siteAccess: ArktExtensionSiteAccess = .none) {
     self.actionId = actionId; self.name = name; self.iconPNG = iconPNG; self.isEnabled = isEnabled
     self.canUninstall = canUninstall; self.canReportAbuse = canReportAbuse
+    self.isPinned = isPinned; self.hasOptionsPage = hasOptionsPage; self.siteAccess = siteAccess
   }
+
+  /// This action as the listing shows it with `pinned`.
+  func listed(pinned: Bool) -> ScriptedAction {
+    ScriptedAction(actionId: actionId, name: name, iconPNG: iconPNG, isEnabled: isEnabled, canUninstall: canUninstall,
+                   canReportAbuse: canReportAbuse, isPinned: pinned, hasOptionsPage: hasOptionsPage,
+                   siteAccess: siteAccess)
+  }
+}
+
+/// One extension command the scripted facade lists (#598).
+final class ScriptedExtensionCommand: NSObject, ArktExtensionCommand {
+  let extensionID: String
+  let commandName: String
+  let extensionName: String
+  let commandDescription: String
+  let shortcut: String?
+  let isGlobal: Bool
+  init(extensionID: String, commandName: String, extensionName: String, commandDescription: String,
+       shortcut: String?, isGlobal: Bool) {
+    self.extensionID = extensionID; self.commandName = commandName; self.extensionName = extensionName
+    self.commandDescription = commandDescription; self.shortcut = shortcut; self.isGlobal = isGlobal
+  }
+}
+
+/// The scripted facade's answer to `setExtensionCommandShortcut` (#598).
+final class ScriptedShortcutChange: NSObject, ArktExtensionShortcutChange {
+  let result: ArktExtensionShortcutResult
+  let conflictExtensionID: String?
+  let conflictCommandName: String?
+  init(result: ArktExtensionShortcutResult, conflictExtensionID: String? = nil, conflictCommandName: String? = nil) {
+    self.result = result; self.conflictExtensionID = conflictExtensionID; self.conflictCommandName = conflictCommandName
+  }
+}
+
+/// One context menu item the scripted facade returns (#593).
+final class ScriptedMenuItem: NSObject, ArktMenuItem {
+  let kind: ArktMenuItemKind
+  let title: String
+  let command: Int
+  let isEnabled: Bool
+  let isChecked: Bool
+  let children: [any ArktMenuItem]
+  init(title: String, command: ArktExtensionContextCommand, isEnabled: Bool = true, isChecked: Bool = false) {
+    kind = .command; self.title = title; self.command = command.rawValue; self.isEnabled = isEnabled
+    self.isChecked = isChecked; children = []
+  }
+  /// An extension's own item (#915), whose command is in the custom range.
+  init(title: String, rawCommand: Int, isEnabled: Bool = true, isChecked: Bool = false) {
+    kind = .command; self.title = title; command = rawCommand; self.isEnabled = isEnabled
+    self.isChecked = isChecked; children = []
+  }
+  init(title: String, children: [ScriptedMenuItem]) {
+    kind = .submenu; self.title = title; command = 0; isEnabled = true; isChecked = false; self.children = children
+  }
+  private init(separator: Void) {
+    kind = .separator; title = ""; command = 0; isEnabled = false; isChecked = false; children = []
+  }
+  static func separator() -> ScriptedMenuItem { ScriptedMenuItem(separator: ()) }
 }
 
 final class ScriptedRequest: NSObject, ArktWindowRequest {
@@ -300,6 +371,32 @@ final class ScriptedTab: NSObject, ArktTabHandle {
 
   /// The engine ends the pending dialog (a navigation, a later dialog, the tab closing).
   func endJSDialog() { jsDialog?.end() }
+
+  // MARK: Leave-site dialogs (#585)
+
+  /// The held close's leave-site dialog, when the facade reports them (`reportsLeaveSiteDialogs`).
+  private(set) var leaveSiteDialog: ScriptedDialog?
+
+  /// Chromium's app-modal queue raises the leave-site dialog of a held close: the tab comes forward first, and the
+  /// answer reaches the held close after the dialog's end is recorded.
+  @discardableResult
+  func raiseLeaveSiteDialog() -> ScriptedDialog {
+    owner?.activate(self)
+    let dialog = ScriptedDialog(kind: .beforeUnload, tab: self, title: "Leave site?",
+                                message: "Changes you made may not be saved.", defaultPromptText: nil)
+    dialog.onEnd = { [weak self, unowned dialog] in
+      guard let self else { return }
+      if leaveSiteDialog === dialog { leaveSiteDialog = nil }
+      record(.dialogEnded) { $0.dialog = dialog }
+    }
+    dialog.onAnswer = { [weak self] accept in _ = self?.answerHeldClose(accept: accept) }
+    leaveSiteDialog = dialog
+    record(.dialogRequested) { $0.dialog = dialog }
+    return dialog
+  }
+
+  /// The tab's contents go: the queue ends its dialog without an answer.
+  func endLeaveSiteDialog() { leaveSiteDialog?.end() }
 
   // MARK: Permission requests (#400)
 
@@ -586,7 +683,7 @@ final class ScriptedTab: NSObject, ArktTabHandle {
 
   func close(mode: ArktCloseMode) -> ArktCloseResult {
     // As the real facade (`ScopedSkipUnloadHandlers`), a close that skips unload handlers runs whatever close is
-    // under way, a pending leave-site dialog included; ChromiumEngine guards its own held close (`clientCloseHeld`).
+    // under way, a pending leave-site dialog included; ChromiumEngine lets only `.skipUnloadHandlers` through while its own close is held (`TabLifecycle`).
     guard let owner, !isClosing || mode == .skipUnloadHandlers else {
       return isClosing ? .held : .closed
     }
@@ -602,6 +699,7 @@ final class ScriptedTab: NSObject, ArktTabHandle {
     if wouldHoldClose && mode == .honourUnloadHandlers {
       isClosing = true
       dialog = .tab(.client)
+      if facade.reportsLeaveSiteDialogs { raiseLeaveSiteDialog() }
       return .held
     }
     owner.remove(self, reason: .client)
@@ -717,8 +815,13 @@ final class ScriptedTab: NSObject, ArktTabHandle {
     if live { recoverIfCrashed() }
   }
 
-  /// The dialog's answer (`answerDialogInTab:accept:`).
+  /// The dialog's answer (`answerDialogInTab:accept:`): a reported leave-site dialog ends first.
   func answer(accept: Bool) -> Bool {
+    if let leaveSiteDialog { return leaveSiteDialog.respond(accepted: accept, userInput: nil) }
+    return answerHeldClose(accept: accept)
+  }
+
+  private func answerHeldClose(accept: Bool) -> Bool {
     guard let pending = dialog, let owner else { return false }
     dialog = nil
     switch pending {
@@ -853,6 +956,7 @@ final class ScriptedBrowser: NSObject, ArktBrowserHandle {
     closed.closeReason = reason
     facade.record(closed)
     tab.endJSDialog()           // the manager goes with the contents, after the tab strip reported the removal
+    tab.endLeaveSiteDialog()
     tab.endPermission()
     if active === tab {
       active = nil
@@ -891,6 +995,7 @@ final class ScriptedBrowser: NSObject, ArktBrowserHandle {
         tab.isClosing = true
         tab.dialog = .window
       }
+      promptNextHeldTab()
       return
     }
     finishClose(reason: tabReason, window: windowReason)
@@ -900,7 +1005,10 @@ final class ScriptedBrowser: NSObject, ArktBrowserHandle {
     guard isClosingWindow else { return }
     if accept {
       tab.isClosing = false
-      guard !tabList.contains(where: { $0.dialog != nil }) else { return }
+      guard !tabList.contains(where: { $0.dialog != nil }) else {
+        promptNextHeldTab()
+        return
+      }
       isClosingWindow = false
       finishClose(reason: closing.tabs, window: closing.window)
     } else {
@@ -911,6 +1019,15 @@ final class ScriptedBrowser: NSObject, ArktBrowserHandle {
         facade.record(ScriptedEvent(.closeCancelled, tab: held, browser: self))
       }
     }
+  }
+
+  /// With reported leave-site dialogs, one held tab at a time: the active one first, the next after Leave.
+  private func promptNextHeldTab() {
+    guard facade.reportsLeaveSiteDialogs else { return }
+    let held = tabList.filter { if case .window? = $0.dialog { true } else { false } }
+    guard !held.contains(where: { $0.leaveSiteDialog != nil }),
+          let next = held.first(where: { $0 === active }) ?? held.first else { return }
+    next.raiseLeaveSiteDialog()
   }
 
   func finishClose(reason: ArktCloseReason, window windowReason: ArktWindowCloseReason) {
@@ -940,6 +1057,9 @@ final class ScriptedFacade: NSObject, ArktEngine {
   var titleAfterLoadEnd = false
   /// While set, batches wait for `flush()`.
   var holdsBatches = false
+  /// A held close reports its leave-site dialog (#585), as the real facade does for a window whose host presents
+  /// dialogs. Off: the close is held with `isClosing` alone and `answerDialog` ends it.
+  var reportsLeaveSiteDialogs = false
   var testAPIEnabled = true
   /// The visits navigations record and the browser debug URLs that ran (#784, `ScriptedAddressBar.swift`).
   let history = ScriptedHistory()
@@ -1034,8 +1154,65 @@ final class ScriptedFacade: NSObject, ArktEngine {
     return browser
   }
 
+  /// The listing as the real facade orders it (#593): pinned actions first in `pinnedIDs` order, then the rest in
+  /// their own order, each with `isPinned` from the profile.
   func extensionActions(in browser: any ArktBrowserHandle) -> [any ArktExtensionAction] {
-    actions[ObjectIdentifier(browser)] ?? []
+    let list = actions[ObjectIdentifier(browser)] ?? []
+    let pinned = pinnedIDs.compactMap { id in list.first { $0.actionId == id }?.listed(pinned: true) }
+    return pinned + list.filter { !pinnedIDs.contains($0.actionId) }.map { $0.listed(pinned: false) }
+  }
+
+  // MARK: Pins and the context menu (#593)
+
+  /// The profile's pins, in order; tests may set them directly (a profile's stored pins).
+  var pinnedIDs: [String] = []
+  var pinnedExtensionIDs: [String] { pinnedIDs }
+  private(set) var pinCalls: [(extensionID: String, pinned: Bool)] = []
+  private(set) var moveCalls: [(extensionID: String, index: Int)] = []
+  /// The menu `extensionContextMenu` returns per action id.
+  var contextMenus: [String: [ScriptedMenuItem]] = [:]
+  private(set) var contextMenuCalls: [(actionId: String, window: Int32)] = []
+  private(set) var performedContextCommands: [(command: Int, actionId: String, window: Int32)] = []
+
+  /// As the real facade: nothing for an unknown id or one already in that state; otherwise the pin list changes and
+  /// every window that lists the action gets `ExtensionActionsChanged`, inside the call
+  /// (`OnToolbarPinnedActionsChanged` fires inside `SetActionVisibility`).
+  func setExtensionPinned(_ extensionID: String, pinned: Bool) {
+    pinCalls.append((extensionID, pinned))
+    guard isListed(extensionID), pinnedIDs.contains(extensionID) != pinned else { return }
+    if pinned { pinnedIDs.append(extensionID) } else { pinnedIDs.removeAll { $0 == extensionID } }
+    announcePins(of: extensionID)
+  }
+
+  func movePinnedExtension(_ extensionID: String, to index: Int) {
+    moveCalls.append((extensionID, index))
+    guard let from = pinnedIDs.firstIndex(of: extensionID) else { return }
+    let to = min(max(index, 0), pinnedIDs.count - 1)
+    guard to != from else { return }
+    pinnedIDs.remove(at: from)
+    pinnedIDs.insert(extensionID, at: to)
+    announcePins(of: extensionID)
+  }
+
+  func extensionContextMenu(forAction actionId: String, in browser: any ArktBrowserHandle) -> [any ArktMenuItem] {
+    contextMenuCalls.append((actionId, browser.windowId))
+    return contextMenus[actionId] ?? []
+  }
+
+  func performExtensionContextCommand(_ command: Int, forAction actionId: String, in browser: any ArktBrowserHandle) {
+    performedContextCommands.append((command, actionId, browser.windowId))
+  }
+
+  private func isListed(_ extensionID: String) -> Bool {
+    browserList.contains { actions[ObjectIdentifier($0)]?.contains { $0.actionId == extensionID } == true }
+  }
+
+  private func announcePins(of extensionID: String) {
+    for browser in browserList where actions[ObjectIdentifier(browser)]?.contains(where: {
+      $0.actionId == extensionID
+    }) == true {
+      record(ScriptedEvent(.extensionActionsChanged, tab: nil, browser: browser))
+    }
   }
 
   func runExtensionAction(_ actionId: String, in browser: any ArktBrowserHandle, anchor: NSView) {
@@ -1244,6 +1421,45 @@ final class ScriptedFacade: NSObject, ArktEngine {
       return ScriptedExtensionResult(id, answer.status, answer.reason)
     }
     Task { @MainActor in completion(results) }
+  }
+
+  /// Ends the held batch with the scripted answers (an id not in `extensionAnswers` is installed).
+  func finishHeldExtensionBatch() {
+    guard let held = heldBatch else { return }
+    heldBatch = nil
+    let results: [any ArktExtensionInstallResult] = held.ids.map { id in
+      let answer = extensionAnswers[id] ?? (.installed, nil)
+      return ScriptedExtensionResult(id, answer.status, answer.reason)
+    }
+    Task { @MainActor in held.completion(results) }
+  }
+
+  /// The profile's extension commands (#598), as `extensionCommands` returns them.
+  var extensionCommandList: [ScriptedExtensionCommand] = []
+  var extensionCommands: [any ArktExtensionCommand] { extensionCommandList }
+  /// What `setExtensionCommandShortcut` answers; nothing changes in `extensionCommandList`.
+  var shortcutAnswer = ScriptedShortcutChange(result: .applied)
+  /// What each `setExtensionCommandShortcut` call received, in order.
+  private(set) var shortcutCalls:
+    [(shortcut: String?, commandName: String, extensionID: String, global: Bool, replacing: Bool)] = []
+
+  func setExtensionCommandShortcut(_ shortcut: String?, forCommand commandName: String, ofExtension extensionID: String,
+                                   global: Bool, replacingConflict: Bool) -> any ArktExtensionShortcutChange {
+    shortcutCalls.append((shortcut, commandName, extensionID, global, replacingConflict))
+    return shortcutAnswer
+  }
+
+  /// The profile's commands changed (#598): one profile-wide `ExtensionCommandsChanged`, no tab or window.
+  func recordExtensionCommandsChanged() {
+    record(ScriptedEvent(.extensionCommandsChanged, tab: nil, browser: nil))
+  }
+
+  /// The profile installed an extension (#592): one profile-wide `ExtensionInstalled`, no tab or window.
+  func recordExtensionInstalled(_ id: String?, name: String?) {
+    let event = ScriptedEvent(.extensionInstalled, tab: nil, browser: nil)
+    event.extensionID = id
+    event.extensionName = name
+    record(event)
   }
 
   /// What the real facade does: every id not yet confirmed fails with "cancelled", then the completion runs.

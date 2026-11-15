@@ -273,6 +273,104 @@ final class SidebarHideTests: XCTestCase {
     }
   }
 
+  // MARK: Traffic lights ride on the sliding overlay (#807)
+
+  /// Where the close button is drawn and how opaque, against where the overlay is drawn, on one spring frame.
+  private struct TrafficLightFrame {
+    var offset: CGFloat
+    var overlayX: CGFloat
+    var closeX: CGFloat
+    var overlayAlpha: CGFloat
+    var closeAlpha: CGFloat
+    var closeHidden: Bool
+    /// Right edge of the buttons' host (NSTitlebarView), which takes clicks wherever it is, and of the overlay at rest.
+    var titlebarMaxX: CGFloat
+    var overlayRestMaxX: CGFloat
+  }
+
+  /// Read in the spring frame's own callback, after the overlay presented it: nothing races the display link.
+  private func trafficLightFrame(offset: CGFloat) -> TrafficLightFrame? {
+    guard let close = controller.window?.standardWindowButton(.closeButton) else { return nil }
+    return TrafficLightFrame(offset: offset,
+                             overlayX: overlay.frame.minX + (overlay.layer?.affineTransform().tx ?? 0),
+                             closeX: close.convert(close.bounds, to: nil).minX,
+                             overlayAlpha: overlay.alphaValue, closeAlpha: close.alphaValue,
+                             closeHidden: close.isHidden,
+                             titlebarMaxX: close.superview.map { $0.convert($0.bounds, to: nil).maxX } ?? .infinity,
+                             overlayRestMaxX: overlay.frame.maxX)
+  }
+
+  /// Records every spring frame of `body` until the overlay settles.
+  private func recordUntilSettled(_ what: String, _ body: () -> Void) async -> [TrafficLightFrame] {
+    var frames: [TrafficLightFrame] = []
+    overlay.onFrameForTesting = { [weak self] offset in
+      if let frame = self?.trafficLightFrame(offset: offset) { frames.append(frame) }
+    }
+    await waitForSettle(what, body)
+    overlay.onFrameForTesting = nil
+    return frames
+  }
+
+  /// Every frame the buttons show, they are drawn where they sit in the overlay, as opaque as the overlay, and the
+  /// titlebar never reaches past the overlay's place to take the page's clicks.
+  private func assertAttached(_ frames: [TrafficLightFrame], _ what: String,
+                              file: StaticString = #filePath, line: UInt = #line) {
+    XCTAssertFalse(frames.isEmpty, "\(what): no spring frames", file: file, line: line)
+    for frame in frames where !frame.closeHidden {
+      XCTAssertEqual(frame.closeX, frame.overlayX + 12, accuracy: 0.5,
+                     "\(what): close button off the overlay at offset \(frame.offset)", file: file, line: line)
+      XCTAssertEqual(frame.closeAlpha, frame.overlayAlpha, accuracy: 0.01,
+                     "\(what): close button opacity off the overlay's at offset \(frame.offset)", file: file, line: line)
+    }
+    for frame in frames {
+      XCTAssertLessThanOrEqual(frame.titlebarMaxX, frame.overlayRestMaxX,
+                               "\(what): titlebar over the page at offset \(frame.offset)", file: file, line: line)
+    }
+  }
+
+  func testTrafficLightsTrackTheSlidingOverlayThroughRevealReversalAndConceal() async throws {
+    controller.toggleSidebarVisibility(nil)
+    root.layoutSubtreeIfNeeded()
+    overlay.reduceMotionForTesting = false
+    // A reveal turned around on the frame it passes -150 pt.
+    var reveal: [TrafficLightFrame] = []
+    await withCheckedContinuation { (midFlight: CheckedContinuation<Void, Never>) in
+      overlay.onFrameForTesting = { [weak self] offset in
+        guard let self else { return }
+        if let frame = self.trafficLightFrame(offset: offset) { reveal.append(frame) }
+        guard offset >= -150 else { return }
+        self.overlay.onFrameForTesting = nil
+        midFlight.resume()
+      }
+      overlay.reveal()
+    }
+    assertAttached(reveal, "interrupted reveal")
+    XCTAssertTrue(reveal.contains { !$0.closeHidden && $0.overlayX < -20 },
+                  "the buttons were checked while the overlay was well off its place")
+    let reversed = await recordUntilSettled("concealed after the turn") { overlay.conceal() }
+    assertAttached(reversed, "reversed conceal")
+    XCTAssertTrue(try XCTUnwrap(controller.window?.standardWindowButton(.closeButton)).isHidden,
+                  "concealed: no buttons over the page")
+
+    let full = await recordUntilSettled("revealed") { overlay.reveal() }
+    assertAttached(full, "full reveal")
+    let conceal = await recordUntilSettled("concealed") { overlay.conceal() }
+    assertAttached(conceal, "full conceal")
+    XCTAssertTrue(try XCTUnwrap(controller.window?.standardWindowButton(.closeButton)).isHidden)
+  }
+
+  func testTrafficLightsFadeWithTheOverlayUnderReduceMotion() async throws {
+    controller.toggleSidebarVisibility(nil)
+    root.layoutSubtreeIfNeeded()
+    overlay.reduceMotionForTesting = true
+    let reveal = await recordUntilSettled("revealed") { overlay.reveal() }
+    assertAttached(reveal, "Reduce Motion reveal")
+    XCTAssertTrue(reveal.contains { !$0.closeHidden && $0.overlayAlpha < 0.9 },
+                  "the buttons were checked mid-fade")
+    let conceal = await recordUntilSettled("concealed") { overlay.conceal() }
+    assertAttached(conceal, "Reduce Motion conceal")
+  }
+
   func testHiddenSidebarLeavesThePageTopLeftCornerClickable() throws {
     let window = try XCTUnwrap(controller.window as? ShellWindow)
     controller.toggleSidebarVisibility(nil)

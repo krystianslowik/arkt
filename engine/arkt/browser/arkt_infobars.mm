@@ -12,7 +12,9 @@
 #include "base/no_destructor.h"
 #include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
+#include "chrome/browser/ui/tab_sharing/tab_sharing_infobar_delegate.h"
 #include "chrome/browser/ui/ui_features.h"
+#include "chrome/browser/ui/views/tab_sharing/tab_sharing_infobar.h"
 #include "components/infobars/content/content_infobar_manager.h"
 #include "components/infobars/core/confirm_infobar_delegate.h"
 #include "components/infobars/core/infobar.h"
@@ -24,6 +26,9 @@
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/image/image_skia_util_mac.h"
 #include "components/strings/grit/components_strings.h"
+#include "ui/views/accessibility/view_accessibility.h"
+#include "ui/views/controls/label.h"
+#include "ui/views/view_utils.h"
 
 namespace arkt {
 namespace {
@@ -144,6 +149,73 @@ ArktInfobarContent* ContentFor(ConfirmInfoBarDelegate* delegate,
   return content;
 }
 
+bool IsTabSharing(infobars::InfoBarDelegate* delegate) {
+  return delegate->GetIdentifier() ==
+         infobars::InfoBarDelegate::TAB_SHARING_INFOBAR_DELEGATE;
+}
+
+ArktInfobarButton* TabSharingButton(
+    TabSharingInfoBarDelegate* delegate,
+    TabSharingInfoBarDelegate::TabSharingInfoBarButton type,
+    bool prominent) {
+  if (!(delegate->GetButtons() & type)) {
+    return nil;
+  }
+  ArktInfobarButton* button = [[ArktInfobarButton alloc] init];
+  button.title = base::SysUTF16ToNSString(delegate->GetButtonLabel(type));
+  button.tooltip = base::SysUTF16ToNSString(delegate->GetButtonTooltip(type));
+  button.enabled = delegate->IsButtonEnabled(type);
+  button.prominent = prominent;
+  return button;
+}
+
+// The tab-sharing infobar (#478) has no confirm delegate: its message is
+// built by the Views infobar from values the delegate does not keep (the
+// shared tab's and the capturer's names, the tab's role). The status view
+// holds the whole sentence as its accessible name (TabSharingStatusMessageView
+// ::SetupMessage), or as its text when the capturer is an extension (a plain
+// label); both are set in the infobar's constructor, so no widget is needed.
+// The row takes Chromium's own words: Stop sharing as OK (the prominent one,
+// as TabSharingInfoBar draws it), Share this tab instead as Cancel. The
+// captured-surface-control indicator and the message's switch-to-tab buttons
+// are not drawn (recorded gaps); the infobar has no close button.
+ArktInfobarContent* ContentForTabSharing(
+    infobars::InfoBar* infobar,
+    const ui::ColorProvider* color_provider) {
+  auto* view = static_cast<TabSharingInfoBar*>(infobar);
+  auto* delegate =
+      static_cast<TabSharingInfoBarDelegate*>(infobar->delegate());
+  ArktInfobarContent* content = [[ArktInfobarContent alloc] init];
+  std::u16string message;
+  views::View* status =
+      const_cast<views::View*>(view->GetStatusMessageViewForTesting());
+  if (status) {
+    if (auto* label = views::AsViewClass<views::Label>(status)) {
+      message = std::u16string(label->GetText());
+    } else {
+      message = status->GetViewAccessibility().GetCachedName();
+    }
+  }
+  content.message = base::SysUTF16ToNSString(message);
+  content.messageLinkRanges = @[];
+  ui::ImageModel icon = delegate->GetIcon();
+  if (!icon.IsEmpty() && color_provider) {
+    gfx::ImageSkia image = icon.Rasterize(color_provider);
+    if (!image.isNull()) {
+      content.icon = gfx::NSImageFromImageSkia(image);
+    }
+  }
+  content.okButton =
+      TabSharingButton(delegate, TabSharingInfoBarDelegate::kStop, true);
+  content.cancelButton = TabSharingButton(
+      delegate, TabSharingInfoBarDelegate::kShareThisTabInstead, false);
+  content.rightToLeft = base::i18n::IsRTL();
+  content.identifier = [NSString
+      stringWithFormat:@"infobar-%d", static_cast<int>(
+                                          delegate->GetIdentifier())];
+  return content;
+}
+
 }  // namespace
 
 void SetInfobarSink(InfobarSink sink) {
@@ -198,15 +270,19 @@ void ArktInfobarPresenter::OnInfoBarAdded(infobars::InfoBar* infobar) {
 void ArktInfobarPresenter::Add(infobars::InfoBar* infobar, size_t index) {
   infobars::InfoBarDelegate* delegate = infobar->delegate();
   ConfirmInfoBarDelegate* confirm = delegate->AsConfirmInfoBarDelegate();
-  if (!confirm) {
-    // Tab sharing and the alternate-URL bar have their own Views; they are
-    // recorded gaps (issue #122).
+  const bool tab_sharing = !confirm && IsTabSharing(delegate);
+  if (!confirm && !tab_sharing) {
+    // Other infobars with Views of their own (the sign-in QR code, the
+    // alternate-URL bar) are recorded gaps (#478).
     LOG(WARNING) << "ARKT: infobar " << delegate->GetIdentifier()
                  << " not drawn (not a confirm infobar)";
     return;
   }
-  ArktInfobarContent* content = ContentFor(
-      confirm, color_provider_ ? color_provider_.Run() : nullptr);
+  const ui::ColorProvider* colors =
+      color_provider_ ? color_provider_.Run() : nullptr;
+  ArktInfobarContent* content = tab_sharing
+                                    ? ContentForTabSharing(infobar, colors)
+                                    : ContentFor(confirm, colors);
   ArktInfobarView* row = [[ArktInfobarView alloc] initWithContent:content];
   base::WeakPtr<ArktInfobarPresenter> weak = weak_factory_.GetWeakPtr();
   // The pointer is only used while the row exists, and the row goes in
@@ -242,10 +318,11 @@ void ArktInfobarPresenter::Add(infobars::InfoBar* infobar, size_t index) {
                Row{infobar, row, NextInfobarId(),
                    KindFor(delegate->GetIdentifier()), content});
   [stack_ insertRow:row atIndex:index];
-  LOG(WARNING) << "ARKT: infobar " << confirm->GetIdentifier() << " shown"
-               << " buttons=" << confirm->GetButtons()
-               << " link=" << !confirm->GetLinkText().empty()
-               << " closeable=" << confirm->IsCloseable()
+  LOG(WARNING) << "ARKT: infobar " << delegate->GetIdentifier() << " shown"
+               << " ok=" << (content.okButton != nil)
+               << " cancel=" << (content.cancelButton != nil)
+               << " link=" << (content.linkTitle != nil)
+               << " closeable=" << delegate->IsCloseable()
                << " substitutions=" << content.messageLinkRanges.count
                << " icon=" << (content.icon != nil) << " rows=" << rows_.size()
                << " message=\"" << base::SysNSStringToUTF8(content.message)
@@ -361,14 +438,32 @@ void ArktInfobarPresenter::Act(infobars::InfoBar* infobar,
   if (!drawn || !infobar->owner()) {
     return;
   }
-  ConfirmInfoBarDelegate* delegate =
-      infobar->delegate()->AsConfirmInfoBarDelegate();
-  LOG(WARNING) << "ARKT: infobar " << delegate->GetIdentifier() << " "
+  LOG(WARNING) << "ARKT: infobar " << infobar->delegate()->GetIdentifier()
+               << " "
                << (action == Action::kOk       ? "ok"
                    : action == Action::kCancel ? "cancel"
                    : action == Action::kLink   ? "link"
                    : action == Action::kClose  ? "close"
                                                : "message-link");
+  if (IsTabSharing(infobar->delegate())) {
+    // As TabSharingInfoBar's Stop and Share-this-tab-instead buttons. The
+    // sharing UI removes or replaces the infobars itself.
+    auto* sharing =
+        static_cast<TabSharingInfoBarDelegate*>(infobar->delegate());
+    const int buttons = sharing->GetButtons();
+    if (action == Action::kOk && (buttons & TabSharingInfoBarDelegate::kStop) &&
+        sharing->IsButtonEnabled(TabSharingInfoBarDelegate::kStop)) {
+      sharing->Stop();
+    } else if (action == Action::kCancel &&
+               (buttons & TabSharingInfoBarDelegate::kShareThisTabInstead) &&
+               sharing->IsButtonEnabled(
+                   TabSharingInfoBarDelegate::kShareThisTabInstead)) {
+      sharing->ShareThisTabInstead();
+    }
+    return;
+  }
+  ConfirmInfoBarDelegate* delegate =
+      infobar->delegate()->AsConfirmInfoBarDelegate();
   switch (action) {
     case Action::kOk:
       if (delegate->Accept()) {

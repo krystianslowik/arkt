@@ -16,6 +16,10 @@ import EngineAPI
 public final class InfobarPresenter {
   private let engine: any EngineClient
   let host: AnchoredPanelHost
+  private let anchor: @MainActor (TabID) -> NSView?
+  /// Gives the keyboard to `tab`'s page when it leaves the strip (Esc, F6, the strip going down while it held it). The
+  /// window sets it.
+  public var focusPage: (@MainActor (TabID) -> Void)?
   private var retryScheduled = false
   /// The infobars of each tab, in the engine's order; a tab with none has no entry.
   public private(set) var infobars: [TabID: [Infobar]] = [:]
@@ -23,11 +27,22 @@ public final class InfobarPresenter {
   var reduceMotion: (@MainActor () -> Bool)?
   /// The corner radius of the page card at the top of a tab's page view; the strip's top corners follow it.
   var cornerRadius: @MainActor (NSView) -> CGFloat = { InfobarPresenter.cardCornerRadius(of: $0) }
+  /// The infobars of each tab that have been on screen in this window. Only an infobar new to the screen fades in and
+  /// is announced: a strip made again for the same rows (a tab or Space switch, the tab leaving HTML fullscreen) shows
+  /// at once and says nothing (#477 review, #581). An infobar leaves the set when it leaves the tab's list.
+  private var seen: [TabID: Set<InfobarID>] = [:]
+  /// Asks VoiceOver to read an infobar's message as it first appears. Tests replace it.
+  var announce: @MainActor (NSPanel, String) -> Void = { panel, message in
+    NSAccessibility.post(element: panel, notification: .announcementRequested, userInfo: [
+      .announcement: message, .priority: NSAccessibilityPriorityLevel.medium.rawValue,
+    ])
+  }
 
   /// `anchor` returns the view of a tab that is on screen in this window, nil for one that is not.
   public init(engine: any EngineClient, anchor: @escaping @MainActor (TabID) -> NSView?,
               windowIsVisible: @escaping @MainActor (NSWindow) -> Bool = { $0.isVisible }) {
     self.engine = engine
+    self.anchor = anchor
     host = AnchoredPanelHost(anchor: anchor, windowIsVisible: windowIsVisible)
     host.refresh = { [weak self] in self?.refresh() }
   }
@@ -51,6 +66,9 @@ public final class InfobarPresenter {
     switch event {
     case .infobarsChanged(let tab, let list):
       infobars[tab] = list.isEmpty ? nil : list
+      let ids = Set(list.map(\.id))
+      let kept = seen[tab]?.intersection(ids) ?? []
+      seen[tab] = kept.isEmpty ? nil : kept
       if list.isEmpty {
         host.dismiss(tab)
       } else {
@@ -89,6 +107,18 @@ public final class InfobarPresenter {
     }
   }
 
+  /// F6 from a page (#478): puts the keyboard in the strip of `tab`, or, when the engine did not name the tab, of the
+  /// tab whose page holds `responder`. False when that tab shows no strip with a control to reach; the page keeps the
+  /// keyboard then.
+  public func focusStrip(of tab: TabID?, holding responder: NSResponder?) -> Bool {
+    let target = tab ?? infobars.keys.first { tab in
+      guard let view = responder as? NSView, let page = anchor(tab) else { return false }
+      return view.isDescendant(of: page)
+    }
+    guard let target, let strip = strip(for: target) else { return false }
+    return strip.focusKeyboard()
+  }
+
   /// Takes every strip down, as the window goes away.
   public func closeAll() {
     host.dismissAll()
@@ -101,15 +131,33 @@ public final class InfobarPresenter {
       return
     }
     strip(for: tab)?.update(list)
+    let before = seen[tab] ?? []
+    let fresh = list.map(\.id).filter { !before.contains($0) }
     host.place(tab, maxWidth: .greatestFiniteMagnitude, fullWidth: true) { width in
       let panel = InfobarPanel(infobars: list, width: width)
       if let reduceMotion { panel.reduceMotion = reduceMotion }
       panel.onAction = { [weak self] infobar, action in self?.engine.act(on: infobar.id, action: action) }
+      // The page takes the keyboard back only while it is on screen in this window.
+      panel.onKeyboardExit = { [weak self] in
+        guard let self, anchor(tab) != nil else { return }
+        focusPage?(tab)
+      }
       return panel
     } show: { [weak self] panel, window, page, frame in
       let radius = self?.cornerRadius(page) ?? 0
-      panel.show(over: window, anchoredTo: frame, topCornerRadius: radius)
+      // A strip of new infobars fades in as one; one that brings back rows already seen shows at once and fades in only
+      // the rows that are new.
+      let allNew = fresh.count == list.count
+      panel.show(over: window, anchoredTo: frame, topCornerRadius: radius, fadeIn: allNew)
+      if !allNew { panel.fadeIn(fresh) }
     }
+    // Announced once, when the strip first shows the infobar.
+    guard let strip = strip(for: tab), !fresh.isEmpty else { return }
+    let shown = Set(strip.infobars.map(\.id))
+    for infobar in list where fresh.contains(infobar.id) && shown.contains(infobar.id) {
+      announce(strip.panel, infobar.message)
+    }
+    seen[tab, default: []].formUnion(fresh.filter { shown.contains($0) })
   }
 
   /// The corner radius the page card clips its content with: the first rounded, clipping layer from the page view up.

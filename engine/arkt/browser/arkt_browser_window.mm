@@ -8,6 +8,7 @@
 #include "arkt/browser/arkt_autofill_bubble_handler.h"
 #include "arkt/browser/arkt_browser_window_parts.h"
 #include "arkt/browser/arkt_extension_calls.h"
+#include "arkt/browser/arkt_extension_keybinding_registry.h"
 #include "arkt/browser/arkt_extensions_bridge.h"
 #include "arkt/browser/arkt_extensions_container.h"
 #include "arkt/browser/arkt_extensions_menu.h"
@@ -41,7 +42,9 @@
 #include "chrome/browser/ui/exclusive_access/fullscreen_controller.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_user_gesture_details.h"
+#include "chrome/browser/ui/toolbar/toolbar_action_view_model.h"
 #include "chrome/browser/ui/unload_controller.h"
+#include "chrome/browser/ui/views/eye_dropper/eye_dropper.h"
 #include "chrome/browser/ui/views/new_tab_footer/footer_controller.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
@@ -271,9 +274,13 @@ ArktBrowserWindow::ArktBrowserWindow(BrowserWindowInterface* browser,
   exclusive_access_context_ =
       std::make_unique<ArktExclusiveAccessContext>(this);
   base::WeakPtr<ArktBrowserWindow> weak = weak_factory_.GetWeakPtr();
-  modal_dialog_host_ = std::make_unique<ArktModalDialogHost>(^NSView* {
-    return weak ? weak->DialogHostViewFor(nullptr) : nil;
-  });
+  modal_dialog_host_ = std::make_unique<ArktModalDialogHost>(
+      ^NSView* {
+        return weak ? weak->DialogHostViewFor(nullptr) : nil;
+      },
+      ^CGFloat {
+        return weak ? weak->DialogTopInsetFor(nullptr) : 0;
+      });
   location_bar_ = std::make_unique<ArktStubLocationBar>(browser_);
   side_panel_ui_ = std::make_unique<ArktSidePanelUI>(browser_);
   // BrowserWindowFeatures creates the NTP footer controller for BrowserView
@@ -310,6 +317,11 @@ ArktBrowserWindow::ArktBrowserWindow(BrowserWindowInterface* browser,
 }
 
 ArktBrowserWindow::~ArktBrowserWindow() {
+  // Before the features: it holds the browser's TabListInterface. Nothing
+  // makes a new one from here on (the key monitor and observers go in
+  // UnbindHost below).
+  keys_torn_down_ = true;
+  keybinding_registry_.reset();
   // As WebUIBrowserWindow does: features that reach into the window go first.
   browser_->GetFeatures().TearDownPreBrowserWindowDestruction();
 
@@ -357,6 +369,12 @@ void ArktBrowserWindow::BindHost() {
                                   }
                                   BrowserActiveStateManager::From(browser_)
                                       ->DidBecomeActive();
+                                  // The profile's registry for the active
+                                  // window (#598).
+                                  if (ArktExtensionKeybindingRegistry* registry =
+                                          KeybindingRegistry()) {
+                                    registry->OnWindowKeyChanged(true);
+                                  }
                                 }]];
   [notification_tokens_
       addObject:[center addObserverForName:NSWindowDidResignKeyNotification
@@ -365,6 +383,10 @@ void ArktBrowserWindow::BindHost() {
                                 usingBlock:^(NSNotification*) {
                                   BrowserActiveStateManager::From(browser_)
                                       ->DidBecomeInactive();
+                                  if (keybinding_registry_) {
+                                    keybinding_registry_->OnWindowKeyChanged(
+                                        false);
+                                  }
                                 }]];
   [notification_tokens_
       addObject:[center
@@ -429,6 +451,19 @@ void ArktBrowserWindow::BindHost() {
   }
 
   base::WeakPtr<ArktBrowserWindow> weak = weak_factory_.GetWeakPtr();
+  // Extension shortcuts with the focus outside the page (#598). A local
+  // monitor sees the key down before the window and the main menu do, as
+  // Chrome's command dispatcher offers it to the extension accelerators
+  // before the menu; the main menu's own keys are still the menu's
+  // (MainMenuHasAccelerator).
+  key_monitor_ = [NSEvent
+      addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown
+                                   handler:^NSEvent*(NSEvent* event) {
+                                     return weak && weak->HandleNonPageKeyDown(
+                                                        event)
+                                                ? nil
+                                                : event;
+                                   }];
   host_.closeRequested = ^{
     if (weak) {
       weak->Close();
@@ -482,6 +517,10 @@ void ArktBrowserWindow::UnbindHost() {
   }
   if (mounted_) {
     Unmount(mounted_);
+  }
+  if (key_monitor_) {
+    [NSEvent removeMonitor:key_monitor_];
+    key_monitor_ = nil;
   }
   host_.closeRequested = nil;
   host_.validateCommand = nil;
@@ -540,6 +579,35 @@ NSView* ArktBrowserWindow::DialogHostViewFor(
     }
   }
   return host_.cardView;
+}
+
+CGFloat ArktBrowserWindow::DialogTopInsetFor(
+    content::WebContents* contents) const {
+  NSView* host = DialogHostViewFor(contents);
+  if (!contents) {
+    contents = browser_->GetTabStripModel()->GetActiveWebContents();
+  }
+  auto it =
+      contents ? infobar_presenters_.find(contents) : infobar_presenters_.end();
+  NSView* stack = it != infobar_presenters_.end() ? it->second->stack() : nil;
+  // The rows are laid out at the top of the container or the card
+  // (ArktLayoutBelowTopBar), and taken out of it in HTML fullscreen. A stack
+  // the shell presents is hidden but keeps its height: the shell draws its
+  // strip over that space.
+  if (!host || !stack || stack.superview != host) {
+    return 0;
+  }
+  return NSHeight(stack.frame);
+}
+
+NSView* ArktBrowserWindow::PromptAnchorViewFor(
+    content::WebContents* contents) const {
+  NSView* host = DialogHostViewFor(contents);
+  NSView* page = contents ? contents->GetNativeView().GetNativeNSView() : nil;
+  // The page view is laid out below the rows, so the panel follows them; it
+  // also follows the view moving inside the host (ArktDialogSheet observes
+  // the anchor's superview too).
+  return page && page.superview == host ? page : host;
 }
 
 // static
@@ -1388,9 +1456,13 @@ ArktBrowserWindow::GetWebContentsModalDialogHostFor(
       tab_modal_dialog_hosts_[web_contents];
   if (!host) {
     base::WeakPtr<ArktBrowserWindow> weak = weak_factory_.GetWeakPtr();
-    host = std::make_unique<ArktModalDialogHost>(^NSView* {
-      return weak ? weak->DialogHostViewFor(web_contents) : nil;
-    });
+    host = std::make_unique<ArktModalDialogHost>(
+        ^NSView* {
+          return weak ? weak->DialogHostViewFor(web_contents) : nil;
+        },
+        ^CGFloat {
+          return weak ? weak->DialogTopInsetFor(web_contents) : 0;
+        });
   }
   return host.get();
 }
@@ -1408,9 +1480,66 @@ BrowserView* ArktBrowserWindow::AsBrowserView() {
 content::KeyboardEventProcessingResult
 ArktBrowserWindow::PreHandleKeyboardEvent(
     const input::NativeWebKeyboardEvent& event) {
-  // The main menu sees Cmd key equivalents after the page did not handle them
-  // (HandleKeyboardEvent), so nothing is reserved here.
+  // Extension shortcuts go before the page, as in Chrome (BrowserView hands
+  // them to its focus manager here, #598). The main menu sees its Cmd key
+  // equivalents after the page did not handle them (HandleKeyboardEvent), so
+  // nothing else is reserved here.
+  if (event.GetType() == input::NativeWebKeyboardEvent::Type::kRawKeyDown &&
+      event.os_event && KeybindingRegistry() &&
+      KeybindingRegistry()->HandleKeyDown(event.os_event.Get())) {
+    return content::KeyboardEventProcessingResult::HANDLED;
+  }
   return content::KeyboardEventProcessingResult::NOT_HANDLED;
+}
+
+ArktExtensionKeybindingRegistry* ArktBrowserWindow::KeybindingRegistry() {
+  if (!keybinding_registry_ && !keys_torn_down_) {
+    keybinding_registry_ = std::make_unique<ArktExtensionKeybindingRegistry>(
+        browser_,
+        base::BindRepeating(
+            [](base::WeakPtr<ArktBrowserWindow> window,
+               const extensions::ExtensionId& id) -> ToolbarActionViewModel* {
+              return window ? window->extensions_container()->GetActionForId(id)
+                            : nullptr;
+            },
+            weak_factory_.GetWeakPtr()));
+  }
+  return keybinding_registry_.get();
+}
+
+bool ArktBrowserWindow::HandleNonPageKeyDown(NSEvent* event) {
+  NSWindow* window = host_.window;
+  if (!window || event.windowNumber != window.windowNumber ||
+      browser_->IsDeleteScheduled()) {
+    return false;
+  }
+  // Every extension shortcut but a media key has Command, Control or Option
+  // (ui::Command::ParseImpl); plain typing never reaches the registry.
+  if (!(event.modifierFlags &
+        (NSEventModifierFlagCommand | NSEventModifierFlagControl |
+         NSEventModifierFlagOption))) {
+    return false;
+  }
+  // A page's key downs go through PreHandleKeyboardEvent.
+  NSResponder* responder = window.firstResponder;
+  // An input method composing in a shell field keeps its keys.
+  if ([responder conformsToProtocol:@protocol(NSTextInputClient)] &&
+      [static_cast<id<NSTextInputClient>>(responder) hasMarkedText]) {
+    return false;
+  }
+  if ([responder isKindOfClass:[NSView class]]) {
+    NSView* view = static_cast<NSView*>(responder);
+    TabStripModel* model = browser_->GetTabStripModel();
+    for (int i = 0; i < model->count(); ++i) {
+      NSView* page =
+          model->GetWebContentsAt(i)->GetNativeView().GetNativeNSView();
+      if (page && [view isDescendantOf:page]) {
+        return false;
+      }
+    }
+  }
+  ArktExtensionKeybindingRegistry* registry = KeybindingRegistry();
+  return registry && registry->HandleKeyDown(event);
 }
 
 bool ArktBrowserWindow::HandleKeyboardEvent(
@@ -1435,9 +1564,17 @@ bool ArktBrowserWindow::HandleKeyboardEvent(
 }
 
 bool ArktBrowserWindow::ForwardUnhandledKeyDown(NSEvent* event) {
-  // Only Esc for now (#313: Esc goes to the page first, then to a Peek).
+  // Esc (#313: Esc goes to the page first, then to a Peek) and F6 (#478: the
+  // keyboard into the tab's infobar strip), neither with a modifier.
   constexpr unsigned short kEscapeKeyCode = 53;
-  if (event.keyCode != kEscapeKeyCode ||
+  constexpr unsigned short kF6KeyCode = 97;
+  const bool forwarded =
+      event.keyCode == kEscapeKeyCode ||
+      (event.keyCode == kF6KeyCode &&
+       !(event.modifierFlags &
+         (NSEventModifierFlagCommand | NSEventModifierFlagControl |
+          NSEventModifierFlagOption | NSEventModifierFlagShift)));
+  if (!forwarded ||
       ![host_ respondsToSelector:@selector(unhandledKeyDown:inTab:)]) {
     return false;
   }
@@ -1575,8 +1712,23 @@ void ArktBrowserWindow::ConfirmBrowserCloseWithPendingDownloads(
     int download_count,
     DownloadCloseType dialog_type,
     base::OnceCallback<void(bool)> callback) {
-  // No dialog this week (known gap): the close waits, as in Webium.
-  ARKT_STUB("BrowserWindow");
+  // On Mac only the last incognito or guest window of its profile gets here
+  // (UnloadController::CanCloseWithInProgressDownloads lets every other window
+  // close and its downloads keep running; a quit asks in AppController). With
+  // no dialog the close used to wait forever. Default (#589): close, and the
+  // profile's downloads are cancelled with it. Answered on the next turn:
+  // UnloadController stores the callback that this answer runs only after
+  // this call returns. The callback is bound to UnloadController's
+  // weak_factory_, which UnloadController::ProcessPendingTabs invalidates on
+  // every run: a ProcessPendingTabs between this post and the task drops the
+  // answer silently. When the private window is the app's last window the type
+  // is kBrowserShutdown and download_count counts every profile's downloads,
+  // regular ones included (OkToCloseWithInProgressDownloads).
+  LOG(WARNING) << "ARKT: close with " << download_count
+               << " pending download(s), type " << static_cast<int>(dialog_type)
+               << ": closing";
+  base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+      FROM_HERE, base::BindOnce(std::move(callback), /*proceed=*/true));
 }
 
 void ArktBrowserWindow::ShowAppMenu() {
@@ -1617,8 +1769,9 @@ void ArktBrowserWindow::ShowEmojiPanel() {
 std::unique_ptr<content::EyeDropper> ArktBrowserWindow::OpenEyeDropper(
     content::RenderFrameHost* frame,
     content::EyeDropperListener* listener) {
-  ARKT_STUB("BrowserWindow");
-  return nullptr;
+  // Chromium's own Mac eye dropper (NSColorSampler, no Views), as
+  // BrowserView::OpenEyeDropper. It serves the page's EyeDropper API (#589).
+  return ShowEyeDropper(frame, listener);
 }
 
 void ArktBrowserWindow::ShowCaretBrowsingDialog() {

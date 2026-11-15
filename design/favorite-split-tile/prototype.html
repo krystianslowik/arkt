@@ -11,8 +11,9 @@
     state: resting | hover | selected | loading | menu | menu-rename | rename-popover
     dark: dark appearance   shot: hide the prototype controls   2x: zoom the page (used for the screenshots)
   No hash: an overview of every state.
-  1 CSS px = 1 pt. Tile geometry is FavoritesLayout / SidebarMetrics on main (52 x 46 tile at the default 190 pt
-  sidebar, 3 columns, 9 pt gap, radius 10, 20 pt favicon, 16 pt X at inset 3). Colors are ShellTokens values.
+  1 CSS px = 1 pt. Tile geometry is FavoritesLayout / SidebarMetrics after #824 (47 pt tall, 52 pt at its narrowest,
+  3 columns at the default 190 pt sidebar, 8 pt gap, radius 10, 20 pt favicon, 16 pt X at inset 3). The screens were
+  rendered before #824, at 52 x 46 with a 9 pt gap; the stack's offsets are the same. Colors are ShellTokens values.
   Favicons are synthetic colored squares; no real sites.
 -->
 <style>
@@ -84,7 +85,7 @@ html.shot2x { zoom: 2; }
 .lights { position: absolute; left: 12px; top: 14px; display: flex; gap: 8px; }
 .lights i { width: 12px; height: 12px; border-radius: 50%; display: block; box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.14); }
 .lights i:nth-child(1) { background: #FF5F57; } .lights i:nth-child(2) { background: #FEBC2E; } .lights i:nth-child(3) { background: #28C840; }
-.grid { position: absolute; left: 8px; top: 40px; width: 174px; display: grid; grid-template-columns: repeat(3, 52px); gap: 9px; }
+.grid { position: absolute; left: 8px; top: 40px; width: 174px; display: grid; grid-template-columns: repeat(3, 52px); gap: 8px; }
 .stitle { position: absolute; left: 16px; top: 155px; font-size: 12px; font-weight: 600; color: var(--text-2); }
 .rows { position: absolute; left: 8px; right: 8px; top: 178px; }
 .row { height: 34px; margin-bottom: 7px; border-radius: 9px; display: flex; align-items: center; gap: 8px; padding: 0 10px;
@@ -105,13 +106,15 @@ html.shot2x { zoom: 2; }
 .zoom h2 { margin: 0; position: absolute; left: 18px; top: 14px; font-size: 12px; font-weight: 600; color: var(--text-2); letter-spacing: 0; }
 .zoom .cells { position: absolute; left: 18px; right: 18px; top: 66px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
 .zoom .cell { display: flex; flex-direction: column; align-items: center; gap: 58px; }
-.zoom .cell .mag { width: 52px; height: 46px; transform: scale(2); transform-origin: top center; }
+.zoom .cell .mag { width: 52px; height: 47px; transform: scale(2); transform-origin: top center; }
 .zoom .cell .cap { font-size: 11px; color: var(--sb-fg); text-align: center; line-height: 1.3; }
 
 /* ---------- Tile (FavoriteTileView) ---------- */
-.tile { position: relative; width: 52px; height: 46px; border-radius: 10px; background: var(--fill); }
+.tile { position: relative; width: 52px; height: 47px; border-radius: 10px; background: var(--fill); }
 .tile.hover { background: var(--fill-hover); }
 .tile.cur { background: var(--cur); box-shadow: var(--cur-shadow); }
+/* FavoriteTileView is not flipped: the favicon's y is ((47 - 20) / 2).rounded() = 14 from the bottom, so the extra
+   0.5 pt goes below the favicon and the top inset is 13. */
 .tile > .fav { position: absolute; left: 16px; top: 13px; }
 .x { position: absolute; right: 3px; top: 3px; width: 16px; height: 16px; display: grid; place-items: center; z-index: 3;
   border-radius: 50%; background: var(--ring-hover); }   /* a split tile's X sits on a plate: it can cover a pane's favicon */
@@ -287,9 +290,9 @@ html.shot2x { zoom: 2; }
 
   function overview() {
     var h = '<div class="overview"><h1>A Split View as a Favorites tile (#788)</h1>' +
-      '<p>The stack. The tile at its real size (52 x 46 pt) in every state, for a split of 2 panes side by side, 2 stacked, 3 and 4. Open a state for the full screen.</p><div class="strip">';
+      '<p>The stack. The tile at its real size (52 x 47 pt) in every state, for a split of 2 panes side by side, 2 stacked, 3 and 4. Open a state for the full screen.</p><div class="strip">';
     ['resting', 'hover', 'selected', 'loading'].forEach(function (s) {
-      h += '<figure><a class="well" href="#' + s + '" style="display:flex;gap:9px">' +
+      h += '<figure><a class="well" href="#' + s + '" style="display:flex;gap:8px">' +
         [{ count: 2, orient: 'h' }, { count: 2, orient: 'v' }, { count: 3, orient: 'h' }, { count: 4, orient: 'h' }].map(function (o) {
           o.state = s; o.focus = 0; return tile(o);
         }).join('') + '</a><figcaption>' + s + '</figcaption></figure>';

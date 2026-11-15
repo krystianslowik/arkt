@@ -3025,6 +3025,38 @@ Merged main at `3a0263c`, including #802's Favorite split behavior and #804's sh
 
 Swift 6.2.4 frontend parsing passed for all ten Swift files changed by the merge; whitespace and source-layer inspection passed. No full local build, GUI or runtime tests ran because the local baseline/toolchain limitation remains. Earlier icon test and screenshot evidence belongs to `e8e807f`; the merge head requires fresh CI, including Favorite split and icon coverage. No new icon behavior, fixture capture, accessibility or performance claim is made.
 
+### #278 — Defer hover resync during Space paging
+
+- The outline and Favorites hosts coalesce pointer resyncs during tracking, frozen gestures and animated settling; pending hosts resync at final rest using the current pointer and geometry. A jump flushes pending work, while closing or detaching discards stale requests.
+- Test-first CI run 42428504805, GUI job 128571999129 at `00b8116`: 2,050 tests executed, 54 skipped, 10 assertion failures, all in `PagerHoverResyncTests`. Four of five methods failed; Reduce Motion/idle passed. Tracking queried both hosts `[1, 1]` instead of `[0, 0]` (line 74); settling reached `[2, 2]` instead of `[0, 0]` (line 79). The required Swift gate, pure tests, app build and lint passed at that test-only head.
+- Implementation verification: Swift frontend syntax parsing of the four changed production files and the GUI test file, `git diff --check`, and import-layer grep passed. These are not compilation or executable tests. Full local ShellKit builds and GUI tests were not run because the local baseline cannot build and full Xcode is unavailable. Current-head CI and separate review are pending; rerun the GUI suite after #816 lands. No #275 timing or physical 120 Hz performance claim is made.
+
+### Hover resync frozen-to-idle follow-up (#278)
+
+The new `testFrozenSettleCancelledAtOriginalSpaceFlushesPendingHosts` failed at `92391cd` in CI run 42433234430,
+GUI job 128586564315: both final assertions observed `[0, 0]` rather than `[1, 1]`. The other seven hover-resync
+methods passed. The complete GUI job executed 2,053 tests with 54 skipped and two assertion failures, both in that
+one regression. The required Swift gate, pure tests, app build and lint passed; Core and XCUITest jobs were skipped.
+
+The `go(to:)` early return now flushes pending hosts after clearing the frozen target when the pager is already idle
+at the requested resting offset. It uses the existing coalesced scheduler, with no timer or per-frame query. The
+regression and its exactly-once assertion are unchanged. Swift 6.2.4 frontend parsing and diff checks passed; the
+production fix has not run locally because the baseline cannot build. A new-head CI result is required. The GUI
+rerun after #816 and the independent physical timing gates remain separate validation work.
+
+### #339: merge main after the Favorites split tile (#864)
+
+Merged main `63ec215`. Three conflicts. In `FavoritesGridView.configure`, main's split-stack branch stays and the
+plain-tile branch checks the node icon before the new `favicon(of:size:)` helper; split panes take no icons. In
+`SidebarContextMenu`, main's `favoriteSplit(_:layout:)` with Separate All Tabs and Convert stays without Change Icon,
+per the spec, and tab Favorites and folders keep Change Icon and Reset Icon. This history keeps both sides.
+`docs/339-custom-icons-integration.md` is removed: its integration order is done and its test status was out of date.
+
+Local: `swift build --build-tests` in ShellKit succeeded. ArktCore `swift test`: 588 tests (150 + 125 + 70 + 8 + 235)
+passed. ShellKit filtered `SidebarContextMenuTests|NodeIconContractTests|SidebarModelStubTests|FavoriteSplit|
+SidebarSourceContractTests|ModelSidebarSourceTests`: 47 and 42 tests in 3 suites each passed. The GUI suite and
+screenshots are left to CI on this head.
+
 ## Composite Space theme overlays (#534)
 
 The drawn base and opacity-scaled overlay are expanded in OKLab and source-over composited at the union of their
@@ -3070,3 +3102,9 @@ changes merged automatically. Parser/source/lint and resolution whitespace check
 build, icon interaction, screenshot capture or inspection ran locally. The earlier screenshots and suite counts
 remain historical until new-head CI and artifact inspection complete. Native accessibility/Character Viewer and
 manual performance remain unverified.
+
+### #278 main integration update
+
+Merged main `1188868` into the hover-query deferral branch. The sole conflict was this append-only history; both histories are retained. The pager keeps main's changed-hidden-page preparation and visible-page parking fixes alongside the deferred-hover queue, frozen-to-idle flush, and detach cancellation. The queued callback still rechecks paging and reads the current pointer and geometry when allowed to run. No new polling or per-frame pointer query is introduced.
+
+After the merge, changed Swift source parsing, workflow import-layer and UI-source checks, actionlint and engine-header parity were checked. No local full build, GUI run or app launch was performed. Merged-head CI, including the overlapping pager GUI coverage, remains pending; earlier passes apply to the previous head only.

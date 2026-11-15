@@ -210,6 +210,6 @@ final class FavoritesGridColumnsTests: XCTestCase {
     for (index, frame) in frames.enumerated() {
       XCTAssertEqual(frame, FavoritesLayout.frame(ofItem: index, itemCount: 4, contentWidth: 174))
     }
-    XCTAssertEqual(FavoritesDrop.band(favoritesFrame: grid.frame).height, 46 * 2 + 9)
+    XCTAssertEqual(FavoritesDrop.band(favoritesFrame: grid.frame).height, 47 * 2 + 8)
   }
 }

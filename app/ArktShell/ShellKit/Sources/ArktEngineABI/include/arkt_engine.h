@@ -31,6 +31,8 @@ NS_ASSUME_NONNULL_BEGIN
 @protocol ArktDownloadItem;
 @protocol ArktEngineEvent;
 @protocol ArktExtensionAction;
+@protocol ArktExtensionCommand;
+@protocol ArktExtensionShortcutChange;
 @protocol ArktExtensionInstallResult;
 @protocol ArktHistoryEntry;
 @protocol ArktImportBookmark;
@@ -116,7 +118,10 @@ typedef NS_ENUM(NSInteger, ArktEngineEventKind) {
   ArktEngineEventKindTabClosed = 1,
   // The tab became its window's active tab.
   ArktEngineEventKindActiveTabChanged = 2,
-  // A held close was cancelled; the tab stays open.
+  // A held close was cancelled; the tab stays open. When the engine ends a
+  // leave-site dialog itself (a cancel that runs the page's callback before
+  // the dialog closes), this can come before that dialog's DialogEnded; a
+  // shell answer always reports DialogEnded first.
   ArktEngineEventKindCloseCancelled = 3,
   // Values: url (the visible URL, pending while a navigation starts).
   ArktEngineEventKindURLChanged = 4,
@@ -144,9 +149,10 @@ typedef NS_ENUM(NSInteger, ArktEngineEventKind) {
   ArktEngineEventKindAudibleChanged = 14,
   // The tab was muted or unmuted (#364). Values: isMuted.
   ArktEngineEventKindMutedChanged = 15,
-  // The page raised an alert, confirm or prompt in a window whose host
-  // presents it (#400). Values: dialog. At most one is pending per tab; a
-  // later one ends the earlier first.
+  // The page raised an alert, confirm or prompt, or its beforeunload handler
+  // a leave-site dialog (#585), in a window whose host presents it (#400).
+  // Values: dialog. At most one is pending per tab; a later one ends the
+  // earlier first.
   ArktEngineEventKindDialogRequested = 16,
   // The dialog is over: the shell answered it, or the engine ended it (a
   // navigation, a later dialog, the tab closing, a confirm or prompt in a
@@ -227,6 +233,28 @@ typedef NS_ENUM(NSInteger, ArktEngineEventKind) {
   // state. Sent only for tabs whose last committed origin the change matches;
   // one call of this facade that changes settings reports once per tab.
   ArktEngineEventKindPageInfoChanged = 30,
+  // An extension was installed in the embedder profile for the first time
+  // (#592), from ExtensionRegistryObserver::OnExtensionInstalled. Values:
+  // extensionID, extensionName. Profile-wide: `tab` and `browser` are nil.
+  // Sent when the install is not an update (an extension the profile already
+  // has), its location is ManifestLocation::kInternal (the Chrome Web Store, a
+  // user's .crx, a batch of -installExtensions:completion:) and it is neither
+  // a theme nor an app. Unpacked, command-line, external, policy and
+  // component extensions send nothing. Its order against the
+  // ExtensionActionsChanged that lists its action is not guaranteed. On an
+  // Arkt window the engine drops Chromium's post-install dialog only for an
+  // install this event reported, so a dropped dialog always has its event;
+  // other post-install dialogs (an update's) keep Chromium's sheet, and an
+  // install that skips its post-install UI (a batch) sends the event with no
+  // dialog to drop.
+  ArktEngineEventKindExtensionInstalled = 31,
+  // extensionCommands changed (#598): a shortcut or scope was set or cleared
+  // (through this facade, an extension update, or the engine clearing a
+  // suggestion a main-menu item holds), or an extension with commands was
+  // loaded or unloaded (installed, enabled, disabled, updated, removed). No
+  // values; profile-wide, `tab` and `browser` are nil. The changes of one task
+  // are merged into one event, sent on a later task.
+  ArktEngineEventKindExtensionCommandsChanged = 32,
 };
 
 // Why a tab's page process went away (#577), folded from
@@ -325,12 +353,17 @@ typedef NS_ENUM(NSInteger, ArktLinkDecision) {
   ArktLinkDecisionCancel = 1,
 };
 
-// What a page's JavaScript dialog is (#400). beforeunload is not one: it
-// keeps Chromium's app-modal Leave site dialog (#265).
+// What a page's JavaScript dialog is (#400).
 typedef NS_ENUM(NSInteger, ArktDialogKind) {
   ArktDialogKindAlert = 0,
   ArktDialogKindConfirm = 1,
   ArktDialogKindPrompt = 2,
+  // The page's beforeunload handler holds a close or a navigation (#585):
+  // Chromium's Leave site (or Reload site) dialog. Accepting leaves: the
+  // close or navigation goes on. Declining stays: a held close reports
+  // CloseCancelled, and a held window close or quit stops. Chromium raises
+  // one at a time, across all windows, and activates the tab first.
+  ArktDialogKindBeforeUnload = 3,
 };
 
 // What a permission request asks for (#400). Other covers the rest; its words
@@ -363,6 +396,11 @@ typedef NS_ENUM(NSInteger, ArktInfobarKind) {
   // Settings changed in Page Info and the page needs a reload to apply them.
   ArktInfobarKindReload = 3,
 };
+
+// The height in points of one infobar row (#478). The engine reserves it per
+// infobar at the top of the tab's container while the shell draws the row over
+// that band, so both sides take it from here.
+enum { ArktInfobarRowHeight = 40 };
 
 // What the shell does on an infobar (#400).
 typedef NS_ENUM(NSInteger, ArktInfobarAction) {
@@ -475,6 +513,10 @@ NS_SWIFT_UI_ACTOR
 @property(nonatomic, readonly) BOOL zoomIsUserInitiated;
 // TabFullscreenChanged; NO on every other kind (#577).
 @property(nonatomic, readonly) BOOL isTabFullscreen;
+// ExtensionInstalled; nil on every other kind (#592). The id, and the
+// extension's name as Chromium shows it in its UI.
+@property(nonatomic, readonly, nullable, copy) NSString* extensionID;
+@property(nonatomic, readonly, nullable, copy) NSString* extensionName;
 @end
 
 // One download as plain values, read when the event was recorded (#132).
@@ -509,25 +551,30 @@ NS_SWIFT_UI_ACTOR
 @property(nonatomic, readonly) BOOL canResume;
 @end
 
-// A page's alert, confirm or prompt, held until the shell answers it or the
-// engine ends it (#400). Every string is Chromium's.
+// A page's alert, confirm or prompt, or its leave-site dialog (#585), held
+// until the shell answers it or the engine ends it (#400). Every string is
+// Chromium's.
 NS_SWIFT_UI_ACTOR
 @protocol ArktJavaScriptDialog <NSObject>
 @property(nonatomic, readonly) ArktDialogKind kind;
 // The tab whose page raised it; stays valid after the tab has closed.
 @property(nonatomic, readonly) id<ArktTabHandle> tab;
-// "example.com says".
+// "example.com says"; "Leave site?" or "Reload site?" for a leave-site
+// dialog.
 @property(nonatomic, readonly, copy) NSString* title;
 @property(nonatomic, readonly, copy) NSString* message;
 // A prompt's initial text; nil for an alert or a confirm.
 @property(nonatomic, readonly, nullable, copy) NSString* defaultPromptText;
-// OK.
+// OK; Leave or Reload for a leave-site dialog.
 @property(nonatomic, readonly, copy) NSString* acceptTitle;
-// Cancel; nil for an alert, which only has OK.
+// Cancel; nil for an alert, which only has OK, and for a leave-site dialog:
+// Chromium's own decline button there is a plain Cancel, and the shell draws
+// its Stay (#584).
 @property(nonatomic, readonly, nullable, copy) NSString* cancelTitle;
 // The dialog is over, however it ended.
 @property(nonatomic, readonly) BOOL isEnded;
-// Answers the page's call: `accepted` is OK, `userInput` a prompt's text.
+// Answers the page's call: `accepted` is OK (Leave for a leave-site
+// dialog), `userInput` a prompt's text.
 // Returns NO, and does nothing, when the dialog is already over (the engine
 // ended it first), so an answer that races the end is harmless. Reported with
 // one DialogEnded.
@@ -629,6 +676,75 @@ NS_SWIFT_UI_ACTOR
 @property(nonatomic, readonly, nullable, copy) NSURL* initialURL;
 @end
 
+// What an extension may read and change on sites (#593): Chromium's user site
+// access for the window's active tab, as its toolbar context menu shows it.
+typedef NS_ENUM(NSInteger, ArktExtensionSiteAccess) {
+  // It asks for no site access the user can change on this tab (no host
+  // permissions, or a page it may not run on): no site access submenu.
+  ArktExtensionSiteAccessNone = 0,
+  // Only when the user clicks its action.
+  ArktExtensionSiteAccessOnClick = 1,
+  // On the active tab's site.
+  ArktExtensionSiteAccessOnThisSite = 2,
+  // On all sites.
+  ArktExtensionSiteAccessOnAllSites = 3,
+};
+
+// The commands of an extension action's context menu (#593), the menu
+// design/extensions fixes. The values are the shell's ExtensionContextCommand
+// raw values.
+typedef NS_ENUM(NSInteger, ArktExtensionContextCommand) {
+  // The extension's name, a disabled header.
+  ArktExtensionContextCommandHeader = 0,
+  // Opens the extension's options page in a tab.
+  ArktExtensionContextCommandOptions = 1,
+  // Pin or Unpin, by the current state.
+  ArktExtensionContextCommandTogglePin = 2,
+  // One place earlier or later in the pinned order.
+  ArktExtensionContextCommandMoveUp = 3,
+  ArktExtensionContextCommandMoveDown = 4,
+  // The site access submenu's three choices.
+  ArktExtensionContextCommandSiteAccessOnClick = 5,
+  ArktExtensionContextCommandSiteAccessOnThisSite = 6,
+  ArktExtensionContextCommandSiteAccessOnAllSites = 7,
+  // Manage Extension... and Remove from Arkt...: the shell runs these itself;
+  // performExtensionContextCommand ignores them.
+  ArktExtensionContextCommandManage = 8,
+  ArktExtensionContextCommandRemove = 9,
+  // The extension's own chrome.contextMenus items for its action (#915) use
+  // the commands from CustomFirst to CustomLast: its item n (Chromium's
+  // IDC_EXTENSIONS_CONTEXT_CUSTOM_FIRST + n) is CustomFirst + n. They come
+  // right after the header and run through performExtensionContextCommand,
+  // which fires chrome.contextMenus.onClicked for the tab that was active
+  // when the menu was built.
+  ArktExtensionContextCommandCustomFirst = 1000,
+  ArktExtensionContextCommandCustomLast = 2000,
+};
+
+typedef NS_ENUM(NSInteger, ArktMenuItemKind) {
+  ArktMenuItemKindCommand = 0,
+  ArktMenuItemKindSeparator = 1,
+  ArktMenuItemKindSubmenu = 2,
+};
+
+// One item of a menu the engine gives the shell to draw (#593), as plain
+// values. Titles are the engine's.
+NS_SWIFT_UI_ACTOR
+@protocol ArktMenuItem <NSObject>
+@property(nonatomic, readonly) ArktMenuItemKind kind;
+// "" for a separator.
+@property(nonatomic, readonly, copy) NSString* title;
+// The command passed back when the user chooses the item; meaningful only for
+// ArktMenuItemKindCommand, and only to the menu's source.
+@property(nonatomic, readonly) NSInteger command;
+// NO for a separator.
+@property(nonatomic, readonly) BOOL isEnabled;
+// Shown with a check mark; NO for a separator or a submenu holder.
+@property(nonatomic, readonly) BOOL isChecked;
+// The submenu's items; empty for any other kind.
+@property(nonatomic, readonly, copy) NSArray<id<ArktMenuItem>>* children;
+@end
+
 // One extension toolbar action of a window, as plain values (Decision 10).
 NS_SWIFT_UI_ACTOR
 @protocol ArktExtensionAction <NSObject>
@@ -646,6 +762,66 @@ NS_SWIFT_UI_ACTOR
 // there (#721). The shell offers Report abuse only then; uninstallExtension
 // opens no report page for the others anyway.
 @property(nonatomic, readonly) BOOL canReportAbuse;
+// Pinned in the profile (#593, pinnedExtensionIDs).
+@property(nonatomic, readonly) BOOL isPinned;
+// The extension has an options page (the context menu's Options...).
+@property(nonatomic, readonly) BOOL hasOptionsPage;
+// Its site access on the window's active tab.
+@property(nonatomic, readonly) ArktExtensionSiteAccess siteAccess;
+@end
+
+// One chrome.commands command of an enabled extension (#598), as Chrome's
+// keyboard shortcuts page lists it: an extension's action command first, then
+// its named commands.
+NS_SWIFT_UI_ACTOR
+@protocol ArktExtensionCommand <NSObject>
+@property(nonatomic, readonly, copy) NSString* extensionID;
+// The manifest's command name: _execute_action for the action (or
+// _execute_browser_action, _execute_page_action), else the extension's own.
+@property(nonatomic, readonly, copy) NSString* commandName;
+// The extension's name as Chromium shows it.
+@property(nonatomic, readonly, copy) NSString* extensionName;
+// The manifest's description, or Chromium's "Activate the extension" for the
+// action.
+@property(nonatomic, readonly, copy) NSString* commandDescription;
+// The shortcut in Chromium's form, Ctrl, Alt, Command and Shift in that
+// order, then the key, joined by "+" (ui::Command::AcceleratorToString), for
+// example "Command+Shift+Y" or "Ctrl+Alt+Comma" (Ctrl is the Control key,
+// Alt the Option key). Keys: A to Z, 0 to 9, Comma, Period, Up, Down, Left,
+// Right, Insert, Delete, Home, End, PageUp, PageDown, Space, Tab,
+// MediaNextTrack, MediaPrevTrack, MediaPlayPause, MediaStop. Nil when the
+// command has no shortcut.
+@property(nonatomic, readonly, nullable, copy) NSString* shortcut;
+// Works while other applications are active (Chromium's global scope).
+@property(nonatomic, readonly) BOOL isGlobal;
+@end
+
+// The answer to setExtensionCommandShortcut (#598).
+typedef NS_ENUM(NSInteger, ArktExtensionShortcutResult) {
+  // The command has the shortcut and scope now (or already had them).
+  ArktExtensionShortcutResultApplied = 0,
+  // Another command has the shortcut; nothing changed. See conflict*.
+  ArktExtensionShortcutResultConflict = 1,
+  // Chromium does not accept the shortcut for this command
+  // (extensions::Command::StringToAccelerator: an unknown key or form, no
+  // Command, Control or Option on a non-media key, Option with Command or
+  // Control, a media key with modifiers or on an action command), or global
+  // scope for an action command or for a key the main menu holds (a system hot
+  // key would take it before the menu); nothing changed.
+  ArktExtensionShortcutResultNotAllowed = 2,
+  // No enabled extension with that id has that command.
+  ArktExtensionShortcutResultUnknownCommand = 3,
+  // A global shortcut the engine's global listener could not register;
+  // the command keeps what it had.
+  ArktExtensionShortcutResultGlobalShortcutTaken = 4,
+};
+
+NS_SWIFT_UI_ACTOR
+@protocol ArktExtensionShortcutChange <NSObject>
+@property(nonatomic, readonly) ArktExtensionShortcutResult result;
+// The command that has the shortcut, on Conflict only.
+@property(nonatomic, readonly, nullable, copy) NSString* conflictExtensionID;
+@property(nonatomic, readonly, nullable, copy) NSString* conflictCommandName;
 @end
 
 // One back or forward history entry of a tab.
@@ -877,8 +1053,9 @@ NS_SWIFT_UI_ACTOR
 // returns. Not implemented: every link navigates.
 - (ArktLinkDecision)decideLinkActivation:(id<ArktLinkActivation>)activation
     NS_SWIFT_NAME(decideLinkActivation(_:));
-// A key down that the page of `tab` did not handle (an Esc the page did not
-// use), from a task posted after the engine finished with the event.
+// A key down that the page of `tab` did not handle (an Esc, or an F6 without
+// modifiers (#478), the page did not use), from a task posted after the
+// engine finished with the event.
 - (void)unhandledKeyDown:(NSEvent*)event
                    inTab:(nullable id<ArktTabHandle>)tab
     NS_SWIFT_NAME(unhandledKeyDown(_:in:));
@@ -1086,6 +1263,8 @@ NS_SWIFT_UI_ACTOR
 // Creates a Browser in the host's window, synchronously.
 - (id<ArktBrowserHandle>)createBrowserWithHost:(id<ArktWindowHost>)host
     NS_SWIFT_NAME(createBrowser(host:));
+// The window's actions: the pinned ones first, in pinnedExtensionIDs order,
+// then the rest.
 - (NSArray<id<ArktExtensionAction>>*)extensionActionsForBrowser:
     (id<ArktBrowserHandle>)browser NS_SWIFT_NAME(extensionActions(in:));
 // Runs the action; its popup is anchored to `anchor`.
@@ -1215,6 +1394,71 @@ NS_SWIFT_UI_ACTOR
                                completion
     NS_SWIFT_NAME(uninstallExtension(_:reportAbuse:in:completion:))
         NS_SWIFT_DISABLE_ASYNC;
+
+// Pinned extensions (#593), of the profile the engine started with: Chromium's
+// toolbar pins, stored in the profile (what chrome://extensions shows as "Pin
+// to toolbar"), in order. Action ids are extension ids.
+@property(nonatomic, readonly, copy) NSArray<NSString*>* pinnedExtensionIDs;
+// Pins (at the end of the order) or unpins an extension that has an action.
+// Nothing for an unknown id, one already in that state, or one the policy
+// pins. A change reaches the sinks as ExtensionActionsChanged for every window.
+- (void)setExtensionPinned:(NSString*)extensionID
+                    pinned:(BOOL)pinned
+    NS_SWIFT_NAME(setExtensionPinned(_:pinned:));
+// Moves a pinned extension to `index` in pinnedExtensionIDs, clamped to the
+// ends. Nothing for one that is not pinned, already there, or policy-pinned.
+- (void)movePinnedExtension:(NSString*)extensionID
+                    toIndex:(NSInteger)index
+    NS_SWIFT_NAME(movePinnedExtension(_:to:));
+// The context menu of action `actionId` in `browser`, from Chromium's
+// ExtensionContextMenuModel for the window's active tab, with
+// ArktExtensionContextCommand commands; empty for an unknown action. The
+// engine keeps that model until the next call for the window, so a choice made
+// after the tab moved to another site changes no site access.
+- (NSArray<id<ArktMenuItem>>*)extensionContextMenuForAction:(NSString*)actionId
+                                                  inBrowser:
+                                                      (id<ArktBrowserHandle>)
+                                                          browser
+    NS_SWIFT_NAME(extensionContextMenu(forAction:in:));
+// Runs a command the user chose from that menu. Nothing for an unknown action
+// or command, a disabled item, or Header, Manage and Remove (the shell's).
+// An extension's own item (CustomFirst to CustomLast) runs only while the tab
+// that was active when the menu was built is still the active one.
+- (void)performExtensionContextCommand:(NSInteger)command
+                             forAction:(NSString*)actionId
+                             inBrowser:(id<ArktBrowserHandle>)browser
+    NS_SWIFT_NAME(performExtensionContextCommand(_:forAction:in:));
+
+// Extension keyboard commands (#598), of the profile the engine started with:
+// every command of its enabled extensions, sorted by extension name, with the
+// shortcut and scope the profile has for them. A command's shortcut works in
+// every Arkt window of the profile, with the page or anything else of the
+// window focused, before the page sees the key (as in Chrome), except a key an
+// item of the main menu has as its key equivalent: the menu keeps it. A
+// manifest suggestion for such a key is not assigned (the engine clears it,
+// see ExtensionCommandsChanged), so the command starts without a shortcut,
+// and global scope on such a key is refused (NotAllowed). A global shortcut
+// works in every application through a system hot key. Keys the shell handles
+// outside its main menu (its window's own keys) are the shell's to keep out
+// of the conflict flow; the engine cannot see them.
+@property(nonatomic, readonly, copy)
+    NSArray<id<ArktExtensionCommand>>* extensionCommands;
+// Sets (nil clears) a command's shortcut, in ArktExtensionCommand's form, and
+// its scope, through Chromium's CommandService, as Chrome's shortcuts page
+// does: the shortcut is the user's from then on, so an update of the
+// extension keeps it. Synchronous; ExtensionCommandsChanged follows when
+// something changed. With `replacingConflict` NO, a shortcut another command
+// has answers Conflict and changes nothing; with YES that command loses it
+// first. Media keys may be shared, as in Chrome. The engine checks only
+// extension commands: conflicts with Arkt's own shortcuts are the shell's to
+// check first. `global` is ignored when clearing.
+- (id<ArktExtensionShortcutChange>)
+    setExtensionCommandShortcut:(nullable NSString*)shortcut
+                     forCommand:(NSString*)commandName
+                    ofExtension:(NSString*)extensionID
+                         global:(BOOL)global
+              replacingConflict:(BOOL)replacingConflict
+    NS_SWIFT_NAME(setExtensionCommandShortcut(_:forCommand:ofExtension:global:replacingConflict:));
 
 // Downloads (#132), of the profile the engine started with. The events are
 // DownloadCreated, DownloadUpdated and DownloadRemoved (no tab, no window).

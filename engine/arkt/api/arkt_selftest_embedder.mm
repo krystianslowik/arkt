@@ -7,15 +7,20 @@
 #include <string>
 #include <vector>
 
+#include "arkt/api/arkt_engine_facade.h"
 #include "base/command_line.h"
+#include "base/files/file_path.h"
+#include "base/functional/bind.h"
 #include "base/logging.h"
 #include "base/no_destructor.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "ui/base/accelerators/command.h"
 #import "ui/base/cocoa/nsmenu_additions.h"
 #include "ui/base/window_open_disposition.h"
+#include "ui/events/keycodes/keyboard_code_conversion_mac.h"
 
 namespace {
 
@@ -66,6 +71,32 @@ const char* ReasonName(ArktCloseReason reason) {
       return "appTerminating";
   }
   return "unknown";
+}
+
+// The page context menu probe (#588): each item's title, "-" for a separator,
+// "(off)" for a disabled item and "[...]" around a submenu's items.
+std::string DescribeMenu(NSMenu* menu) {
+  std::string out;
+  for (NSMenuItem* item in menu.itemArray) {
+    if (item.hidden) {
+      continue;
+    }
+    if (!out.empty()) {
+      out += " | ";
+    }
+    if (item.separatorItem) {
+      out += "-";
+      continue;
+    }
+    out += base::SysNSStringToUTF8(item.title);
+    if (!item.enabled) {
+      out += " (off)";
+    }
+    if (item.submenu) {
+      out += " [" + DescribeMenu(item.submenu) + "]";
+    }
+  }
+  return out;
 }
 
 std::string SelectorName(SEL action) {
@@ -236,11 +267,19 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
   NSInteger _windowCount;
   // When each tab's close was asked for (session id), for held durations.
   std::map<int32_t, NSDate*> _closeStarts;
+  // The pending dialog of each tab (session id), for `respond`.
+  std::map<int32_t, id<ArktJavaScriptDialog>> _dialogs;
+  // Each tab's last infobar list (#478), for infobar-act.
+  std::map<int32_t, NSArray<id<ArktInfobar>>*> _infobarLists;
   // --arkt-menu-probe (W3-8).
   id _launchObserver;
   NSMenu* _probeFileMenu;
   NSMenuItem* _probeBookmarksItem;
   NSMenu* _probeBookmarksSubmenu;
+  // The page context menu probe (#588): the open context menu, if any.
+  id _contextMenuBeginObserver;
+  id _contextMenuEndObserver;
+  NSMenu* __weak _contextMenu;
 }
 
 + (id<ArktEngineEmbedder>)sharedEmbedder {
@@ -282,6 +321,7 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
           arkt::kFacadeSelfTestSwitch);
   LOG(WARNING) << "ARKT selftest engineDidStart mode="
                << (mode.empty() ? "ready" : mode);
+  [self observeContextMenus];
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           arkt::kMenuProbeSwitch)) {
     // Arkt's menu goes in after launch (Decision 9): after AppController's
@@ -302,6 +342,73 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
                withObject:nil
                afterDelay:mode == "hold" ? kDelayedStart : 0];
   }
+}
+
+// The page context menu probe (#588): logs a context menu's items when it
+// begins tracking, so a scripted run can check it without Accessibility
+// access; ctx-pick and ctx-cancel act on it.
+- (void)observeContextMenus {
+  ArktSelfTestEmbedder* __weak weakSelf = self;
+  _contextMenuBeginObserver = [NSNotificationCenter.defaultCenter
+      addObserverForName:NSMenuDidBeginTrackingNotification
+                  object:nil
+                   queue:nil
+              usingBlock:^(NSNotification* note) {
+                [weakSelf contextMenuBegan:note.object];
+              }];
+  _contextMenuEndObserver = [NSNotificationCenter.defaultCenter
+      addObserverForName:NSMenuDidEndTrackingNotification
+                  object:nil
+                   queue:nil
+              usingBlock:^(NSNotification* note) {
+                [weakSelf contextMenuEnded:note.object];
+              }];
+}
+
+- (BOOL)isContextMenu:(NSMenu*)menu {
+  return [menu isKindOfClass:[NSMenu class]] && menu != NSApp.mainMenu &&
+         !menu.supermenu;
+}
+
+- (void)contextMenuBegan:(NSMenu*)menu {
+  if (![self isContextMenu:menu]) {
+    return;
+  }
+  _contextMenu = menu;
+  // Validate first: that is what hides the items a model marks invisible.
+  [menu update];
+  LOG(WARNING) << "ARKT selftest context menu open items=["
+               << DescribeMenu(menu) << "]";
+}
+
+- (void)contextMenuEnded:(NSMenu*)menu {
+  if (![self isContextMenu:menu]) {
+    return;
+  }
+  _contextMenu = nil;
+  LOG(WARNING) << "ARKT selftest context menu closed";
+}
+
+// ctx-pick <title prefix>: runs the open context menu's first item whose
+// title starts with the words given, then closes the menu.
+- (void)pickContextMenuItem:(const std::string&)prefix {
+  NSMenu* menu = _contextMenu;
+  NSString* wanted = base::SysUTF8ToNSString(prefix);
+  NSInteger index = -1;
+  for (NSInteger i = 0; i < menu.numberOfItems; ++i) {
+    NSMenuItem* item = [menu itemAtIndex:i];
+    if (!item.separatorItem && !item.hidden && [item.title hasPrefix:wanted]) {
+      index = i;
+      break;
+    }
+  }
+  LOG(WARNING) << "ARKT selftest ctx-pick \"" << prefix << "\" menu="
+               << (menu ? "open" : "none") << " index=" << index;
+  if (index < 0) {
+    return;
+  }
+  [menu performActionForItemAtIndex:index];
+  [menu cancelTracking];
 }
 
 - (void)ready {
@@ -386,6 +493,22 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
   file.submenu = _probeFileMenu;
   [main addItem:file];
 
+  // #598: a key equivalent spelled as the shell's Split View items spell
+  // theirs, the unshifted character with Control and Shift.
+  NSMenuItem* view = [[NSMenuItem alloc] initWithTitle:@"View"
+                                                action:nil
+                                         keyEquivalent:@""];
+  view.submenu = [[NSMenu alloc] initWithTitle:@"View"];
+  NSMenuItem* split =
+      [[NSMenuItem alloc] initWithTitle:@"Switch to Split View 1"
+                                 action:@selector(menuProbeSplitView:)
+                          keyEquivalent:@"1"];
+  split.keyEquivalentModifierMask =
+      NSEventModifierFlagControl | NSEventModifierFlagShift;
+  split.target = self;
+  [view.submenu addItem:split];
+  [main addItem:view];
+
   if (has("bookmarks")) {
     _probeBookmarksItem = [[NSMenuItem alloc] initWithTitle:@"Bookmarks"
                                                      action:nil
@@ -422,6 +545,10 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
 
 - (void)menuProbeNewTab:(id)sender {
   LOG(WARNING) << "ARKT menuprobe action New Tab";
+}
+
+- (void)menuProbeSplitView:(id)sender {
+  LOG(WARNING) << "ARKT menuprobe action Switch to Split View 1";
 }
 
 - (void)logProbeMenuState {
@@ -618,11 +745,27 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
                      << " muted=" << (event.isMuted ? "yes" : "no");
         break;
       case ArktEngineEventKindDialogRequested:
-        // Nobody draws it here; the self-test's `answer` command ends it.
+        // Nobody draws it here; the self-test's `answer` or `respond` command
+        // ends it.
+        _dialogs[tab] = event.dialog;
         LOG(WARNING) << "ARKT selftest dialogRequested tab=" << tab
-                     << " kind=" << event.dialog.kind;
+                     << " kind=" << event.dialog.kind << " active="
+                     << (event.tab.isActive ? "yes" : "no") << " title=\""
+                     << base::SysNSStringToUTF8(event.dialog.title)
+                     << "\" message=\""
+                     << base::SysNSStringToUTF8(event.dialog.message)
+                     << "\" accept=\""
+                     << base::SysNSStringToUTF8(event.dialog.acceptTitle)
+                     << "\" cancel=\""
+                     << (event.dialog.cancelTitle
+                             ? base::SysNSStringToUTF8(event.dialog.cancelTitle)
+                             : std::string("(none)"))
+                     << "\"";
         break;
       case ArktEngineEventKindDialogEnded:
+        if (_dialogs[tab] == event.dialog) {
+          _dialogs.erase(tab);
+        }
         LOG(WARNING) << "ARKT selftest dialogEnded tab=" << tab;
         break;
       case ArktEngineEventKindPermissionRequested:
@@ -638,6 +781,28 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
         // no sink that presents them.
         LOG(WARNING) << "ARKT selftest infobarsChanged tab=" << tab
                      << " count=" << event.infobars.count;
+        _infobarLists[tab] = event.infobars;
+        // #478: every row's values, as the shell gets them.
+        for (NSUInteger i = 0; i < event.infobars.count; ++i) {
+          id<ArktInfobar> infobar = event.infobars[i];
+          LOG(WARNING) << "ARKT selftest infobar tab=" << tab << " index=" << i
+                       << " id=" << infobar.infobarId
+                       << " kind=" << static_cast<int>(infobar.kind)
+                       << " message=\""
+                       << base::SysNSStringToUTF8(infobar.message) << "\""
+                       << " ok=\""
+                       << base::SysNSStringToUTF8(infobar.okTitle ?: @"(none)")
+                       << "\" enabled=" << (infobar.okEnabled ? "yes" : "no")
+                       << " cancel=\""
+                       << base::SysNSStringToUTF8(infobar.cancelTitle
+                                                      ?: @"(none)")
+                       << "\" enabled="
+                       << (infobar.cancelEnabled ? "yes" : "no") << " close="
+                       << (infobar.closeAccessibilityLabel ? "yes" : "no")
+                       << " link="
+                       << (infobar.linkTitle ? "yes" : "no")
+                       << " icon=" << (infobar.iconPNG ? "yes" : "no");
+        }
         break;
       case ArktEngineEventKindFindResult:
         LOG(WARNING) << "ARKT selftest findResult tab=" << tab
@@ -705,6 +870,20 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
                              : std::string("none"));
         break;
       }
+      case ArktEngineEventKindExtensionInstalled:
+        LOG(WARNING) << "ARKT selftest extensionInstalled id="
+                     << base::SysNSStringToUTF8(event.extensionID ?: @"nil")
+                     << " name="
+                     << base::SysNSStringToUTF8(event.extensionName ?: @"nil")
+                     << " tab=" << (event.tab ? "set" : "nil")
+                     << " browser=" << (event.browser ? "set" : "nil");
+        break;
+      case ArktEngineEventKindExtensionCommandsChanged:
+        LOG(WARNING) << "ARKT selftest extensionCommandsChanged tab="
+                     << (event.tab ? "set" : "nil")
+                     << " browser=" << (event.browser ? "set" : "nil");
+        [self logExtensionCommands];
+        break;
     }
   }
   if (windows_changed) {
@@ -783,12 +962,25 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
 // window's sendEvent: in this process. It never enters the system event
 // queue, so no other window or app can receive it.
 - (void)sendEscapeToTab:(id<ArktTabHandle>)tab {
+  [self sendKey:53 characters:@"\x1b" toTab:tab];
+}
+
+// #478: an F6 into the focused page, as sendEscapeToTab: sends Esc.
+- (void)sendF6ToTab:(id<ArktTabHandle>)tab {
+  [self sendKey:97 characters:@"\uF709" toTab:tab];
+}
+
+// A key down and up delivered to the tab's own window in this process.
+- (void)sendKey:(unsigned short)keyCode
+     characters:(NSString*)characters
+          toTab:(id<ArktTabHandle>)tab {
   NSWindow* window = tab.browser.host.window;
   NSResponder* responder = window.firstResponder;
   const bool in_page =
       [responder isKindOfClass:[NSView class]] &&
       [static_cast<NSView*>(responder) isDescendantOf:tab.containerView];
-  LOG(WARNING) << "ARKT selftest esc send tab=" << tab.sessionId
+  LOG(WARNING) << "ARKT selftest key " << keyCode
+               << " send tab=" << tab.sessionId
                << " loading=" << (tab.isLoading ? "yes" : "no")
                << " appActive=" << (NSApp.isActive ? "yes" : "no")
                << " key=" << (window.isKeyWindow ? "yes" : "no")
@@ -809,11 +1001,119 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
                               timestamp:NSProcessInfo.processInfo.systemUptime
                            windowNumber:window.windowNumber
                                 context:nil
-                             characters:@"\x1b"
-            charactersIgnoringModifiers:@"\x1b"
+                             characters:characters
+            charactersIgnoringModifiers:characters
                               isARepeat:NO
-                                keyCode:53];
+                                keyCode:keyCode];
     [window sendEvent:event];
+  }
+}
+
+// #598: the profile's extension commands as the shell reads them.
+- (void)logExtensionCommands {
+  NSArray<id<ArktExtensionCommand>>* commands = _engine.extensionCommands;
+  LOG(WARNING) << "ARKT selftest ext-commands count=" << commands.count;
+  for (id<ArktExtensionCommand> command in commands) {
+    LOG(WARNING) << "ARKT selftest ext-command "
+                 << base::SysNSStringToUTF8(command.extensionID) << " "
+                 << base::SysNSStringToUTF8(command.commandName) << " \""
+                 << base::SysNSStringToUTF8(command.commandDescription)
+                 << "\" of \"" << base::SysNSStringToUTF8(command.extensionName)
+                 << "\" shortcut="
+                 << (command.shortcut
+                         ? base::SysNSStringToUTF8(command.shortcut)
+                         : std::string("none"))
+                 << " global=" << (command.isGlobal ? "yes" : "no");
+  }
+}
+
+// #598: a key down for `shortcut` (Chromium's form) in `tab`'s window, made
+// in this process and given only to this process. "page" makes the page the
+// first responder and hands the event to the window's sendEvent: (the page
+// path, PreHandleKeyboardEvent); "sidebar" makes the window itself the first
+// responder and posts the event to this application's queue, where the
+// window's local key monitor sees it before AppKit dispatches it;
+// "page-queue" makes the page the first responder and this window the key
+// window of this application, then posts the event the same way, so the
+// monitor, the window, the page and PreHandleKeyboardEvent all see it. Never
+// the system event queue, so no other app can receive it.
+- (void)sendShortcut:(const std::string&)shortcut
+               toTab:(id<ArktTabHandle>)tab
+                mode:(const std::string&)mode {
+  NSWindow* window = tab.browser.host.window;
+  const ui::Accelerator accelerator =
+      ui::Command::StringToAccelerator(shortcut);
+  if (!window || accelerator.key_code() == ui::VKEY_UNKNOWN) {
+    LOG(WARNING) << "ARKT selftest ext-key " << shortcut << " not sent";
+    return;
+  }
+  NSEventModifierFlags flags = 0;
+  if (accelerator.IsShiftDown()) {
+    flags |= NSEventModifierFlagShift;
+  }
+  if (accelerator.IsCtrlDown()) {
+    flags |= NSEventModifierFlagControl;
+  }
+  if (accelerator.IsAltDown()) {
+    flags |= NSEventModifierFlagOption;
+  }
+  if (accelerator.IsCmdDown()) {
+    flags |= NSEventModifierFlagCommand;
+  }
+  unichar shifted = 0;
+  unichar plain = 0;
+  const int key_code = ui::MacKeyCodeForWindowsKeyCode(accelerator.key_code(),
+                                                       flags, &shifted, &plain);
+  NSString* characters = [NSString stringWithCharacters:&shifted length:1];
+  NSString* unmodified = [NSString stringWithCharacters:&plain length:1];
+  if (mode == "page" || mode == "page-queue") {
+    NSView* page = nil;
+    NSMutableArray<NSView*>* queue =
+        [NSMutableArray arrayWithObject:tab.containerView];
+    while (queue.count && !page) {
+      NSView* view = queue.firstObject;
+      [queue removeObjectAtIndex:0];
+      if ([NSStringFromClass([view class])
+              isEqualToString:@"RenderWidgetHostViewCocoa"]) {
+        page = view;
+      }
+      [queue addObjectsFromArray:view.subviews];
+    }
+    [window makeFirstResponder:page];
+  } else {
+    [window makeFirstResponder:nil];
+  }
+  if (mode == "page-queue") {
+    [window makeKeyWindow];
+  }
+  NSResponder* responder = window.firstResponder;
+  LOG(WARNING) << "ARKT selftest ext-key " << shortcut << " mode=" << mode
+               << " keyCode=" << key_code
+               << " appActive=" << (NSApp.isActive ? "yes" : "no")
+               << " key=" << (window.isKeyWindow ? "yes" : "no")
+               << " responder="
+               << base::SysNSStringToUTF8(
+                      responder ? NSStringFromClass([responder class])
+                                : @"none");
+  for (NSEventType type : {NSEventTypeKeyDown, NSEventTypeKeyUp}) {
+    NSEvent* event =
+        [NSEvent keyEventWithType:type
+                               location:NSZeroPoint
+                          modifierFlags:flags
+                              timestamp:NSProcessInfo.processInfo.systemUptime
+                           windowNumber:window.windowNumber
+                                context:nil
+                             characters:characters
+            charactersIgnoringModifiers:unmodified
+                              isARepeat:NO
+                                keyCode:static_cast<unsigned short>(key_code)];
+    if (mode == "page") {
+      [window sendEvent:event];
+    } else {
+      // "page-queue" and "sidebar": through the application's queue, so the
+      // window's local key monitor sees the event first.
+      [NSApp postEvent:event atStart:NO];
+    }
   }
 }
 
@@ -832,7 +1132,29 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
                          : std::string("none"))
                  << " png=" << (__bridge void*)action.iconPNG
                  << " canUninstall=" << (action.canUninstall ? "1" : "0")
-                 << " canReportAbuse=" << (action.canReportAbuse ? "1" : "0");
+                 << " canReportAbuse=" << (action.canReportAbuse ? "1" : "0")
+                 << " pinned=" << (action.isPinned ? "1" : "0")
+                 << " options=" << (action.hasOptionsPage ? "1" : "0")
+                 << " siteAccess=" << static_cast<int>(action.siteAccess);
+  }
+  std::string pinned;
+  for (NSString* id in _engine.pinnedExtensionIDs) {
+    pinned += (pinned.empty() ? "" : ",") + base::SysNSStringToUTF8(id);
+  }
+  LOG(WARNING) << "ARKT selftest pinned [" << pinned << "]";
+}
+
+- (void)logMenuItems:(NSArray<id<ArktMenuItem>>*)items depth:(int)depth {
+  for (id<ArktMenuItem> item in items) {
+    LOG(WARNING) << "ARKT selftest ext-menu " << std::string(depth * 2, ' ')
+                 << (item.kind == ArktMenuItemKindSeparator ? "---"
+                     : item.kind == ArktMenuItemKindSubmenu
+                         ? "> " + base::SysNSStringToUTF8(item.title)
+                         : base::SysNSStringToUTF8(item.title))
+                 << " command=" << item.command
+                 << " enabled=" << (item.isEnabled ? "1" : "0")
+                 << " checked=" << (item.isChecked ? "1" : "0");
+    [self logMenuItems:item.children depth:depth + 1];
   }
 }
 
@@ -1150,6 +1472,58 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
     }
   } else if (command == "actions") {
     [self logActionsOf:tab.browser];
+  } else if (command == "pin" || command == "unpin") {
+    [_engine setExtensionPinned:base::SysUTF8ToNSString(argument)
+                         pinned:command == "pin"];
+  } else if (command == "move-pin") {
+    int index = 0;
+    base::StringToInt(words.size() > 2 ? words[2] : "0", &index);
+    [_engine movePinnedExtension:base::SysUTF8ToNSString(argument)
+                         toIndex:index];
+  } else if (command == "ext-menu") {
+    NSArray<id<ArktMenuItem>>* items =
+        [_engine extensionContextMenuForAction:base::SysUTF8ToNSString(argument)
+                                     inBrowser:tab.browser];
+    LOG(WARNING) << "ARKT selftest ext-menu " << argument
+                 << " items=" << items.count;
+    [self logMenuItems:items depth:0];
+  } else if (command == "ext-pick") {
+    int picked = -1;
+    base::StringToInt(words.size() > 2 ? words[2] : "-1", &picked);
+    [_engine performExtensionContextCommand:picked
+                                  forAction:base::SysUTF8ToNSString(argument)
+                                  inBrowser:tab.browser];
+  } else if (command == "ext-commands") {
+    [self logExtensionCommands];
+  } else if (command == "ext-set") {
+    // ext-set <extension id> <command> <shortcut, or - to clear>
+    // [global] [replace]
+    std::string shortcut = words.size() > 3 ? words[3] : "-";
+    bool global = false;
+    bool replace = false;
+    for (size_t i = 4; i < words.size(); ++i) {
+      global |= words[i] == "global";
+      replace |= words[i] == "replace";
+    }
+    id<ArktExtensionShortcutChange> change = [_engine
+        setExtensionCommandShortcut:shortcut == "-"
+                                        ? nil
+                                        : base::SysUTF8ToNSString(shortcut)
+                         forCommand:base::SysUTF8ToNSString(
+                                        words.size() > 2 ? words[2] : "")
+                        ofExtension:base::SysUTF8ToNSString(argument)
+                             global:global
+                  replacingConflict:replace];
+    LOG(WARNING) << "ARKT selftest ext-set result=" << change.result
+                 << " conflict="
+                 << base::SysNSStringToUTF8(change.conflictExtensionID ?: @"-")
+                 << " "
+                 << base::SysNSStringToUTF8(change.conflictCommandName ?: @"-");
+  } else if (command == "ext-key") {
+    // ext-key <shortcut> page|sidebar
+    [self sendShortcut:argument
+                 toTab:tab
+                  mode:words.size() > 2 ? words[2] : "page"];
   } else if (command == "menu-check") {
     [self menuCheckIn:tab.browser.host.window];
   } else if (command == "run") {
@@ -1201,6 +1575,57 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
     LOG(WARNING) << "ARKT selftest answer tab=" << sessionId
                  << " accept=" << (accept ? "yes" : "no")
                  << " answered=" << (answered ? "yes" : "no");
+  } else if (command == "respond") {
+    // respond <session id> leave|stay: the shell's answer, through the
+    // reported dialog object (#585).
+    int32_t sessionId = 0;
+    base::StringToInt(argument, &sessionId);
+    auto found = _dialogs.find(sessionId);
+    const bool leave = words.size() > 2 && words[2] == "leave";
+    BOOL answered = found != _dialogs.end() &&
+                    [found->second respondAccepted:leave userInput:nil];
+    LOG(WARNING) << "ARKT selftest respond tab=" << sessionId
+                 << " leave=" << (leave ? "yes" : "no")
+                 << " answered=" << (answered ? "yes" : "no");
+  } else if (command == "close-window") {
+    // The shell's window close (-[ArktBrowserHandle close]).
+    LOG(WARNING) << "ARKT selftest close-window window="
+                 << tab.browser.windowId;
+    [tab.browser close];
+  } else if (command == "quit") {
+    // Quit as the shell's Quit item does.
+    LOG(WARNING) << "ARKT selftest quit";
+    [NSApp performSelector:@selector(terminate:) withObject:nil afterDelay:0];
+  } else if (command == "new-tab") {
+    // A background tab at `argument` in this tab's window.
+    id<ArktTabHandle> created = [tab.browser
+        createTabWithURL:[NSURL URLWithString:base::SysUTF8ToNSString(argument)]
+                  active:NO];
+    LOG(WARNING) << "ARKT selftest new-tab tab=" << created.sessionId;
+  } else if (command == "new-window") {
+    // A second shell window with one tab at `argument`.
+    ArktSelfTestWindowHost* host = [self newHostWithFrame:NSZeroRect];
+    id<ArktBrowserHandle> browser = [_engine createBrowserWithHost:host];
+    [host.window orderFront:nil];
+    id<ArktTabHandle> created = [browser
+        createTabWithURL:[NSURL URLWithString:base::SysUTF8ToNSString(argument)]
+                  active:YES];
+    LOG(WARNING) << "ARKT selftest new-window window=" << browser.windowId
+                 << " tab=" << created.sessionId;
+  } else if (command == "ctx-pick") {
+    std::string prefix;
+    for (size_t i = 1; i < words.size(); ++i) {
+      if (words[i].starts_with("@")) {
+        continue;
+      }
+      prefix += (prefix.empty() ? "" : " ") + words[i];
+    }
+    [self pickContextMenuItem:prefix];
+  } else if (command == "ctx-cancel") {
+    NSMenu* menu = _contextMenu;
+    LOG(WARNING) << "ARKT selftest ctx-cancel menu="
+                 << (menu ? "open" : "none");
+    [menu cancelTracking];
   } else if (command == "zoom") {
     // #577: zoom in|out|reset on this tab, or on the tab with session id
     // `@<id>` (a crashed page cannot set its own title).
@@ -1229,17 +1654,94 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
                  << " id=" << command_id
                  << " enabled=" << (enabled ? "yes" : "no")
                  << " tab=" << tab.sessionId << " now=" << tab.zoomPercent;
+  } else if (command == "infobar-act") {
+    // #478: infobar-act <index> ok|cancel|close acts on the tab's reported
+    // row as the shell's button does.
+    int index = -1;
+    base::StringToInt(argument, &index);
+    const std::string action = words.size() > 2 ? words[2] : "";
+    NSArray<id<ArktInfobar>>* list = _infobarLists[tab.sessionId];
+    BOOL acted = NO;
+    if (index >= 0 && static_cast<NSUInteger>(index) < list.count) {
+      ArktInfobarAction mapped = action == "cancel" ? ArktInfobarActionCancel
+                                 : action == "close" ? ArktInfobarActionClose
+                                                     : ArktInfobarActionOk;
+      acted = [list[index] actWithAction:mapped linkIndex:0];
+    }
+    LOG(WARNING) << "ARKT selftest infobar-act tab=" << tab.sessionId
+                 << " index=" << index << " action=" << action
+                 << " acted=" << (acted ? "yes" : "no");
+  } else if (command == "tab-share") {
+    // #478: the page shares its own tab (getDisplayMedia with
+    // preferCurrentTab), with a user gesture. Run with
+    // --auto-accept-this-tab-capture so no picker shows; never a screen or a
+    // window. The page title reports "tab-share sharing browser", "tab-share
+    // rejected <name>" or, when the capture ends, "tab-share ended".
+    // tab-share stop ends the capture from the page.
+    NSString* script =
+        argument == "stop"
+            ? @"(() => { const s = window.__arktShare; if (!s) return 'none'; "
+              @"s.getTracks().forEach(t => t.stop()); window.__arktShare = "
+              @"null; return 'stopped'; })()"
+            : @"(() => { navigator.mediaDevices.getDisplayMedia({video: "
+              @"true, preferCurrentTab: true, selfBrowserSurface: "
+              @"'include'}).then(s => { window.__arktShare = s; "
+              @"const t = s.getVideoTracks()[0]; t.onended = () => "
+              @"document.title = 'tab-share ended'; document.title = "
+              @"'tab-share sharing ' + t.getSettings().displaySurface; }, "
+              @"e => document.title = 'tab-share rejected ' + e.name); "
+              @"return 'asked'; })()";
+    [self evaluate:script
+             inTab:tab
+       userGesture:YES
+             label:"tab-share"];
+  } else if (command == "infobars" || command == "nonconfirm-infobar" ||
+             command == "tab-modal" ||
+             command == "geometry" || command == "file-folder" ||
+             command == "file-panel" || command == "stubs" ||
+             command == "stub-command" || command == "incognito" ||
+             command == "incognito-download" || command == "incognito-close" ||
+             command == "incognito-state") {
+    // #478: nonconfirm-infobar [remove] adds (or removes) an infobar with no
+    // confirm delegate, as the sign-in QR code infobar.
+    // #586: infobars <n> leaves n test infobar rows on the tab; tab-modal
+    // shows a Chromium tab-modal dialog on it; geometry logs where the rows,
+    // the page and each child window of the tab's window are; file-folder
+    // <path> sets where a file chooser opens; file-panel logs each open or
+    // save panel's parent window and cancels it. #589: stubs calls every
+    // Views stub the window keeps; stub-command <name> runs the Chromium
+    // command that reaches one; incognito <url> opens an incognito window at
+    // a URL; incognito-download <url> <file> starts an incognito download
+    // saved to <file> without asking; incognito-close closes the incognito
+    // window as its close button does; incognito-state logs what is left.
+    arkt::RunDialogProbeForSelfTest(tab, words);
+  } else if (command == "file-click") {
+    // #586: clicks the page's file input (made if it has none), with a user
+    // gesture as a click gives it.
+    [self evaluate:@"(() => { let input = "
+                   @"document.querySelector('input[type=file]'); "
+                   @"if (!input) { input = document.createElement('input'); "
+                   @"input.type = 'file'; document.body.append(input); } "
+                   @"input.click(); return 'clicked'; })()"
+             inTab:tab
+       userGesture:YES
+             label:"file-click"];
   } else if (command == "chrome-command") {
     // E1 crash guards: Chromium commands the shell does not send today, sent
     // through the host as a menu item would send them:
-    // copy-url|close-tab|cut|copy|paste|pin.
+    // copy-url|close-tab|cut|copy|paste|pin; #586: print|devtools|
+    // devtools-toggle.
     const int command_id = argument == "copy-url"    ? IDC_COPY_URL
                            : argument == "close-tab" ? IDC_CLOSE_TAB
                            : argument == "cut"       ? IDC_CUT
                            : argument == "copy"      ? IDC_COPY
                            : argument == "paste"     ? IDC_PASTE
                            : argument == "pin"       ? IDC_WINDOW_PIN_TAB
-                                                     : 0;
+                           : argument == "print"     ? IDC_PRINT
+                           : argument == "devtools"  ? IDC_DEV_TOOLS
+                           : argument == "devtools-toggle"
+                               ? IDC_DEV_TOOLS_TOGGLE
+                               : 0;
     id<ArktWindowHost> host = tab.browser.host;
     BOOL enabled = command_id && host.validateCommand &&
                    host.validateCommand(command_id);
@@ -1264,6 +1766,11 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
     [self performSelector:@selector(sendEscapeToTab:)
                withObject:tab
                afterDelay:delay_ms / 1000.0];
+  } else if (command == "f6") {
+    // #478: focuses the page, then sends it an F6 on the next turn; the host
+    // logs it if the page did not use it (unhandledKeyDown).
+    [tab focus];
+    [self performSelector:@selector(sendF6ToTab:) withObject:tab afterDelay:0];
   } else if (command == "fullscreen") {
     // #577: HTML fullscreen of the page's body, with a user gesture as a
     // click gives it; "exit" leaves it from script.
@@ -1275,6 +1782,52 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
              inTab:tab
        userGesture:YES
              label:"fullscreen"];
+  } else if (command == "eyedropper") {
+    // #589: the page's EyeDropper API, with a user gesture as a click gives
+    // it. When the sampler ends, the page title reports the picked color or
+    // the rejection ("eyedropper picked #rrggbb" or "eyedropper rejected
+    // AbortError").
+    [self evaluate:@"(() => { new EyeDropper().open().then("
+                   @"r => document.title = 'eyedropper picked ' + r.sRGBHex, "
+                   @"e => document.title = 'eyedropper rejected ' + e.name); "
+                   @"return 'opened'; })()"
+              inTab:tab
+        userGesture:YES
+              label:"eyedropper"];
+  } else if (command == "app-windows") {
+    // #589: every window of the app, to find a system picker's window.
+    for (NSWindow* window in NSApp.windows) {
+      LOG(WARNING) << "ARKT selftest app-window "
+                   << base::SysNSStringToUTF8(NSStringFromClass([window class]))
+                   << " number=" << window.windowNumber
+                   << " level=" << window.level
+                   << " visible=" << (window.visible ? "yes" : "no")
+                   << " key=" << (window.keyWindow ? "yes" : "no");
+    }
+    LOG(WARNING) << "ARKT selftest app-windows done";
+  } else if (command == "app-esc") {
+    // #589: an Esc key down and up posted to this app's event queue (to its
+    // key window), never to another app.
+    NSWindow* key = NSApp.keyWindow;
+    LOG(WARNING) << "ARKT selftest app-esc key="
+                 << (key ? base::SysNSStringToUTF8(
+                               NSStringFromClass([key class]))
+                         : std::string("none"));
+    const NSEventType types[] = {NSEventTypeKeyDown, NSEventTypeKeyUp};
+    for (NSEventType type : types) {
+      NSEvent* event =
+          [NSEvent keyEventWithType:type
+                                 location:NSZeroPoint
+                            modifierFlags:0
+                                timestamp:NSProcessInfo.processInfo.systemUptime
+                             windowNumber:key.windowNumber
+                                  context:nil
+                               characters:@"\x1b"
+              charactersIgnoringModifiers:@"\x1b"
+                                isARepeat:NO
+                                  keyCode:53];
+      [NSApp postEvent:event atStart:NO];
+    }
   } else if (command == "session") {
     // #577: the crashed-session prompt's state; "dismiss" answers it.
     if (argument == "dismiss") {
@@ -1335,6 +1888,23 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
                      << " setting=" << permission.setting;
       }
     }
+  } else if (command == "install-crx") {
+    // #592: "install-crx <absolute path of a packed .crx> [prompt]", a
+    // user's .crx installed into the tab's profile with its prompt accepted,
+    // so Chromium continues to its post-install dialog. "prompt": an update
+    // also goes through the prompt and the post-install dialog, as a Web
+    // Store update does (chrome://extensions updates without either).
+    const bool prompt_updates =
+        std::find(words.begin(), words.end(), "prompt") != words.end();
+    LOG(WARNING) << "ARKT selftest install-crx " << argument
+                 << (prompt_updates ? " prompt" : "");
+    arkt::InstallCrxForSelfTest(
+        tab, base::FilePath(argument), prompt_updates,
+        base::BindOnce([](const std::string& error) {
+          LOG(WARNING) << "ARKT selftest install-crx answered "
+                       << (error.empty() ? std::string("installed")
+                                         : "failed: " + error);
+        }));
   } else if (command == "uninstall") {
     // #721: "uninstall <extension id> [abuse] [nowin] [@<session id>]", as
     // the shell's remove sheet: the report page goes to the window of the

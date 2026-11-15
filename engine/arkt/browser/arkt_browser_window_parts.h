@@ -82,13 +82,15 @@ class ArktExclusiveAccessContext : public ExclusiveAccessContext {
 };
 
 // Tab-modal dialogs are positioned against the card or, in host mode, the
-// tab's container: top centre, at most its size.
+// tab's container, below the tab's infobar rows (#586): top centre of the
+// area under the rows, at most its size.
 //
 // The host view is a plain NSView, not inside a views::Widget, so Chromium
 // neither parents nor positions the dialog widget (GetModalDialogBounds needs
 // a host widget). The host does both: it claims the dialog widget when the
 // dialog's managers register as observers, and while the dialog is visible
-// keeps it a child window of the host view's window, top-centred on the view.
+// keeps it a child window of the host view's window, top-centred below the
+// rows.
 // Hidden dialogs (another tab active) are detached, as Chromium's bridge does
 // for its own child windows.
 class ArktModalDialogHost : public web_modal::WebContentsModalDialogHost,
@@ -96,8 +98,9 @@ class ArktModalDialogHost : public web_modal::WebContentsModalDialogHost,
  public:
   // `view` is asked for the host view on every call: the tab's view, or the
   // host's card as fallback, can change while a dialog is up (week-3 plan,
-  // Decision 6).
-  explicit ArktModalDialogHost(NSView* (^view)(void));
+  // Decision 6). `top_inset` is asked as often: the height of the infobar
+  // rows at the view's top (0 with none, or in HTML fullscreen).
+  ArktModalDialogHost(NSView* (^view)(void), CGFloat (^top_inset)(void));
   ArktModalDialogHost(const ArktModalDialogHost&) = delete;
   ArktModalDialogHost& operator=(const ArktModalDialogHost&) = delete;
   ~ArktModalDialogHost() override;
@@ -127,12 +130,15 @@ class ArktModalDialogHost : public web_modal::WebContentsModalDialogHost,
   // so a dialog follows the view when the embedder lays it out anew without
   // a window resize (the tab's container in host mode, #261 review).
   NSView* HostView();
+  // The infobar rows' height at the top of `view`, within its height.
+  CGFloat TopInset(NSView* view) const;
   // Makes `widget` a child window of the host view's window, top-centred on
   // the view. A no-op while the view is not in a visible window.
   void Attach(views::Widget* widget);
   void Detach(views::Widget* widget);
 
   NSView* (^view_)(void);
+  CGFloat (^top_inset_)(void);
   NSView* __weak observed_view_ = nil;
   id __strong frame_token_ = nil;
   base::ObserverList<web_modal::ModalDialogHostObserver> observers_;

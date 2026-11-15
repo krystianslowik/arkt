@@ -19,7 +19,16 @@ final class CommandBarTableView: NSTableView {
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+  #if DEBUG
+  /// How many times the rows were reloaded, for tests: a typed keystroke refreshes the rows in place instead (#606,
+  /// #839). Debug builds only.
+  private(set) var reloadDataCount = 0
+  #endif
+
   override func reloadData() {
+    #if DEBUG
+    reloadDataCount += 1
+    #endif
     super.reloadData()
     rowsDidChange()
   }

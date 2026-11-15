@@ -1,8 +1,9 @@
 import AppKit
 import EngineAPI
 
-/// Sizes of the infobar row (docs/design/alerts-sheets-toasts.md section 5). The row height is the engine's too:
-/// `kArktInfobarRowHeight` reserves it at the top of the tab's container while the shell draws the row.
+/// Sizes of the infobar row (docs/design/alerts-sheets-toasts.md section 5). The row height is the engine's: it reserves
+/// `ArktInfobarRowHeight` (facade header) per infobar at the top of the tab's container while the shell draws the row,
+/// and `InfobarMetricsTests` holds the two equal.
 enum InfobarMetrics {
   static let rowHeight: CGFloat = 40
   static let inset: CGFloat = 12
@@ -93,6 +94,9 @@ final class InfobarMessageView: NSTextView, NSTextViewDelegate {
 final class InfobarCloseButton: NSButton {
   private var hovering = false
   private var tracking: NSTrackingArea?
+  /// `ShellTokens.focusRing` around the button while the strip's keyboard focus is on it (#478).
+  private(set) lazy var keyboardFocusRing = KeyboardFocusRingView.attach(outside: self,
+                                                                         radius: InfobarMetrics.closeSize / 2)
 
   init(label: String) {
     super.init(frame: .zero)
@@ -236,6 +240,32 @@ final class InfobarRowView: NSView {
     pill.setAccessibilityIdentifierWithCell(id)
     addSubview(pill)
     return pill
+  }
+
+  /// The controls F6 reaches (#478), in reading order: the link when it comes before the buttons, OK, Cancel, the link
+  /// after them, the close button. Disabled ones are skipped.
+  var keyboardControls: [NSButton] {
+    let link: [NSButton] = linkButton.map { [$0] } ?? []
+    let ordered: [NSButton?] = (infobar.linkBeforeButtons ? link : []) + [okButton, cancelButton]
+      + (infobar.linkBeforeButtons ? [] : link) + [closeButton]
+    return ordered.compactMap { $0 }.filter(\.isEnabled)
+  }
+
+  /// Draws the keyboard focus ring on `control` (one of `keyboardControls`) and on no other control of the row; nil
+  /// clears it.
+  func showKeyboardFocus(on control: NSButton?) {
+    for case let button? in [linkButton, okButton, cancelButton, closeButton] as [NSButton?] {
+      Self.ring(of: button)?.setFocused(button === control)
+    }
+  }
+
+  static func ring(of button: NSButton) -> KeyboardFocusRingView? {
+    switch button {
+    case let pill as ArchivePillButton: pill.keyboardFocusRing
+    case let link as ArchiveLinkButton: link.keyboardFocusRing
+    case let close as InfobarCloseButton: close.keyboardFocusRing
+    default: nil
+    }
   }
 
   /// The glyph for an infobar whose engine sent no icon.

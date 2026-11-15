@@ -34,16 +34,23 @@ public enum FakeChromiumProfile {
     /// expire in the past, which the fixed ones do).
     public var extraCookies: [FixtureManifest.Cookie] = []
     public var extraLogins: [FixtureManifest.Login] = []
+    /// History entries and extensions written after the fixed ones: the fixed visits are from 2024, past the 90 days
+    /// an import keeps, and the fixed extensions hold one Web Store id (#517).
+    public var extraHistory: [FixtureManifest.HistoryEntry] = []
+    public var extraExtensions: [FixtureManifest.ExtensionEntry] = []
 
     public init(
       cookieFormat: CookieFormat = .v24, bookmarks: BookmarksVariant = .populated, drift: SchemaDrift = .none,
-      extraCookies: [FixtureManifest.Cookie] = [], extraLogins: [FixtureManifest.Login] = []
+      extraCookies: [FixtureManifest.Cookie] = [], extraLogins: [FixtureManifest.Login] = [],
+      extraHistory: [FixtureManifest.HistoryEntry] = [], extraExtensions: [FixtureManifest.ExtensionEntry] = []
     ) {
       self.cookieFormat = cookieFormat
       self.bookmarks = bookmarks
       self.drift = drift
       self.extraCookies = extraCookies
       self.extraLogins = extraLogins
+      self.extraHistory = extraHistory
+      self.extraExtensions = extraExtensions
     }
   }
 
@@ -78,7 +85,7 @@ public enum FakeChromiumProfile {
     }
 
     let historyURL = directory.appendingPathComponent("History")
-    let history = FixtureData.history
+    let history = FixtureData.history + options.extraHistory
     try writeHistory(
       to: historyURL, entries: history,
       urlColumns: columns("urls", HistorySchema.urls),
@@ -104,7 +111,7 @@ public enum FakeChromiumProfile {
     let bookmarks = options.bookmarks == .populated ? FixtureData.bookmarks : []
     try BookmarksWriter.write(bookmarks, to: bookmarksURL)
 
-    let extensions = FixtureData.extensions
+    let extensions = FixtureData.extensions + options.extraExtensions
     let preferencesURL = directory.appendingPathComponent("Preferences")
     let securePreferencesURL = directory.appendingPathComponent("Secure Preferences")
     try PreferencesWriter.write(extensions, profileName: "Fixture Profile", to: preferencesURL)

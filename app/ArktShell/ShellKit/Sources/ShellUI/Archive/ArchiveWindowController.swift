@@ -847,22 +847,12 @@ private final class ArchiveFilterMenuItem: NSMenuItem {
 final class ArchiveWindow: NSWindow {
   var onFind: (@MainActor () -> Void)?
 
-  /// Close, minimize and zoom at x 20, 40 and 60, centered in the 52 pt bar. The titlebar container is narrowed to
-  /// the buttons, so it never takes clicks from the title, the search field or the filter button.
+  /// Close, minimize and zoom at x 20, 40 and 60, centered in the 52 pt bar. Only the buttons' host is narrowed to the
+  /// buttons, so it never takes clicks from the title, the search field or the filter button; the window's top rim
+  /// spans the window.
   func layoutTrafficLights() {
-    guard !styleMask.contains(.fullScreen), let close = standardWindowButton(.closeButton),
-          let titlebar = close.superview, let container = titlebar.superview else { return }
-    let height = ArchiveMetrics.barHeight
-    let width = ArchiveMetrics.trafficLightX * 2 + ArchiveMetrics.trafficLightSpacing * 2 + close.frame.width
-    let containerFrame = NSRect(x: 0, y: frame.height - height, width: width, height: height)
-    if container.frame != containerFrame { container.frame = containerFrame }
-    let kinds: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
-    for (index, kind) in kinds.enumerated() {
-      guard let button = standardWindowButton(kind) else { continue }
-      let origin = NSPoint(x: ArchiveMetrics.trafficLightX + CGFloat(index) * ArchiveMetrics.trafficLightSpacing,
-                           y: ((titlebar.bounds.height - button.frame.height) / 2).rounded())
-      if button.frame.origin != origin { button.setFrameOrigin(origin) }
-    }
+    placeTrafficLights(barHeight: ArchiveMetrics.barHeight, firstX: ArchiveMetrics.trafficLightX,
+                       spacing: ArchiveMetrics.trafficLightSpacing)
   }
 
   override func performKeyEquivalent(with event: NSEvent) -> Bool {

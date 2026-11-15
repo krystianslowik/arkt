@@ -170,6 +170,29 @@ final class SettingsWindowTests: XCTestCase {
     XCTAssertEqual(controller.titleLabel.stringValue, "Spaces and Profiles")
   }
 
+  /// #863: the window's top rim spans the window, in light and dark; only the buttons' host is narrowed, and the bar
+  /// beside it is the content's.
+  func testWindowTopRimSpansTheWindow() throws {
+    for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+      let controller = make()
+      let window = try XCTUnwrap(controller.window as? SettingsWindow)
+      window.appearance = NSAppearance(named: appearance)
+      controller.show()
+      window.contentView?.layoutSubtreeIfNeeded()
+      window.layoutTrafficLights()
+      let close = try XCTUnwrap(window.standardWindowButton(.closeButton))
+      let hostWidth = SettingsMetrics.trafficLightX * 2 + SettingsMetrics.trafficLightSpacing * 2 + close.frame.width
+      let content = try XCTUnwrap(window.contentView)
+      let barY = window.frame.height - SettingsMetrics.titleCenterY
+      try assertTopRimSpansTheWindow(window, buttonHostWidth: hostWidth,
+                                     clicks: [(NSPoint(x: hostWidth + 4, y: barY), content),
+                                              (NSPoint(x: window.frame.width / 2, y: barY), content),
+                                              (NSPoint(x: window.frame.width - 8, y: barY), content)],
+                                     appearance.rawValue)
+      XCTAssertEqual(close.convert(close.bounds, to: nil).minX, SettingsMetrics.trafficLightX, "\(appearance.rawValue)")
+    }
+  }
+
   // MARK: - Keys
 
   /// Cmd-1 to Cmd-7 switch panes with no animation: the frame and the tab tile change in the same turn.
