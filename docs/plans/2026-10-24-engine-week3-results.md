@@ -7948,3 +7948,76 @@ What ships until then: Chromium's wording in the generic Arkt sheet, one sheet p
 Both runs and the fixture server stopped by exact PID (`ps -p` prints nothing). No crash reports from these runs.
 Throwaway profiles under `profiles/913-20261115/` deleted. Nothing touched the Keychain (mock keychain only), the
 clipboard or `/Applications/Arkt.app`.
+
+## #941: VoiceOver in the infobar strip, and the #940 review follow-ups (seam, no patch)
+
+Date 2026-11-15. Branch `engine/941-strip-voiceover` from `main` at `ad453ddd`. `$CR` branch `arkt` unchanged
+(0001-0016). Facade header unchanged.
+
+### Gate
+
+- Seam, no patch; no header change (`-focusThroughTabTraversal:` only changes inside the overlay). `.patches` 16 lines,
+  in sync. `nice -n 15 autoninja -j 4 -C out/Arkt chrome`: `The build has finished successfully.`; internal disk 21 GB
+  free.
+
+### What landed
+
+- VoiceOver. While the strip holds the keyboard its stack is the first responder; it now reports the focused control
+  as its `accessibilityFocusedUIElement`, and the strip posts `focusedUIElementChanged` for that control whenever it
+  changes: F6 or Tab into the strip, Tab, Shift-Tab and the arrows inside it, a row going under it. Nothing is posted
+  when the keyboard leaves, or when a key moves nothing (Down on the last row). The post is one place,
+  `InfobarPanel.showKeyboardFocus()`, which every move already goes through.
+- `ShellWindow.keyViewHandoff` is set where `ShellWindowController` configures its window, as Little Arkt does, not in
+  the infobar presenter's lazy factory.
+- `-focusThroughTabTraversal:` calls `-focus`, then `FocusThroughTabTraversal`.
+
+### Focus and blur (the question from the #940 review)
+
+`Focus()` before `FocusThroughTabTraversal` fires no focus or blur on the element the page had focused. Self-test,
+fresh profiles under `profiles/941-20261115/`, a loopback page that logs `focusin`, `focusout` and the window's
+`focus` and `blur`, before and after the change to `-focus` (same results):
+
+| Step | Log |
+|---|---|
+| Focus the last input, `tab-key` (the page lets focus go, as before a strip takes it) | `focus`, `in:last`, `out:last`, `blur`; active `BODY` |
+| then `traverse first` (the state a strip exit starts from) | `focus`, `in:first` |
+| Focus the first input, `tab-key shift`, then `traverse last` | `out:first`, `blur`; then `focus`, `in:last` |
+| The middle button focused in the page, `traverse first` | `out:middle`, `in:first` (no second `in:middle`) |
+| `FATAL`, `Check failed`, `DCHECK` (runs 1 and 2) | 0 |
+
+### Tests
+
+- `InfobarKeyboardTests` + 4 (VoiceOver: F6 in, Tab in from the page, every move and leaving, a row going under the
+  focus); `InfobarWindowTests` + 3 (the hand-off is set before anything made the presenter, Tab out of split pane B
+  reaches B's strip and not A's, `EngineClient.focusPage(of:at:)`'s default gives the page the keyboard at either
+  edge).
+- GUI, `AAWindowLeakGuardTests`, `InfobarKeyboardTests`, `InfobarPresenterTests`, `InfobarWindowTests`,
+  `LittleArktDialogTests`, `ZzzWindowLeakGuardEndTests`: 112 run, 0 failures (baseline 105 + 7).
+- ShellKit `swift test --skip ShellKitGUITests`: every run passes (1573, 44, 60, 29, 289, 49, 352, 227, 39); lints
+  `--filter 'LintTests|IsolationTests'` 13 + 60; ArktCore 235.
+- 20 runs of `AAWindowLeakGuardTests`, `InfobarKeyboardTests`, `InfobarWindowTests`, `ZzzWindowLeakGuardEndTests` (57 tests each) under the machine's own load (1-minute load average 7.6 to 9.3, no load added): 20 passed, 0 failed.
+
+### Deliberate breaks
+
+- The post and the stack's `accessibilityFocusedUIElement` taken out: 9 failures in the four VoiceOver tests
+  (`("[]") is not equal to ("[Optional("OK")]")`, `("nil") is not equal to ("Optional("OK")") - the stack reports the
+  control, not itself`).
+- The window's `keyViewHandoff` line taken out of `ShellWindowController`'s init: 5 failures
+  (`testTheWindowHandsTabToTheStripsFromTheStart`, `testTabOutOfASplitPaneReachesThatPanesStrip`,
+  `testTabOutOfThePageReachesTheStripThroughTheWindow`). Restored: passing.
+
+### Patch budget
+
+Unchanged: 16 patch files. `.patches` 16 lines, in sync. Facade header copies `cmp` identical. `gn check out/Arkt
+"//arkt/*"`: `Header dependency check OK`.
+
+### Left open
+
+- Real keys and VoiceOver in the shell app on an Engine build: #932 (needs the user). The announcement was checked
+  through the posted notification and the accessibility focus the stack reports, not with VoiceOver running.
+
+### Cleanup
+
+Both engine runs and the fixture server stopped by exact PID (`ps -p` prints nothing). No crash reports. Throwaway
+profiles under `profiles/941-20261115/` deleted. Nothing touched the Keychain (mock keychain only), the clipboard or
+`/Applications/Arkt.app`.

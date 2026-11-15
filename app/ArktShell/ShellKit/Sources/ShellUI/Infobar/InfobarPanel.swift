@@ -23,6 +23,12 @@ final class InfobarStackView: NSView {
 
   override var acceptsFirstResponder: Bool { keyHandler != nil }
 
+  /// The control the keyboard is on while the strip holds it (#941): what accessibility reports as focused while the
+  /// stack is the first responder, so VoiceOver speaks the control ("OK, button"), not the stack.
+  weak var focusedControl: NSButton?
+
+  override var accessibilityFocusedUIElement: Any? { focusedControl ?? super.accessibilityFocusedUIElement }
+
   override func keyDown(with event: NSEvent) {
     if keyHandler?(event) != true { super.keyDown(with: event) }
   }
@@ -106,6 +112,10 @@ final class InfobarPanel: AnchoredPanel {
   /// strip does not hold the keyboard, which is always unless F6, or Tab or Shift-Tab out of the page (#930), put it
   /// there.
   private(set) var keyboardFocus: (id: InfobarID, index: Int)?
+  /// Tells VoiceOver the keyboard moved to `control` (#941). Tests replace it.
+  var postFocusChange: @MainActor (NSButton) -> Void = { control in
+    NSAccessibility.post(element: control, notification: .focusedUIElementChanged)
+  }
   private var isShown = false
 
   init(infobars: [Infobar], width: CGFloat) {
@@ -180,9 +190,14 @@ final class InfobarPanel: AnchoredPanel {
     return controls.indices.contains(focus.index) ? controls[focus.index] : nil
   }
 
+  /// Draws the ring on the control the keyboard is on, and tells VoiceOver when that control changed (#941): F6 or Tab
+  /// into the strip, every move inside it, a row replaced under it. Nothing is posted when the keyboard leaves.
   private func showKeyboardFocus() {
     let focused = keyboardFocusedControl
     for row in rows { row.showKeyboardFocus(on: focused) }
+    let moved = focused !== stack.focusedControl
+    stack.focusedControl = focused
+    if moved, let focused { postFocusChange(focused) }
   }
 
   /// After a new list: the focus stays on its infobar's row, or moves to the row that took its place; the strip lets
