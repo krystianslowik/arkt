@@ -6,6 +6,8 @@ import EngineAPI
 /// is already there only updates, so a progress stream never rebuilds anything.
 @MainActor
 final class DownloadsPopoverView: NSView {
+  /// The shortcut keycaps beside the Library button.
+  static let keycapsFontSize: CGFloat = 11
   private let listView = FlippedView(frame: .zero)
   private let emptyLabel = NSTextField(labelWithString: "No downloads yet")
   private let divider = CALayer()
@@ -26,12 +28,12 @@ final class DownloadsPopoverView: NSView {
     super.init(frame: frameRect)
     wantsLayer = true
     addSubview(listView)
-    emptyLabel.font = .systemFont(ofSize: 13)
+    emptyLabel.font = ShellType.body.font
     emptyLabel.alignment = .center
     emptyLabel.setAccessibilityElement(true)
     listView.addSubview(emptyLabel)
     layer?.addSublayer(divider)
-    keycaps.font = .systemFont(ofSize: 11, weight: .medium)
+    keycaps.font = .systemFont(ofSize: Self.keycapsFontSize, weight: .medium)
     keycaps.setAccessibilityElement(false)
     for view in [showLibraryButton, keycaps, clearButton] as [NSView] { addSubview(view) }
     showLibraryButton.target = self

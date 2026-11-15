@@ -24,8 +24,8 @@ public enum SidebarLocation: Hashable, Sendable {
 public struct SpaceThemeInfo: Equatable, Sendable {
   /// Gradient stops, top-left to bottom-right (Track B: `SpaceTheme.baseColors`).
   public var baseColors: [RGBA]
-  /// Arc's second gradient layer (Track B: `SpaceTheme.overlayColors`), drawn above the base
-  /// gradient (#381). Each color's alpha is its strength; `ThemeContrast.drawn` multiplies in `opacity`.
+  /// Overlay gradient (Track B: `SpaceTheme.overlayColors`), composited over the base (#534).
+  /// Each color's alpha is its strength; `ThemeContrast.drawn` multiplies in `opacity`.
   public var overlayColors: [RGBA]
   /// Tiled overlay texture: "grain", "sand", "denim" or "tweed" (Track B: `SpaceTheme.texture`); see `ThemeTexture`.
   public var texture: String?
@@ -182,6 +182,10 @@ public protocol SidebarSource: AnyObject {
   /// The name a split was given (#787), which its row shows instead of the pane titles; nil for a split without one,
   /// a node that is not a split, and an unknown id. A change to it is reported as `.node(id)`.
   func splitTitle(_ id: NodeID) -> String?
+  /// The node icon override, or nil for the default appearance or an unknown node.
+  func nodeIcon(_ id: NodeID) -> SpaceIconInfo?
+  /// Sets or clears an override; unchanged and unknown nodes emit no change.
+  func setNodeIcon(_ id: NodeID, to icon: SpaceIconInfo?)
   /// The location that holds `id` (Track B: `Node.parent`).
   func parent(of id: NodeID) -> SidebarLocation?
   /// Throws when the model refuses the location (unknown Space, too deep). `StubSidebar` never throws.
@@ -309,6 +313,10 @@ public final class SidebarChangeHub {
 }
 
 extension SidebarSource {
+  /// Compatibility for sources that do not support node icons.
+  public func nodeIcon(_ id: NodeID) -> SpaceIconInfo? { nil }
+  public func setNodeIcon(_ id: NodeID, to icon: SpaceIconInfo?) {}
+
   public func moveNodes(_ ids: [NodeID], to location: SidebarLocation, at index: Int) throws {
     var target = index
     for id in ids {

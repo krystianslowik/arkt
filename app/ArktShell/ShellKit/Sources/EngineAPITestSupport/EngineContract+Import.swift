@@ -107,8 +107,9 @@ public enum EngineImportContract {
     try EngineContract.require(isZeroed(newer[0].password), "the secret of a stored login is zeroed")
   }
 
-  /// History (#511): counts are in visits; the watermark skips what was imported before; the result carries the newest
-  /// visit written; old visits and URLs the history refuses are skipped; an invalid URL fails its visits.
+  /// History (#511): counts are in visits; the watermark skips what was imported before; a visit the history already
+  /// holds is skipped (#754); the result carries the newest visit written or already held; old visits and URLs the
+  /// history refuses are skipped; an invalid URL fails its visits.
   @MainActor
   public static func runHistory(_ engine: some EngineImporting) async throws {
     var result = await engine.importHistory([], after: nil)
@@ -123,6 +124,13 @@ public enum EngineImportContract {
     // The same batch with the watermark the first call returned writes nothing.
     result = await engine.importHistory([first, second], after: second.visits.last?.time)
     try EngineContract.require(result == ImportWriteResult(skipped: 4), "same batch at the watermark: \(result)")
+
+    // The same batch without a watermark, as a later import sends it after a batch that got no answer (#754): every
+    // visit is already held (same URL and time), so nothing is written twice, and the newest held visit is reported so
+    // the watermark can move past it.
+    result = await engine.importHistory([first, second], after: nil)
+    try EngineContract.require(
+      result == ImportWriteResult(skipped: 4, latestVisit: second.visits.last?.time), "same batch again: \(result)")
 
     // A watermark inside the batch keeps the visits after it only; a visit exactly at it is skipped.
     let third = historyEntry("https://example.net/", days: 1, transitions: [.link, .link, .link])

@@ -74,7 +74,8 @@ final class SidebarDragDropTests: XCTestCase {
     let engine = InMemoryEngine()
     let controller: ShellWindowController
     var errors: [SidebarMutation] = []
-    var haptics = 0
+    let ticks = CountingReorderPerformer()
+    var haptics: Int { ticks.count }
     var motionTime: CFTimeInterval = 100
 
     init(_ sidebar: SidebarModel.Sidebar, reduceMotion: Bool = false) {
@@ -93,7 +94,7 @@ final class SidebarDragDropTests: XCTestCase {
       for page in pages {
         page.outlineController.drop.reduceMotion = { reduceMotion }
         page.outlineController.drop.now = { [unowned self] in motionTime }
-        page.outlineController.drop.haptic = { [unowned self] in haptics += 1 }
+        page.outlineController.drop.hapticPerformer = ticks
       }
     }
 
@@ -485,6 +486,15 @@ final class SidebarDragDropTests: XCTestCase {
     XCTAssertEqual(preview.offset(ofRow: gapRow, at: harness.motionTime + 2), 0)
   }
 
+  func testNoReorderTickWhenTheSettingIsOff() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let drop = try harness.drop()
+    drop.playsReorderHaptics = { false }
+    drop.update(at: try harness.point(world.today[1], y: 0.1), payload: harness.payload([world.today[0]]))
+    XCTAssertEqual(harness.haptics, 0, "BH-024: the setting off plays none")
+  }
+
   func testTheRowTransformFollowsTheSpring() throws {
     let world = try Self.makeWorld()
     let harness = Harness(world.sidebar)
@@ -817,5 +827,15 @@ final class SidebarDragDropTests: XCTestCase {
     var time = timespec()
     clock_gettime(CLOCK_THREAD_CPUTIME_ID, &time)
     return Double(time.tv_sec) + Double(time.tv_nsec) / 1e9
+  }
+}
+
+/// Counts reorder ticks in place of `NSHapticFeedbackManager.defaultPerformer`.
+private final class CountingReorderPerformer: NSObject, NSHapticFeedbackPerformer {
+  var count = 0
+
+  func perform(_ pattern: NSHapticFeedbackManager.FeedbackPattern,
+               performanceTime: NSHapticFeedbackManager.PerformanceTime) {
+    count += 1
   }
 }

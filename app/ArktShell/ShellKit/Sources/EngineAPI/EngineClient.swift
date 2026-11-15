@@ -234,6 +234,12 @@ public protocol EngineClient: AnyObject {
   /// Closing a window's active tab makes another tab of that window active (`.activeTabChanged`).
   func closeTab(_ id: TabID, mode: CloseMode)
   func navigate(_ id: TabID, to url: URL)
+  /// A navigation the user typed in the address field (Cmd-L, #784), sent as Chrome's omnibox sends it. Unlike
+  /// `navigate(_:to:)`, the URL the tab already shows loads again as a new navigation, not as a reload (the back list
+  /// does not grow either way), and the history marks the visit as from the address bar; both count it as typed.
+  /// Browser debug URLs (`chrome://gpucrash` and the like) stay unreachable unless the engine runs with
+  /// `--arkt-engine-test-api`. Default: `navigate(_:to:)`, for an engine with no address-bar transition.
+  func navigateFromAddressBar(_ id: TabID, to url: URL)
   func reload(_ id: TabID)
   /// Moves one entry back in the tab's history (Toolbar Back); no-op when there is none (contract rule 7).
   func goBack(_ id: TabID)
@@ -354,6 +360,8 @@ public protocol EngineClient: AnyObject {
 }
 
 extension EngineClient {
+  public func navigateFromAddressBar(_ id: TabID, to url: URL) { navigate(id, to: url) }
+
   public func focusPage(of id: TabID) {
     guard let view = contentView(for: id) else { return }
     view.window?.makeFirstResponder(view)

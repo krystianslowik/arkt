@@ -21,12 +21,14 @@ extension ShellWindowController {
       bar.siteDescription = pill?.description
       bar.siteSymbol = pill?.symbol
     }
+    refreshPaneSiteGlyphs()                                         // #698: inert while a Peek shows, as these are
     pageInfo.pageDidChange(currentTab: info == nil ? nil : currentTab)
   }
 
   /// The glyph of `bar` was pressed: the panel for the current tab opens below it, or closes.
   func toggleSiteControls(from bar: URLBarView) {
     guard let tab = currentTab, bar.siteSymbol != nil else { return }
+    splitState.pageInfoCard = nil                                   // not from a pane Toolbar (#698)
     pageInfo.toggle(for: tab, anchoredTo: bar)
   }
 }

@@ -17,15 +17,18 @@ public struct ArchiveStore: Sendable {
   /// `archived_item.format_version`: the version of the stored `NodeSnapshot` JSON. It is versioned apart from the
   /// sidebar document (`SidebarStorageFormat.currentVersion`) because a snapshot holds no Space data: sidebar format
   /// 2 added `Space.icon` and left `NodeSnapshot` unchanged, so archive rows stay at 1 and builds that read only
-  /// version 1 keep reading them. Bump this only when `NodeSnapshot`'s stored shape changes. Version 2 adds a split's
-  /// title (`SplitItem.title`, #787); a version 1 row is read with its splits unnamed. This is the newest version
-  /// this build reads and writes; each row is stamped with the oldest version that holds it (`formatVersion(of:)`).
-  public static let snapshotFormatVersion = 2
+  /// version 1 keep reading them. Bump this only when `NodeSnapshot`'s stored shape changes. Version 2 adds the node
+  /// custom icon (#339); version 1 snapshots decode without it. Version 3 adds a split's title (`SplitItem.title`,
+  /// #787); a version 1 or 2 row is read with its splits unnamed. This is the newest version this build reads and
+  /// writes; each row is stamped with the oldest version that holds it (`formatVersion(of:)`).
+  public static let snapshotFormatVersion = 3
 
-  /// The version a row is stamped with: 2 only when a split in `snapshot` has a title, otherwise 1, so builds that
-  /// read only version 1 (an older release, or a bisect) keep reading every row that does not need the new field.
+  /// The version a row is stamped with: 3 when a split in `snapshot` has a title, else 2 when a node has a custom
+  /// icon, else 1, so builds that read only an older version (an older release, or a bisect) keep reading every row
+  /// that does not need a newer field.
   static func formatVersion(of snapshot: NodeSnapshot) -> Int {
-    snapshot.containsSplitTitle ? 2 : 1
+    if snapshot.containsSplitTitle { return 3 }
+    return snapshot.containsCustomIcon ? 2 : 1
   }
 
   let database: ArktDatabase
@@ -287,7 +290,7 @@ private struct FetchedRow: Sendable {
       let archivedAt, let body = snapshot,
       let decoded = try? decoder.decode(NodeSnapshot.self, from: body), decoded.id == id
     else { return nil }
-    let snapshot = version >= 2 ? decoded : decoded.withoutSplitTitles()
+    let snapshot = version >= 3 ? decoded : decoded.withoutSplitTitles()
     let source: ArchiveSource
     switch sourceKind {
     case "space":

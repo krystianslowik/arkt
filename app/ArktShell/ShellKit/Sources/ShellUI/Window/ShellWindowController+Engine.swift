@@ -231,6 +231,7 @@ extension ShellWindowController {
   /// left without a row.
   func closeWasCancelled(_ tab: TabID, node: NodeID) {
     isWindowCloseRequested = false
+    onRecoveryEligibilityChanged?()
     stampsShownTabsOnWindowClose = false                  // the tabs stayed visible: nothing to stamp
     sidebarController.setClosing(node, false)
     forgetClose(of: node)                                           // nothing to reopen (#346)

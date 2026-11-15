@@ -29,7 +29,12 @@ final class PeekMotionOnScreenTests: XCTestCase {
     controller.activate(node: pinned)
   }
 
-  override func tearDown() async throws { controller.close() }
+  // XCTest keeps each test case object until the run ends: release the window too, not only close it (#805).
+  override func tearDown() async throws {
+    controller.close()
+    controller = nil
+    engine = nil
+  }
 
   private func openPeek() throws -> PeekOverlayView {
     let tab = try XCTUnwrap(controller.engineTab(of: pinned))

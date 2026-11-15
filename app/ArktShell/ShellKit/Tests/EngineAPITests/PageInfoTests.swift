@@ -116,6 +116,25 @@ struct PageInfoTests {
     #expect(info.permissions.first { $0.kind == .popups }?.options == [.allow, .block], "pop-ups have no Ask")
   }
 
+  // MARK: Open panels (#782)
+
+  @Test func openAndCloseAreRecordedPerTab() throws {
+    let engine = InMemoryEngine()
+    let a = try tab(engine, "https://alpha.example/")
+    let b = try tab(engine, "https://beta.example/")
+    let site = try settings(engine)
+
+    site.pageInfoDidOpen(tab: a)
+    site.pageInfoDidOpen(tab: b)
+    site.pageInfoDidOpen(tab: TabID())                // an unknown tab is not recorded
+    #expect(engine.openPageInfoPanels == [a, b])
+
+    site.pageInfoDidClose(tab: a)                     // closes with no change to offer a reload for
+    #expect(engine.openPageInfoPanels == [b])
+    engine.closeTab(b)
+    #expect(engine.openPageInfoPanels.isEmpty, "a closed tab's panel is gone")
+  }
+
   // MARK: Per-site calls
 
   @Test func setPermissionChangesTheSiteOnlyAndIsReadBackAtOnce() throws {

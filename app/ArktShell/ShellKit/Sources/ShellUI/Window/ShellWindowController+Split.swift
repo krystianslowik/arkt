@@ -32,6 +32,9 @@ struct SplitWindowState {
   /// A closed pane reopened into the split on screen (#403, Cmd-Shift-T or Cmd-Z, by maintainer decision on the
   /// issue): the next show of that split with the pane back reflows the panes on screen on the spring.
   var reflowAfterReopen: (split: NodeID, pane: NodeID)?
+  /// The pane card whose Toolbar glyph opened the page info panel (#698): the panel closes once that card no longer
+  /// shows the panel's tab, the Toolbar hides or the split ends.
+  var pageInfoCard: Int?
 }
 
 /// Where a new pane goes relative to the focused tab, and the orientation of a split made from a plain tab (BH-117).
@@ -115,6 +118,7 @@ extension ShellWindowController {
     splitState.focus = nil
     rootView.split.show(panes: [], axis: .sideBySide, factors: [])
     rootView.showsSplit = false
+    closePageInfoIfItsPaneBarWent()                             // #698: its pane Toolbar is gone
     if let survivorFrame { rootView.reflowCard(from: survivorFrame) }
   }
 
@@ -203,8 +207,8 @@ extension ShellWindowController {
 
   // MARK: Pane Toolbars (BH-125, KB-074)
 
-  /// Each pane card shows the Toolbar while it is on, with its own pane's URL and history; its buttons act on that
-  /// pane and focus it. Rewired on every show, because a card's pane changes between shows.
+  /// Each pane card shows the Toolbar while it is on, with its own pane's URL, history and site glyph; its buttons
+  /// and glyph act on that pane and focus it. Rewired on every show, because a card's pane changes between shows.
   func configurePaneToolbars() {
     let visible = toolbarSetting.isVisible
     for (index, card) in rootView.split.paneCards.enumerated() {
@@ -217,13 +221,36 @@ extension ShellWindowController {
         self.openLocation(nil)
       }
       toolbar.urlBar.onToggleToolbar = { [weak self] in self?.toggleToolbar(nil) }
+      toolbar.urlBar.onPressSiteGlyph = { [weak self, weak bar = toolbar.urlBar] in   // #698
+        if let bar { self?.toggleSiteControls(fromPane: index, bar: bar) }
+      }
       wireToolbarActions(toolbar) { [weak self] in self?.focusPaneForToolbar(index) }
       let pane = splitState.panes.indices.contains(index) ? splitState.panes[index] : nil
       refreshToolbar(toolbar, tab: pane.flatMap { engineTab(of: $0) })
     }
+    closePageInfoIfItsPaneBarWent()
   }
 
-  /// A pane's page changed its URL or history: its own card's Toolbar follows, focused or not.
+  /// The glyph of pane `index`'s Toolbar (#698): focuses that pane, as its other buttons do, then opens the window's
+  /// page info panel for its tab below that glyph, or closes it. The panel follows the focused tab, so focusing
+  /// another pane closes it.
+  private func toggleSiteControls(fromPane index: Int, bar: URLBarView) {
+    guard bar.siteSymbol != nil, let tab = focusPaneForToolbar(index) else { return }
+    splitState.pageInfoCard = pageInfo.toggle(for: tab, anchoredTo: bar) ? index : nil
+  }
+
+  /// Closes a panel opened from a pane Toolbar once that Toolbar is hidden, gone with the split, or shows another
+  /// pane (a pane before it left the split): the panel would hang from the wrong bar.
+  func closePageInfoIfItsPaneBarWent() {
+    guard let index = splitState.pageInfoCard else { return }
+    let holdsTab = splitState.split != nil && toolbarSetting.isVisible && splitState.panes.indices.contains(index)
+      && engineTab(of: splitState.panes[index]) == pageInfo.tab
+    if pageInfo.isShown, holdsTab { return }
+    splitState.pageInfoCard = nil
+    if pageInfo.isShown { pageInfo.hide(keyboard: false) }
+  }
+
+  /// A pane's page changed its URL, history or page info: its own card's Toolbar follows, focused or not.
   func refreshPaneToolbar(of node: NodeID) {
     guard splitState.split != nil, let index = splitState.panes.firstIndex(of: node) else { return }
     let cards = rootView.split.paneCards
@@ -234,7 +261,26 @@ extension ShellWindowController {
   private func refreshToolbar(_ toolbar: ContentToolbarView, tab: TabID?) {
     let snapshot = tab.flatMap { engine.snapshot(of: $0) }
     toolbar.urlBar.url = snapshot?.url
+    refreshSiteGlyph(of: toolbar.urlBar, tab: tab)
     toolbar.setHistory(canGoBack: snapshot?.canGoBack ?? false, canGoForward: snapshot?.canGoForward ?? false)
+  }
+
+  /// Every pane Toolbar's site glyph again, for a Peek opening or closing (`refreshPageInfo()`).
+  func refreshPaneSiteGlyphs() {
+    guard splitState.split != nil else { return }
+    for (index, card) in rootView.split.paneCards.enumerated() {
+      let pane = splitState.panes.indices.contains(index) ? splitState.panes[index] : nil
+      refreshSiteGlyph(of: card.toolbar.urlBar, tab: pane.flatMap { engineTab(of: $0) })
+    }
+  }
+
+  /// A pane Toolbar's site glyph shows its pane's page info (#698). While a Peek shows its own address it is inert, as
+  /// the main bars are: the panel follows the window's current page, which the Peek's address stands in for.
+  private func refreshSiteGlyph(of bar: URLBarView, tab: TabID?) {
+    let info = peek.addressOverride == nil ? tab.flatMap { engine.siteSettings?.pageInfo(of: $0) } : nil
+    let pill = PageInfoModel.pill(for: info)
+    bar.siteDescription = pill?.description
+    bar.siteSymbol = pill?.symbol
   }
 
   /// Focuses pane `index` when it is not focused yet and returns its tab (nil: no page).

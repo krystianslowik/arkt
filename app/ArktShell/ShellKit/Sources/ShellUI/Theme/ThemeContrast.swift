@@ -62,10 +62,18 @@ public enum ThemeContrast {
     guard !stops.isEmpty else { return nil }
     let opacity = min(max(opacity, 0), 1)
     let tints = overlayTints(overlay, stops: stops.count, opacity: opacity)
+    let positions = (0..<max(overlay.count, 2)).map { Double($0) / Double(max(overlay.count - 1, 1)) }
     func fits(_ tone: ThemeFlavor, _ mixes: [Double?]) -> Bool {
-      stops.indices.allSatisfy { index in
+      guard stops.indices.allSatisfy({ index in
         mixes[index].map { passes(stops[index], mix: $0, tone: tone, opacity: opacity, tint: tints[index], in: context) }
           ?? false
+      }) else { return false }
+      guard !overlay.isEmpty else { return true }
+      let drawn = result(tone, mixes.map { $0 ?? 0 })
+      return positions.allSatisfy { position in
+        let base = ThemeGradient.sample(drawn.colors, at: position)
+        let tint = ThemeGradient.sample(drawn.overlay, at: position)
+        return passes(base, mix: 0, tone: tone, opacity: 1, tint: tint, in: context)
       }
     }
     func result(_ tone: ThemeFlavor, _ mixes: [Double]) -> Resolution {
@@ -80,7 +88,12 @@ public enum ThemeContrast {
         requiredStep(stops[$0], tone: tone, opacity: opacity, tint: tints[$0], in: context)
       }
       guard steps.allSatisfy({ $0 != nil }) else { continue }
-      return result(tone, steps.map { Double($0 ?? 0) / 100 })
+      // Adjust the existing base stops together until the interpolated drawn base also passes at overlay stops.
+      // Recheck base stops as well: their overlay can differ from the overlay at the intermediate position.
+      for extra in 0...mixSteps {
+        let mixes = steps.map { min(Double(($0 ?? 0) + extra) / 100, maximumMix) }
+        if fits(tone, mixes.map { Optional($0) }) { return result(tone, mixes) }
+      }
     }
     // Neither tone reaches the target within 50 %: the appearance's tone at the strongest mix.
     return result(own, stops.map { _ in maximumMix })

@@ -1,8 +1,10 @@
 #include "arkt/api/arkt_import_writer.h"
 
 #include <algorithm>
+#include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <tuple>
 #include <utility>
 
@@ -33,6 +35,7 @@
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/bookmark_node.h"
 #include "components/history/core/browser/history_backend.h"
+#include "components/history/core/browser/history_database.h"
 #include "components/history/core/browser/history_db_task.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/history_service_observer.h"
@@ -559,28 +562,91 @@ class HistoryBarrier : public history::HistoryDBTask {
   scoped_refptr<base::SequencedTaskRunner> origin_;
 };
 
-// Owns one history batch until the history thread has caught up. The visits
-// are submitted without an answer of their own, so they are held as pending
-// and counted written only when the barrier behind them answered; when it is
-// dropped or the service is deleted first, they are counted failed. Either
-// way `done` runs exactly once.
+// Finds, on the history thread, the visits the history already holds (same
+// URL and visit time), so a batch sent again after it got no answer is not
+// written twice (#754). A visit that appears twice in the batch counts as held
+// the second time. Like HistoryBarrier, a task destroyed without having
+// answered answers `reached` false from its destructor.
+class HistoryLookup : public history::HistoryDBTask {
+ public:
+  using Reply = base::OnceCallback<void(bool reached, std::vector<bool> held)>;
+
+  HistoryLookup(std::vector<std::pair<GURL, base::Time>> visits, Reply reply)
+      : visits_(std::move(visits)),
+        reply_(std::move(reply)),
+        origin_(base::SequencedTaskRunner::GetCurrentDefault()) {}
+
+  ~HistoryLookup() override {
+    if (reply_) {
+      origin_->PostTask(FROM_HERE,
+                        base::BindOnce(std::move(reply_), /*reached=*/false,
+                                       std::vector<bool>()));
+    }
+  }
+
+  bool RunOnDBThread(history::HistoryBackend*,
+                     history::HistoryDatabase* db) override {
+    held_.assign(visits_.size(), false);
+    std::map<GURL, std::set<base::Time>> stored;
+    for (size_t i = 0; i < visits_.size(); ++i) {
+      const auto& [url, time] = visits_[i];
+      auto it = stored.find(url);
+      if (it == stored.end()) {
+        std::set<base::Time> times;
+        history::URLRow row;
+        history::VisitVector visits;
+        if (db && db->GetRowForURL(url, &row) &&
+            db->GetVisitsForURL(row.id(), &visits)) {
+          for (const history::VisitRow& visit : visits) {
+            times.insert(visit.visit_time);
+          }
+        }
+        it = stored.emplace(url, std::move(times)).first;
+      }
+      held_[i] = !it->second.insert(time).second;
+    }
+    return true;
+  }
+  void DoneRunOnMainThread() override {
+    std::move(reply_).Run(/*reached=*/true, std::move(held_));
+  }
+
+ private:
+  const std::vector<std::pair<GURL, base::Time>> visits_;
+  std::vector<bool> held_;
+  Reply reply_;
+  scoped_refptr<base::SequencedTaskRunner> origin_;
+};
+
+// Owns one history batch until the history thread has caught up. First a
+// lookup leaves out the visits the history already holds; the others are
+// submitted without an answer of their own, so they are held as pending and
+// counted written only when the barrier behind them answered. When the lookup
+// or the barrier is dropped, or the service is deleted first, the visits not
+// yet confirmed are counted failed. Either way `done` runs exactly once.
 class HistoryImport : public history::HistoryServiceObserver {
  public:
   HistoryImport(ImportCounts counts,
-                int pending,
-                base::Time pending_latest,
+                std::vector<history::HistoryAddPageArgs> visits,
                 ImportDone done)
       : counts_(std::move(counts)),
-        pending_(pending),
-        pending_latest_(pending_latest),
+        visits_(std::move(visits)),
+        pending_(static_cast<int>(visits_.size())),
         done_(std::move(done)) {}
 
   void Start(history::HistoryService* service) {
+    service_ = service;
     observation_.Observe(service);
+    std::vector<std::pair<GURL, base::Time>> keys;
+    keys.reserve(visits_.size());
+    for (const history::HistoryAddPageArgs& args : visits_) {
+      keys.emplace_back(args.url, args.time);
+    }
     service->ScheduleDBTask(
         FROM_HERE,
-        std::make_unique<HistoryBarrier>(base::BindOnce(
-            &HistoryImport::Settle, weak_factory_.GetWeakPtr())),
+        std::make_unique<HistoryLookup>(
+            std::move(keys),
+            base::BindOnce(&HistoryImport::Write, weak_factory_.GetWeakPtr())),
         &tracker_);
   }
 
@@ -593,6 +659,45 @@ class HistoryImport : public history::HistoryServiceObserver {
   }
 
  private:
+  // The lookup answered: writes the visits the history does not hold yet and
+  // queues the barrier behind them.
+  void Write(bool reached, std::vector<bool> held) {
+    if (!done_) {
+      return;
+    }
+    if (!reached) {
+      Settle(/*reached=*/false);
+      return;
+    }
+    pending_ = 0;
+    for (size_t i = 0; i < visits_.size(); ++i) {
+      const base::Time time = visits_[i].time;
+      if (held[i]) {
+        counts_.skipped++;
+        if (time > counts_.latest_visit) {
+          counts_.latest_visit = time;
+        }
+        continue;
+      }
+      service_->AddPage(std::move(visits_[i]));
+      // Counted written only once the barrier behind it answers.
+      pending_++;
+      if (time > pending_latest_) {
+        pending_latest_ = time;
+      }
+    }
+    visits_.clear();
+    if (pending_ == 0) {
+      Settle(/*reached=*/true);
+      return;
+    }
+    service_->ScheduleDBTask(
+        FROM_HERE,
+        std::make_unique<HistoryBarrier>(base::BindOnce(
+            &HistoryImport::Settle, weak_factory_.GetWeakPtr())),
+        &tracker_);
+  }
+
   void Settle(bool reached) {
     if (!done_) {
       return;
@@ -603,7 +708,7 @@ class HistoryImport : public history::HistoryServiceObserver {
       if (pending_latest_ > counts_.latest_visit) {
         counts_.latest_visit = pending_latest_;
       }
-    } else {
+    } else if (pending_ > 0) {
       LOG(WARNING) << "history import: " << pending_
                    << " visits got no answer from the history store";
       counts_.failed += pending_;
@@ -617,9 +722,15 @@ class HistoryImport : public history::HistoryServiceObserver {
   }
 
   ImportCounts counts_;
+  // The visits to write, until the lookup answered.
+  std::vector<history::HistoryAddPageArgs> visits_;
+  // The visits not confirmed yet: all of them until the lookup answered, then
+  // the ones submitted.
   int pending_;
   base::Time pending_latest_;
   ImportDone done_;
+  // Valid while observed: `done_` is reset before the service goes away.
+  raw_ptr<history::HistoryService> service_ = nullptr;
   base::CancelableTaskTracker tracker_;
   base::ScopedObservation<history::HistoryService,
                           history::HistoryServiceObserver>
@@ -647,23 +758,22 @@ void ImportHistory(Profile* profile,
   const base::Time oldest =
       base::Time::Now() -
       base::Days(history::HistoryBackend::kExpireDaysThreshold);
-  int submitted = 0;
-  base::Time latest;
+  std::vector<history::HistoryAddPageArgs> visits;
   for (const ImportHistoryEntry& entry : entries) {
-    const int visits = static_cast<int>(entry.visits.size());
+    const int count = static_cast<int>(entry.visits.size());
     if (!service) {
-      counts.failed += visits;
-      counts.reasons["no history service"] += visits;
+      counts.failed += count;
+      counts.reasons["no history service"] += count;
       continue;
     }
     const GURL url(entry.url);
     if (!url.is_valid()) {
-      counts.failed += visits;
-      counts.reasons["invalid url"] += visits;
+      counts.failed += count;
+      counts.reasons["invalid url"] += count;
       continue;
     }
     if (!HistoryAccepts(url)) {
-      counts.skipped += visits;
+      counts.skipped += count;
       continue;
     }
     for (const ImportVisit& visit : entry.visits) {
@@ -678,7 +788,7 @@ void ImportHistory(Profile* profile,
               ? visit.transition
               : static_cast<int>(ui::PAGE_TRANSITION_LINK);
       const ui::PageTransition transition = ui::PageTransitionFromInt(core);
-      history::HistoryAddPageArgs args(
+      visits.emplace_back(
           url, visit.time, /*context_id=*/0, /*nav_entry_id=*/0,
           /*local_navigation_id=*/std::nullopt, /*referrer=*/GURL(),
           history::RedirectList(), transition,
@@ -690,19 +800,13 @@ void ImportHistory(Profile* profile,
           history::VisitContextEphemerality::kNotEphemeral,
           entry.title.empty() ? std::nullopt
                               : std::optional<std::u16string>(entry.title));
-      service->AddPage(std::move(args));
-      // Counted written only once the barrier behind it answers.
-      submitted++;
-      if (visit.time > latest) {
-        latest = visit.time;
-      }
     }
   }
-  if (submitted == 0) {
+  if (visits.empty()) {
     PostDone(std::move(done), std::move(counts));
     return;
   }
-  (new HistoryImport(std::move(counts), submitted, latest, std::move(done)))
+  (new HistoryImport(std::move(counts), std::move(visits), std::move(done)))
       ->Start(service);
 }
 

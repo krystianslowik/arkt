@@ -11,7 +11,7 @@ public enum CommandBarGeometry {
   public static let inputLeading: CGFloat = 18
   public static let cornerRadius: CGFloat = 16
   public static let rowHeight: CGFloat = 40
-  public static let selectedRowRadius: CGFloat = 9
+  public static let selectedRowRadius = ShellRadius.row
   public static let rowHorizontalPadding: CGFloat = 12
   /// The favicon or symbol slot, and the gap between it and the title.
   public static let slotWidth: CGFloat = 20
@@ -35,9 +35,10 @@ public enum CommandBarGeometry {
   public static let previewColumnWidth: CGFloat = 300
   public static let previewColumnPadding: CGFloat = 12
   public static let previewThumbnailHeight: CGFloat = 116
-  public static let previewThumbnailRadius: CGFloat = 10
+  public static let previewThumbnailRadius = ShellRadius.card
   public static let previewButtonHeight: CGFloat = 30
-  public static let previewButtonRadius: CGFloat = 8
+  public static let previewButtonRadius = ShellRadius.control
+  static let scopeChipRadius: CGFloat = 6
   public static let previewOpenDot: CGFloat = 6
 
   /// The bar's height: the field, the notice, and, when there are rows, a hairline, the padded list, a hairline and

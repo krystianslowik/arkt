@@ -38,7 +38,7 @@ final class FindBarField: NSTextField {
     isBezeled = false
     drawsBackground = false
     focusRingType = .none
-    font = .systemFont(ofSize: 13)
+    font = ShellType.body.font
     usesSingleLineMode = true
     cell?.isScrollable = true
     cell?.wraps = false

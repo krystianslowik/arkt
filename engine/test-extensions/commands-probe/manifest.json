@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "Arkt commands probe",
+  "version": "1.0",
+  "description": "Declares chrome.commands shortcuts and records each command and popup opening (#598).",
+  "permissions": ["storage", "tabs"],
+  "action": { "default_title": "Arkt commands probe", "default_popup": "popup.html" },
+  "background": { "service_worker": "sw.js" },
+  "commands": {
+    "_execute_action": {
+      "suggested_key": { "default": "Ctrl+Shift+U", "mac": "MacCtrl+Shift+U" }
+    },
+    "run-probe": {
+      "suggested_key": { "default": "Ctrl+Shift+Y", "mac": "MacCtrl+Shift+Y" },
+      "description": "Run the probe"
+    },
+    "menu-key": {
+      "suggested_key": { "default": "Ctrl+T", "mac": "Command+T" },
+      "description": "Asks for a key the main menu holds"
+    },
+    "split-key": {
+      "suggested_key": { "default": "Ctrl+Shift+1", "mac": "MacCtrl+Shift+1" },
+      "description": "Asks for the shell's Split View key"
+    },
+    "unset": {
+      "description": "Has no suggested key"
+    }
+  }
+}

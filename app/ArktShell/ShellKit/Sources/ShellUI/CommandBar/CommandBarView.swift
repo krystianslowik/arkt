@@ -19,8 +19,22 @@ final class CommandBarTableView: NSTableView {
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+  #if DEBUG
+  /// How many times the rows were reloaded, for tests: a typed keystroke refreshes the rows in place instead (#606,
+  /// #839). Debug builds only.
+  private(set) var reloadDataCount = 0
+  #endif
+
   override func reloadData() {
+    #if DEBUG
+    reloadDataCount += 1
+    #endif
     super.reloadData()
+    rowsDidChange()
+  }
+
+  /// The rows' contents changed, by a reload or in place: accessibility and the selection indicator follow.
+  func rowsDidChange() {
     axProxyRows.invalidate()
     onSelectionOrDataChange?()
   }
@@ -114,9 +128,9 @@ final class CommandBarView: NSView {
     addSubview(magnifier)
 
     scopeChip.isHidden = true
-    scopeChip.font = .systemFont(ofSize: 13, weight: .medium)
+    scopeChip.font = ShellType.rowTitle.font
     scopeChip.wantsLayer = true
-    scopeChip.layer?.cornerRadius = 6
+    scopeChip.layer?.cornerRadius = CommandBarGeometry.scopeChipRadius
     scopeChip.layer?.cornerCurve = .continuous
     scopeChip.setAccessibilityIdentifier(AXID.CommandBar.scope)
     addSubview(scopeChip)
@@ -126,7 +140,7 @@ final class CommandBarView: NSView {
     field.drawsBackground = false
     field.wantsLayer = true
     field.focusRingType = .none
-    field.font = .systemFont(ofSize: 22)
+    field.font = ShellType.commandInput.font
     field.cell?.isScrollable = true
     field.cell?.wraps = false
     field.cell?.usesSingleLineMode = true
@@ -142,7 +156,7 @@ final class CommandBarView: NSView {
 
     noticeView.isHidden = true
     noticeLabel.stringValue = CommandBarView.noticeText
-    noticeLabel.font = .systemFont(ofSize: 12)
+    noticeLabel.font = ShellType.caption.font
     noticeLabel.lineBreakMode = .byTruncatingTail
     noticeLabel.cell?.usesSingleLineMode = true
     noticeLabel.setAccessibilityIdentifier(AXID.CommandBar.notice)
@@ -262,7 +276,7 @@ final class CommandBarView: NSView {
     shownPlaceholder = (text, flavor)
     scopePlaceholder = text == Self.placeholder ? nil : text
     field.placeholderAttributedString = NSAttributedString(string: text, attributes: [
-      .font: NSFont.systemFont(ofSize: 22),
+      .font: ShellType.commandInput.font,
       .foregroundColor: ShellTokens.commandBarTertiaryText.resolve(flavor).nsColor(),
     ])
   }

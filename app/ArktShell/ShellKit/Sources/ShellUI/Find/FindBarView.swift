@@ -221,7 +221,7 @@ public final class FindBarView: NSView, NSTextFieldDelegate {
     separator.backgroundColor = ShellTokens.sidebarDivider.resolve(flavor).cgColor
     field.textColor = ShellTokens.primaryText.resolve(flavor).nsColor()
     field.placeholderAttributedString = NSAttributedString(string: "Find in page", attributes: [
-      .font: NSFont.systemFont(ofSize: 13),
+      .font: ShellType.body.font,
       .foregroundColor: ShellTokens.secondaryText.resolve(flavor).nsColor().withAlphaComponent(0.8),
     ])
     let noMatches = presenter?.display?.hasNoMatches ?? false

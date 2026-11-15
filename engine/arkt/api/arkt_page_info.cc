@@ -307,6 +307,8 @@ struct PageInfoHub::SiteDataCache {
   std::unique_ptr<BrowsingDataModel> model;
   base::TimeTicks built;
   bool building = false;
+  // When the running BuildFromDisk started, for the log of its duration.
+  base::TimeTicks started;
   std::vector<Waiting> waiting;
 };
 
@@ -664,7 +666,31 @@ void PageInfoHub::ResetPermissions(content::WebContents* contents,
   EndChanging();
 }
 
+bool PageInfoHub::IsOpen(content::WebContents* contents) {
+  std::erase_if(open_, [](const auto& tab) { return !tab; });
+  return std::any_of(open_.begin(), open_.end(), [contents](const auto& tab) {
+    return tab.get() == contents;
+  });
+}
+
+void PageInfoHub::PageInfoOpened(content::WebContents* contents) {
+  if (!contents || IsOpen(contents)) {
+    return;
+  }
+  open_.push_back(contents->GetWeakPtr());
+  const GURL& page = contents->GetLastCommittedURL();
+  const PageConnection connection = ReadConnection(contents);
+  if (!page.is_valid() || connection == PageConnection::kLocalFile ||
+      connection == PageConnection::kInternalPage) {
+    return;
+  }
+  SiteData(ProfileOf(contents), url::Origin::Create(page), contents);
+}
+
 void PageInfoHub::PageInfoClosed(content::WebContents* contents) {
+  std::erase_if(open_, [contents](const auto& tab) {
+    return !tab || tab.get() == contents;
+  });
   auto it = sessions_.find(contents);
   if (it == sessions_.end()) {
     return;
@@ -703,10 +729,12 @@ std::optional<SiteDataCount> PageInfoHub::SiteData(
   if (cache->model) {
     count = CountSiteData(*cache->model, origin);
   }
-  if (!fresh) {
+  // Only an open panel counts (#782): the pill reads on every refresh.
+  if (!fresh && IsOpen(contents)) {
     cache->waiting.push_back({contents->GetWeakPtr(), origin, count});
     if (!cache->building) {
       cache->building = true;
+      cache->started = base::TimeTicks::Now();
       BrowsingDataModel::BuildFromDisk(
           profile, ChromeBrowsingDataModelDelegate::CreateForProfile(profile),
           base::BindOnce(&PageInfoHub::SiteDataBuilt,
@@ -726,12 +754,21 @@ void PageInfoHub::SiteDataBuilt(Profile* profile,
   cache.model = std::move(model);
   cache.built = base::TimeTicks::Now();
   cache.building = false;
+  if (VLOG_IS_ON(1)) {
+    size_t entries = 0;
+    for ([[maybe_unused]] const auto& entry : *cache.model) {
+      ++entries;
+    }
+    VLOG(1) << "ARKT: site data counted entries=" << entries << " in "
+            << (cache.built - cache.started).InMilliseconds() << " ms";
+  }
   std::vector<SiteDataCache::Waiting> waiting = std::move(cache.waiting);
   cache.waiting.clear();
   std::vector<content::WebContents*> reported;
   for (const SiteDataCache::Waiting& tab : waiting) {
-    if (!tab.contents || std::find(reported.begin(), reported.end(),
-                                   tab.contents.get()) != reported.end()) {
+    if (!tab.contents || !IsOpen(tab.contents.get()) ||
+        std::find(reported.begin(), reported.end(), tab.contents.get()) !=
+            reported.end()) {
       continue;
     }
     const SiteDataCount count = CountSiteData(*cache.model, tab.origin);

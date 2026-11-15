@@ -160,11 +160,11 @@ final class ImportText: NSView {
 
   private func systemFont() -> NSFont {
     switch role {
-    case .title: .systemFont(ofSize: 15, weight: .semibold)
-    case .subtitle, .detail, .note, .progressTrail, .eyebrow: .systemFont(ofSize: 12)
-    case .heading: .systemFont(ofSize: 12, weight: .semibold)
-    case .name: .systemFont(ofSize: 13, weight: .medium)
-    case .progressLead: .systemFont(ofSize: 13, weight: .semibold)
+    case .title: ShellType.dialogTitle.font
+    case .subtitle, .detail, .note, .progressTrail, .eyebrow: ShellType.caption.font
+    case .heading: ShellType.captionEmphasis.font
+    case .name: ShellType.rowTitle.font
+    case .progressLead: ShellType.bodyEmphasis.font
     case .count, .status: .monospacedDigitSystemFont(ofSize: 13, weight: .regular)
     }
   }
@@ -485,9 +485,11 @@ final class ImportBarView: NSView {
 /// checkbox with the row's label ("Spaces and tabs, 213"), its value and the note as help.
 @MainActor
 final class ImportCheckbox: NSView {
+  /// The box's radius; the focus ring follows it.
+  static let cornerRadius: CGFloat = 4.5
   var onToggle: (@MainActor (Bool) -> Void)?
   /// The chrome's ink focus ring outside the box while it has keyboard focus (#687), in the style's tone.
-  private(set) lazy var keyboardFocusRing = KeyboardFocusRingView.attach(outside: self, radius: 4.5)
+  private(set) lazy var keyboardFocusRing = KeyboardFocusRingView.attach(outside: self, radius: Self.cornerRadius)
   private(set) var isOn = false
   private(set) var isEnabled = true
   private let box = CALayer()
@@ -551,7 +553,7 @@ final class ImportCheckbox: NSView {
   private func restyle() {
     let palette = style.palette
     OnboardingMotion.set {
-      box.cornerRadius = 4.5
+      box.cornerRadius = Self.cornerRadius
       box.cornerCurve = .continuous
       box.backgroundColor = (isOn ? palette.checkFill : NSColor.clear).cgColor
       box.borderWidth = isOn ? 0 : 1.5

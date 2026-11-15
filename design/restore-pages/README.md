@@ -63,3 +63,31 @@ The shared toast (`design/alerts-sheets-toasts`), shield glyph, no action, close
   Little Arkt windows and Peek pages; never private windows; nothing to offer means a toast, not a prompt.
 
 Rejected directions: B (one toast with Reopen) and C (a card in the sidebar).
+
+## Recovery contract and implementation (#580)
+
+The engine's `EngineSessionRecovery` supplies only crash state and dismissal. The shell owns URL, title, kind and
+Peek source `NodeID` records through an injected `RecoveryPageSource`; only the App imports Persistence. The App
+adapter writes ordered snapshots off the main actor. Engine tab and window identities are not persisted.
+
+The window set captures the prior snapshot at initialization, before live writes. While the crash marker is set and
+an offer is unanswered, live Little Arkt and Peek events must not overwrite the crashed snapshot, and even a confirmed
+clean quit must not clear it. [#803](https://github.com/krystianslowik/arkt/pull/803) retains the engine marker across
+launches until the decision is answered. After Restore, Dismiss, or the empty-offer notice acknowledges it, the shell
+refreshes records from current live pages and resumes tracking opens, navigation, titles and actual closes, including
+hidden Peeks. Blank, Incognito and sidebar pages are excluded. Unchanged snapshots do not write. A confirmed clean
+quit then clears records and stops lifecycle writes; a cancelled quit resumes tracking. The App suspends writes during
+a potentially cancelled teardown to preserve the pre-quit snapshot.
+
+At offer time, Peeks without an existing, non-archived sidebar source are excluded. Duplicate Peeks per source keep
+the last record. An empty offer shows the notice and acknowledges the crash. Restore prefers a regular window showing
+the source, otherwise activates it in the host; it never replaces a live or hidden Peek. Distinct sources can coexist.
+An unsuccessful restore retains the offer and does not acknowledge. Little Arkt's opening API reports requests, not
+successful page loads. The decision is hosted only by a regular window and remains pending across host closure or a
+change to private mode.
+
+On normal confirmed quit the App requests a clear and flushes it, except while an offer is unanswered; a failed flush is logged and the existing quit flow
+allows failure. SIGTERM has no final confirmed-termination hook, so its flush retains the snapshot. Persistence tests
+and ShellKit tests cover their respective boundaries, not the App adapter or a killed process; feature-level validation
+and CI on the combined head remain necessary. See the maintainer's [contract](https://github.com/krystianslowik/arkt/pull/690#issuecomment-6707149941)
+and [source eligibility decision](https://github.com/krystianslowik/arkt/pull/690#issuecomment-6707374449).

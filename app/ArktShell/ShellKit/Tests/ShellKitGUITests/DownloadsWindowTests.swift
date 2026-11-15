@@ -25,11 +25,16 @@ final class DownloadsWindowTests: XCTestCase {
     center.announce = { _ in }
   }
 
+  // XCTest keeps each test case object until the run ends: release the windows too, not only hide them (#805).
   override func tearDown() async throws {
     center.library.window?.close()
     for controller in controllers { controller.close() }
+    for id in engine.windowIDs { engine.closeWindow(id) }
     controllers = []
     try? FileManager.default.removeItem(at: folder)
+    center = nil
+    settings = nil
+    engine = nil
   }
 
   private func makeWindow(width: CGFloat = 1200, height: CGFloat = 800) -> ShellWindowController {
@@ -496,6 +501,10 @@ final class DownloadsWindowTests: XCTestCase {
     sheet.keepLink?.performClick(nil)
     XCTAssertEqual(engine.download(id)?.dangerType, .userValidated)
     XCTAssertNil(center.sheet)
+    let window = try XCTUnwrap(sheet.window)
+    XCTAssertNil(window.sheetParent, "Keep Anyway takes the sheet down like the buttons do (#817)")
+    XCTAssertFalse(window.isVisible)
+    XCTAssertTrue(controller.window?.attachedSheet == nil)
   }
 
   func testEscapeDisarmsKeepAnywayBeforeItDismissesTheSheet() throws {

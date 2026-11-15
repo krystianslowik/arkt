@@ -201,13 +201,12 @@ extension ArktPermissionKind {
 }
 
 extension ArktDialogKind {
-  /// Throws for a leave-site prompt: the facade has no such kind until #585.
   init(_ kind: JavaScriptDialog.Kind) throws {
     switch kind {
     case .alert: self = .alert
     case .confirm: self = .confirm
     case .prompt: self = .prompt
-    case .beforeUnload: throw ScriptedHarness.HarnessError("the facade has no leave-site dialog kind yet (#585)")
+    case .beforeUnload: self = .beforeUnload
     }
   }
 }

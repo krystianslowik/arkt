@@ -28,7 +28,7 @@ public final class TabSwitcherView: NSView {
   public static let width: CGFloat = 480
   public static let padding: CGFloat = 6
   public static let rowHeight: CGFloat = 40
-  static let cornerRadius: CGFloat = 12
+  static let cornerRadius = ShellRadius.popover
   static let rowCornerRadius: CGFloat = 8
   static let fadeDuration: CFTimeInterval = FadeDuration.quick
   static let fadeKey = "tabSwitcher.fade"
@@ -405,11 +405,11 @@ public final class TabSwitcherRowView: NSView {
     super.init(frame: frameRect)
     wantsLayer = true
     faviconView.imageScaling = .scaleProportionallyUpOrDown
-    titleField.font = .systemFont(ofSize: 13, weight: .medium)
+    titleField.font = ShellType.rowTitle.font
     titleField.lineBreakMode = .byTruncatingTail
     titleField.maximumNumberOfLines = 1
     titleField.cell?.truncatesLastVisibleLine = true
-    spaceField.font = .systemFont(ofSize: 11, weight: .regular)
+    spaceField.font = ShellType.footnote.font
     spaceField.lineBreakMode = .byTruncatingTail
     spaceField.maximumNumberOfLines = 1
     splitView.imageScaling = .scaleProportionallyUpOrDown

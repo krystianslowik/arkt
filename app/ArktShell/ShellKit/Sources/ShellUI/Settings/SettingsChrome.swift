@@ -9,6 +9,8 @@ import Motion
 /// as a radio button in the "Settings" tab group; with Full Keyboard Access, Tab reaches it and Space selects.
 @MainActor
 public final class SettingsPaneItemView: NSView {
+  /// The pane label under the glyph.
+  static let labelFontSize: CGFloat = 11
   let pane: SettingsPane
   var onSelect: (@MainActor (SettingsPane) -> Void)?
   public private(set) var isSelected = false
@@ -179,7 +181,7 @@ public final class SettingsPaneItemView: NSView {
       plate.shadowOpacity = plateShadow.alpha > 0 ? 1 : 0
       plate.borderWidth = increase && flavor == .dark ? 1 : 0
       plate.borderColor = SettingsTokens.separatorIncreasedContrast.resolve(flavor).cgColor
-      let font = NSFont.systemFont(ofSize: 11, weight: .medium)
+      let font = NSFont.systemFont(ofSize: Self.labelFontSize, weight: .medium)
       let line = ceil(font.ascender - font.descender)
       let glyphSize = SettingsMetrics.paneGlyph
       let top = ((box.height - glyphSize - SettingsMetrics.paneGlyphToLabel - line) / 2).rounded()
@@ -229,7 +231,7 @@ final class SettingsChromeView: NSView {
     material.state = .followsWindowActiveState
     addSubview(material)
     layer?.addSublayer(tint)
-    titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+    titleLabel.font = ShellType.bodyEmphasis.font
     titleLabel.alignment = .center
     titleLabel.setAccessibilityElement(false)        // the window title says it
     addSubview(titleLabel)
@@ -343,20 +345,10 @@ final class SettingsWindow: NSWindow {
 
   private static let escapeKeyCode: UInt16 = 53
 
-  /// Close, minimize and zoom at x 20, 40 and 60, centered 20 pt from the top, level with the title.
+  /// Close, minimize and zoom at x 20, 40 and 60, centered 20 pt from the top, level with the title. Only the buttons'
+  /// host is narrowed to the buttons; the window's top rim spans the window.
   func layoutTrafficLights() {
-    guard !styleMask.contains(.fullScreen), let close = standardWindowButton(.closeButton),
-          let titlebar = close.superview, let container = titlebar.superview else { return }
-    let height = SettingsMetrics.titleCenterY * 2
-    let width = SettingsMetrics.trafficLightX * 2 + SettingsMetrics.trafficLightSpacing * 2 + close.frame.width
-    let containerFrame = NSRect(x: 0, y: frame.height - height, width: width, height: height)
-    if container.frame != containerFrame { container.frame = containerFrame }
-    let kinds: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
-    for (index, kind) in kinds.enumerated() {
-      guard let button = standardWindowButton(kind) else { continue }
-      let origin = NSPoint(x: SettingsMetrics.trafficLightX + CGFloat(index) * SettingsMetrics.trafficLightSpacing,
-                           y: ((titlebar.bounds.height - button.frame.height) / 2).rounded())
-      if button.frame.origin != origin { button.setFrameOrigin(origin) }
-    }
+    placeTrafficLights(barHeight: SettingsMetrics.titleCenterY * 2, firstX: SettingsMetrics.trafficLightX,
+                       spacing: SettingsMetrics.trafficLightSpacing)
   }
 }

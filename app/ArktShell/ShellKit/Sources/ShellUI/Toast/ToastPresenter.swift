@@ -10,6 +10,8 @@ public enum ToastKind: Hashable, Sendable {
   case undo
   /// A recovery notice: wraps to three lines and stays until dismissed or replaced.
   case persistent
+  /// A six-second crash recovery status.
+  case recovery
 
   /// The SF Symbol drawn before the text; nil: none (a notice names its own).
   public var defaultGlyph: String? {
@@ -17,7 +19,7 @@ public enum ToastKind: Hashable, Sendable {
     case .notice: nil
     case .error: "exclamationmark.circle"
     case .undo: "archivebox"
-    case .persistent: "exclamationmark.shield"
+    case .persistent, .recovery: "exclamationmark.shield"
     }
   }
 
@@ -26,7 +28,7 @@ public enum ToastKind: Hashable, Sendable {
   public var duration: Duration? {
     switch self {
     case .notice, .error: .seconds(4)
-    case .undo: .seconds(6)
+    case .undo, .recovery: .seconds(6)
     case .persistent: nil
     }
   }
@@ -62,6 +64,8 @@ public struct Toast: Equatable, Sendable {
 
   /// Persistent toasts (recovery notices) stay until dismissed or replaced by another persistent one.
   public var isPersistent: Bool { kind == .persistent }
+  /// Recovery notices wrap and have a dismiss button even when timed.
+  public var isMultiline: Bool { isPersistent || kind == .recovery }
   /// How long it stays; nil: until dismissed.
   public var duration: Duration? { kind.duration }
   /// What VoiceOver announces when the toast shows.

@@ -17,7 +17,12 @@ final class SpacePagerTests: XCTestCase {
     controller.window?.contentView?.layoutSubtreeIfNeeded()
   }
 
-  override func tearDown() async throws { controller.close() }
+  // XCTest keeps each test case object until the run ends: release the window too, not only close it (#805).
+  override func tearDown() async throws {
+    controller.close()
+    controller = nil
+    sidebar = nil
+  }
 
   private func awaitSettle(_ body: () -> Void) async {
     let settled = expectation(description: "settled")
@@ -181,9 +186,12 @@ final class SpacePagerTests: XCTestCase {
     controller.rootView.sidebarWidth = 260
     controller.rootView.layoutSubtreeIfNeeded()
     XCTAssertEqual(pager.bounds.width, 260, accuracy: 0.001)
+    // Mid-swipe a shown page's view frame sits in the visible slot and its layer translation shows it at its own
+    // place in the strip (#415, #841): its place on screen is the frame plus that translation.
     for (index, page) in pager.pages.enumerated() {
       XCTAssertEqual(page.frame.width, 260, accuracy: 0.001)
-      XCTAssertEqual(page.frame.minX, CGFloat(index) * 260, accuracy: 0.001)
+      let shownX = page.frame.minX + (page.layer?.affineTransform().tx ?? 0)
+      XCTAssertEqual(shownX, CGFloat(index) * 260, accuracy: 0.001)
     }
     XCTAssertEqual(pager.offset, -260 - 30, accuracy: 0.001, "strip offset follows the new page width during swipe")
     await awaitSettle { pager.endTracking() }

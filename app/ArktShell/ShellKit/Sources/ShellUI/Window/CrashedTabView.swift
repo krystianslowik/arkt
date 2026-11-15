@@ -77,9 +77,9 @@ final class CrashedTabView: NSView {
     wantsLayer = true
     content.wantsLayer = true
     addSubview(content)
-    titleLabel.font = .systemFont(ofSize: 15, weight: .semibold)
+    titleLabel.font = ShellType.dialogTitle.font
     titleLabel.alignment = .center
-    bodyLabel.font = .systemFont(ofSize: 13)
+    bodyLabel.font = ShellType.body.font
     bodyLabel.alignment = .center
     bodyLabel.stringValue = Self.message(host: host)
     reloadButton.target = self

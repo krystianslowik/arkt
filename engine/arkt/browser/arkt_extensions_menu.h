@@ -13,7 +13,9 @@
 #include "base/scoped_observation.h"
 #include "chrome/browser/themes/theme_service_observer.h"
 #include "chrome/browser/ui/toolbar/toolbar_action_view_model.h"
+#include "arkt/browser/arkt_extension_context_menu.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_model.h"
+#include "extensions/browser/permissions_manager.h"
 #include "extensions/common/extension_id.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/native_theme/native_theme.h"
@@ -37,6 +39,7 @@ namespace arkt {
 // the action through ExtensionActionViewModel, which opens the popup (through
 // the Arkt delegate's TriggerPopup) or dispatches the click event.
 class ArktExtensionsMenu : public ToolbarActionsModel::Observer,
+                           public extensions::PermissionsManager::Observer,
                            public ThemeServiceObserver,
                            public ui::NativeThemeObserver {
  public:
@@ -74,9 +77,30 @@ class ArktExtensionsMenu : public ToolbarActionsModel::Observer,
     // backing) comes back from repeated calls.
     gfx::ImageSkia icon;
     bool enabled = false;
+    // Pinned in the profile (#593).
+    bool pinned = false;
+    bool has_options_page = false;
+    // On the active tab.
+    ExtensionSiteAccess site_access = ExtensionSiteAccess::kNone;
   };
-  // Every action of the model, in model order.
+  // Every action of the model: the pinned ones first, in pinned order, then
+  // the rest in model order (#593).
   std::vector<ActionInfo> GetActions() const;
+
+  // The context menu of `extension_id`'s action for the active tab (#593),
+  // built from Chromium's model now; this menu keeps it, replacing the one
+  // before, so a later ExecuteContextCommand runs against the same model.
+  // Empty for an unknown action.
+  std::vector<ExtensionMenuItem> BuildContextMenu(
+      const extensions::ExtensionId& extension_id);
+  // Runs a command of the kept context menu of `extension_id`. False when it
+  // ran nothing (no menu was built for that action, or the command is not
+  // offered).
+  bool ExecuteContextCommand(const extensions::ExtensionId& extension_id,
+                             int command);
+  // The action's own fallback (clicked while disabled on the tab): its
+  // context menu as a native menu at the anchor.
+  void ShowContextMenuForAction(const extensions::ExtensionId& extension_id);
   // Popups (and the menu) attach to `anchor` from now on.
   void SetAnchor(NSView* anchor);
   // Runs `extension_id`'s action as a toolbar click. False when there is no
@@ -114,8 +138,23 @@ class ArktExtensionsMenu : public ToolbarActionsModel::Observer,
   void OnToolbarActionRemoved(const ToolbarActionsModel::ActionId& id) override;
   void OnToolbarActionUpdated(const ToolbarActionsModel::ActionId& id) override;
   void OnToolbarModelInitialized() override;
-  void OnToolbarPinnedActionsChanged() override {}
+  void OnToolbarPinnedActionsChanged() override;
   void OnToolbarActionsModelShutdown() override;
+
+  // extensions::PermissionsManager::Observer: site access changed (this menu
+  // or chrome://extensions).
+  void OnUserPermissionsSettingsChanged(
+      const extensions::PermissionsManager::UserPermissionsSettings& settings)
+      override;
+  void OnExtensionPermissionsUpdated(
+      const extensions::Extension& extension,
+      const extensions::PermissionSet& permissions,
+      extensions::PermissionsManager::UpdateReason reason) override;
+
+  void ShowContextMenuAt(const extensions::ExtensionId& extension_id,
+                         NSView* anchor);
+  // The model's action ids, pinned first in pinned order.
+  std::vector<extensions::ExtensionId> OrderedActionIds() const;
 
   // ThemeServiceObserver, ui::NativeThemeObserver: icons are rasterized with
   // the tab's color provider, so a theme or color-scheme change drops them.
@@ -165,8 +204,15 @@ class ArktExtensionsMenu : public ToolbarActionsModel::Observer,
   std::vector<std::string> last_dump_;
   extensions::ExtensionId pending_action_id_;
   base::RepeatingClosure on_changed_;
+  // The context menu last built for the shell (#593).
+  std::unique_ptr<ArktExtensionContextMenu> context_menu_;
+  // The fallback menu while it is shown.
+  std::unique_ptr<ArktExtensionContextMenu> fallback_menu_;
   base::ScopedObservation<ToolbarActionsModel, ToolbarActionsModel::Observer>
       observation_{this};
+  base::ScopedObservation<extensions::PermissionsManager,
+                          extensions::PermissionsManager::Observer>
+      permissions_observation_{this};
   base::ScopedObservation<ThemeService, ThemeServiceObserver>
       theme_observation_{this};
   base::ScopedObservation<ui::NativeTheme, ui::NativeThemeObserver>

@@ -111,6 +111,21 @@ struct ChromiumImportTests {
     #expect(result.latestVisit == nil)
   }
 
+  @Test func aBatchTheHistoryAlreadyHoldsComesBackSkippedWithItsNewestVisit() async {
+    // #754: a batch sent again after it got no answer; the engine finds every visit stored and writes none.
+    let engine = ChromiumEngine(facade: facade)
+    let newest = Date(timeIntervalSince1970: 2_002)
+    facade.importAnswer = (written: 0, skipped: 3, failed: 0, failureReason: nil)
+    facade.importLastVisitTime = newest
+    let entry = ImportedHistoryEntry(
+      url: "https://example.com/", title: "Example", visitCount: 3, typedCount: 0, lastVisit: newest,
+      visits: (0..<3).map { HistoryVisit(time: Date(timeIntervalSince1970: 2_000 + Double($0)), transition: .link) })
+    let result = await engine.importHistory([entry], after: nil)
+
+    #expect(facade.importedHistoryWatermarks == [nil])
+    #expect(result == ImportWriteResult(written: 0, skipped: 3, latestVisit: newest))
+  }
+
   @Test func aHistoryAnswerDeliveredTwiceResumesTheCallerOnce() async {
     let engine = ChromiumEngine(facade: facade)
     facade.importHistoryAnswersTwice = true

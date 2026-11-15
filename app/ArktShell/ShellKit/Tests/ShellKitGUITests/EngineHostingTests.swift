@@ -56,6 +56,7 @@ final class EngineHostingTests: XCTestCase {
   func testTheHostClaimsNewTabAndCloseTab() throws {
     let world = try EngineWorld.make()
     let harness = EngineHarnessWindow(world.sidebar)
+    defer { harness.controller.close() }   // the command bar shows the window (#805)
     let host = harness.controller.engineHost
     XCTAssertEqual(host.claim(.newTab), CommandClaim(isEnabled: true))
     XCTAssertEqual(host.claim(.closeTab), CommandClaim(isEnabled: true))
@@ -101,6 +102,7 @@ final class EngineHostingTests: XCTestCase {
   func testCommandDispatchRunsClaimedCommandsAndForwardsTheRest() throws {
     let world = try EngineWorld.make()
     let harness = EngineHarnessWindow(world.sidebar)
+    defer { harness.controller.close() }   // the command bar shows the window (#805)
     let window = try XCTUnwrap(harness.controller.window as? ShellWindow)
     let reload = NSMenuItem(title: "Reload", action: #selector(ShellWindow.commandDispatch(_:)), keyEquivalent: "")
     reload.tag = EngineCommand.reload.rawValue
@@ -564,6 +566,10 @@ final class EngineTabRoutingTests: XCTestCase {
       pending.append(controller)
       return controller.engineHost
     }
+    defer {   // #805: the engine keeps its hosts, so close its windows too
+      (pending + adopted).forEach { $0.close() }
+      for id in engine.windowIDs { engine.closeWindow(id) }
+    }
     let pairing = engine.observeWindows { event in
       guard case .windowOpened(let id) = event, !pending.isEmpty else { return }
       let controller = pending.removeFirst()
@@ -598,6 +604,7 @@ final class ExtensionsControlTests: XCTestCase {
   func testTheControlOpensTheExtensionsPanelWithTheWindowsActions() throws {
     let world = try EngineWorld.make()
     let harness = EngineHarnessWindow(world.sidebar)
+    defer { harness.controller.close() }   // the panel shows the window (#805)
     let button = try XCTUnwrap(harness.controller.extensionsButton)
     XCTAssertTrue(button.isDescendant(of: harness.controller.sidebarController.view))
     XCTAssertTrue(button.isEnabled, "the panel shows the empty state, so the control always opens it")

@@ -1,0 +1,70 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Arkt contributors <noreply@arkt.invalid>
+Date: Sun, 8 Nov 2026 15:23:49 +0100
+Subject: [PATCH] Arkt: cancel a tab-modal dialog on a window without a Views
+ widget
+
+TabDialogManager checked that the tab's window has a Views widget and
+took the browser process down when it had none. The dialog now gets a
+widget parented to the tab's view, so callers can hold and close it as
+usual, and ShowDialog() closes it on the next turn instead of showing
+it.
+---
+ chrome/browser/ui/tabs/tab_dialog_manager.cc | 28 +++++++++++++++++++-
+ 1 file changed, 27 insertions(+), 1 deletion(-)
+
+diff --git a/chrome/browser/ui/tabs/tab_dialog_manager.cc b/chrome/browser/ui/tabs/tab_dialog_manager.cc
+index 4e82fbd0e6..a0269ad898 100644
+--- a/chrome/browser/ui/tabs/tab_dialog_manager.cc
++++ b/chrome/browser/ui/tabs/tab_dialog_manager.cc
+@@ -9,8 +9,10 @@
+ 
+ #include "base/functional/bind.h"
+ #include "base/functional/callback.h"
++#include "base/logging.h"
+ #include "base/memory/ptr_util.h"
+ #include "base/scoped_observation.h"
++#include "base/task/single_thread_task_runner.h"
+ #include "chrome/browser/ui/browser_element_identifiers.h"
+ #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+ #include "chrome/browser/ui/browser_window/public/desktop_browser_window_capabilities.h"
+@@ -304,7 +306,15 @@ std::unique_ptr<views::Widget> TabDialogManager::CreateTabScopedDialog(
+     views::DialogDelegate* delegate) {
+   DCHECK_EQ(ui::mojom::ModalType::kChild, delegate->GetModalType());
+   views::Widget* host = GetHostWidget();
+-  CHECK(host);
++  if (!host) {
++    // An embedder's window without a Views widget: the dialog gets a widget
++    // parented to the tab's view, so callers can hold and close it as usual,
++    // and ShowDialog() cancels it instead of showing it.
++    gfx::NativeView parent = tab_interface_->GetContents()->GetNativeView();
++    CHECK(parent);
++    return base::WrapUnique(views::DialogDelegate::CreateDialogWidget(
++        delegate, gfx::NativeWindow(), parent));
++  }
+ 
+   if (base::FeatureList::IsEnabled(features::kTabModalUsesDesktopWidget)) {
+     delegate->set_use_desktop_widget_override(true);
+@@ -316,6 +326,22 @@ std::unique_ptr<views::Widget> TabDialogManager::CreateTabScopedDialog(
+ 
+ void TabDialogManager::ShowDialog(views::Widget* widget,
+                                   std::unique_ptr<Params> params) {
++  if (!GetHostWidget()) {
++    // An embedder's window without a Views widget cannot host a tab-modal
++    // dialog: it is closed on the next turn, after the caller has set up its
++    // close handling, as if the user dismissed it at once.
++    LOG(WARNING) << "ARKT: tab-modal dialog cancelled, the window has no "
++                    "Views widget";
++    base::SingleThreadTaskRunner::GetCurrentDefault()->PostTask(
++        FROM_HERE, base::BindOnce(
++                       [](base::WeakPtr<views::Widget> dialog) {
++                         if (dialog && !dialog->IsClosed()) {
++                           dialog->Close();
++                         }
++                       },
++                       widget->GetWeakPtr()));
++    return;
++  }
+   // An autosized widget handles its own bounds, while `animated` bounds changes
+   // are handled by `TabDialogManager` and not the widget. They are not
+   // compatible.

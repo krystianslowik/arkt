@@ -23,6 +23,8 @@ enum PageInfoMetrics {
   static let headerHeight: CGFloat = 54
   /// Rows: 32 pt, 16 pt glyph, a 22 pt pop-up with radius 6.
   static let rowHeight: CGFloat = 32
+  /// A row with a note under its title ("Turned off in macOS", #786): the 17 pt title, 1 pt, the 14 pt note line.
+  static let notedRowHeight: CGFloat = 44
   static let glyph: CGFloat = 16
   static let glyphGap: CGFloat = 12
   static let popUpHeight: CGFloat = 22
@@ -60,7 +62,8 @@ struct PageInfoModel: Equatable {
     case localFile
   }
 
-  /// One permission row: its glyph, the engine's title and a pop-up of the settings it offers.
+  /// One permission row: its glyph, the engine's title and a pop-up of the settings it offers. When macOS itself denies
+  /// Arkt the permission, a note under the title says so (#786); the pop-up keeps the site's stored setting.
   struct Row: Equatable {
     struct Option: Equatable {
       var setting: PermissionSetting
@@ -71,14 +74,25 @@ struct PageInfoModel: Equatable {
     var symbol: String
     var setting: PermissionSetting
     var options: [Option]
-    var accessibilityLabel: String { title }
+    /// Why macOS keeps the permission from every site: Arkt's own access denied (#786) or Location Services off for
+    /// the whole Mac (#856). Nil otherwise, including while macOS has not decided (it still asks on first use).
+    var systemBlock: SystemPermissionBlock?
+    /// "Turned off in macOS" or "Location Services off", under the title; nil without a block.
+    var systemNote: String? { systemBlock?.note }
+    /// VoiceOver reads the pop-up as "Location, turned off in macOS, Allow, pop-up button".
+    var accessibilityLabel: String {
+      guard let systemBlock else { return title }
+      return "\(title), \(systemBlock.spokenNote)"
+    }
+    var height: CGFloat { systemNote == nil ? PageInfoMetrics.rowHeight : PageInfoMetrics.notedRowHeight }
 
-    init(_ permission: SitePermission) {
+    init(_ permission: SitePermission, deniedInMacOS: SystemPermissionBlock? = nil) {
       kind = permission.kind
       title = permission.title
       symbol = PageInfoModel.symbol(for: permission.kind)
       setting = permission.setting
       options = permission.options.map { Option(setting: $0, title: PageInfoModel.title(of: $0)) }
+      systemBlock = deniedInMacOS
     }
   }
 
@@ -106,7 +120,10 @@ struct PageInfoModel: Equatable {
   var accessibilityLabel: String { "Site controls for \(host)" }
   var readOnlyNote: String? { isReadOnly ? "Site settings can't be changed in this window." : nil }
 
-  init?(_ info: PageInfo, locale: Locale = .current, isReadOnly: Bool = false, favicon: Data? = nil) {
+  /// `deniedInMacOS`: the permissions macOS keeps from every site, and why (`SystemPermissions.blockedKinds()`); their
+  /// rows get the note. Empty by default, so the address pill's reads never ask macOS.
+  init?(_ info: PageInfo, locale: Locale = .current, isReadOnly: Bool = false, favicon: Data? = nil,
+        deniedInMacOS: [SitePermissionKind: SystemPermissionBlock] = [:]) {
     tab = info.tab
     origin = info.origin
     // The engine's host in either form, written as the address bar writes it (#697); a local file's name as it is.
@@ -150,7 +167,7 @@ struct PageInfoModel: Equatable {
     }
     state = .site
     siteDataText = info.siteData.map { Self.siteDataText($0, locale: locale) } ?? ""
-    rows = info.permissions.map(Row.init)
+    rows = info.permissions.map { Row($0, deniedInMacOS: deniedInMacOS[$0.kind]) }
     canResetPermissions = !isReadOnly && info.permissions.contains { !$0.isDefault }
   }
 
@@ -237,7 +254,7 @@ struct PageInfoModel: Equatable {
       return m.headerHeight + m.sectionPadding + 2 * 16 + m.noteBottom
     case .site:
       let dataSection = 1 + 2 * m.sectionPadding + m.rowHeight
-      let list = CGFloat(rows.count) * m.rowHeight
+      let list = rows.reduce(0) { $0 + $1.height }
       let readOnly = isReadOnly && !rows.isEmpty ? m.readOnlyNoteHeight : 0
       let permissions = rows.isEmpty ? 0 : 1 + m.sectionTitleHeight + readOnly + list + m.sectionPadding
       return m.headerHeight + dataSection + permissions + 1 + m.footerHeight

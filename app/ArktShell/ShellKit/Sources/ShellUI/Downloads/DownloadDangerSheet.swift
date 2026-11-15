@@ -89,9 +89,12 @@ final class DownloadDangerSheet {
     deleteButton.keyEquivalent = "\r"
   }
 
+  /// Every answer takes the sheet down. Keep Anyway is a footer link, not one of the sheet's buttons, so the sheet does
+  /// not end itself for it; without this it stayed on its window (#817). Ending a sheet that already ended is a no-op.
   private func finish(_ answer: DownloadDangerAnswer) {
     let callback = onFinish
     onFinish = nil
+    sheet.dismiss()
     callback?(answer)
   }
 }

@@ -3262,7 +3262,8 @@ cd $REPO && git add app/ArktShell docs/plans/2026-10-22-track-c-results.md && gi
 - M3: catch a settle while it overshoots past the last page (the drag base rounds the overshot position).
 - M4: a sidebar resize during an active swipe keeps the old page width until the gesture ends.
 - M6: grain renderer: the four textures (grain, sand, denim, tweed), their intensity, Metal renderer with
-  `overlayColors` (data-model doc 1.6). Textures and intensity done in #379: the four textures, generated in code to
+  `overlayColors` (data-model doc 1.6). #534 composites the drawn overlay into each Space gradient and caches
+  colors and locations; texture remains separate. Textures and intensity done in #379: the four textures, generated in code to
   parity-estimate statistics and multiplied at alpha = noiseFactor (parity estimate, PARITY(NEEDS-RUNTIME-CHECK)),
   drawn by a Metal tile renderer. Follow-up: #381.
 - M9: the flavor flip (sidebar appearance aqua / darkAqua) at the halfway point is a known hitch risk; precompute

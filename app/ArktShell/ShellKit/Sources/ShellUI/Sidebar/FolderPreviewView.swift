@@ -81,7 +81,7 @@ final class FolderPreviewView: NSView {
     searchField.isBordered = false
     searchField.drawsBackground = false
     searchField.focusRingType = .none
-    searchField.font = .systemFont(ofSize: 13)
+    searchField.font = ShellType.body.font
     searchField.placeholderString = "Search"
     searchField.usesSingleLineMode = true
     searchField.cell?.isScrollable = true
@@ -98,7 +98,7 @@ final class FolderPreviewView: NSView {
     highlightLayer.cornerRadius = Self.rowCornerRadius
     highlightLayer.cornerCurve = .continuous
     list.layer?.addSublayer(highlightLayer)
-    emptyField.font = .systemFont(ofSize: 13)
+    emptyField.font = ShellType.body.font
     emptyField.isHidden = true
     for view in [searchGlyph, searchField, scrollView, emptyField] as [NSView] {
       view.autoresizingMask = []
@@ -307,7 +307,7 @@ final class FolderPreviewRowView: NSView {
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
     faviconView.imageScaling = .scaleProportionallyUpOrDown
-    titleField.font = .systemFont(ofSize: 13)
+    titleField.font = ShellType.body.font
     titleField.lineBreakMode = .byTruncatingTail
     titleField.maximumNumberOfLines = 1
     titleField.cell?.truncatesLastVisibleLine = true

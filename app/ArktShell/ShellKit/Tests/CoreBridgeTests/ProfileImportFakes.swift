@@ -76,6 +76,31 @@ final class RecordingImportEngine: EngineImporting {
   }
 }
 
+/// An engine that keeps what it writes in an `ImportRecording`, so a test can count what a profile would hold after
+/// several imports. A history call listed in `unansweredHistoryCalls` (1-based) is stored but answered the way the
+/// engine answers a batch the history store never confirmed (#531, #754).
+@MainActor
+final class StoringImportEngine: EngineImporting {
+  private(set) var recording: ImportRecording
+  /// The watermark of every history call, in call order.
+  private(set) var historyWatermarks: [Date?] = []
+  var unansweredHistoryCalls: Set<Int> = []
+
+  init(now: @escaping @Sendable () -> Date) { recording = ImportRecording(now: now) }
+
+  func importCookies(_ batch: [ArcCookie]) async -> ImportWriteResult { recording.record(batch) }
+  func importPasswords(_ batch: [ArcLogin]) async -> ImportWriteResult { recording.record(batch) }
+  func importHistory(_ batch: [ImportedHistoryEntry], after watermark: Date?) async -> ImportWriteResult {
+    historyWatermarks.append(watermark)
+    let stored = recording.record(batch, after: watermark)
+    guard unansweredHistoryCalls.contains(historyWatermarks.count), stored.written > 0 else { return stored }
+    return ImportWriteResult(
+      skipped: stored.skipped, failed: stored.written,
+      failureReason: "no answer from the history store: \(stored.written)\n")
+  }
+  func importBookmarks(_ batch: [BookmarkRecord]) async -> ImportWriteResult { recording.record(batch) }
+}
+
 /// An engine that adopts none of the optional steps: `installExtensions` is the protocol's default.
 @MainActor
 final class BareImportEngine: EngineImporting {

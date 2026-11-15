@@ -1,6 +1,6 @@
 ---
 name: arkt-swift-ui-quality
-description: Use when writing or reviewing Arkt Swift code, UI, animation or performance-sensitive paths - Swift 6 concurrency, deterministic tests, motion with a purpose and a Reduce Motion variant, the 120 Hz frame budget, one primary action per surface, and worst-case data.
+description: Use when writing or reviewing Arkt Swift code, UI, animation or performance-sensitive paths - Swift 6 concurrency, deterministic tests, motion with a purpose and a Reduce Motion variant, the 120 Hz frame budget, one primary action per surface, worst-case data, and explicit state for multi-flag state machines.
 ---
 
 # Arkt Swift and UI quality
@@ -24,6 +24,33 @@ are in `CONTRIBUTING.md`, section 7 and section 6, Pass 2; this skill is how to 
       database queue; main-actor code only `await`s, never blocks or waits synchronously.
 - [ ] Time is injected: clocks and sleepers are parameters, so tests can drive them.
 - [ ] Tests never `sleep` and never assert against a wall-clock deadline (see `arkt-flaky-tests`).
+- [ ] GUI tests close every window they open in `tearDown` (`arkt-flaky-tests`, "GUI test hygiene").
+
+## Explicit state
+
+When one behavior's state is spread over several flags, optionals or tokens that must change together (#877):
+
+- [ ] One `enum` holds the phase; data that only exists in a phase (tasks, timers, sessions, tokens) is its
+      associated value.
+- [ ] One transition entry point (`send(_:)`, `handle(_:)` or `step(_:)`) switches on `(state, event)`. Side
+      effects come back as values or run in one place. Unknown pairs are no-ops.
+- [ ] Async replies carry the token or session they started under and are dropped if it no longer matches.
+- [ ] A debug-only transition log (`#if DEBUG`, the same zero-cost pattern as the command bar counters in
+      #876), and the phase readable by tests (`internal` or `ForTesting`), so a test asserts one value and a
+      transition sequence.
+- [ ] One machine per pull request: first a test that reproduces the bad sequence on current code and fails, then
+      a behavior-preserving conversion.
+- [ ] Do not convert two-flag cases, single debounce tokens, re-entrancy guards, or code that already has a phase
+      enum and tests.
+
+Templates, under `app/ArktShell/ShellKit/Sources/`:
+
+- `ShellUI/Onboarding/OnboardingFlow.swift`: a value model with derived actions and pure tests.
+- `ShellUI/Window/QuitWarningGate.swift`: event in (`begin(warns:)`, `reply(confirmed:)`), `Decision` out.
+- `CrashReporting/CrashReportPolicy.swift`: a pure table from answer to resolution, no stored state.
+- `ShellWindow.TrafficLightPlacement` in `ShellUI/Window/ShellWindow.swift`: one enum and one ordered apply function.
+
+And in C++: `Batch::Phase` with `Settle()` in `engine/arkt/browser/arkt_extension_batch_install.mm`.
 
 ## Motion
 
@@ -34,8 +61,9 @@ are in `CONTRIBUTING.md`, section 7 and section 6, Pass 2; this skill is how to 
       jumps or waits for the old one to finish.
 - [ ] Animate transform and opacity only. No per-frame layout, path or frame-size changes on hot paths.
 - [ ] A Reduce Motion variant (a fade or an instant change), with a test that covers it.
-- [ ] Stays inside the 120 Hz frame budget (about 8 ms per frame). Frame-timing tests skip as NOT-MEASURABLE below
-      120 Hz or under load; run them on a quiet machine.
+- [ ] Stays inside the 120 Hz frame budget (about 8 ms per frame). Frame-time gates assert when their class
+      runs alone at a load below the core count and only report otherwise (`CONTRIBUTING.md`, section 7, "Speed
+      gates", which also covers the CPU gates).
 
 ## UI polish
 

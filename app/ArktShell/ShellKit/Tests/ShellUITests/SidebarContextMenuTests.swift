@@ -118,10 +118,32 @@ struct SidebarContextMenuTests {
 
   // MARK: 3.3 Favorite
 
+  /// A split in the Favorites (#788, design/favorite-split-tile): Separate All Tabs and Convert, then the Favorite
+  /// items that act on a split. No Rename... until #847, not even disabled.
+  @Test func favoriteSplitMenuMatchesTheDesign() throws {
+    let split = sidebar.addSplit(in: .favorites(profile: "default"))
+    sidebar.addTab(url: url, title: "L", in: .split(split))
+    sidebar.addTab(url: url, title: "R", in: .split(split))
+    let menu = entries(.favorite(split))
+    #expect(titles(menu) == ["Separate All Tabs", "Convert to Vertical Split View", "", "Copy Links", "",
+                             "Remove from Favorites", "Close and Keep Favorite"])
+    #expect(try entry("Separate All Tabs", in: menu).action == .separateSplit(split))
+    #expect(try entry("Convert to Vertical Split View", in: menu).action == .convertSplit(split))
+    #expect(try entry("Copy Links as Markdown", in: menu).isAlternate)
+    #expect(try entry("Close and Keep Favorite", in: menu).keyEquivalent == "w")
+    #expect(menu.filter { !$0.isSeparator }.allSatisfy { $0.isEnabled })
+
+    let vertical = sidebar.addSplit(in: .favorites(profile: "default"),
+                                    layout: SplitLayoutInfo(orientation: .vertical, widthFactors: [0.5, 0.5]))
+    sidebar.addTab(url: url, title: "T", in: .split(vertical))
+    sidebar.addTab(url: url, title: "B", in: .split(vertical))
+    #expect(titles(entries(.favorite(vertical)))[1] == "Convert to Horizontal Split View")
+  }
+
   @Test func favoriteMenuMatchesTheDesign() throws {
     let favorite = sidebar.addTab(url: url, title: "F", in: .favorites(profile: "default"))
     let menu = entries(.favorite(favorite))
-    #expect(titles(menu) == ["Rename\u{2026}", "Change Icon", "", "Back to Pinned URL", "Edit Pinned URL\u{2026}", "",
+    #expect(titles(menu) == ["Rename\u{2026}", "Change Icon", "Reset Icon", "", "Back to Pinned URL", "Edit Pinned URL\u{2026}", "",
                              "Copy Link", "", "Remove from Favorites", "Close and Keep Favorite"])
     #expect(try entry("Remove from Favorites", in: menu).action == .removeFromFavorites(favorite))
     #expect(try entry("Close and Keep Favorite", in: menu).action == .archive([favorite]))
@@ -131,7 +153,8 @@ struct SidebarContextMenuTests {
     #expect(try entry("Edit Pinned URL\u{2026}", in: menu).action == .editPin(favorite, focus: .url))
     #expect(try entry("Rename\u{2026}", in: menu).isEnabled)
     #expect(try entry("Edit Pinned URL\u{2026}", in: menu).isEnabled)
-    #expect(try !entry("Change Icon", in: menu).isEnabled)
+    #expect(try entry("Change Icon", in: menu).isEnabled)
+    #expect(try !entry("Reset Icon", in: menu).isEnabled)
   }
 
   // MARK: 3.4 Folder
@@ -139,10 +162,11 @@ struct SidebarContextMenuTests {
   @Test func folderMenuMatchesTheDesign() throws {
     let folder = sidebar.addFolder(title: "F", in: .pinned(work))
     let menu = entries(.rows([folder]))
-    #expect(titles(menu) == ["Rename", "Change Icon", "", "Duplicate", "Share", "", "Copy All Links",
+    #expect(titles(menu) == ["Rename", "Change Icon", "Reset Icon", "", "Duplicate", "Share", "", "Copy All Links",
                              "Paste URL as New Tab", "", "Move To", "Delete"])
     #expect(try !entry("Share", in: menu).isEnabled)
-    #expect(try !entry("Change Icon", in: menu).isEnabled)
+    #expect(try entry("Change Icon", in: menu).isEnabled)
+    #expect(try !entry("Reset Icon", in: menu).isEnabled)
     #expect(try entry("Delete", in: menu).action == .deleteFolder(folder))
     #expect(try entry("Copy All Links", in: menu).action == .copyLinks([folder], markdown: false))
     let alternate = try entry("Copy All as Markdown Links", in: menu)
@@ -150,6 +174,18 @@ struct SidebarContextMenuTests {
     #expect(alternate.action == .copyLinks([folder], markdown: true))
     let moveTo = try #require(try entry("Move To", in: menu).submenu)
     #expect(moveTo.map(\.title) == ["Work", "Personal"], "folders cannot be Favorites")
+  }
+
+  @Test func resetIconIsEnabledOnlyForTheNodeWithAnOverride() throws {
+    let favorite = sidebar.addTab(url: url, title: "F", in: .favorites(profile: "default"))
+    let folder = sidebar.addFolder(title: "Folder", in: .pinned(work))
+    sidebar.setNodeIcon(favorite, to: .symbol("star"))
+    #expect(try entry("Reset Icon", in: entries(.favorite(favorite))).isEnabled)
+    #expect(try !entry("Reset Icon", in: entries(.rows([folder]))).isEnabled)
+    sidebar.setNodeIcon(favorite, to: nil)
+    sidebar.setNodeIcon(folder, to: .emoji("\u{1F680}"))
+    #expect(try !entry("Reset Icon", in: entries(.favorite(favorite))).isEnabled)
+    #expect(try entry("Reset Icon", in: entries(.rows([folder]))).isEnabled)
   }
 
   @Test func pasteURLAsNewTabNeedsAURLOnTheClipboard() throws {

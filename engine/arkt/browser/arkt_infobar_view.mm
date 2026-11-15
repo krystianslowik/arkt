@@ -2,11 +2,13 @@
 
 #import <QuartzCore/QuartzCore.h>
 
+#import "arkt/api/arkt_engine.h"
 #import "arkt/browser/arkt_dialog_sheet.h"
 
 // Chrome's infobar is 40 dip high with a single elided line of text; the row
-// keeps that height so the page moves by a predictable amount.
-const CGFloat kArktInfobarRowHeight = 40;
+// keeps that height so the page moves by a predictable amount. The shell draws
+// its rows at the same height: one definition, in the facade header (#478).
+const CGFloat kArktInfobarRowHeight = ArktInfobarRowHeight;
 
 namespace {
 

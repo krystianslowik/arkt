@@ -185,6 +185,36 @@ struct ThemeContrastTests {
     }
   }
 
+  /// An overlay stop between base stops also needs readable text, even when the base endpoints pass unchanged.
+  @Test func overlayMiddleStopParticipatesInContrast() throws {
+    let base = RGBA.srgb(hex: 0x333333)
+    let overlay: [RGBA] = [.white(0), .white(0.5), .white(0)]
+    let resolution = try #require(ThemeContrast.resolve(stops: [base, base], opacity: 1, overlay: overlay,
+                                                        in: Self.light))
+    let middle = ThemeGradient.sample(resolution.colors, at: 0.5)
+    let background = ThemeContrast.composite(middle, mix: 0, tone: resolution.tone, opacity: 1,
+                                             tint: resolution.overlay[1], in: Self.light)
+    #expect(Self.ratio(background, tone: resolution.tone) >= ThemeContrast.target(increaseContrast: false))
+  }
+
+  /// The base is interpolated after its stops have been composited; overlay alpha is scaled only once.
+  @Test func overlayStopsUseDrawnBaseAndIncreasedContrast() throws {
+    let context = ThemeContext(appearance: .dark, increaseContrast: true)
+    let stops = [RGBA.srgb(hex: 0x080808), RGBA.srgb(hex: 0x202020)]
+    let overlay: [RGBA] = [.white(0), .white(0.2), .white(0)]
+    let resolution = try #require(ThemeContrast.resolve(stops: stops, opacity: 0.8, overlay: overlay, in: context))
+    #expect(resolution.tone == .dark)
+    #expect(abs(resolution.overlay[1].alpha - 0.16) < 1e-12)
+    for index in overlay.indices {
+      let position = Double(index) / Double(overlay.count - 1)
+      let base = ThemeGradient.sample(resolution.colors, at: position)
+      let tint = ThemeGradient.sample(resolution.overlay, at: position)
+      let background = ThemeContrast.composite(base, mix: 0, tone: resolution.tone, opacity: 1,
+                                               tint: tint, in: context)
+      #expect(Self.ratio(background, tone: resolution.tone) >= 7)
+    }
+  }
+
   /// A sample of a gradient: the ends are exact, the middle is the perceptual mix, one color is flat.
   @Test func aGradientIsSampledByPosition() {
     let stops = [RGBA.white(1), RGBA.black(1), RGBA.srgb(hex: 0xFF0000)]

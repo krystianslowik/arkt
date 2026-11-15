@@ -60,8 +60,10 @@ void SetInfobarSink(InfobarSink sink);
 // lays out at the top of the tab's container (or the placeholder's card),
 // pushing the page down as Chrome's infobar container does. Buttons, links
 // and the close button run the delegate exactly as ConfirmInfoBar and
-// InfoBarView do. Infobars with their own Views (not a confirm delegate:
-// tab sharing, the alternate-URL bar) are logged and not drawn.
+// InfoBarView do. The tab-sharing infobar (#478) takes the same row: its
+// message read from its Views status view, Stop sharing as OK and Share this
+// tab instead as Cancel. Other infobars with their own Views (the sign-in QR
+// code, the alternate-URL bar) are logged and not drawn.
 //
 // When the window's embedder host presents infobars (issue #400, the sink says
 // so) the rows stay in the presenter, hidden: the stack keeps its height so the

@@ -8,34 +8,52 @@ struct FavoritesLayoutTests {
   static let standard: CGFloat = 174
   static let wide: CGFloat = 384
 
-  @Test func threeTilesFitDefaultSidebar() {
-    // 190 pt sidebar minus 8 pt padding each side = 174 = 3 * 52 + 2 * 9
-    #expect(FavoritesLayout.contentWidth(sidebarWidth: 190) == 174)
-    #expect(FavoritesLayout.itemSize(contentWidth: 174, columns: 3) == CGSize(width: 52, height: 46))
+  @Test func measuredSidebarGeometry() {
+    // Measurement: 192 pt sidebar, 8 pt insets, 53.3 x 47 tiles, about 8.2 pt gaps, 63 pt section.
+    let width = FavoritesLayout.contentWidth(sidebarWidth: 192)
+    #expect(width == 176)
+    #expect(FavoritesLayout.columns(itemCount: 3, contentWidth: width) == 3)
+    let size = FavoritesLayout.itemSize(contentWidth: width, columns: 3)
+    #expect(abs(size.width - 53.3) < 0.1)
+    #expect(size.height == 47)
+    let frames = (0..<3).map { FavoritesLayout.frame(ofItem: $0, itemCount: 3, contentWidth: width) }
+    for (index, frame) in frames.enumerated() {
+      #expect(abs(frame.minX - CGFloat(index) * 61.5) <= 0.5)
+      #expect(abs(frame.width - 53.3) <= 0.71)
+      #expect(frame.height == 47)
+      if index > 0 { #expect(abs(frame.minX - frames[index - 1].maxX - 8.2) <= 0.3) }
+    }
+    #expect(frames.last?.maxX == 176)
+    #expect(SidebarMetrics.favoritesTopGap + FavoritesLayout.height(itemCount: 3, contentWidth: width)
+            + SidebarMetrics.favoritesBottomGap == 63)
   }
 
   @Test func tilesStretchWithSidebar() {
     let size = FavoritesLayout.itemSize(contentWidth: 201, columns: 3)
-    #expect(size.height == 46)
-    #expect(abs(size.width - 61) < 0.001)
+    #expect(size.height == 47)
+    #expect(abs(size.width - 185.0 / 3.0) < 0.001)
   }
 
   @Test func gridHeight() {
     #expect(FavoritesLayout.height(itemCount: 0, contentWidth: Self.standard) == 0)
-    #expect(FavoritesLayout.height(itemCount: 3, contentWidth: Self.standard) == 46)
-    #expect(FavoritesLayout.height(itemCount: 4, contentWidth: Self.standard) == CGFloat(46 * 2 + 9))
-    #expect(FavoritesLayout.height(itemCount: 4, contentWidth: Self.wide) == 46, "one row of 4 in a wide sidebar")
+    #expect(FavoritesLayout.height(itemCount: 3, contentWidth: Self.standard) == 47)
+    #expect(FavoritesLayout.height(itemCount: 4, contentWidth: Self.standard) == 102)
+    #expect(FavoritesLayout.height(itemCount: 4, contentWidth: Self.wide) == 47, "one row of 4 in a wide sidebar")
   }
 
   // MARK: Columns
 
-  /// The measured 52 pt tile is the narrowest a tile gets; up to 4 fit.
+  /// Preserve the existing capacity thresholds independently of the rendering gap.
   @Test func columnCapacityFollowsTheMinimumTileWidth() {
     #expect(FavoritesLayout.columnCapacity(contentWidth: Self.narrow) == 2)
     #expect(FavoritesLayout.columnCapacity(contentWidth: Self.standard) == 3)
     #expect(FavoritesLayout.columnCapacity(contentWidth: Self.wide) == 4)
-    #expect(FavoritesLayout.columnCapacity(contentWidth: 3 * 52 + 2 * 9 - 1) == 2, "one point short of three")
-    #expect(FavoritesLayout.columnCapacity(contentWidth: 4 * 52 + 3 * 9) == 4)
+    #expect(FavoritesLayout.columnCapacity(contentWidth: 112) == 1)
+    #expect(FavoritesLayout.columnCapacity(contentWidth: 113) == 2)
+    #expect(FavoritesLayout.columnCapacity(contentWidth: 173) == 2, "one point short of three")
+    #expect(FavoritesLayout.columnCapacity(contentWidth: 174) == 3)
+    #expect(FavoritesLayout.columnCapacity(contentWidth: 234) == 3)
+    #expect(FavoritesLayout.columnCapacity(contentWidth: 235) == 4)
     #expect(FavoritesLayout.columnCapacity(contentWidth: 2000) == 4, "never more than 4")
     // One column only below the sidebar's minimum width (a 150 pt sidebar already fits two).
     #expect(FavoritesLayout.columnCapacity(contentWidth: 100) == 1)
@@ -74,7 +92,7 @@ struct FavoritesLayoutTests {
       if index % columns == 0 { #expect(frame.minX == 0) }
       if index % columns == columns - 1 { #expect(abs(frame.maxX - contentWidth) <= 0.5, "full rows reach the edge") }
       if index % columns > 0 {
-        #expect(abs(frame.minX - frames[index - 1].maxX - FavoritesLayout.gap) <= 1, "9 pt gaps")
+        #expect(abs(frame.minX - frames[index - 1].maxX - FavoritesLayout.gap) <= 1, "rounded measured gaps")
       }
       #expect(frame.minX == frame.minX.rounded() && frame.maxX == frame.maxX.rounded(), "whole points")
     }
@@ -98,8 +116,8 @@ struct FavoritesLayoutTests {
   }
 
   @Test func heightOfFractionalRows() {
-    #expect(FavoritesLayout.height(rows: 1) == 46)
-    #expect(FavoritesLayout.height(rows: 1.5) == 46 + 0.5 * 55)
+    #expect(FavoritesLayout.height(rows: 1) == 47)
+    #expect(FavoritesLayout.height(rows: 1.5) == 47 + 0.5 * 55)
     #expect(FavoritesLayout.height(rows: 0) == 0)
   }
 

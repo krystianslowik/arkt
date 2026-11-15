@@ -64,14 +64,20 @@ public final class URLBarView: NSView {
     didSet { if flavor != oldValue { applyColors() } }
   }
 
-  /// The bars' only font; it never changes.
-  private static let font = NSFont.systemFont(ofSize: SidebarMetrics.urlBarFontSize, weight: .medium)
-  /// One line of `font`, measured once for every bar instead of on each layout pass.
-  static let labelHeight: CGFloat = {
+  /// A bar's font, fixed for its life: the sidebar pill keeps `SidebarMetrics.urlBarFontSize`, the Toolbar text has
+  /// its own token (#623).
+  static func font(showsPill: Bool) -> NSFont {
+    showsPill ? .systemFont(ofSize: SidebarMetrics.urlBarFontSize, weight: .medium) : ShellType.toolbarURL.font
+  }
+  /// One line of a bar's font, measured once per kind of bar instead of on each layout pass.
+  static func labelHeight(showsPill: Bool) -> CGFloat { showsPill ? sidebarLabelHeight : toolbarLabelHeight }
+  private static let sidebarLabelHeight = lineHeight(of: font(showsPill: true))
+  private static let toolbarLabelHeight = lineHeight(of: font(showsPill: false))
+  private static func lineHeight(of font: NSFont) -> CGFloat {
     let probe = NSTextField(labelWithString: "")
     probe.font = font
     return ceil(probe.intrinsicContentSize.height)
-  }()
+  }
 
   let label = NSTextField(labelWithString: "")
   let siteGlyph = NSImageView()
@@ -94,7 +100,7 @@ public final class URLBarView: NSView {
     wantsLayer = true
     layerContentsRedrawPolicy = .onSetNeedsDisplay
     layer?.cornerCurve = .continuous
-    label.font = Self.font
+    label.font = Self.font(showsPill: showsPill)
     label.lineBreakMode = showsPill ? .byTruncatingTail : .byTruncatingMiddle
     label.alignment = showsPill ? .natural : .center
     label.maximumNumberOfLines = 1
@@ -161,7 +167,7 @@ public final class URLBarView: NSView {
   public override func layout() {
     super.layout()
     let inset = showsPill ? SidebarMetrics.urlBarTextInset : 0
-    let height = Self.labelHeight
+    let height = Self.labelHeight(showsPill: showsPill)
     let y = ((bounds.height - height) / 2).rounded()
     let available = max(0, bounds.width - 2 * inset)
     guard !siteGlyph.isHidden else {

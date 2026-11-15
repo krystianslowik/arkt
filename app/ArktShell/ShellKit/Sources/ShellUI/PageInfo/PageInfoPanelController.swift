@@ -9,9 +9,10 @@ import EngineAPI
 /// no longer being the main window, and the app going to the background.
 ///
 /// Every change goes to the engine (`EngineSiteSettings`) at once, from the panel's tab, and the panel shows what the
-/// engine reads back (also on `.pageInfoChanged`, through `pageDidChange`). Closing tells the engine
-/// (`pageInfoDidClose(tab:)`), which raises its reload infobar on the page if a change needs one. In a private window
-/// the panel is read-only (#557).
+/// engine reads back (also on `.pageInfoChanged`, through `pageDidChange`). Opening tells the engine
+/// (`pageInfoDidOpen(tab:)`), which counts the site's data only while a panel is open and announces the count when it
+/// arrives. Closing tells it too (`pageInfoDidClose(tab:)`), which raises its reload infobar on the page if a change
+/// needs one. In a private window the panel is read-only (#557).
 @MainActor
 public final class PageInfoPanelController: NSObject {
   private let siteSettings: @MainActor () -> (any EngineSiteSettings)?
@@ -33,6 +34,11 @@ public final class PageInfoPanelController: NSObject {
   var isReadOnly: @MainActor () -> Bool = { false }
   /// The favicon of a tab's page, for the header badge.
   var favicon: @MainActor (TabID) -> Data? = { _ in nil }
+  /// The permissions macOS keeps from every site, and why, read each time the panel shows a page and when
+  /// `SystemPermissions.didChange` says the cached state changed (tests set them) (#786, #856).
+  var deniedInMacOS: @MainActor () -> [SitePermissionKind: SystemPermissionBlock] = {
+    SystemPermissions.blockedKinds()
+  }
 
   public var isShown: Bool { panel?.isVisible == true }
 
@@ -48,7 +54,9 @@ public final class PageInfoPanelController: NSObject {
   }
 
   private func model(for tab: TabID) -> PageInfoModel? {
-    siteSettings()?.pageInfo(of: tab).flatMap { PageInfoModel($0, isReadOnly: isReadOnly(), favicon: favicon(tab)) }
+    siteSettings()?.pageInfo(of: tab).flatMap {
+      PageInfoModel($0, isReadOnly: isReadOnly(), favicon: favicon(tab), deniedInMacOS: deniedInMacOS())
+    }
   }
 
   // MARK: Opening
@@ -75,6 +83,7 @@ public final class PageInfoPanelController: NSObject {
     self.tab = tab
     origin = model.origin
     self.anchor = anchor
+    siteSettings()?.pageInfoDidOpen(tab: tab)          // the engine counts site data only while the panel is open
     let window = DialogWindow(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered,
                               defer: false)
     window.isOpaque = false
@@ -238,6 +247,9 @@ public final class PageInfoPanelController: NSObject {
       },
       center.addObserver(forName: NSWindow.didResignMainNotification, object: parent, queue: .main) { [weak self] _ in
         MainActor.assumeIsolated { self?.parentDidResignMain() }
+      },
+      center.addObserver(forName: SystemPermissions.didChange, object: nil, queue: .main) { [weak self] _ in
+        MainActor.assumeIsolated { self?.reread() }
       },
       center.addObserver(forName: NSApplication.didResignActiveNotification, object: nil,
                          queue: .main) { [weak self] _ in

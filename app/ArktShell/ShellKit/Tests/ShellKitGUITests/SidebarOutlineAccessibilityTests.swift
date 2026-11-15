@@ -653,6 +653,108 @@ final class SidebarOutlineAccessibilityTests: XCTestCase {
     rowView.isHovered = false
   }
 
+  // MARK: Context menus (#860)
+
+  // AppKit makes the view a context menu is shown for (or popped up in) the menu's accessibility parent, and an
+  // out-of-process client reaches the menu's items only through that view. The real outline is not in the tree (the
+  // page lists the proxy in its place), so a row menu shown for the outline was on screen while XCUITest could not
+  // find its items. The row menus are shown for a view that is in the tree.
+
+  /// A row menu request as the outline's presentation seam received it, with the items its delegate filled.
+  private struct MenuRequest {
+    var titles: [String]
+    var anchor: NSView
+  }
+
+  /// Records every request of `outline`'s context menu, filling the menu as AppKit does before showing it.
+  private func recordContextMenus(of outline: SidebarOutlineView) -> Box<[MenuRequest]> {
+    let requests = Box<[MenuRequest]>([])
+    outline.presentContextMenu = { menu, _, anchor in
+      guard let menu else { return }
+      menu.delegate?.menuNeedsUpdate?(menu)
+      requests.value.append(MenuRequest(titles: menu.items.map(\.title), anchor: anchor))
+    }
+    return requests
+  }
+
+  /// A mouse event at the middle of `row`, in `outline`'s window.
+  private func mouseEvent(_ type: NSEvent.EventType, onRow row: Int, of outline: SidebarOutlineView,
+                          _ flags: NSEvent.ModifierFlags = []) throws -> NSEvent {
+    let rect = outline.rect(ofRow: row)
+    let point = outline.convert(NSPoint(x: rect.midX, y: rect.midY), to: nil)
+    XCTAssertEqual(outline.row(at: outline.convert(point, from: nil)), row, "the click lands on the row")
+    return try XCTUnwrap(NSEvent.mouseEvent(
+      with: type, location: point, modifierFlags: flags, timestamp: 0,
+      windowNumber: outline.window?.windowNumber ?? 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+  }
+
+  /// Whether a client walking down from `window` reaches `view` as an element, where the menu would hang.
+  private func isReachable(_ view: NSView, from window: NSWindow) -> Bool {
+    view.isAccessibilityElement() && descendants(of: window).contains { ($0 as AnyObject) === view }
+  }
+
+  /// Runs `body`; should it start real menu tracking (the request skipped the seam), the first tracking turn ends it,
+  /// so the test fails on the missing request instead of waiting on a menu nobody closes.
+  private func endingAnyMenuTracking(of outline: SidebarOutlineView, _ body: () throws -> Void) rethrows {
+    let stopper = MenuTrackingStopper(menu: outline.menu)
+    let stop = Timer(timeInterval: 0, target: stopper, selector: #selector(MenuTrackingStopper.stop), userInfo: nil,
+                     repeats: false)
+    RunLoop.main.add(stop, forMode: .eventTracking)
+    defer { stop.invalidate() }
+    try body()
+  }
+
+  private func firstTodayRow(_ fixture: Fixture) -> Int {
+    fixture.outlineController.row(for: fixture.sidebar.children(of: .today(fixture.space))[0])
+  }
+
+  func testARightClickShowsTheRowMenuForAViewInTheTree() throws {
+    let fixture = try makeFixture()
+    let outline = fixture.outline
+    let window = try XCTUnwrap(outline.window)
+    let requests = recordContextMenus(of: outline)
+    let event = try mouseEvent(.rightMouseDown, onRow: firstTodayRow(fixture), of: outline)
+
+    endingAnyMenuTracking(of: outline) { outline.rightMouseDown(with: event) }
+
+    XCTAssertEqual(requests.value.count, 1, "the right-click asked for the row's menu")
+    let request = try XCTUnwrap(requests.value.first)
+    XCTAssertTrue(request.titles.contains("Rename"), "the row's own menu: \(request.titles)")
+    XCTAssertTrue(request.anchor === fixture.page, "shown for the page that lists the proxy outline")
+    XCTAssertTrue(isReachable(request.anchor, from: window), "a client reaches the menu's parent from the window")
+    XCTAssertFalse(isReachable(outline, from: window), "the real outline stays out of the tree")
+  }
+
+  func testACtrlClickShowsTheRowMenuForAViewInTheTree() throws {
+    let fixture = try makeFixture()
+    let outline = fixture.outline
+    let window = try XCTUnwrap(outline.window)
+    let requests = recordContextMenus(of: outline)
+
+    outline.mouseDown(with: try mouseEvent(.leftMouseDown, onRow: firstTodayRow(fixture), of: outline, .control))
+
+    XCTAssertEqual(requests.value.count, 1, "the Ctrl-click asked for the row's menu")
+    let request = try XCTUnwrap(requests.value.first)
+    XCTAssertTrue(request.titles.contains("Rename"), "the row's own menu: \(request.titles)")
+    XCTAssertTrue(request.anchor === fixture.page, "shown for the page that lists the proxy outline")
+    XCTAssertTrue(isReachable(request.anchor, from: window), "a client reaches the menu's parent from the window")
+  }
+
+  /// VoiceOver's show-menu pops the menu up in the page too, at the row's bottom-left corner as before.
+  func testShowMenuPopsTheRowMenuUpInAViewInTheTree() throws {
+    let fixture = try makeFixture()
+    let outline = fixture.outline
+    let window = try XCTUnwrap(outline.window)
+    let row = firstTodayRow(fixture)
+
+    let placement = fixture.outlineController.accessibilityMenuPlacement(forRow: row)
+
+    XCTAssertTrue(placement.view === fixture.page, "popped up in the page that lists the proxy outline")
+    XCTAssertTrue(isReachable(placement.view, from: window), "a client reaches the menu's parent from the window")
+    let rect = outline.rect(ofRow: row)
+    XCTAssertEqual(placement.point, placement.view.convert(NSPoint(x: rect.minX, y: rect.maxY), from: outline))
+  }
+
   /// Every unignored element below `root`, depth first.
   private func descendants(of root: Any) -> [NSAccessibilityProtocol] {
     guard let element = root as? NSAccessibilityProtocol else { return [] }
@@ -660,6 +762,14 @@ final class SidebarOutlineAccessibilityTests: XCTestCase {
       .compactMap { $0 as? NSAccessibilityProtocol }
     return children.flatMap { [$0] + descendants(of: $0) }
   }
+}
+
+/// Ends a menu's tracking from a timer that only an event-tracking run loop fires.
+@MainActor
+private final class MenuTrackingStopper: NSObject {
+  private weak var menu: NSMenu?
+  init(menu: NSMenu?) { self.menu = menu }
+  @objc func stop() { menu?.cancelTracking() }
 }
 
 /// A value the providers read and the test changes between reads.

@@ -37,7 +37,7 @@ enum SidebarDiff {
     for (id, node) in new.nodes {
       guard let before = old.nodes[id], before != node else { continue }
       if BridgeMapping.nodeInfo(before) != BridgeMapping.nodeInfo(node)
-        || BridgeMapping.splitTitle(before) != BridgeMapping.splitTitle(node) {
+        || BridgeMapping.splitTitle(before) != BridgeMapping.splitTitle(node) || before.customIcon != node.customIcon {
         nodeChanges.append(id)
       }
     }

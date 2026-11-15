@@ -19,11 +19,13 @@ final class LittleArktWindowTests: XCTestCase {
     NSApp.setActivationPolicy(.accessory)
   }
 
+  // XCTest keeps each test case object until the run ends: release the windows too, not only hide them (#805).
   override func tearDown() async throws {
     for set in sets {
-      for controller in set.controllers { controller.window?.orderOut(nil) }
-      for little in set.littleArkts { little.window.orderOut(nil) }
+      for controller in set.controllers { controller.close() }
+      for little in set.littleArkts { little.window.close() }
     }
+    for set in sets { set.closeAllForTesting() }
     sets = []
   }
 
@@ -114,6 +116,30 @@ final class LittleArktWindowTests: XCTestCase {
     let inWindow = chevron.convert(origin, to: nil)
     let chevronInWindow = chevron.convert(chevron.bounds, to: nil)
     XCTAssertEqual(inWindow.y, chevronInWindow.minY - 4, accuracy: 0.5, "the menu starts below the chevron")
+  }
+
+  /// #863: the window's top rim spans the window at its smallest size, in light and dark; only the buttons' host is
+  /// narrowed, and the host label and Open as Tab in the same bar keep their clicks.
+  func testWindowTopRimSpansTheWindow() throws {
+    let (set, engine, _) = try makeSet()
+    _ = set.openWindow()
+    for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+      let (little, _, _) = try openPopup(engine, set)
+      little.finishMotion()
+      let window = little.window
+      window.appearance = NSAppearance(named: appearance)
+      window.setFrame(NSRect(origin: window.frame.origin, size: window.minSize), display: false)
+      window.contentView?.layoutSubtreeIfNeeded()
+      window.layoutTrafficLights()
+      let close = try XCTUnwrap(window.standardWindowButton(.closeButton))
+      let metrics = ShellMetrics.standard
+      let hostWidth = metrics.trafficLightOrigin.x * 2 + metrics.trafficLightSpacing * 2 + close.frame.width
+      try assertTopRimSpansTheWindow(window, buttonHostWidth: hostWidth,
+                                     clicks: [(centerInWindow(little.topBar.hostLabel), little.topBar),
+                                              (centerInWindow(little.topBar.openButton), little.topBar.openButton)],
+                                     appearance.rawValue)
+      XCTAssertEqual(close.convert(close.bounds, to: nil).minX, metrics.trafficLightOrigin.x, "\(appearance.rawValue)")
+    }
   }
 
   // MARK: Cascade

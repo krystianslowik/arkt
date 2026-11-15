@@ -19,7 +19,7 @@ final class HandoffPlaceholderView: NSView {
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
     wantsLayer = true
-    messageLabel.font = .systemFont(ofSize: 13)
+    messageLabel.font = ShellType.body.font
     messageLabel.textColor = .secondaryLabelColor
     messageLabel.alignment = .center
     moveHereButton.bezelStyle = .push

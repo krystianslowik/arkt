@@ -24,6 +24,7 @@ final class AppSession {
   /// windows the engine asks for (Chromium: a Dock reopen, `chrome.windows.create`, a startup URL). A closed window is
   /// never shown again.
   let windows: ShellWindowSet
+  private let recoveryPages: RecoveryPages
   /// One instance for every window, so Show / Hide Toolbar reaches all of them.
   let toolbarSetting = ToolbarSetting(defaults: AppEnvironment.userDefaults)
   /// The app-level settings the Settings window edits (#307), over the same defaults and Toolbar setting; every
@@ -86,8 +87,8 @@ final class AppSession {
 
   /// `hostLookup` pairs the engine's own windows with the windows built for them (`ChromiumEngine.host(of:)`); nil
   /// for an engine that never asks for a window (FakeEngine).
-  init(state: LaunchState, location: DatabaseLocation, engine: any EngineClient, faviconStore: FaviconStore?,
-       hostLookup: ShellWindowSet.HostLookup? = nil) {
+  init(state: LaunchState, recoveryState: RecoveryPageState, location: DatabaseLocation, engine: any EngineClient,
+       faviconStore: FaviconStore?, hostLookup: ShellWindowSet.HostLookup? = nil) {
     self.location = location
     self.database = state.database
     self.engine = engine
@@ -95,10 +96,13 @@ final class AppSession {
     self.source = source
     // Toolbar on / off is an app-level setting in the user defaults (`topBarURLEnabled`; Debug test runs use the
     // `ARKT_DEFAULTS_SUITE` suite), not in the database: see ToolbarSetting.
+    let recoveryPages = RecoveryPages(state: recoveryState, store: SettingsStore(database: state.database))
+    self.recoveryPages = recoveryPages
     let windows = ShellWindowSet(engine: engine, sidebar: source, toolbarSetting: toolbarSetting,
                                  sidebarStateStore: SidebarWindowStateStore(defaults: AppEnvironment.userDefaults),
                                  sessionStore: WindowSessionStore(defaults: AppEnvironment.userDefaults),
-                                 commandBarSettings: commandBarSettings, hostLookup: hostLookup)
+                                 commandBarSettings: commandBarSettings, hostLookup: hostLookup,
+                                 recoveryPageSource: recoveryPages)
     // BH-196: the one-off Copy URL tip remembers what it showed (#404).
     windows.copyLinkEducation = CopyLinkEducation(defaults: AppEnvironment.userDefaults)
     self.windows = windows
@@ -150,6 +154,7 @@ final class AppSession {
     archiveSearch.onRestored = { [weak self] restored, text in self?.didRestore(restored, toast: text) }
     archiveSearch.onRestoreFailed = { [weak self] text in self?.shownWindow().toasts.show(Toast(text: text, kind: .error)) }
     settings.addObserver(self)
+    ReorderHapticGate.bind(settings)
   }
 
   /// `defersWindows`: the launch window and auto-archive wait for `finishLaunch(opensWindow:)` (the Chromium engine
@@ -190,14 +195,12 @@ final class AppSession {
   /// extension's `chrome.windows.create`) opened one already.
   func finishLaunch(opensWindow: Bool) {
     let window = opensWindow ? windows.openWindow() : windows.primary
-    if let window { presentOnboardingIfNeeded(on: window) }
-    askAboutCrashIfNeeded()
-    if let notice = launchNotice, let window {
-      launchNotice = nil
-      window.toasts.show(notice.toast) { [location] in
-        NSWorkspace.shared.activateFileViewerSelecting([location.directory])
-      }
+    if let window {
+      presentOnboardingIfNeeded(on: window)
     }
+    askAboutCrashIfNeeded()
+    if let window { presentLaunchNotice(on: window) }
+    windows.beginSessionRecovery(engine.sessionRecovery)
     startAutoArchive()
   }
 
@@ -210,9 +213,18 @@ final class AppSession {
     }
   }
 
+  private func presentLaunchNotice(on window: ShellWindowController) {
+    guard let notice = launchNotice else { return }
+    launchNotice = nil
+    window.toasts.show(notice.toast) { [location] in
+      NSWorkspace.shared.activateFileViewerSelecting([location.directory])
+    }
+  }
+
   /// The app's hooks on every browser window, before it is shown. Its stored favicons load off the main actor
   /// (each window has its own sidebar views); ids the engine reports meanwhile keep the newer one (#91).
   private func wire(_ window: ShellWindowController) {
+    presentLaunchNotice(on: window)
     window.onImportFromArc = { [weak self] in self?.importFromArc() }
     window.onArchive = { [weak self] ids in self?.archive.archive(ids, reason: .manual) }      // Cmd-W, BH-071
     window.onReopenArchived = { [weak self, weak window] id in                                // Cmd-Shift-T, BH-074
@@ -618,22 +630,29 @@ final class AppSession {
   /// favicon batch is pending, or the onboarding record is being written (#344).
   var needsFlush: Bool {
     autosaver.needsFlush || archive.hasPendingWrites || (faviconWriter?.needsFlush ?? false)
-      || onboardingRecords.needsFlush
+      || onboardingRecords.needsFlush || recoveryPages.needsFlush
   }
 
   /// Runs before the termination flush: stops the auto-archive timer, then stamps every window's visible tabs
   /// (decision 10).
   func prepareForTermination() {
     isTerminating = true
+    recoveryPages.suspendWrites() // Window teardown can still be cancelled; keep the pre-quit snapshot.
     autoArchive.stop()  // stop first: no auto-archive pass may run between the sidebar write and the outbox write
     source.markInactive(windows.visibleNodes, at: .now)
     windows.saveSessionsForTermination()              // #116: before the engine closes the tabs
+  }
+
+  func finishSessionRecovery(cleanQuit: Bool) {
+    recoveryPages.resumeWrites()
+    windows.finishSessionRecovery(cleanQuit: cleanQuit)
   }
 
   /// The quit was cancelled (Chromium: a held leave-site prompt, or the user): auto-archive runs again. The visible
   /// tabs keep the stamp `prepareForTermination` wrote; they are stamped again when they stop being visible.
   func terminationCancelled() {
     isTerminating = false
+    finishSessionRecovery(cleanQuit: false)
     windows.resumeSessions()
     resumeAutoArchive()
   }
@@ -652,7 +671,8 @@ final class AppSession {
     let sidebar = archived ? await autosaver.flush() : false
     await Self.wait(for: favicons, atMost: Self.faviconFlushTimeout)
     let onboardingSaved = await onboarding.value
-    return sidebar && archived && onboardingSaved
+    let recoverySaved = await recoveryPages.flush()
+    return sidebar && archived && onboardingSaved && recoverySaved
   }
 
   /// `flush()` for a quit whose main thread never runs again (#298: Chromium's SIGTERM path blocks the main thread
@@ -660,7 +680,9 @@ final class AppSession {
   /// flush timeout while this thread waits; favicons are skipped (the engine fetches them again).
   func flushBlocking() -> Bool {
     let archived = archive.flushBlocking()
-    return archived && autosaver.flushBlocking()
+    let sidebar = archived ? autosaver.flushBlocking() : false
+    let recoverySaved = recoveryPages.flushBlocking()
+    return archived && sidebar && recoverySaved
   }
 
   static let faviconFlushTimeout: Duration = .seconds(1)

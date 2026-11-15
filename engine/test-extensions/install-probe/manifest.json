@@ -1,0 +1,7 @@
+{
+  "manifest_version": 3,
+  "name": "Arkt install probe",
+  "version": "1.0",
+  "description": "Packed into a .crx and installed by the self-test's install-crx command (#592).",
+  "action": { "default_title": "Arkt install probe" }
+}

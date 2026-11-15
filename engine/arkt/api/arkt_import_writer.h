@@ -75,7 +75,8 @@ struct ImportCounts {
   int skipped = 0;
   int failed = 0;
   std::map<std::string, int> reasons;
-  // History only: the newest visit time written; null when none was.
+  // History only: the newest visit time written or already held; null when
+  // there is none.
   base::Time latest_visit;
 };
 
@@ -97,11 +98,14 @@ void ImportLogins(Profile* profile,
 // Writes every visit through the profile's HistoryService (AddPage per
 // visit, source SOURCE_OS_MIGRATION_IMPORTED). A visit at or before `after`
 // (when it is not null), older than the history retention window, or of a
-// URL the history refuses (not http, https, ftp or file) is skipped. `done`
-// runs after the history thread processed the writes, never inside the call.
-// The visits are counted written only once that answer arrives; if the history
-// service shuts down or drops the request first, they are counted failed
-// ("no answer from the history store") and `done` still runs.
+// URL the history refuses (not http, https, ftp or file) is skipped. A visit
+// the history already holds (same URL and visit time) is skipped too and
+// counts toward `latest_visit`, so a batch sent again after it got no answer
+// is not written twice (#754). `done` runs after the history thread processed
+// the writes, never inside the call. The visits are counted written only once
+// that answer arrives; if the history service shuts down or drops the request
+// first, they are counted failed ("no answer from the history store") and
+// `done` still runs.
 void ImportHistory(Profile* profile,
                    std::vector<ImportHistoryEntry> entries,
                    base::Time after,

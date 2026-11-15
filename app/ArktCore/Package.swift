@@ -25,6 +25,8 @@ let package = Package(
     ),
     .target(name: "Archive", dependencies: ["SidebarModel"]),
     .executableTarget(name: "arkt-import-check", dependencies: ["ArcImport"]),
+    // Writes a FakeChromiumProfile into a new folder for the engine import smoke (#517). Invented data only.
+    .executableTarget(name: "arkt-make-import-fixture", dependencies: ["CoreTestSupport"]),
     .target(name: "ArcProbe", dependencies: ["ArcImport"]),
     .executableTarget(name: "arkt-arc-probe", dependencies: ["ArcProbe"]),
     .testTarget(

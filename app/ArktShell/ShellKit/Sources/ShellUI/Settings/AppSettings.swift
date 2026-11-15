@@ -30,6 +30,8 @@ public final class AppSettings {
     public static let downloadsFolder = "downloadsFolder"
     /// The Library section last shown (BH-181).
     public static let libraryLastSection = "libraryLastSection"
+    /// Settings > Appearance > Haptic feedback when reordering tabs (BH-024). Stored inverted: absent means on.
+    public static let tabReorderingHapticsDisabled = "tabReorderingHapticsDisabled"
 
     /// The preferences the panes edit, the Toolbar's and the Peek switches' keys included: what Reset all settings
     /// (#617) removes. Not here: window state (`lastPane`, `windowTopLeft`, `libraryLastSection`) and the one-time
@@ -39,7 +41,8 @@ public final class AppSettings {
     @MainActor public static let preferences = [
       excludeFavoritesInSwitchToNthTab, switchToNinthSidebarItemEnabled, globalLittleBrowserHotkeyEnabled,
       optionCommandClickLittleArcEntryPointEnabled, sendsCrashReports, shouldWarnBeforeQuitting,
-      downloadsAskWhereToSave, downloadsFolder, PeekLinkSettings.crossSiteKey, PeekLinkSettings.shiftClickKey,
+      downloadsAskWhereToSave, downloadsFolder, tabReorderingHapticsDisabled,
+      PeekLinkSettings.crossSiteKey, PeekLinkSettings.shiftClickKey,
       ToolbarSetting.defaultsKey, ToolbarSetting.showsFullURLDefaultsKey,
     ]
   }
@@ -79,6 +82,18 @@ public final class AppSettings {
       guard newValue != tabNavigation else { return }
       set(!newValue.countsFavorites, Key.excludeFavoritesInSwitchToNthTab)
       set(newValue.ninthOpensNinth, Key.switchToNinthSidebarItemEnabled)
+      notifyObservers()
+    }
+  }
+
+  /// Settings > Appearance > "Haptic feedback when reordering tabs" (BH-024). On by default. Stored inverted as
+  /// `tabReorderingHapticsDisabled`.
+  public var playsReorderHaptics: Bool {
+    get { !bool(Key.tabReorderingHapticsDisabled, default: false) }
+    set {
+      let disabled = !newValue
+      guard disabled != bool(Key.tabReorderingHapticsDisabled, default: false) else { return }
+      set(disabled, Key.tabReorderingHapticsDisabled)
       notifyObservers()
     }
   }

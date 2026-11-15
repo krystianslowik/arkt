@@ -26,11 +26,14 @@ final class DialogSheetView: NSView {
   static let buttonGap: CGFloat = 8
   static let bodyLineHeight: CGFloat = 19      // 13 pt at 1.45
   static let listMaxHeight: CGFloat = 260
+  /// How far a label draws its text inside its frame (its text container's padding); the checkbox title label sits
+  /// this much left of the button's title rect so the text lands where the button drew it.
+  static let labelTextInset: CGFloat = 2
 
   let content: DialogContent
   let insets: Insets
   let iconView: DialogIconView?
-  let titleField = NSTextField(wrappingLabelWithString: "")
+  let titleField = TokenLabel(wrappingLabelWithString: "")
   let subtitleField: NSTextField?
   let paragraphFields: [NSTextField]
   /// The paragraphs inside a scroll view, when the content caps the body's height.
@@ -41,6 +44,9 @@ final class DialogSheetView: NSView {
   let listField: DialogListView?
   /// The content's checkbox (Report abuse), under the body.
   let checkboxButton: NSButton?
+  /// The checkbox's title as drawn: a `TokenLabel` over the button's own title, which is laid out (so a click on the
+  /// title toggles the box and VoiceOver reads it) but drawn clear. The box stays AppKit's own, unchanged (#711).
+  let checkboxTitleLabel: TokenLabel?
   let footerLinkButton: ArchiveLinkButton?
   let primaryButton: ArchivePillButton
   let secondaryButton: ArchivePillButton?
@@ -60,8 +66,8 @@ final class DialogSheetView: NSView {
     self.insets = insets
     iconView = content.icon == .none ? nil : DialogIconView(icon: content.icon, size: content.iconPlacement == .stacked
       ? Self.stackedIconSize : Self.besideIconSize)
-    subtitleField = content.subtitle.map { NSTextField(wrappingLabelWithString: $0) }
-    paragraphFields = content.paragraphs.map { NSTextField(wrappingLabelWithString: $0.text) }
+    subtitleField = content.subtitle.map { TokenLabel(wrappingLabelWithString: $0) }
+    paragraphFields = content.paragraphs.map { TokenLabel(wrappingLabelWithString: $0.text) }
     bodyScroll = content.bodyMaxHeight == nil ? nil : NSScrollView()
     inputView = content.input.map { DialogInputView(input: $0) }
     listField = content.listItems.isEmpty ? nil : DialogListView(heading: content.listHeading, items: content.listItems)
@@ -70,6 +76,7 @@ final class DialogSheetView: NSView {
       button.state = box.isOn ? .on : .off
       return button
     }
+    checkboxTitleLabel = content.checkbox.map { TokenLabel(labelWithString: $0.title) }
     footerLinkButton = content.footerLink.map {
       ArchiveLinkButton(style: content.footerLinkIsDestructive ? .destructive : .secondary, title: $0, fontSize: 13)
     }
@@ -103,12 +110,12 @@ final class DialogSheetView: NSView {
   private func build() {
     if let iconView { addSubview(iconView) }
     titleField.stringValue = content.title
-    titleField.font = .systemFont(ofSize: 15, weight: .semibold)
+    titleField.font = ShellType.dialogTitle.font
     if content.titleMaxLines > 0 {
       titleField.maximumNumberOfLines = content.titleMaxLines
       titleField.cell?.truncatesLastVisibleLine = true
     }
-    subtitleField?.font = .systemFont(ofSize: 12)
+    subtitleField?.font = ShellType.caption.font
     for (field, paragraph) in zip(paragraphFields, content.paragraphs) {
       field.attributedStringValue = Self.body(paragraph.text)
     }
@@ -129,9 +136,16 @@ final class DialogSheetView: NSView {
     if let inputView { addSubview(inputView) }
     if let listField { addSubview(listField) }
     if let checkboxButton {
-      checkboxButton.font = .systemFont(ofSize: 13)
+      checkboxButton.font = ShellType.body.font
       checkboxButton.setAccessibilityIdentifier(AXID.Dialog.checkbox)
       addSubview(checkboxButton)
+    }
+    if let checkboxTitleLabel {
+      checkboxTitleLabel.font = ShellType.body.font
+      checkboxTitleLabel.isSelectable = false
+      checkboxTitleLabel.passesMouseThrough = true
+      checkboxTitleLabel.setAccessibilityElement(false)
+      addSubview(checkboxTitleLabel, positioned: .above, relativeTo: checkboxButton)
     }
     if let footerLinkButton {
       footerLinkButton.target = self
@@ -190,7 +204,7 @@ final class DialogSheetView: NSView {
     let paragraph = NSMutableParagraphStyle()
     paragraph.minimumLineHeight = bodyLineHeight
     paragraph.maximumLineHeight = bodyLineHeight
-    return NSAttributedString(string: text, attributes: [.font: NSFont.systemFont(ofSize: 13),
+    return NSAttributedString(string: text, attributes: [.font: ShellType.body.font,
                                                           .paragraphStyle: paragraph])
   }
 
@@ -206,8 +220,9 @@ final class DialogSheetView: NSView {
     }
     if let checkboxButton {
       checkboxButton.attributedTitle = NSAttributedString(string: checkboxButton.title, attributes: [
-        .font: NSFont.systemFont(ofSize: 13), .foregroundColor: ShellTokens.primaryText.resolve(flavor).nsColor(),
+        .font: ShellType.body.font, .foregroundColor: NSColor.clear,
       ])
+      checkboxTitleLabel?.textColor = ShellTokens.primaryText.resolve(flavor).nsColor()
     }
   }
 
@@ -262,6 +277,7 @@ final class DialogSheetView: NSView {
       checkboxButton.frame = NSRect(x: textX, y: y + Self.paragraphGap, width: min(ceil(size.width), textWidth),
                                     height: ceil(size.height))
       y = checkboxButton.frame.maxY
+      placeCheckboxTitle(over: checkboxButton)
     }
     if besideIcon, let iconView { y = max(y, iconView.frame.maxY) }
     let height = DialogMetrics.buttonHeight
@@ -289,6 +305,25 @@ final class DialogSheetView: NSView {
                                       height: size.height)
     }
     return y + height + side
+  }
+
+  /// The title label on the button's title rect: the same origin and baseline the cell draws its title at, on the
+  /// title's leading edge in either layout direction. The dialog checkbox is never disabled (`DialogContent.Checkbox`
+  /// has no such state), so the label does not mirror `isEnabled`.
+  private func placeCheckboxTitle(over button: NSButton) {
+    guard let checkboxTitleLabel, let cell = button.cell else { return }
+    let title = button.convert(cell.titleRect(forBounds: button.bounds), to: self)
+    let frame = button.frame
+    let rightToLeft = button.userInterfaceLayoutDirection == .rightToLeft
+    // The cell's size, not `intrinsicContentSize`, which can lag the font and attributes set after creation.
+    let size = checkboxTitleLabel.cell?.cellSize ?? checkboxTitleLabel.intrinsicContentSize
+    // No wider than the button's title, plus the label's own inset on both sides of its text.
+    let room = (rightToLeft ? title.maxX - frame.minX : frame.maxX - title.minX) + 2 * Self.labelTextInset
+    let width = min(ceil(size.width), max(0, room))
+    let x = rightToLeft ? title.maxX + Self.labelTextInset - width : title.minX - Self.labelTextInset
+    checkboxTitleLabel.alignment = rightToLeft ? .right : .left
+    checkboxTitleLabel.frame = NSRect(x: x, y: (title.midY - size.height / 2).rounded(), width: width,
+                                      height: ceil(size.height))
   }
 
   private func place(_ field: NSTextField, x: CGFloat, y: CGFloat, width: CGFloat, maxLines: Int = 0) -> CGFloat {
@@ -375,14 +410,14 @@ final class DialogInputView: NSView {
   init(input: DialogContent.Input) {
     super.init(frame: .zero)
     wantsLayer = true
-    layer?.cornerRadius = 8
+    layer?.cornerRadius = DialogMetrics.inputRadius
     layer?.cornerCurve = .continuous
     field.stringValue = input.text
     field.isBordered = false
     field.isBezeled = false
     field.drawsBackground = false
     field.focusRingType = .none
-    field.font = .systemFont(ofSize: 13)
+    field.font = ShellType.body.font
     field.lineBreakMode = .byTruncatingTail
     field.cell?.usesSingleLineMode = true
     field.setAccessibilityLabel(input.accessibilityLabel)
@@ -416,9 +451,10 @@ final class DialogInputView: NSView {
 
 enum DialogMetrics {
   static let buttonHeight: CGFloat = 28
-  static let sheetCornerRadius: CGFloat = 14
-  static let panelCornerRadius: CGFloat = 12
-  static let alertCornerRadius: CGFloat = 14
+  static let sheetCornerRadius = ShellRadius.sheet
+  static let panelCornerRadius = ShellRadius.popover
+  static let alertCornerRadius = ShellRadius.sheet
+  static let inputRadius = ShellRadius.control
 }
 
 // MARK: - Icon
@@ -426,6 +462,8 @@ enum DialogMetrics {
 /// The dialog's icon: the plain app icon, or a Space's theme swatch (32 pt, radius 8) with its mark centered.
 @MainActor
 final class DialogIconView: NSView {
+  /// An emoji icon.
+  static let emojiFontSize: CGFloat = 17
   let icon: DialogContent.Icon
   /// The decoded `.image` icon, decoded once here rather than on every draw.
   private let image: NSImage?
@@ -486,7 +524,7 @@ final class DialogIconView: NSView {
       image.draw(in: NSRect(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2,
                             width: size.width, height: size.height))
     case .emoji(let text)?:
-      let string = NSAttributedString(string: text, attributes: [.font: NSFont.systemFont(ofSize: 17)])
+      let string = NSAttributedString(string: text, attributes: [.font: NSFont.systemFont(ofSize: Self.emojiFontSize)])
       let size = string.size()
       string.draw(at: NSPoint(x: (bounds.width - size.width) / 2, y: (bounds.height - size.height) / 2))
     case nil:
@@ -506,15 +544,18 @@ final class DialogListView: NSView {
   let itemFields: [NSTextField]
 
   init(heading: String?, items: [String]) {
-    headingField = heading.map { NSTextField(labelWithString: $0) }
-    itemFields = items.map { NSTextField(wrappingLabelWithString: $0) }
+    headingField = heading.map { TokenLabel(labelWithString: $0) }
+    itemFields = items.map { TokenLabel(wrappingLabelWithString: $0) }
     super.init(frame: .zero)
     wantsLayer = true
-    layer?.cornerRadius = 10
+    layer?.cornerRadius = ShellRadius.field
     layer?.cornerCurve = .continuous
-    headingField?.font = .systemFont(ofSize: 12, weight: .semibold)
-    for field in itemFields { field.font = .systemFont(ofSize: 13) }
-    for field in [headingField].compactMap({ $0 }) + itemFields { addSubview(field) }
+    headingField?.font = ShellType.captionEmphasis.font
+    for field in itemFields { field.font = ShellType.body.font }
+    for field in [headingField].compactMap({ $0 }) + itemFields {
+      field.isSelectable = false
+      addSubview(field)
+    }
   }
 
   @available(*, unavailable)

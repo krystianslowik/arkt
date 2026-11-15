@@ -4,7 +4,7 @@ import EngineAPI
 /// One extension in the Extensions panel (design/extensions, direction C): a grip (pinned rows only), the icon (or a
 /// neutral puzzle tile without one), the name, the status line, the pin toggle and the "..." button. Clicking the icon
 /// and labels runs the action anchored to this row. Right-click, Ctrl-click, "..." and the accessibility show-menu
-/// action open the engine's context menu (#596, `ExtensionContextMenuView`). Pinned rows offer Move Left and Move Right
+/// action open the engine's context menu (#596, `ExtensionContextMenuView`). Pinned rows offer Move Up and Move Down
 /// as accessibility actions, so a drag is never the only way to order them. Frames are set in `layout()`.
 @MainActor
 final class ExtensionsPanelRow: ExtensionContextMenuView {
@@ -25,7 +25,7 @@ final class ExtensionsPanelRow: ExtensionContextMenuView {
 
   var onRun: (@MainActor (ExtensionsPanelRow) -> Void)?
   var onTogglePin: (@MainActor (ExtensionsPanelRow) -> Void)?
-  /// Move Left (-1) or Move Right (1); true when it moved.
+  /// Move Up (-1) or Move Down (1); true when it moved.
   var onMove: (@MainActor (ExtensionsPanelRow, Int) -> Bool)?
 
   var isPinned: Bool { action.isPinned }
@@ -56,8 +56,8 @@ final class ExtensionsPanelRow: ExtensionContextMenuView {
       label.cell?.truncatesLastVisibleLine = true
       label.setAccessibilityElement(false)
     }
-    nameLabel.font = .systemFont(ofSize: 13)
-    statusLabel.font = .systemFont(ofSize: 12)
+    nameLabel.font = ShellType.body.font
+    statusLabel.font = ShellType.caption.font
     runButton.target = self
     runButton.action = #selector(runPressed(_:))
     pinToggle.target = self
@@ -112,13 +112,13 @@ final class ExtensionsPanelRow: ExtensionContextMenuView {
     guard let place else { return [] }
     var actions: [NSAccessibilityCustomAction] = []
     if place.index > 0 {
-      actions.append(NSAccessibilityCustomAction(name: "Move Left") { [weak self] in
+      actions.append(NSAccessibilityCustomAction(name: "Move Up") { [weak self] in
         guard let self else { return false }
         return MainActor.assumeIsolated { self.onMove?(self, -1) ?? false }
       })
     }
     if place.index < place.count - 1 {
-      actions.append(NSAccessibilityCustomAction(name: "Move Right") { [weak self] in
+      actions.append(NSAccessibilityCustomAction(name: "Move Down") { [weak self] in
         guard let self else { return false }
         return MainActor.assumeIsolated { self.onMove?(self, 1) ?? false }
       })
@@ -186,7 +186,7 @@ final class ExtensionsPanelRow: ExtensionContextMenuView {
       tile.frame = CGRect(x: iconX, y: iconY, width: m.iconSize, height: m.iconSize)
       glyph.frame = CGRect(x: (m.iconSize - 16) / 2, y: (m.iconSize - 16) / 2, width: 16, height: 16)
       dot.frame = CGRect(x: iconX + m.iconSize - 6, y: iconY - 2, width: 8, height: 8)
-      dot.cornerRadius = 4
+      dot.cornerRadius = ExtensionsPanelMetrics.dotRadius
     }
   }
 

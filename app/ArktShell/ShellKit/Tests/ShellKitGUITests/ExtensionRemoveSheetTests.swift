@@ -268,5 +268,8 @@ final class ExtensionRemoveSheetTests: XCTestCase {
     try openSheet("a")
     XCTAssertFalse(panel.isShown)
     XCTAssertTrue(panelWindow.isVisible, "the fade runs")
+    // The fade's completion takes the panel off its window and lets it go. It runs on a turn of the run loop, which
+    // nothing turns between tests, so the test lets it end rather than leave the panel to a later class (#817).
+    waitUntil("the panel faded out") { panelWindow.parent == nil && !panelWindow.isVisible }
   }
 }

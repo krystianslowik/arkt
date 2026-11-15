@@ -144,7 +144,7 @@ public final class SidebarOverflowPill: NSView {
     surface.cornerCurve = .continuous
     surface.borderWidth = 0.5
     layer?.addSublayer(surface)
-    label.font = .systemFont(ofSize: 11, weight: .regular)
+    label.font = ShellType.footnote.font
     label.setAccessibilityElement(false)
     label.cell?.setAccessibilityElement(false)
     chevron.imageScaling = .scaleProportionallyUpOrDown

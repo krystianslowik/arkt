@@ -32,8 +32,11 @@ final class InfobarWindowTests: XCTestCase {
     controller.infobarStrips.reduceMotion = { true }
   }
 
+  // XCTest keeps each test case object until the run ends: release the windows too, not only hide them (#805).
   override func tearDown() async throws {
     controller.close()
+    controller = nil
+    engine = nil
   }
 
   func testTheShownTabsInfobarGetsAStripOverTheWindowAndAnActionReachesTheEngine() throws {

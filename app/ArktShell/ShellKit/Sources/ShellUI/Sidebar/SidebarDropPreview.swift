@@ -271,7 +271,7 @@ final class SidebarDropCanvas: NSView {
   static let lineHeight: CGFloat = 2
   /// design/drag-hint-focus-ring: the slot in the open gap is 30 pt high with a radius of 9, the row width.
   static let slotHeight: CGFloat = 30
-  static let slotCornerRadius: CGFloat = 9
+  static let slotCornerRadius = ShellRadius.row
 
   let slot = CALayer()
   let line = CALayer()

@@ -102,8 +102,8 @@ final class DownloadRowView: NSView {
 
   private var tileSize: CGFloat { style == .popover ? DownloadsMetrics.tilePopover : DownloadsMetrics.tileLibrary }
   var rowHeight: CGFloat { style == .popover ? DownloadsMetrics.popoverRowMin : DownloadsMetrics.libraryRow }
-  private var nameFont: NSFont { .systemFont(ofSize: 13, weight: .medium) }
-  private var statusFont: NSFont { .systemFont(ofSize: 11.5) }
+  private var nameFont: NSFont { ShellType.rowTitle.font }
+  private var statusFont: NSFont { ShellType.hint.font }
 
   // MARK: State
 

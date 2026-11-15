@@ -48,8 +48,9 @@ public final class SidebarOverlayView: NSView {
   public var isAnimating: Bool { driver.isRunning }
   /// Pacing of the last finished reveal or conceal.
   public private(set) var lastPacing: FrameStats?
-  /// 0 concealed to 1 revealed, on every frame and when docking (1). The root fades the traffic lights with it.
-  public var onRevealProgress: (@MainActor (CGFloat) -> Void)?
+  /// What the overlay presents, on every frame and when docking (no slide, opaque): its layer translation along x and
+  /// its opacity (0 while concealed). The root draws the traffic lights with it (#807).
+  public var onPresent: (@MainActor (_ slide: CGFloat, _ alpha: CGFloat) -> Void)?
   /// Test hook: a reveal (true) or conceal (false) came to rest.
   @_spi(Smoke) public var onSettleForTesting: (@MainActor (Bool) -> Void)?
 
@@ -292,7 +293,7 @@ public final class SidebarOverlayView: NSView {
     guard !isDocked else {
       if let layer, !layer.affineTransform().isIdentity { layer.setAffineTransform(.identity) }
       if alphaValue != 1 { alphaValue = 1 }
-      onRevealProgress?(1)
+      onPresent?(0, 1)
       return
     }
     let p = SidebarRevealMotion.presentation(offset: offset, distance: -concealedOffset,
@@ -300,7 +301,7 @@ public final class SidebarOverlayView: NSView {
     let transform = CGAffineTransform(translationX: p.translation, y: 0)
     if let layer, layer.affineTransform() != transform { layer.setAffineTransform(transform) }
     if alphaValue != p.alpha { alphaValue = p.alpha }
-    onRevealProgress?(isHidden ? 0 : p.progress)
+    onPresent?(p.translation, isHidden ? 0 : p.alpha)
   }
 
   /// A backing change can reset the layer's geometry; present the current offset again.
