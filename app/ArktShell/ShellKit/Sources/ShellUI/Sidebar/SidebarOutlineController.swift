@@ -1113,7 +1113,11 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
         syncDisplay(id)
       }
       if case .split(let split) = location {                 // title from panes
-        if split == renamingNode { renameReloadPending = true } else { outlineView.reloadItem(parent, reloadChildren: false) }
+        if split == renamingNode {
+          renameReloadPending = true
+        } else {
+          outlineView.reloadItem(parent, reloadChildren: false)
+        }
       }
     default:
       return
