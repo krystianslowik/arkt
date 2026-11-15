@@ -7889,8 +7889,12 @@ the process.
 - GUI, `AAWindowLeakGuardTests`, `InfobarKeyboardTests` (29, 9 new), `InfobarPresenterTests`, `InfobarWindowTests`
   (1 new), `LittleArktDialogTests` (1 new), `ZzzWindowLeakGuardEndTests`: 105 run, 0 failures (after the breaks were
   restored).
-- Whole `ShellKitGUITests` bundle (`ShellWindow` is shared): GUI_BUNDLE_RESULT.
+- Whole `ShellKitGUITests` bundle (`ShellWindow` is shared), before merging `main`: 2265 run, 51 skipped, 0 failures
+  (load average 14 to 15, so the pacing gates only reported).
+- After merging `main` (`805e9ff9`): ShellKit `swift test --skip ShellKitGUITests` passes (1573, 44, 60, 29, 289, 49,
+  350, 227, 39); `--filter 'LintTests|IsolationTests'` 13 + 60; ArktCore 235.
 - ArktCore `swift test`: 235 tests passed.
+- 20 runs of `AAWindowLeakGuardTests`, `InfobarKeyboardTests`, `InfobarWindowTests`, `LittleArktDialogTests`, `ZzzWindowLeakGuardEndTests` (69 tests each), under the machine's own load (1-minute load average 6.6 to 9.1, no load added): 20 passed, 0 failed.
 
 ### Patch budget
 
