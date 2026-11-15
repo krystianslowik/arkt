@@ -13,9 +13,6 @@ extension ShellWindowController {
     }
     presenter.focusPage = { [weak self] tab in self?.engine.focusPage(of: tab) }
     presenter.focusPageAtEdge = { [weak self] tab, edge in self?.engine.focusPage(of: tab, at: edge) }
-    (window as? ShellWindow)?.keyViewHandoff = { [weak self] view, reverse in
-      self?.infobarStrips.focusStrip(leaving: view, reverse: reverse) ?? false
-    }
     return presenter
   }
 

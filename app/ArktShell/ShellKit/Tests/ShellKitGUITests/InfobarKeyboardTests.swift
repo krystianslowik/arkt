@@ -254,6 +254,99 @@ final class InfobarKeyboardTests: XCTestCase {
     XCTAssertEqual(pageFocused, [tab])
   }
 
+  // MARK: VoiceOver (#941)
+
+  /// The controls VoiceOver was told the keyboard moved to, by label, in order.
+  private func recordFocusChanges() throws -> () -> [String?] {
+    var posted: [String?] = []
+    try strip().postFocusChange = { posted.append($0.accessibilityLabel()) }
+    return { posted }
+  }
+
+  /// What accessibility reports as focused in the strip while its stack holds the keyboard.
+  private func accessibilityFocus() throws -> String? {
+    (try strip().stack.accessibilityFocusedUIElement as? NSButton)?.accessibilityLabel()
+  }
+
+  /// The same, resolved from the strip's window, the way VoiceOver asks the key window for its focused element.
+  private func windowAccessibilityFocus() throws -> String? {
+    (try strip().panel.accessibilityFocusedUIElement as? NSButton)?.accessibilityLabel()
+  }
+
+  func testF6IntoTheStripTellsVoiceOverWhichControlHasTheKeyboard() throws {
+    engine.raiseInfobar(in: tab, message: "One")
+    let posted = try recordFocusChanges()
+    presenter.focusStrip(of: tab, holding: nil)
+    XCTAssertEqual(posted(), ["OK"])
+    XCTAssertEqual(try accessibilityFocus(), "OK", "the stack reports the control, not itself")
+    XCTAssertEqual(try windowAccessibilityFocus(), "OK", "and the strip's window resolves to it")
+  }
+
+  /// A new list that leaves the keyboard on the same control (another infobar arrives, a row's values refresh) tells
+  /// VoiceOver nothing again (#943 review): only a move to another control is posted.
+  func testAListChangeThatKeepsTheFocusedControlTellsVoiceOverNothingAgain() throws {
+    let first = try XCTUnwrap(engine.raiseInfobar(in: tab, message: "One"))
+    let posted = try recordFocusChanges()
+    presenter.focusStrip(of: tab, holding: nil)
+    XCTAssertEqual(posted(), ["OK"])
+    engine.raiseInfobar(in: tab, message: "Two")
+    XCTAssertEqual(try strip().rows.count, 2)
+    let refreshed = Infobar(id: first, tab: tab, message: "One, refreshed", ok: InfobarButton(title: "OK"),
+                            cancel: InfobarButton(title: "Cancel"), closeLabel: "Close")
+    presenter.handle(.infobarsChanged(tab, [refreshed] + Array(try strip().infobars.dropFirst())))
+    XCTAssertEqual(try strip().rows.first?.infobar.message, "One, refreshed")
+    XCTAssertEqual(try focused(), "OK")
+    XCTAssertEqual(posted(), ["OK"], "the same control: no second announcement")
+  }
+
+  /// Left and Right on a row with one control go around to that same control: nothing new to tell.
+  func testLeftAndRightOnAOneControlRowTellVoiceOverNothingAgain() throws {
+    engine.raiseInfobar(in: tab, message: "Note", okTitle: nil, cancelTitle: nil)
+    let posted = try recordFocusChanges()
+    presenter.focusStrip(of: tab, holding: nil)
+    XCTAssertEqual(try focused(), "Close")
+    try press(Key.right)
+    try press(Key.left)
+    XCTAssertEqual(try focused(), "Close")
+    XCTAssertEqual(posted(), ["Close"])
+  }
+
+  func testTabFromThePageTellsVoiceOverWhereItLands() throws {
+    engine.raiseInfobar(in: tab, message: "One")
+    let posted = try recordFocusChanges()
+    presenter.focusStrip(leaving: page, reverse: true)
+    XCTAssertEqual(posted(), ["Close"])
+    XCTAssertEqual(try accessibilityFocus(), "Close")
+    XCTAssertEqual(try windowAccessibilityFocus(), "Close")
+  }
+
+  func testEveryMoveInsideTheStripIsToldAndLeavingItIsNot() throws {
+    engine.raiseInfobar(in: tab, message: "One")
+    engine.raiseInfobar(in: tab, message: "Two", cancelTitle: nil)
+    let posted = try recordFocusChanges()
+    presenter.focusStrip(of: tab, holding: nil)
+    try press(Key.tab, "\t")
+    try press(Key.right)
+    try press(Key.down)
+    try press(Key.down)
+    XCTAssertEqual(posted(), ["OK", "Cancel", "Close", "Close"], "Down past the last row moves nothing: no repeat")
+    try press(Key.escape, "\u{1b}")
+    XCTAssertEqual(posted().count, 4, "leaving for the page tells nothing more")
+    XCTAssertNil(try accessibilityFocus(), "the stack no longer points at a control")
+  }
+
+  func testWhenTheFocusedRowGoesVoiceOverIsToldWhereTheKeyboardWent() throws {
+    engine.raiseInfobar(in: tab, message: "One")
+    let second = try XCTUnwrap(engine.raiseInfobar(in: tab, message: "Two"))
+    let posted = try recordFocusChanges()
+    presenter.focusStrip(leaving: page, reverse: true)
+    XCTAssertEqual(posted(), ["Close"])
+    engine.removeInfobar(second)
+    XCTAssertEqual(try strip().keyboardFocus?.index, 0, "the row that is left, at its first control")
+    XCTAssertEqual(posted(), ["Close", "OK"])
+    XCTAssertEqual(try accessibilityFocus(), "OK")
+  }
+
   func testAShellWindowHandsTabOutOfThePageToItsHandlerFirst() throws {
     let shell = ShellWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 200))
     defer { shell.close() }

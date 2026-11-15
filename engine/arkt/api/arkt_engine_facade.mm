@@ -3877,15 +3877,17 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
 }
 
 - (void)focusThroughTabTraversal:(BOOL)reverse {
-  arkt::CheckFacadeEntry();
+  // FocusThroughTabTraversal only moves the page's own focus
+  // (SetInitialFocus); -focus makes the contents the first responder first,
+  // as a direct selection, so WebContentsViewMac does not traverse a second
+  // time. Focus() adds no focus or blur on the element the page had focused
+  // (#941: checked with focusin and focusout on the self-test; the
+  // traversal itself blurs it, as Tab would).
+  [self focus];
   if (_parked) {
     return;
   }
-  // FocusThroughTabTraversal only moves the page's own focus
-  // (SetInitialFocus); Focus makes the contents the first responder first, as
-  // a direct selection, so WebContentsViewMac does not traverse a second time.
   if (content::WebContents* contents = self.contents) {
-    contents->Focus();
     contents->FocusThroughTabTraversal(reverse);
   }
 }

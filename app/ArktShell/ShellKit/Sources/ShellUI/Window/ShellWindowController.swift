@@ -287,6 +287,11 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     }
     engineHost.controller = self
     window.commandHost = engineHost
+    // Tab out of a page reaches its infobar strip (#930); set with the window, as Little Arkt does, not in the
+    // presenter's lazy factory (#941).
+    window.keyViewHandoff = { [weak self] view, reverse in
+      self?.infobarStrips.focusStrip(leaving: view, reverse: reverse) ?? false
+    }
     let toastView = ToastView(frame: .zero)
     toastView.presenter = toasts
     root.card.toastView = toastView
