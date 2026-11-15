@@ -17,9 +17,19 @@ public struct ArchiveStore: Sendable {
   /// `archived_item.format_version`: the version of the stored `NodeSnapshot` JSON. It is versioned apart from the
   /// sidebar document (`SidebarStorageFormat.currentVersion`) because a snapshot holds no Space data: sidebar format
   /// 2 added `Space.icon` and left `NodeSnapshot` unchanged, so archive rows stay at 1 and builds that read only
-  /// version 1 keep reading them. Version 2 adds the node custom icon; version 1 snapshots decode without it.
-  /// Bump this only when `NodeSnapshot`'s stored shape changes.
-  public static let snapshotFormatVersion = 2
+  /// version 1 keep reading them. Bump this only when `NodeSnapshot`'s stored shape changes. Version 2 adds the node
+  /// custom icon (#339); version 1 snapshots decode without it. Version 3 adds a split's title (`SplitItem.title`,
+  /// #787); a version 1 or 2 row is read with its splits unnamed. This is the newest version this build reads and
+  /// writes; each row is stamped with the oldest version that holds it (`formatVersion(of:)`).
+  public static let snapshotFormatVersion = 3
+
+  /// The version a row is stamped with: 3 when a split in `snapshot` has a title, else 2 when a node has a custom
+  /// icon, else 1, so builds that read only an older version (an older release, or a bisect) keep reading every row
+  /// that does not need a newer field.
+  static func formatVersion(of snapshot: NodeSnapshot) -> Int {
+    if snapshot.containsSplitTitle { return 3 }
+    return snapshot.containsCustomIcon ? 2 : 1
+  }
 
   let database: ArktDatabase
 
@@ -57,7 +67,7 @@ public struct ArchiveStore: Sendable {
         try db.execute(
           sql: sql,
           arguments: [
-            row.id, Self.snapshotFormatVersion, row.reason, row.archivedAt, row.sourceKind,
+            row.id, row.formatVersion, row.reason, row.archivedAt, row.sourceKind,
             row.sourceSpaceID, row.sectionKind, row.sectionProfile, row.title, row.url, row.snapshot,
             row.searchText,
           ])
@@ -223,9 +233,11 @@ private struct InsertRow: Sendable {
   var url: String?
   var snapshot: Data
   var searchText: String
+  var formatVersion: Int
 
   init(_ item: ArchivedItem, encoder: JSONEncoder) throws {
     id = item.id.uuidString
+    formatVersion = ArchiveStore.formatVersion(of: item.snapshot)
     reason = item.reason.rawValue
     archivedAt = item.archivedAt.timeIntervalSinceReferenceDate
     switch item.source {
@@ -276,8 +288,9 @@ private struct FetchedRow: Sendable {
       let version = formatVersion, version <= ArchiveStore.snapshotFormatVersion,
       let reason = reason.flatMap(ArchiveReason.init(rawValue:)),
       let archivedAt, let body = snapshot,
-      let snapshot = try? decoder.decode(NodeSnapshot.self, from: body), snapshot.id == id
+      let decoded = try? decoder.decode(NodeSnapshot.self, from: body), decoded.id == id
     else { return nil }
+    let snapshot = version >= 3 ? decoded : decoded.withoutSplitTitles()
     let source: ArchiveSource
     switch sourceKind {
     case "space":

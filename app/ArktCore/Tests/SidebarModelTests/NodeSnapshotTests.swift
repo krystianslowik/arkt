@@ -211,4 +211,38 @@ struct NodeSnapshotTests {
     #expect(sidebar.section(of: favorite) == .favorites(profile: "p"))
     #expect(sidebar.section(of: NodeID()) == nil)
   }
+
+  /// #787: whether a split anywhere in the subtree has a title; `withoutSplitTitles()` removes every one.
+  @Test func containsSplitTitleFindsANamedSplitAtAnyDepth() {
+    let tab = NodeSnapshot(kind: .tab(TabItem(url: URL(string: "https://example.com")!, title: "T")),
+                           createdAt: .distantPast)
+    func split(_ title: String?) -> NodeSnapshot {
+      NodeSnapshot(kind: .split(SplitItem(orientation: .vertical, widthFactors: [0.5, 0.5], title: title)),
+                   createdAt: .distantPast, children: [tab, tab.withFreshIDs()])
+    }
+    #expect(!tab.containsSplitTitle)
+    #expect(!split(nil).containsSplitTitle)
+    #expect(split("Research").containsSplitTitle)
+    let folder = NodeSnapshot(kind: .folder(FolderItem(title: "F")), createdAt: .distantPast,
+                              children: [tab, split("Research")])
+    #expect(folder.containsSplitTitle)
+    #expect(!folder.withoutSplitTitles().containsSplitTitle)
+  }
+
+  /// A node icon at any depth needs archive snapshot format 2 (#339), and stripping split titles keeps it.
+  @Test func containsCustomIconFindsAnIconAtAnyDepthAndSurvivesTheTitleStrip() {
+    var tab = NodeSnapshot(kind: .tab(TabItem(url: URL(string: "https://example.com")!, title: "T")),
+                           createdAt: .distantPast)
+    let folder = NodeSnapshot(kind: .folder(FolderItem(title: "F")), createdAt: .distantPast, children: [tab])
+    #expect(!folder.containsCustomIcon)
+    tab.customIcon = .symbol("star")
+    let split = NodeSnapshot(kind: .split(SplitItem(orientation: .vertical, widthFactors: [0.5, 0.5], title: "S")),
+                             createdAt: .distantPast, children: [tab, tab.withFreshIDs()])
+    let nested = NodeSnapshot(kind: .folder(FolderItem(title: "F")), createdAt: .distantPast, children: [split])
+    #expect(nested.containsCustomIcon)
+    let stripped = nested.withoutSplitTitles()
+    #expect(!stripped.containsSplitTitle)
+    #expect(stripped.containsCustomIcon)
+    #expect(stripped.children[0].children[0].customIcon == .symbol("star"))
+  }
 }

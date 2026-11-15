@@ -178,7 +178,9 @@ struct ArchiveStoreTests {
     #expect(try await store.count() == 0)
   }
 
-  /// Archive rows carry the snapshot format version, independently of the sidebar document.
+  /// Archive rows carry the snapshot's own format version, not the sidebar document's: sidebar format 2 (Space icons)
+  /// did not change `NodeSnapshot`. Snapshot format 2 adds a node icon (#339) and format 3 a split's title (#787);
+  /// each row is stamped with the oldest version that holds it, so older builds keep reading every row they can.
   @Test func archivedRowsAreStampedWithTheSnapshotFormatVersion() async throws {
     let database = try ArktDatabase.inMemory()
     let store = ArchiveStore(database: database)
@@ -190,8 +192,8 @@ struct ArchiveStoreTests {
       try Int.fetchOne(
         db, sql: "SELECT format_version FROM archived_item WHERE id = ?", arguments: [itemID.uuidString])
     }
-    #expect(stamped == 2)
-    #expect(ArchiveStore.snapshotFormatVersion == 2)
+    #expect(stamped == 2, "a node icon needs version 2, and nothing newer")
+    #expect(ArchiveStore.snapshotFormatVersion == 3)
     #expect(try await store.items().items == [item])
   }
 
@@ -254,6 +256,78 @@ struct ArchiveStoreTests {
     }
     #expect(try await store.items() == ArchivePage(items: [good], unreadable: 3))
     #expect(try await store.count() == 4)
+  }
+
+  /// A renamed split keeps its name in the Archive, so a restore brings it back named (#787).
+  @Test func aSplitTitleRoundTrips() async throws {
+    let store = ArchiveStore(database: try ArktDatabase.inMemory())
+    let pane = NodeSnapshot(kind: .tab(TabItem(url: URL(string: "https://example.com/p")!, title: "P")),
+                            createdAt: Self.at(0))
+    let split = NodeSnapshot(
+      kind: .split(SplitItem(orientation: .vertical, widthFactors: [0.5, 0.5], title: "Research")),
+      createdAt: Self.at(0), children: [pane, pane.withFreshIDs()])
+    let item = ArchivedItem(reason: .manual, archivedAt: Self.at(1), source: .unknown, snapshot: split)
+    _ = try await store.add([item], onConflict: .replace)
+    #expect(try await store.items().items == [item])
+  }
+
+  /// Each row is stamped with the oldest version that holds it: 3 when a split somewhere in its snapshot has a title,
+  /// else 2 when a node has a custom icon, else 1. An unnamed split, a named split inside a folder and an icon are
+  /// told apart.
+  @Test func eachRowIsStampedWithTheOldestVersionThatHoldsIt() async throws {
+    let database = try ArktDatabase.inMemory()
+    let store = ArchiveStore(database: database)
+    let pane = NodeSnapshot(kind: .tab(TabItem(url: URL(string: "https://example.com/p")!, title: "P")),
+                            createdAt: Self.at(0))
+    func split(_ title: String?) -> NodeSnapshot {
+      NodeSnapshot(kind: .split(SplitItem(orientation: .horizontal, widthFactors: [0.5, 0.5], title: title)),
+                   createdAt: Self.at(0), children: [pane.withFreshIDs(), pane.withFreshIDs()])
+    }
+    let unnamed = ArchivedItem(reason: .manual, archivedAt: Self.at(1), source: .unknown, snapshot: split(nil))
+    let named = ArchivedItem(reason: .manual, archivedAt: Self.at(2), source: .unknown, snapshot: split("Research"))
+    let folder = NodeSnapshot(kind: .folder(FolderItem(title: "F")), createdAt: Self.at(0),
+                              children: [pane.withFreshIDs(), split("Inner")])
+    let nested = ArchivedItem(reason: .manual, archivedAt: Self.at(3), source: .unknown, snapshot: folder)
+    var iconSnapshot = split(nil)
+    iconSnapshot.children[0].customIcon = .symbol("star")
+    let iconOnly = ArchivedItem(reason: .manual, archivedAt: Self.at(4), source: .unknown, snapshot: iconSnapshot)
+    var bothSnapshot = split("Both")
+    bothSnapshot.customIcon = .emoji("A")
+    let both = ArchivedItem(reason: .manual, archivedAt: Self.at(5), source: .unknown, snapshot: bothSnapshot)
+    _ = try await store.add([unnamed, named, nested, iconOnly, both], onConflict: .replace)
+    let stamps = try await database.writer.read { db in
+      try Dictionary(uniqueKeysWithValues: Row.fetchAll(db, sql: "SELECT id, format_version FROM archived_item")
+        .map { (row: Row) -> (String, Int) in (row["id"], row["format_version"]) })
+    }
+    #expect(stamps == [unnamed.id.uuidString: 1, named.id.uuidString: 3, nested.id.uuidString: 3,
+                       iconOnly.id.uuidString: 2, both.id.uuidString: 3])
+    #expect(try await store.items().items == [both, iconOnly, nested, named, unnamed])
+  }
+
+  /// A split `title` key is not part of snapshot formats 1 and 2: such a row that holds one is read without it. A
+  /// version 2 row keeps its node icons; a version 1 row has none in its format.
+  @Test(arguments: [1, 2])
+  func anOlderRowIgnoresASplitTitle(version: Int) async throws {
+    let database = try ArktDatabase.inMemory()
+    let store = ArchiveStore(database: database)
+    let pane = NodeSnapshot(kind: .tab(TabItem(url: URL(string: "https://example.com/p")!, title: "P")),
+                            createdAt: Self.at(0))
+    var split = NodeSnapshot(
+      kind: .split(SplitItem(orientation: .horizontal, widthFactors: [0.5, 0.5], title: "Research")),
+      createdAt: Self.at(0), children: [pane, pane.withFreshIDs()])
+    if version == 2 { split.children[0].customIcon = .symbol("star") }
+    let item = ArchivedItem(reason: .manual, archivedAt: Self.at(1), source: .unknown, snapshot: split)
+    _ = try await store.add([item], onConflict: .replace)
+    let itemID = item.id
+    try await database.writer.write { db in
+      try db.execute(sql: "UPDATE archived_item SET format_version = ? WHERE id = ?",
+                     arguments: [version, itemID.uuidString])
+    }
+    let read = try #require(try await store.items().items.first)
+    guard case .split(let stored) = read.snapshot.kind else { Issue.record("not a split"); return }
+    #expect(stored.title == nil)
+    #expect(stored.widthFactors == [0.5, 0.5])
+    #expect(read.snapshot.children[0].customIcon == (version == 2 ? SpaceIcon.symbol("star") : nil))
   }
 
   @Test func folderAndSplitSnapshotsRoundTrip() async throws {

@@ -230,7 +230,8 @@ Reduce Transparency reaches the menus through AppKit, not through us.
 - Menus: native `NSMenu` gives arrow-key navigation, type-ahead, Escape, and VoiceOver item reading for free.
   The context-menu key (VO+Shift+M, or the keyboard's menu key) opens the focused row's menu.
 - Disabled items are skipped by arrows and read as "dimmed"; the enabled rules in section 3 are the contract.
-- Rename field: an `AXTextField` labelled "Tab name" with the current title as its selected value; committing
+- Rename field: an `AXTextField` labelled "Tab name" ("Folder name" on a folder row, "Split View name" on a split
+  row, #787) with the current title as its selected value; committing
   returns focus to the row. VoiceOver announces "Rename, text field" when it opens.
 - Multi-selection: Cmd/Shift-click is pointer-only, so the sidebar's keyboard focus (Ctrl-Space, KB-036) gets
   no multi-select gestures for now (the arrow-key behavior with sidebar focus is itself BH-020,

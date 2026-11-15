@@ -47,12 +47,12 @@ struct SidebarV3LaunchTests {
       #expect(try await SidebarStore(database: state.database).save(sidebar, at: saveDate) == .written)
       let stored = try await state.database.writer.read { try SidebarStore.fetchStored($0) }
       let saved = try #require(stored)
-      #expect(saved.formatVersion == 4)
+      #expect(saved.formatVersion == SidebarStorageFormat.currentVersion)
       let savedBody = try #require(saved.body)
       let json = try #require(try JSONSerialization.jsonObject(with: savedBody) as? [String: Any])
-      #expect(json["version"] as? Int == 4)
+      #expect(json["version"] as? Int == SidebarStorageFormat.currentVersion)
       var expected = try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
-      expected["version"] = 4
+      expected["version"] = SidebarStorageFormat.currentVersion
       #expect((json as NSDictionary) == (expected as NSDictionary))
       try state.database.close()
       let reopened = try await ArktLaunch.openAndLoad(location, now: Date(timeIntervalSinceReferenceDate: 800_000_002))
