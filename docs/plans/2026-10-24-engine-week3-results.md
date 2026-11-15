@@ -7793,3 +7793,20 @@ folder after. Deleted: the throwaway profiles under `profiles/517-20261114/`, th
 app and derived data, the SwiftPM build folder and the bundle's preferences file (`dev.arkt.Arkt.try517.plist`); the
 defaults suites had never been written. Nothing touched a real browser profile, the Keychain (mock keychain, invented
 key), the clipboard, the network (resolver rules), `/Applications/Arkt.app` or `~/Applications/ArktTest`.
+
+## Import result counts (#935)
+
+Follow-up to the #517 import smoke findings, with the maintainer's decisions on #935.
+
+- A type with nothing in Arkt and at least one refused item (`ImportItemCounts.nothingCameOver`) is now a Not imported
+  row with "N couldn't be imported" and Retry (`.notImported(.refused(failed:))`, `ProfileImportSummary.retryTypes`).
+  The notice reads "Some of it couldn't be imported. Retry tries again." unless a type was also unreadable. A cancelled
+  extensions install with nothing in Arkt stays "cancelled", with no Retry.
+- Visits older than the 90-day window are counted apart (`ImportItemCounts.tooOld`) in `ProfileImportRead.history`,
+  before the watermark check, so a re-import reports them the same way. They are left out of the History count and
+  the consent count, and the row adds "N older than 90 days not imported". The engine is unchanged.
+- In the smoke's terms: History now reads 3 with "5 older than 90 days not imported", and Extensions sits under Not
+  imported with Retry; the subtitle reads "Most of it came over.".
+- Not changed: the engine still counts visits with a scheme its history refuses as skipped. The coordinator does not
+  filter schemes, so such visits would still count as in Arkt. Fixture profiles have none.
+- The `=sheet` engine smoke was not run again for this change; the model, coordinator and state tests cover it.
