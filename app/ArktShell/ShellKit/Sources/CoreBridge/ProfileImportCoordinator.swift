@@ -223,7 +223,7 @@ public final class ProfileImportCoordinator {
       // Batches are in time order, so each batch's newest visit is a valid watermark for the rest. Once a batch had
       // visits the engine refused, the watermark stops moving, so those visits are offered again next time.
       var frozen = false
-      return await write(
+      var result = await write(
         type, total: prepared.batches.reduce(0) { $0 + $1.reduce(0) { $0 + $1.visits.count } },
         next: Self.pull(prepared), size: { $0.reduce(0) { $0 + $1.visits.count } }, wipe: { _ in },
         send: { await self.engine.importHistory($0, after: watermark) },
@@ -232,6 +232,11 @@ public final class ProfileImportCoordinator {
           guard !frozen else { return nil }
           return result.latestVisit.map { ArcImportRecord(historyWatermark: $0) }
         }, emit: emit)
+      if case .done(var counts) = result.outcome {
+        counts.tooOld = prepared.tooOld
+        result.outcome = .done(counts)
+      }
+      return result
 
     case .bookmarks:
       let prepared: PreparedBatches<BookmarkRecord>
@@ -315,6 +320,10 @@ public final class ProfileImportCoordinator {
       counts.add(result)
       // A cancelled batch resolves its pending ids as failed, so nothing is recorded as handled.
       if result.failed == 0 { await persist(ArcImportRecord(extensionIDs: Set(ids))) }
+      // Nothing in Arkt because of the cancel is a cancelled type, not a refused one: no Retry (#935).
+      if Task.isCancelled && counts.written + counts.skipped == 0 {
+        return TypeResult(outcome: .skipped(reason: "cancelled"), cancelled: true)
+      }
       return TypeResult(outcome: .done(counts), cancelled: Task.isCancelled)
     }
   }

@@ -60,6 +60,8 @@ public enum BrowserDataNotImportedReason: Equatable, Sendable {
   case keychainDenied
   /// Attempted and not read or written.
   case unreadable
+  /// Attempted, and every item was refused: none is in Arkt (#935).
+  case refused(failed: Int)
 }
 
 public enum BrowserDataRowStatus: Equatable, Sendable {
@@ -71,8 +73,9 @@ public enum BrowserDataRowStatus: Equatable, Sendable {
   case waitingForMac
   /// `done` of `total` items written; a total of 0 is not known yet.
   case working(done: Int, total: Int)
-  /// Came over: `count` items are now in Arkt (written, or already there); `failed` were refused.
-  case imported(count: Int, failed: Int)
+  /// Came over: `count` items are now in Arkt (written, or already there); `failed` were refused. `tooOld` are history
+  /// visits past the 90 days an import keeps, not in Arkt and not in `count` (#935).
+  case imported(count: Int, failed: Int, tooOld: Int = 0)
   /// Not chosen.
   case skipped
   /// Chosen but not run (cancelled, or the engine cannot do it yet).

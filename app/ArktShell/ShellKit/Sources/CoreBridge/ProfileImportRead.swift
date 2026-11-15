@@ -7,6 +7,8 @@ import Foundation
 struct PreparedBatches<Item: Sendable>: Sendable {
   var batches: [[Item]] = []
   var alreadyHandled = 0
+  /// History visits past the retention window: not sent and not in Arkt (#935).
+  var tooOld = 0
 }
 
 /// Everything the profile import reads from the snapshot, off the main actor. Reads only; never writes, and the only
@@ -52,9 +54,17 @@ enum ProfileImportRead {
     }
     if let history = profile.copiedFile("History") {
       do {
-        let summary = try HistoryReader.read(from: history) { _ in }
-        result.counts.historyURLs = summary.urlCount
-        result.counts.historyVisits = summary.visitCount
+        // Only what an import keeps: visits past the retention window are left out of the consent (#935).
+        let oldest = now.addingTimeInterval(-ImportRecording.historyRetention)
+        var urls = 0, visits = 0
+        try HistoryReader.read(from: history) { batch in
+          for entry in batch {
+            let kept = entry.visits.count { $0.time >= oldest }
+            if kept > 0 { urls += 1; visits += kept }
+          }
+        }
+        result.counts.historyURLs = urls
+        result.counts.historyVisits = visits
       } catch { unreadable(.history, "History") }
     } else {
       result.unavailable[.history] = .skipped(reason: notInProfile)
@@ -101,20 +111,23 @@ enum ProfileImportRead {
     var entries: [ImportedHistoryEntry] = []
     var visits: [(entry: Int, visit: HistoryVisit)] = []
     var total = 0
+    var tooOld = 0
     try HistoryReader.read(from: file) { batch in
       for entry in batch {
         let index = entries.count
         entries.append(entry.keepingNoVisits())
         for visit in entry.visits {
           total += 1
-          if visit.time >= oldest, watermark.map({ visit.time > $0 }) ?? true { visits.append((index, visit)) }
+          // Too old wins over the watermark: a visit past the window is not in Arkt, whatever an earlier run did.
+          if visit.time < oldest { tooOld += 1 } else if watermark.map({ visit.time > $0 }) ?? true { visits.append((index, visit)) }
         }
       }
     }
     visits.sort { ($0.visit.time, $0.entry) < ($1.visit.time, $1.entry) }
 
     var result = PreparedBatches<ImportedHistoryEntry>()
-    result.alreadyHandled = total - visits.count
+    result.tooOld = tooOld
+    result.alreadyHandled = total - visits.count - tooOld
     var start = 0
     while start < visits.count {
       var end = min(start + visitsPerBatch, visits.count)
