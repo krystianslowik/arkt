@@ -6872,7 +6872,7 @@ Unchanged: 16 patch files, 8 seam and hook patch files, 22 upstream files outsid
   for the `action` context, Rate, View web permissions, Inspect popup (developer mode), the side panel toggle. The
   design table lists none of them; question on #593.
 - Revoking access to On click marks the page as needing a reload (`TabHelper::SetReloadRequired`); Chrome shows that
-  in its toolbar, Arkt shows nothing yet.
+  in its toolbar, Arkt shows nothing yet. (Checked in #913: Chromium's reload dialog does show, as the 0007 sheet.)
 - The shell's menu and panel against this engine with real input (right-click, Ctrl-click, VoiceOver show-menu) need
   the shell build that hosts the engine.
 
@@ -7911,4 +7911,40 @@ OK`.
 
 Both engine runs and the fixture server stopped by exact PID (`ps -p` prints nothing). No crash reports from these
 runs. Throwaway profiles under `profiles/930-20261115/` deleted. Nothing touched the Keychain (mock keychain only), the
+clipboard or `/Applications/Arkt.app`.
+
+## #913: the reload prompt after an extension's site access is revoked (results only, no change)
+
+Date 2026-11-15. Checked on `out/Arkt` at `63ec2155` (up to date, `Everything is up-to-date`). `$CR` branch `arkt`
+unchanged (0001-0016). No overlay, facade or Swift change.
+
+### Finding
+
+The #593 note "Arkt shows nothing yet" does not hold. Picking When You Click the Extension
+(`ExtensionContextMenuModel::ExecuteCommand(PAGE_ACCESS_RUN_ON_CLICK)`) runs `SitePermissionsHelper::UpdateSiteAccess`,
+which calls `ShowReloadBubbleForAllExtensions`: every tab of the profile on the same origin is marked
+(`TabHelper::SetReloadRequired`), and each marked tab shows `ReloadPageDialogController` when it is visible, or later
+when it becomes visible (`OnVisibilityChanged`). That dialog goes through `ShowDialog(gfx::NativeWindow, ...)`; an Arkt
+window has no Views extensions container, so the 0007 hook shows it as a `ModelSheet` (`ArktDialogSheet`).
+`ON_CLICK` from `chrome://extensions` (`developerPrivate`) only changes the permissions
+(`ScriptingPermissionsModifier`) and marks no tab, as in Chrome.
+
+### Smoke (`out/Arkt/Arkt.app`, `--no-startup-window --arkt-facade-selftest --arkt-engine-test-api --remote-debugging-port`, fresh profiles under `profiles/913-20261115/`, `--use-mock-keychain --mute-audio`, `--host-resolver-rules="MAP * ~NOTFOUND, EXCLUDE 127.0.0.1"`, a loopback fixture server, `site-probe` unpacked, commands through page titles over DevTools)
+
+| Step | Result |
+|---|---|
+| 1. One window on the fixture page, visible; `ext-menu`, then `ext-pick <site probe> 5` | `ARKT: dialog sheet shown` 15 ms after the command; `siteAccess=1`. The sheet: "Reload this page to apply your updated settings for "Arkt site probe" on this site", Cancel and Reload (default) |
+| 2. Two windows and a background tab on the same origin, all covered by other windows (`document.visibilityState` hidden in all three); the same pick | access revoked (`siteAccess=1`), no sheet yet: the tabs are marked, and each shows its own sheet once it becomes visible |
+| `FATAL`, `Check failed`, `DCHECK` (runs 1 and 2) | 0 |
+
+### Maintainer decision (2026-11-15, on #913)
+
+Keep Chromium's reload sheet as it is for now (option 1): no facade value or event, no shell surface. Revisit it when
+the extension request-access button (connector design, E4 item 4) is designed, since both would live in the same place.
+What ships until then: Chromium's wording in the generic Arkt sheet, one sheet per marked tab as it is shown.
+
+### Cleanup
+
+Both runs and the fixture server stopped by exact PID (`ps -p` prints nothing). No crash reports from these runs.
+Throwaway profiles under `profiles/913-20261115/` deleted. Nothing touched the Keychain (mock keychain only), the
 clipboard or `/Applications/Arkt.app`.
