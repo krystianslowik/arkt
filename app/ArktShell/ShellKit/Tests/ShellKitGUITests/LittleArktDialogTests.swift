@@ -151,6 +151,21 @@ final class LittleArktDialogTests: XCTestCase {
     XCTAssertEqual(panel.panel.frame.maxY, top - InfobarMetrics.rowHeight, accuracy: 0.5, "below the row again")
   }
 
+  /// Tab out of the page reaches the strip through the Little Arkt window too (#930).
+  func testTabOutOfThePageReachesTheStripThroughTheWindow() throws {
+    let scene = try makeScene(reduceMotion: true)
+    scene.little.infobarStrips.reduceMotion = { true }
+    scene.engine.raiseInfobar(in: scene.tab, message: "One")
+    let window = try XCTUnwrap(scene.little.window)
+    let page = try XCTUnwrap(scene.engine.contentView(for: scene.tab))
+    let strip = try XCTUnwrap(scene.little.infobarStrips.strip(for: scene.tab))
+    window.selectPreviousKeyView(page)
+    XCTAssertEqual(strip.keyboardFocusedControl?.accessibilityLabel(), "Close", "the strip's last control")
+    strip.endKeyboard(returningToPage: true, at: .last)
+    window.selectNextKeyView(page)
+    XCTAssertEqual(strip.keyboardFocusedControl?.accessibilityLabel(), "OK", "the strip's first control")
+  }
+
   func testThePanelWidthFollowsTheLittleArktWindow() throws {
     let scene = try makeScene()
     scene.little.window.setFrame(NSRect(x: 100, y: 100, width: 360, height: 500), display: false)

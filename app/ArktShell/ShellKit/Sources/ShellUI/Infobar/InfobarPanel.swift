@@ -87,7 +87,7 @@ final class InfobarWindow: NSPanel {
 /// the tab's container, so the page sits below the strip and moves down once when a row arrives; nothing animates
 /// the height. A row that arrives fades in over 0.14 s, none fades out, and Reduce Motion shows both at once; the
 /// presenter says which infobars are new, so one that was on screen before never fades again. The panel never takes key
-/// focus from the page.
+/// focus from the page on its own: only F6, or Tab or Shift-Tab out of the page (#930), put the keyboard in it.
 @MainActor
 final class InfobarPanel: AnchoredPanel {
   let panel: NSPanel
@@ -98,12 +98,13 @@ final class InfobarPanel: AnchoredPanel {
   /// engine's next list drops it.
   var onAction: (@MainActor (Infobar, InfobarAction) -> Void)?
   var reduceMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
-  /// The keyboard left the strip by Esc or F6, or with the strip going down while it held it (no edge: the page gets its
-  /// own focus back), or by Tab past the last control or Shift-Tab before the first (#930: the page's first or last
-  /// element). The owner gives it to the page.
+  /// The keyboard left the strip by Esc or F6, or with the strip going down while it held it (no edge: the page gets
+  /// its own focus back), or by Tab past the last control or Shift-Tab before the first (#930: the page's first or
+  /// last element). The owner gives it to the page.
   var onKeyboardExit: (@MainActor (PageFocusEdge?) -> Void)?
   /// Where F6's keyboard focus is (#478): the infobar's row and the index into its `keyboardControls`; nil while the
-  /// strip does not hold the keyboard, which is always unless F6 put it there.
+  /// strip does not hold the keyboard, which is always unless F6, or Tab or Shift-Tab out of the page (#930), put it
+  /// there.
   private(set) var keyboardFocus: (id: InfobarID, index: Int)?
   private var isShown = false
 

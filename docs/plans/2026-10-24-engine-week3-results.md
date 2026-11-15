@@ -7841,11 +7841,13 @@ the rest of the window's key view loop; without a strip nothing changes.
 |---|---|
 | Focus the last input, `tab-key` | `selectKeyView next sender=WebContentsViewCocoa inCard=yes`; the page's focus leaves to `BODY` |
 | Focus the first input, `tab-key shift` | `selectKeyView previous sender=WebContentsViewCocoa inCard=yes`; `BODY` |
-| `traverse first` | `inPage=yes`; `document.activeElement` the first input |
-| `traverse last` | `inPage=yes`; the last input |
-| `FATAL`, `Check failed`, `DCHECK` (runs 1 and 2) | 0 |
+| Run 3: focus the last input, `tab-key` (focus leaves to `BODY`), then `traverse first` | `inPage=yes`; `document.activeElement` the first input |
+| Run 3: focus the first input, `tab-key shift` (`BODY`), then `traverse last` | `inPage=yes`; the last input |
+| `FATAL`, `Check failed`, `DCHECK` (runs 1 to 3) | 0 |
 
-Run 1 sent the Tab without focusing the page first: the window itself was the first responder and logged the selection
+Run 3 starts each traversal from the state a strip exit leaves: the page has let its focus go through `TakeFocus`.
+`contentView(for:)` in `ChromiumEngine` is the tab's `containerView`; the self-test card holds only that container, so
+`inCard=yes` puts the sender inside it. Run 1 sent the Tab without focusing the page first: the window itself was the first responder and logged the selection
 with itself as the sender; `tab-key` focuses the page since. The self-test window is not a shell window, so the strip
 itself was not driven on the engine; the shell side is covered by `InfobarKeyboardTests` with key events delivered in
 the process.
@@ -7854,16 +7856,23 @@ the process.
 
 - `ShellWindow.selectNextKeyView(_:)` without the handler: `testAShellWindowHandsTabOutOfThePageToItsHandlerFirst`
   fails on all three of its checks (the loop ran, the handler was asked only for Shift-Tab, the declined case).
-- The strip's exit guard disabled: the exit tests and `testTabAndShiftTabGoThroughEveryControlOfEveryRow` fail.
-  Restored: passing.
+- The controllers' `keyViewHandoff =` lines taken out (the `ShellWindowController` one sits in the presenter's lazy
+  factory): `InfobarWindowTests.testTabOutOfThePageReachesTheStripThroughTheWindow` 3 failures,
+  `LittleArktDialogTests.testTabOutOfThePageReachesTheStripThroughTheWindow` 2.
+- #478's wrap-around back in the strip's Tab handling: 9 failures in `testADisabledControlIsSkipped`,
+  `testShiftTabBeforeTheStripsFirstControlEntersThePageAtItsLastElement`,
+  `testTabPastTheStripsLastControlEntersThePageAtItsFirstElement` and
+  `testWithoutAnEdgeHandlerTheStripFallsBackToThePagesLastFocus`. Restored: passing.
 
 ### Tests
 
 - ShellKit `swift test --skip ShellKitGUITests`: every bundle passes (Swift Testing runs of 1567, 44, 60, 29, 289, 49,
   343, 227 and 39 tests), including `EngineABIIsolationTests`; 1 new
   (`focusPageAtAnEdgeAsksTheTabHandleToTraverse`).
-- GUI, `AAWindowLeakGuardTests`, `InfobarKeyboardTests` (29, 9 new), `InfobarPresenterTests`, `InfobarWindowTests`,
-  `LittleArktDialogTests`, `ZzzWindowLeakGuardEndTests`: 103 run, 0 failures (after the breaks were restored).
+- GUI, `AAWindowLeakGuardTests`, `InfobarKeyboardTests` (29, 9 new), `InfobarPresenterTests`, `InfobarWindowTests`
+  (1 new), `LittleArktDialogTests` (1 new), `ZzzWindowLeakGuardEndTests`: 105 run, 0 failures (after the breaks were
+  restored).
+- Whole `ShellKitGUITests` bundle (`ShellWindow` is shared): GUI_BUNDLE_RESULT.
 - ArktCore `swift test`: 235 tests passed.
 
 ### Patch budget

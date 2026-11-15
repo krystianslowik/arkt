@@ -56,6 +56,25 @@ final class InfobarWindowTests: XCTestCase {
     XCTAssertNil(controller.infobarStrips.strip(for: tab), "the engine removed it")
   }
 
+  /// Tab past the page's last element and Shift-Tab before its first reach the window's key view loop with the page's
+  /// view (#930): the window hands them to the tab's strip, at its first or last control.
+  func testTabOutOfThePageReachesTheStripThroughTheWindow() throws {
+    controller.activate(node: first)
+    let tab = try XCTUnwrap(controller.currentTab)
+    engine.raiseInfobar(in: tab, message: "One")
+    let window = try XCTUnwrap(controller.window)
+    let page = try XCTUnwrap(engine.contentView(for: tab))
+    let strip = try XCTUnwrap(controller.infobarStrips.strip(for: tab))
+
+    window.selectNextKeyView(page)
+    XCTAssertEqual(strip.keyboardFocusedControl?.accessibilityLabel(), "OK", "the strip's first control")
+    strip.endKeyboard(returningToPage: true, at: .first)
+    window.selectPreviousKeyView(page)
+    XCTAssertEqual(strip.keyboardFocusedControl?.accessibilityLabel(), "Close", "the strip's last control")
+    strip.endKeyboard(returningToPage: true, at: .last)
+    XCTAssertTrue(window.firstResponder === page, "the page has the keyboard again")
+  }
+
   func testEachTabKeepsItsOwnListAcrossSwitches() throws {
     controller.activate(node: first)
     let firstTab = try XCTUnwrap(controller.currentTab)
