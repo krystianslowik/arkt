@@ -46,15 +46,22 @@ public struct ImportSelection: Equatable, Sendable {
   public static let `default` = ImportSelection()
 }
 
-/// Counts of one type's import: how many items were stored, skipped on purpose and refused. Counts only.
+/// Counts of one type's import: how many items were stored, already in Arkt, refused, and (history only) past the 90
+/// days an import keeps. Counts only.
 public struct ImportItemCounts: Equatable, Sendable {
   public var written = 0
+  /// Already in Arkt: imported before, or held by the engine.
   public var skipped = 0
   public var failed = 0
+  /// History visits older than `ImportRecording.historyRetention`: left out, so not in Arkt (#935).
+  public var tooOld = 0
 
-  public init(written: Int = 0, skipped: Int = 0, failed: Int = 0) {
-    self.written = written; self.skipped = skipped; self.failed = failed
+  public init(written: Int = 0, skipped: Int = 0, failed: Int = 0, tooOld: Int = 0) {
+    self.written = written; self.skipped = skipped; self.failed = failed; self.tooOld = tooOld
   }
+
+  /// Nothing of the type is in Arkt and something was refused: the type did not come over (#935).
+  public var nothingCameOver: Bool { written + skipped == 0 && failed > 0 }
 
   mutating func add(_ result: ImportWriteResult) {
     written += result.written; skipped += result.skipped; failed += result.failed
@@ -100,10 +107,15 @@ public struct ProfileImportSummary: Equatable, Sendable {
 
   public init() {}
 
-  /// The types a Retry runs again: only the ones that failed, in import order.
+  /// The types a Retry runs again: the ones that failed, and the ones where every item was refused (#935), in import
+  /// order.
   public var retryTypes: [ImportDataType] {
     ImportDataType.allCases.filter {
-      if case .failed? = outcomes[$0] { return true } else { return false }
+      switch outcomes[$0] {
+      case .failed?: true
+      case .done(let counts)?: counts.nothingCameOver
+      default: false
+      }
     }
   }
 
@@ -120,6 +132,7 @@ public struct ProfileImportSummary: Equatable, Sendable {
         var parts = ["\(counts.written) \(type.noun)\(counts.written == 1 ? "" : "s") added"]
         if counts.skipped > 0 { parts.append("\(counts.skipped) skipped") }
         if counts.failed > 0 { parts.append("\(counts.failed) failed") }
+        if counts.tooOld > 0 { parts.append("\(counts.tooOld) older than 90 days") }
         lines.append("\(type.title): " + parts.joined(separator: ", "))
       case .skipped(let reason): lines.append("\(type.title): skipped, \(reason)")
       case .failed(let reason): lines.append("\(type.title): not imported, \(reason)")
