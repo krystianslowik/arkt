@@ -287,6 +287,44 @@ struct BrowserDataImportStateTests {
     #expect(state.primaryButton?.action == .done)
   }
 
+  @Test func aTypeWhoseItemsAllFailedIsNotImportedWithRetry() throws {
+    let state = Self.result([
+      .spacesAndTabs: .imported(count: 213, failed: 0), .history: .imported(count: 3, failed: 0),
+      .extensions: .notImported(.refused(failed: 2)),
+    ], BrowserDataImportResult(canRetry: true))
+    #expect(state.groups.map(\.heading) == ["Imported", "Not imported"])
+    let row = try #require(state.groups[1].rows.first)
+    #expect(row.kind == .extensions)
+    #expect(row.value == "Not imported")
+    #expect(row.detail == "2 couldn't be imported")
+    #expect(row.accessibilityLabel == "Extensions, not imported, 2 couldn't be imported")
+    #expect(state.groups[1].notice?.text == "Some of it couldn't be imported. Retry tries again.")
+    #expect(state.subtitle == "Most of it came over.")
+    #expect(state.primaryButton?.action == .retry)
+  }
+
+  @Test func anUnreadableTypeKeepsTheReadNoticeNextToARefusedOne() {
+    let state = Self.result([.history: .notImported(.unreadable), .extensions: .notImported(.refused(failed: 2))],
+                            BrowserDataImportResult(canRetry: true))
+    #expect(state.groups[0].notice?.text == "Some of it couldn't be read. Retry tries again.")
+  }
+
+  @Test func visitsPastTheHistoryWindowAreANoteNotACount() throws {
+    let state = Self.result([.history: .imported(count: 3, failed: 0, tooOld: 5)])
+    let row = try #require(state.groups[0].rows.first)
+    #expect(row.value == "3")
+    #expect(row.detail == "5 older than 90 days not imported")
+    #expect(row.accessibilityLabel == "History, 3, imported, 5 older than 90 days not imported")
+    #expect(state.subtitle == "Everything you chose came over.")
+  }
+
+  @Test func theLongestHistoryDetailHoldsBothNotes() throws {
+    let state = Self.result([.history: .imported(count: 12_000_000, failed: 9_999_999, tooOld: 9_999_999)])
+    let row = try #require(state.groups[0].rows.first)
+    #expect(row.value == "12M")
+    #expect(row.detail == "9,999,999 couldn't be imported, 9,999,999 older than 90 days not imported")
+  }
+
   // MARK: Hero type
 
   /// The Hero entry's roles (design spec): headline 56 DemiBold, rows 18 medium, counts 26 DemiBold tabular, the
