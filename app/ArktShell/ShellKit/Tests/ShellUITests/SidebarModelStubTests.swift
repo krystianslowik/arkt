@@ -4,6 +4,29 @@ import Testing
 
 @MainActor
 struct SidebarModelStubTests {
+  @Test func nodeIconsNotifyOnlyOnChangesAndSurviveCopies() throws {
+    let stub = StubSidebar()
+    let space = stub.addSpace(title: "Example")
+    let folder = stub.addFolder(title: "Folder", in: .pinned(space))
+    let child = stub.addTab(url: try #require(URL(string: "https://example.com")), title: "Tab", in: .folder(folder))
+    var changes: [SidebarChange] = []
+    let observation = stub.observe { changes.append($0) }
+    let source: any SidebarSource = stub
+    source.setNodeIcon(folder, to: .symbol("star"))
+    source.setNodeIcon(folder, to: .symbol("star"))
+    source.setNodeIcon(child, to: .emoji("\u{1F680}"))
+    source.setNodeIcon(UUID(), to: .symbol("star"))
+    #expect(changes == [.node(folder), .node(child)])
+    let copy = try source.duplicateNode(folder)
+    let copiedChild = try #require(source.children(of: .folder(copy)).first)
+    #expect(source.nodeIcon(copy) == .symbol("star"))
+    #expect(source.nodeIcon(copiedChild) == .emoji("\u{1F680}"))
+    source.setNodeIcon(folder, to: nil)
+    source.setNodeIcon(folder, to: nil)
+    #expect(changes.filter { $0 == .node(folder) }.count == 2)
+    withExtendedLifetime(observation) {}
+  }
+
   @Test func sampleHasThreeSpacesAndFavorites() {
     let s = StubSidebar.sample()
     #expect(s.spaceOrder.count == 3)

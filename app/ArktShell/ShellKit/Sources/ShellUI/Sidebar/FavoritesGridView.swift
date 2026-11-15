@@ -734,7 +734,9 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
       tile.setSplitStack(splitStack(of: id))
     } else {
       tile.setSplitStack(nil)
-      tile.faviconView.image = favicon(of: id, size: SidebarMetrics.favoriteFaviconSize)
+      tile.faviconView.image = source.nodeIcon(id).map { SidebarGlyphs.customIcon($0, flavor: flavor,
+        size: SidebarMetrics.favoriteFaviconSize, scale: collectionView.shellBackingScale) }
+        ?? favicon(of: id, size: SidebarMetrics.favoriteFaviconSize)
     }
     let shown = label(of: id)
     tile.toolTip = shown

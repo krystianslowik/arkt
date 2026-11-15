@@ -36,7 +36,9 @@ enum SidebarDiff {
     var nodeChanges: [UUID] = []
     for (id, node) in new.nodes {
       guard let before = old.nodes[id], before != node else { continue }
-      if BridgeMapping.nodeInfo(before) != BridgeMapping.nodeInfo(node) { nodeChanges.append(id) }
+      if BridgeMapping.nodeInfo(before) != BridgeMapping.nodeInfo(node) || before.customIcon != node.customIcon {
+        nodeChanges.append(id)
+      }
     }
     result += nodeChanges.sorted { $0.uuidString < $1.uuidString }.map { .node($0) }
     return result

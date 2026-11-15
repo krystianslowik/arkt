@@ -38,6 +38,8 @@ public final class ModelSidebarSource: SidebarSource {
 
   public func node(_ id: UUID) -> SidebarNodeInfo? { sidebar.nodes[id].map(BridgeMapping.nodeInfo) }
 
+  public func nodeIcon(_ id: UUID) -> SpaceIconInfo? { BridgeMapping.icon(sidebar.nodes[id]?.customIcon) }
+
   public func parent(of id: UUID) -> SidebarLocation? { sidebar.nodes[id].map { BridgeMapping.location($0.parent) } }
 
   public func observe(_ handler: @escaping @MainActor (SidebarChange) -> Void) -> SidebarObservation {
@@ -83,6 +85,10 @@ public final class ModelSidebarSource: SidebarSource {
 
   public func setIcon(_ id: UUID, to icon: SpaceIconInfo?) {
     mutate { $0.setIcon(id, to: BridgeMapping.modelIcon(icon)) }
+  }
+
+  public func setNodeIcon(_ id: UUID, to icon: SpaceIconInfo?) {
+    mutate { $0.setNodeIcon(id, to: BridgeMapping.modelIcon(icon)) }
   }
 
   public func setTheme(_ id: UUID, to theme: SpaceThemeInfo?) {
@@ -262,7 +268,8 @@ public final class ModelSidebarSource: SidebarSource {
       kind = .tab(tab)
     }
     return NodeSnapshot(
-      id: snapshot.id, kind: kind, createdAt: date, children: snapshot.children.map { restamped($0, at: date) })
+      id: snapshot.id, kind: kind, createdAt: date, children: snapshot.children.map { restamped($0, at: date) },
+      customIcon: snapshot.customIcon)
   }
 
   /// BH-116 and the plan's error surface (decision 13): `.splitFull` becomes `SplitEditError.splitFull`,
