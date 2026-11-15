@@ -227,8 +227,11 @@ extension BrowserDataImportState {
         text: "\(lead) macOS didn't let Arkt read your other browser's saved logins. Retry asks again.", emphasis: lead)
     }
     let unreadable = BrowserDataKind.allCases.contains { status($0) == .notImported(.unreadable) }
-    guard unreadable else { return nil }
-    let lead = "Some of it couldn't be read."
+    let refused = BrowserDataKind.allCases.contains {
+      if case .notImported(.refused) = status($0) { true } else { false }
+    }
+    guard unreadable || refused else { return nil }
+    let lead = unreadable ? "Some of it couldn't be read." : "Some of it couldn't be imported."
     return BrowserDataImportNotice(symbol: .exclamation, text: "\(lead) Retry tries again.", emphasis: lead)
   }
 
@@ -268,23 +271,29 @@ extension BrowserDataImportState {
         value = total > 0 ? BrowserDataNumberFormat.progress(done: done, total: total, locale: locale) : "Starting"
         bar = total > 0 ? min(1, max(0, Double(done) / Double(total))) : 0
         label = "\(kind.title), \(value)"
-      case .imported(let imported, let failed):
+      case .imported(let imported, let failed, let tooOld):
         leading = .done
         value = BrowserDataNumberFormat.text(imported, locale: locale)
-        if failed > 0 {
-          let refused = "\(BrowserDataNumberFormat.text(failed, locale: locale)) couldn't be imported"
-          detail = detail.map { "\($0), \(refused)" } ?? refused
-        }
-        label = "\(kind.title), \(value), imported" + (failed > 0 ? ", \(BrowserDataNumberFormat.text(failed, locale: locale)) couldn't be imported" : "")
+        var notes: [String] = []
+        if failed > 0 { notes.append("\(BrowserDataNumberFormat.text(failed, locale: locale)) couldn't be imported") }
+        // The window is `ImportRecording.historyRetention`, which ShellUI cannot see.
+        if tooOld > 0 { notes.append("\(BrowserDataNumberFormat.text(tooOld, locale: locale)) older than 90 days not imported") }
+        if !notes.isEmpty { detail = ([detail].compactMap { $0 } + notes).joined(separator: ", ") }
+        label = (["\(kind.title), \(value), imported"] + notes).joined(separator: ", ")
       case .skipped:
         leading = .skipped; value = "Skipped"; dimmed = true
         label = "\(kind.title), skipped"
       case .stopped:
         leading = .skipped; value = "Skipped"; dimmed = true
         label = "\(kind.title), skipped"
-      case .notImported:
+      case .notImported(let reason):
         leading = .notImported; value = "Not imported"; dimmed = true
         label = "\(kind.title), not imported"
+        if case .refused(let failed) = reason, failed > 0 {
+          let refused = "\(BrowserDataNumberFormat.text(failed, locale: locale)) couldn't be imported"
+          detail = refused
+          label += ", \(refused)"
+        }
       }
     }
     return BrowserDataImportRow(kind: kind, title: kind.title, detail: detail, value: value, leading: leading,

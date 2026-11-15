@@ -24,7 +24,7 @@ struct ProfileImportCoordinatorTests {
     init(
       folder: ArcUserDataFolder? = nil, provider: FakeSafeStorageKeyProvider = ProfileImportCoordinatorTests.good,
       batchSize: Int = 500, historyVisitsPerBatch: Int = 2_000, record: ArcImportRecord = ArcImportRecord(),
-      engine: RecordingImportEngine? = nil
+      engine: RecordingImportEngine? = nil, clock: Date = ProfileImportCoordinatorTests.clock
     ) throws {
       let folder = try folder ?? ArcUserDataFolder()
       self.folder = folder
@@ -36,7 +36,7 @@ struct ProfileImportCoordinatorTests {
         engine: engine, importRecord: records, keyProvider: self.provider,
         configuration: ProfileImportConfiguration(
           batchSize: batchSize, historyVisitsPerBatch: historyVisitsPerBatch, scratchParent: folder.scratch),
-        now: { ProfileImportCoordinatorTests.clock })
+        now: { clock })
     }
 
     func run(_ selection: ImportSelection? = .default) async throws -> [ProfileImportEvent] {
@@ -509,6 +509,55 @@ struct ProfileImportCoordinatorTests {
     let summary = try await harness.summary(ImportSelection([.extensions]))
     #expect(summary.cancelled)
     #expect(await harness.records.stored.extensionIDs.isEmpty)
+    // Nothing came over because of the cancel, not a refusal: no Retry (#935).
+    #expect(summary.outcomes[.extensions] == .skipped(reason: "cancelled"))
+    #expect(!summary.canRetry)
+  }
+
+  // MARK: Result counts (#935)
+
+  @Test func aTypeWhoseItemsAllFailedIsRetried() async throws {
+    let harness = try Harness()
+    harness.engine.installResult = ImportWriteResult(failed: 1, failureReason: "store refused: 1\n")
+    let first = try await harness.summary(ImportSelection([.extensions]))
+    #expect(first.outcomes[.extensions] == Self.counts(0, failed: 1))
+    #expect(first.retryTypes == [.extensions])
+
+    harness.engine.installResult = ImportWriteResult(written: 1)
+    var events: [ProfileImportEvent] = []
+    for await event in try harness.coordinator.retry(root: harness.folder.root, after: first) { events.append(event) }
+    #expect(try Harness.summary(of: events).outcomes[.extensions] == Self.counts(1))
+    #expect(harness.engine.installCalls.count == 2)
+  }
+
+  @Test func aTypeWithSomethingInArktIsNotRetriedForItsFailures() {
+    var summary = ProfileImportSummary()
+    summary.outcomes[.history] = Self.counts(1, failed: 1)
+    summary.outcomes[.extensions] = Self.counts(0, skipped: 1, failed: 1)
+    summary.outcomes[.bookmarks] = Self.counts(0)
+    #expect(summary.retryTypes.isEmpty)
+  }
+
+  @Test func visitsPastTheRetentionWindowAreCountedApartFromTheOnesInArkt() async throws {
+    // The fixture's visits run from 60 s to one day after its base date. An hour and ten seconds past 90 days later,
+    // the three in the first hour are past the window and the other two are not.
+    let late = Self.clock.addingTimeInterval(ImportRecording.historyRetention + 3_600)
+    let harness = try Harness(clock: late)
+    let events = try await harness.run(ImportSelection([.history]))
+    let counted = events.compactMap { event -> ProfileDataCounts? in
+      if case .counted(let counts) = event { counts } else { nil }
+    }.first
+    #expect(counted?.historyVisits == 2, "the consent counts only visits an import keeps")
+    #expect(counted?.historyURLs == 2)
+    let first = try Harness.summary(of: events)
+    #expect(first.outcomes[.history] == .done(ImportItemCounts(written: 2, tooOld: 3)))
+    #expect(first.lines == ["History: 2 visits added, 3 older than 90 days"])
+    #expect(harness.engine.visitCount == 2)
+
+    // Again: the two are already in Arkt, the three are still too old, whatever the watermark says.
+    let second = try await harness.summary(ImportSelection([.history]))
+    #expect(second.outcomes[.history] == .done(ImportItemCounts(skipped: 2, tooOld: 3)))
+    #expect(harness.engine.visitCount == 2)
   }
 
   // MARK: Counts only
