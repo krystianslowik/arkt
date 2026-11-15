@@ -204,6 +204,7 @@ final class TestTab: NSObject, ArktTabHandle {
     return .closed
   }
   func focus() {}
+  func focusThroughTabTraversal(reverse: Bool) {}
   private(set) var movedTo: [any ArktBrowserHandle] = []
   func move(to browser: any ArktBrowserHandle) { movedTo.append(browser) }
   func setMuted(_ muted: Bool) {

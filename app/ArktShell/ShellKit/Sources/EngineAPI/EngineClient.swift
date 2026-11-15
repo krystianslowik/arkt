@@ -23,6 +23,13 @@ public enum CloseMode: Equatable, Sendable {
   case skipUnloadHandlers
 }
 
+/// Where the keyboard enters a page from outside it (#930): its first focusable element, as Tab into it does, or its
+/// last, as Shift-Tab does.
+public enum PageFocusEdge: Equatable, Sendable {
+  case first
+  case last
+}
+
 /// Why a tab closed (Decision 12). The shell removes a sidebar row only for `.page` and `.extension`;
 /// `.windowClosing` and `.appTerminating` only unload.
 public enum CloseReason: Equatable, Sendable {
@@ -260,6 +267,10 @@ public protocol EngineClient: AnyObject {
   /// `contentView(for:)` its window's first responder; an engine whose content view is a container focuses the page
   /// inside it.
   func focusPage(of id: TabID)
+  /// Gives the tab's page the keyboard focus on its first focusable element, or on its last (#930): what Tab into the
+  /// page from before it, or Shift-Tab from after it, does. The default gives the page the keyboard as
+  /// `focusPage(of:)` does.
+  func focusPage(of id: TabID, at edge: PageFocusEdge)
   /// Moves the tab, with its page, history and content view, to the end of `window`'s tabs and makes it active there,
   /// without a reload (#314, Little Arkt's Open in). The tab keeps its id; the move itself has no event, the tab's
   /// later events go to `window`, starting with its `.activeTabChanged`. A window left without tabs closes
@@ -366,6 +377,8 @@ extension EngineClient {
     guard let view = contentView(for: id) else { return }
     view.window?.makeFirstResponder(view)
   }
+
+  public func focusPage(of id: TabID, at edge: PageFocusEdge) { focusPage(of: id) }
 
   public func moveTab(_ id: TabID, to window: EngineWindowID) {}
 

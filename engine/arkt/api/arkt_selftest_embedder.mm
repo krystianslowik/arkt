@@ -137,6 +137,41 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
 
 // A plain NSWindow host. The close button asks the engine (closeRequested)
 // and never closes the window itself.
+// #930: logs Tab and Shift-Tab leaving the page. On an Arkt window
+// WebContentsViewMac::TakeFocus ends in the host window's key view loop with
+// the page's view as the sender; the shell takes the keyboard into the
+// infobar strip there.
+@interface ArktSelfTestWindow : NSWindow
+@property(nonatomic, weak) NSView* cardView;
+@end
+
+@implementation ArktSelfTestWindow
+@synthesize cardView = _cardView;
+
+- (void)logKeyViewSelection:(const char*)direction sender:(id)sender {
+  NSView* view = [sender isKindOfClass:[NSView class]]
+                     ? static_cast<NSView*>(sender)
+                     : nil;
+  LOG(WARNING) << "ARKT selftest selectKeyView " << direction << " sender="
+               << base::SysNSStringToUTF8(
+                      sender ? NSStringFromClass([sender class]) : @"none")
+               << " inCard="
+               << (view && _cardView && [view isDescendantOf:_cardView]
+                       ? "yes"
+                       : "no");
+}
+
+- (void)selectNextKeyView:(id)sender {
+  [self logKeyViewSelection:"next" sender:sender];
+  [super selectNextKeyView:sender];
+}
+
+- (void)selectPreviousKeyView:(id)sender {
+  [self logKeyViewSelection:"previous" sender:sender];
+  [super selectPreviousKeyView:sender];
+}
+@end
+
 @interface ArktSelfTestWindowHost : NSObject <ArktWindowHost, NSWindowDelegate>
 - (instancetype)initWithFrame:(NSRect)frame title:(NSString*)title;
 // Shows `tab`'s container as the card's only subview.
@@ -159,7 +194,7 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
 
 - (instancetype)initWithFrame:(NSRect)frame title:(NSString*)title {
   if ((self = [super init])) {
-    _window = [[NSWindow alloc]
+    ArktSelfTestWindow* window = [[ArktSelfTestWindow alloc]
         initWithContentRect:frame
                   styleMask:NSWindowStyleMaskTitled |
                             NSWindowStyleMaskClosable |
@@ -167,12 +202,14 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
                             NSWindowStyleMaskResizable
                     backing:NSBackingStoreBuffered
                       defer:NO];
+    _window = window;
     _window.releasedWhenClosed = NO;
     _window.title = title;
     _window.delegate = self;
     _cardView = [[NSView alloc] initWithFrame:_window.contentView.bounds];
     _cardView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     [_window.contentView addSubview:_cardView];
+    window.cardView = _cardView;
     // Top left, above the card (the content view is not flipped).
     NSRect content = _window.contentView.bounds;
     _anchorView = [[NSView alloc]
@@ -970,9 +1007,29 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
   [self sendKey:97 characters:@"\uF709" toTab:tab];
 }
 
+// #930: a Tab into the page, as sendF6ToTab: sends F6.
+- (void)sendTabToTab:(id<ArktTabHandle>)tab {
+  [self sendKey:48 characters:@"\t" toTab:tab];
+}
+
+// #930: a Shift-Tab into the page (AppKit's characters for it are a back tab).
+- (void)sendShiftTabToTab:(id<ArktTabHandle>)tab {
+  [self sendKey:48
+      characters:@"\x19"
+       modifiers:NSEventModifierFlagShift
+           toTab:tab];
+}
+
 // A key down and up delivered to the tab's own window in this process.
 - (void)sendKey:(unsigned short)keyCode
      characters:(NSString*)characters
+          toTab:(id<ArktTabHandle>)tab {
+  [self sendKey:keyCode characters:characters modifiers:0 toTab:tab];
+}
+
+- (void)sendKey:(unsigned short)keyCode
+     characters:(NSString*)characters
+      modifiers:(NSEventModifierFlags)modifiers
           toTab:(id<ArktTabHandle>)tab {
   NSWindow* window = tab.browser.host.window;
   NSResponder* responder = window.firstResponder;
@@ -997,7 +1054,7 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
     NSEvent* event =
         [NSEvent keyEventWithType:type
                                location:NSZeroPoint
-                          modifierFlags:0
+                          modifierFlags:modifiers
                               timestamp:NSProcessInfo.processInfo.systemUptime
                            windowNumber:window.windowNumber
                                 context:nil
@@ -1771,6 +1828,31 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
     // logs it if the page did not use it (unhandledKeyDown).
     [tab focus];
     [self performSelector:@selector(sendF6ToTab:) withObject:tab afterDelay:0];
+  } else if (command == "tab-key") {
+    // #930: focuses the page (it keeps the element it had focused), then
+    // sends it a Tab (or with "shift" a Shift-Tab) on the next turn; the
+    // window logs the key view selection when the page lets the focus go.
+    [tab focus];
+    [self performSelector:argument == "shift"
+                              ? @selector(sendShiftTabToTab:)
+                              : @selector(sendTabToTab:)
+               withObject:tab
+               afterDelay:0];
+  } else if (command == "traverse") {
+    // #930: focusThroughTabTraversal, "last" for reverse; the page title
+    // reports the focused element afterwards (the fixture page sets it).
+    const bool reverse = argument == "last";
+    [tab focusThroughTabTraversal:reverse];
+    NSWindow* window = tab.browser.host.window;
+    NSResponder* responder = window.firstResponder;
+    LOG(WARNING) << "ARKT selftest traverse reverse=" << (reverse ? "yes" : "no")
+                 << " key=" << (window.isKeyWindow ? "yes" : "no")
+                 << " inPage="
+                 << ([responder isKindOfClass:[NSView class]] &&
+                             [static_cast<NSView*>(responder)
+                                 isDescendantOf:tab.containerView]
+                         ? "yes"
+                         : "no");
   } else if (command == "fullscreen") {
     // #577: HTML fullscreen of the page's body, with a user gesture as a
     // click gives it; "exit" leaves it from script.

@@ -20,6 +20,9 @@ public final class InfobarPresenter {
   /// Gives the keyboard to `tab`'s page when it leaves the strip (Esc, F6, the strip going down while it held it). The
   /// window sets it.
   public var focusPage: (@MainActor (TabID) -> Void)?
+  /// Gives the keyboard to `tab`'s page at its first or last element when Tab or Shift-Tab leaves the strip off an end
+  /// (#930). The window sets it; without it the page gets its own focus back through `focusPage`.
+  public var focusPageAtEdge: (@MainActor (TabID, PageFocusEdge) -> Void)?
   private var retryScheduled = false
   /// The infobars of each tab, in the engine's order; a tab with none has no entry.
   public private(set) var infobars: [TabID: [Infobar]] = [:]
@@ -119,6 +122,20 @@ public final class InfobarPresenter {
     return strip.focusKeyboard()
   }
 
+  /// Tab past the last element of a page, or Shift-Tab before its first (#930): the window's key view loop is asked to
+  /// move on from `view`, a view inside the page (Chromium's `TakeFocus` on an Arkt window). Puts the keyboard on the
+  /// first control of that tab's strip, or with `reverse` on its last. False when `view` is in no page this window
+  /// shows, or the tab shows no strip with a control to reach; the window's key view loop moves on then, as without a
+  /// strip.
+  public func focusStrip(leaving view: NSView, reverse: Bool) -> Bool {
+    let target = infobars.keys.first { tab in
+      guard let page = anchor(tab) else { return false }
+      return view.isDescendant(of: page)
+    }
+    guard let target, let strip = strip(for: target) else { return false }
+    return strip.focusKeyboard(at: reverse ? .last : .first)
+  }
+
   /// Takes every strip down, as the window goes away.
   public func closeAll() {
     host.dismissAll()
@@ -138,9 +155,13 @@ public final class InfobarPresenter {
       if let reduceMotion { panel.reduceMotion = reduceMotion }
       panel.onAction = { [weak self] infobar, action in self?.engine.act(on: infobar.id, action: action) }
       // The page takes the keyboard back only while it is on screen in this window.
-      panel.onKeyboardExit = { [weak self] in
+      panel.onKeyboardExit = { [weak self] edge in
         guard let self, anchor(tab) != nil else { return }
-        focusPage?(tab)
+        if let edge, let focusPageAtEdge {
+          focusPageAtEdge(tab, edge)
+        } else {
+          focusPage?(tab)
+        }
       }
       return panel
     } show: { [weak self] panel, window, page, frame in

@@ -204,6 +204,9 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
     window.nextResponder = self
     window.commandHost = engineHost
     window.onKeyEquivalent = { [weak self] event in self?.handleKeyEquivalent(event) ?? false }
+    window.keyViewHandoff = { [weak self] view, reverse in
+      self?.infobarStrips.focusStrip(leaving: view, reverse: reverse) ?? false
+    }
     engineHost.controller = self
     rootView.onLayout = { [weak self] in
       self?.javaScriptDialogs.layoutDidFinish()
@@ -397,6 +400,7 @@ public final class LittleArktWindowController: NSResponder, NSWindowDelegate {
   private func makeInfobarPresenter() -> InfobarPresenter {
     let presenter = InfobarPresenter(engine: engine) { [weak self] tab in self?.pageAnchor(tab) }
     presenter.focusPage = { [weak self] tab in self?.engine.focusPage(of: tab) }
+    presenter.focusPageAtEdge = { [weak self] tab, edge in self?.engine.focusPage(of: tab, at: edge) }
     return presenter
   }
 

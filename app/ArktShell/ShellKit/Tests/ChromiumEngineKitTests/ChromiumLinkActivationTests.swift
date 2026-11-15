@@ -104,6 +104,17 @@ struct ChromiumLinkActivationTests {
     #expect(handle.focusCount == 1)
   }
 
+  /// The keyboard leaving the infobar strip by Tab or Shift-Tab (#930) enters the page at its first or last element:
+  /// the facade's tab traversal, not its plain focus.
+  @Test func focusPageAtAnEdgeAsksTheTabHandleToTraverse() throws {
+    let (engine, _, tab, _) = try makeEngine()
+    let handle = try #require(engine.handle(of: tab) as? ScriptedTab)
+    engine.focusPage(of: tab, at: .first)
+    engine.focusPage(of: tab, at: .last)
+    #expect(handle.traversals == [false, true])
+    #expect(handle.focusCount == 0)
+  }
+
   // MARK: Links opened outside the tab (#345)
 
   /// The facade reports Shift-, Command- and Command-Shift-clicks from `OpenURLFromTab` with Chromium's disposition

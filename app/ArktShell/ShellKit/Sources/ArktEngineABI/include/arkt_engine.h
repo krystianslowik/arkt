@@ -1142,6 +1142,12 @@ NS_SWIFT_UI_ACTOR
 - (ArktCloseResult)closeWithMode:(ArktCloseMode)mode NS_SWIFT_NAME(close(mode:));
 // Makes the contents the first responder.
 - (void)focus;
+// Makes the contents the first responder and puts the page's focus on its
+// first focusable element, or with `reverse` on its last (#930): what Tab
+// into the page from before it, or Shift-Tab from after it, does
+// (WebContents::FocusThroughTabTraversal). Same window rules as -focus.
+- (void)focusThroughTabTraversal:(BOOL)reverse
+    NS_SWIFT_NAME(focusThroughTabTraversal(reverse:));
 // A new tab next to this one with its URL, title and back and forward
 // history, reported with TabCreated and origin Client
 // (EngineClient.duplicateTab(_:), contract rule 10); nil when the tab cannot

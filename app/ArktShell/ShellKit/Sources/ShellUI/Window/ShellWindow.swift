@@ -100,6 +100,21 @@ public final class ShellWindow: NSWindow {
   /// ones that must go no further: the Ctrl-Tab switcher (#103), which a page must never take.
   public var eventInterceptor: (@MainActor (NSEvent) -> Bool)?
 
+  /// Asked first when the key view loop moves on from `view` (#930): Tab past a page's last element or Shift-Tab before
+  /// its first ends here (Chromium's `TakeFocus` on this window, with the page's view as the sender). True when the
+  /// handler took the keyboard (into the page's infobar strip); false lets the window's key view loop run as usual.
+  public var keyViewHandoff: (@MainActor (_ view: NSView, _ reverse: Bool) -> Bool)?
+
+  public override func selectNextKeyView(_ sender: Any?) {
+    if let view = sender as? NSView, keyViewHandoff?(view, false) == true { return }
+    super.selectNextKeyView(sender)
+  }
+
+  public override func selectPreviousKeyView(_ sender: Any?) {
+    if let view = sender as? NSView, keyViewHandoff?(view, true) == true { return }
+    super.selectPreviousKeyView(sender)
+  }
+
   /// Mouse buttons 3 and 4 switch to the previous / next Space anywhere in the window (GS-002, BH-035, #98).
   public override func sendEvent(_ event: NSEvent) {
     switch event.type {

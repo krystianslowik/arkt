@@ -7,8 +7,10 @@ import XCTest
 /// F6 into a tab's infobar strip (#478, maintainer decision 2026-11-13): F6 from the page puts the keyboard on the
 /// strip's first control; Tab and Shift-Tab go through every control of every row, Left and Right along the row, Up and
 /// Down between rows; Return, Enter and Space press; Esc and F6 give the keyboard back to the page. The strip never
-/// takes the keyboard on its own, and its keys go to the strip, not to a focused field. Keys are delivered to the
-/// strip's stack view in the process; nothing is posted to the system.
+/// takes the keyboard on its own, and its keys go to the strip, not to a focused field. Tab past the page's last element
+/// reaches the strip's first control and Shift-Tab before its first element the strip's last; Tab or Shift-Tab off an
+/// end of the strip enters the page at its first or last element (#930). Keys are delivered to the strip's stack view in
+/// the process; nothing is posted to the system.
 /// A browser window stand-in that records the window commands instead of closing, minimizing, zooming or going full
 /// screen, and enables them for the menu.
 @MainActor
@@ -25,6 +27,12 @@ private final class RecordingWindow: NSWindow {
   }
 }
 
+/// A view the window's key view loop can select, as a page's view can.
+private final class KeyView: NSView {
+  override var acceptsFirstResponder: Bool { true }
+  override var canBecomeKeyView: Bool { true }
+}
+
 @MainActor
 final class InfobarKeyboardTests: XCTestCase {
   private var window: RecordingWindow!
@@ -36,6 +44,8 @@ final class InfobarKeyboardTests: XCTestCase {
   private var observation: EngineObservation?
   /// The tabs whose page the presenter gave the keyboard back to, in order.
   private var pageFocused: [TabID] = []
+  /// The tabs whose page the presenter entered at an end by Tab or Shift-Tab (#930), in order.
+  private var pageEdges: [(TabID, PageFocusEdge)] = []
 
   override func setUp() async throws {
     _ = NSApplication.shared
@@ -55,6 +65,7 @@ final class InfobarKeyboardTests: XCTestCase {
     presenter.reduceMotion = { true }
     presenter.announce = { _, _ in }
     presenter.focusPage = { [unowned self] tab in pageFocused.append(tab) }
+    presenter.focusPageAtEdge = { [unowned self] tab, edge in pageEdges.append((tab, edge)) }
     observation = engine.observe { [unowned self] in presenter.handle($0) }
   }
 
@@ -155,22 +166,136 @@ final class InfobarKeyboardTests: XCTestCase {
 
   // MARK: Moving
 
-  func testTabAndShiftTabGoThroughEveryControlOfEveryRowAndAround() throws {
+  func testTabAndShiftTabGoThroughEveryControlOfEveryRow() throws {
     engine.raiseInfobar(in: tab, message: "One")
     engine.raiseInfobar(in: tab, message: "Two", cancelTitle: nil)
     presenter.focusStrip(of: tab, holding: nil)
     var order: [String?] = [try focused()]
-    for _ in 0..<5 {
+    for _ in 0..<4 {
       try press(Key.tab, "\t")
       order.append(try focused())
     }
-    XCTAssertEqual(order, ["OK", "Cancel", "Close", "OK", "Close", "OK"], "row one, row two, then around")
-    XCTAssertEqual(try strip().keyboardFocus?.id, try strip().rows[0].infobar.id)
+    XCTAssertEqual(order, ["OK", "Cancel", "Close", "OK", "Close"], "row one, then row two")
+    XCTAssertEqual(try strip().keyboardFocus?.id, try strip().rows[1].infobar.id)
+    try press(Key.tab, "\t", shift: true)
+    XCTAssertEqual(try focused(), "OK")
     try press(Key.tab, "\t", shift: true)
     XCTAssertEqual(try focused(), "Close")
-    XCTAssertEqual(try strip().keyboardFocus?.id, try strip().rows[1].infobar.id, "Shift-Tab goes back around")
+    XCTAssertEqual(try strip().keyboardFocus?.id, try strip().rows[0].infobar.id, "Shift-Tab goes back a row")
     XCTAssertEqual(try rings(), ["Close"])
   }
+
+  // MARK: Tab between the page and the strip (#930)
+
+  func testTabPastThePagesLastElementPutsTheKeyboardOnTheStripsFirstControl() throws {
+    engine.raiseInfobar(in: tab, message: "One")
+    engine.raiseInfobar(in: tab, message: "Two", cancelTitle: nil)
+    XCTAssertTrue(presenter.focusStrip(leaving: field, reverse: false))
+    XCTAssertEqual(try focused(), "OK")
+    XCTAssertEqual(try strip().keyboardFocus?.id, try strip().rows[0].infobar.id)
+    XCTAssertEqual(try rings(), ["OK"])
+    XCTAssertTrue(try strip().panel.firstResponder === (try strip().stack), "keys go to the strip's controller")
+  }
+
+  func testShiftTabBeforeThePagesFirstElementPutsTheKeyboardOnTheStripsLastControl() throws {
+    engine.raiseInfobar(in: tab, message: "One")
+    engine.raiseInfobar(in: tab, message: "Two", cancelTitle: nil)
+    XCTAssertTrue(presenter.focusStrip(leaving: page, reverse: true))
+    XCTAssertEqual(try focused(), "Close")
+    XCTAssertEqual(try strip().keyboardFocus?.id, try strip().rows[1].infobar.id)
+    XCTAssertEqual(try rings(), ["Close"])
+  }
+
+  func testTabOutOfAPageWithoutAStripKeepsTodaysBehaviour() throws {
+    XCTAssertFalse(presenter.focusStrip(leaving: field, reverse: false), "no infobar: the window's key view loop")
+    engine.raiseInfobar(in: tab, message: "Note", okTitle: nil, cancelTitle: nil, isCloseable: false)
+    XCTAssertFalse(presenter.focusStrip(leaving: field, reverse: true), "an infobar with no control")
+    XCTAssertNil(try strip().keyboardFocus)
+    XCTAssertEqual(pageEdges.count, 0)
+  }
+
+  func testTabFromOutsideAnyPageIsNotTheStrips() throws {
+    engine.raiseInfobar(in: tab, message: "One")
+    let outside = NSView(frame: NSRect(x: 0, y: 0, width: 10, height: 10))
+    window.contentView?.superview?.addSubview(outside)
+    XCTAssertFalse(presenter.focusStrip(leaving: outside, reverse: false))
+    XCTAssertNil(try strip().keyboardFocus)
+  }
+
+  func testTabPastTheStripsLastControlEntersThePageAtItsFirstElement() throws {
+    engine.raiseInfobar(in: tab, message: "One")
+    engine.raiseInfobar(in: tab, message: "Two", cancelTitle: nil)
+    presenter.focusStrip(leaving: field, reverse: false)
+    for _ in 0..<4 { try press(Key.tab, "\t") }
+    XCTAssertEqual(try focused(), "Close", "the last control")
+    try press(Key.tab, "\t")
+    XCTAssertNil(try strip().keyboardFocus)
+    XCTAssertEqual(try rings(), [])
+    XCTAssertEqual(pageEdges.map(\.0), [tab])
+    XCTAssertEqual(pageEdges.map(\.1), [.first])
+    XCTAssertEqual(pageFocused, [], "not the page's last focus, as Esc and F6 give it")
+  }
+
+  func testShiftTabBeforeTheStripsFirstControlEntersThePageAtItsLastElement() throws {
+    engine.raiseInfobar(in: tab, message: "One")
+    presenter.focusStrip(of: tab, holding: nil)
+    XCTAssertEqual(try focused(), "OK")
+    try press(Key.tab, "\t", shift: true)
+    XCTAssertNil(try strip().keyboardFocus)
+    XCTAssertEqual(pageEdges.map(\.1), [.last])
+    XCTAssertEqual(pageFocused, [])
+  }
+
+  func testWithoutAnEdgeHandlerTheStripFallsBackToThePagesLastFocus() throws {
+    presenter.focusPageAtEdge = nil
+    engine.raiseInfobar(in: tab, message: "One")
+    presenter.focusStrip(of: tab, holding: nil)
+    try press(Key.tab, "\t", shift: true)
+    XCTAssertEqual(pageFocused, [tab])
+  }
+
+  func testAShellWindowHandsTabOutOfThePageToItsHandlerFirst() throws {
+    let shell = ShellWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 200))
+    defer { shell.close() }
+    checkKeyViewHandoff(shell) { shell.keyViewHandoff = $0 }
+  }
+
+  func testALittleArktWindowHandsTabOutOfThePageToItsHandlerFirst() throws {
+    let little = LittleArktWindow(contentRect: NSRect(x: 0, y: 0, width: 300, height: 200))
+    defer { little.close() }
+    checkKeyViewHandoff(little) { little.keyViewHandoff = $0 }
+  }
+
+  /// The window asks its handler before its own key view loop, in both directions, with the view the loop moves on
+  /// from; a handler that takes the keyboard stops the loop, one that declines lets it run.
+  private func checkKeyViewHandoff(_ window: NSWindow,
+                                   set: (@escaping @MainActor (NSView, Bool) -> Bool) -> Void,
+                                   file: StaticString = #filePath, line: UInt = #line) {
+    let first = KeyView(frame: NSRect(x: 10, y: 10, width: 100, height: 24))
+    let second = KeyView(frame: NSRect(x: 10, y: 50, width: 100, height: 24))
+    window.contentView?.addSubview(first)
+    window.contentView?.addSubview(second)
+    first.nextKeyView = second
+    second.nextKeyView = first
+    var asked: [(NSView, Bool)] = []
+    var takes = true
+    set { view, reverse in
+      asked.append((view, reverse))
+      return takes
+    }
+    window.makeFirstResponder(first)
+    window.selectNextKeyView(first)
+    XCTAssertTrue(window.firstResponder === first, "the handler took it: AppKit's loop does not run",
+                  file: file, line: line)
+    window.selectPreviousKeyView(first)
+    XCTAssertEqual(asked.map(\.1), [false, true], file: file, line: line)
+    XCTAssertTrue(asked.allSatisfy { $0.0 === first }, file: file, line: line)
+    takes = false
+    window.selectNextKeyView(first)
+    XCTAssertTrue(window.firstResponder === second, "declined: the window's own key view loop moves on",
+                  file: file, line: line)
+  }
+
 
   func testLeftAndRightGoAlongTheRowAndUpAndDownBetweenRows() throws {
     engine.raiseInfobar(in: tab, message: "One")
@@ -209,8 +334,11 @@ final class InfobarKeyboardTests: XCTestCase {
     XCTAssertEqual(try focused(), "Cancel")
     try press(Key.tab, "\t")
     XCTAssertEqual(try focused(), "Close")
-    try press(Key.tab, "\t")
-    XCTAssertEqual(try focused(), "Cancel")
+    try press(Key.tab, "\t", shift: true)
+    XCTAssertEqual(try focused(), "Cancel", "Shift-Tab skips it too")
+    try press(Key.tab, "\t", shift: true)
+    XCTAssertNil(try focused(), "the disabled OK is not the first control: Shift-Tab leaves for the page")
+    XCTAssertEqual(pageEdges.map(\.1), [.last])
   }
 
   func testTheTrailingLinkIsReachedInReadingOrder() throws {
@@ -288,6 +416,7 @@ final class InfobarKeyboardTests: XCTestCase {
     presenter.reduceMotion = { true }
     presenter.announce = { _, _ in }
     presenter.focusPage = { [unowned self] tab in pageFocused.append(tab) }
+    presenter.focusPageAtEdge = { [unowned self] tab, edge in pageEdges.append((tab, edge)) }
     observation?.cancel()
     observation = engine.observe { [unowned self] in presenter.handle($0) }
     engine.raiseInfobar(in: tab, message: "One")

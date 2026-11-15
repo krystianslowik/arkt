@@ -11,6 +11,10 @@ final class LittleArktWindow: NSWindow {
   /// The window's own key equivalents, asked first; true when taken.
   var onKeyEquivalent: (@MainActor (NSEvent) -> Bool)?
   var reservedKeys = ReservedKeys.arkt
+  /// Asked first when the key view loop moves on from `view` (#930): Tab past a page's last element or Shift-Tab before
+  /// its first ends here (Chromium's `TakeFocus` on this window, with the page's view as the sender). True when the
+  /// handler took the keyboard (into the page's infobar strip); false lets the window's key view loop run as usual.
+  var keyViewHandoff: (@MainActor (_ view: NSView, _ reverse: Bool) -> Bool)?
 
   init(contentRect: NSRect) {
     super.init(contentRect: contentRect,
@@ -36,6 +40,16 @@ final class LittleArktWindow: NSWindow {
     let metrics = ShellMetrics.standard
     placeTrafficLights(barHeight: LittleArktLayout.topBarHeight, firstX: metrics.trafficLightOrigin.x,
                        spacing: metrics.trafficLightSpacing)
+  }
+
+  override func selectNextKeyView(_ sender: Any?) {
+    if let view = sender as? NSView, keyViewHandoff?(view, false) == true { return }
+    super.selectNextKeyView(sender)
+  }
+
+  override func selectPreviousKeyView(_ sender: Any?) {
+    if let view = sender as? NSView, keyViewHandoff?(view, true) == true { return }
+    super.selectPreviousKeyView(sender)
   }
 
   override func performKeyEquivalent(with event: NSEvent) -> Bool {

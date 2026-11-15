@@ -98,9 +98,10 @@ final class InfobarPanel: AnchoredPanel {
   /// engine's next list drops it.
   var onAction: (@MainActor (Infobar, InfobarAction) -> Void)?
   var reduceMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
-  /// The keyboard left the strip by Esc or F6, or with the strip going down while it held it: the owner gives it to
-  /// the page.
-  var onKeyboardExit: (@MainActor () -> Void)?
+  /// The keyboard left the strip by Esc or F6, or with the strip going down while it held it (no edge: the page gets its
+  /// own focus back), or by Tab past the last control or Shift-Tab before the first (#930: the page's first or last
+  /// element). The owner gives it to the page.
+  var onKeyboardExit: (@MainActor (PageFocusEdge?) -> Void)?
   /// Where F6's keyboard focus is (#478): the infobar's row and the index into its `keyboardControls`; nil while the
   /// strip does not hold the keyboard, which is always unless F6 put it there.
   private(set) var keyboardFocus: (id: InfobarID, index: Int)?
@@ -142,12 +143,14 @@ final class InfobarPanel: AnchoredPanel {
 
   // MARK: Keyboard (#478)
 
-  /// Puts the keyboard in the strip, on the first control of the first row that has one: the strip becomes the key
-  /// window and its stack takes the keys. False, and nothing changes, when no row has a control to reach.
+  /// Puts the keyboard in the strip, on the first control of the first row that has one, or at `.last` on the last
+  /// control of the last such row (Shift-Tab from the page, #930): the strip becomes the key window and its stack takes
+  /// the keys. False, and nothing changes, when no row has a control to reach.
   @discardableResult
-  func focusKeyboard() -> Bool {
-    guard let row = rows.first(where: { !$0.keyboardControls.isEmpty }) else { return false }
-    keyboardFocus = (row.infobar.id, 0)
+  func focusKeyboard(at edge: PageFocusEdge = .first) -> Bool {
+    let reachable = rows.filter { !$0.keyboardControls.isEmpty }
+    guard let row = edge == .first ? reachable.first : reachable.last else { return false }
+    keyboardFocus = (row.infobar.id, edge == .first ? 0 : row.keyboardControls.count - 1)
     stack.keyHandler = { [weak self] event in self?.handleKey(event) ?? false }
     panel.makeKey()
     panel.makeFirstResponder(stack)
@@ -155,10 +158,10 @@ final class InfobarPanel: AnchoredPanel {
     return true
   }
 
-  /// Takes the keyboard out of the strip. With `returningToPage` (Esc, F6, the strip going down) the parent window
-  /// becomes key again and the owner gives the keyboard to the page; without it (another window took the keyboard)
-  /// only the ring goes.
-  func endKeyboard(returningToPage: Bool) {
+  /// Takes the keyboard out of the strip. With `returningToPage` (Esc, F6, Tab or Shift-Tab off an end, the strip going
+  /// down) the parent window becomes key again and the owner gives the keyboard to the page, at `edge` when a Tab took
+  /// it there; without it (another window took the keyboard) only the ring goes.
+  func endKeyboard(returningToPage: Bool, at edge: PageFocusEdge? = nil) {
     guard keyboardFocus != nil else { return }
     keyboardFocus = nil
     stack.keyHandler = nil
@@ -166,7 +169,7 @@ final class InfobarPanel: AnchoredPanel {
     if panel.firstResponder === stack { panel.makeFirstResponder(nil) }
     guard returningToPage else { return }
     if panel.isKeyWindow { panel.parent?.makeKey() }
-    onKeyboardExit?()
+    onKeyboardExit?(edge)
   }
 
   /// The control the keyboard is on, nil while the strip does not hold it.
@@ -197,9 +200,10 @@ final class InfobarPanel: AnchoredPanel {
     showKeyboardFocus()
   }
 
-  /// Tab and Shift-Tab go through every control of every row (and around); Left and Right go along the row, mirrored
-  /// right to left; Up and Down go to the row above or below; Return, Enter and Space press the control; Esc and F6
-  /// give the keyboard back to the page.
+  /// Tab and Shift-Tab go through every control of every row; Tab past the last control enters the page at its first
+  /// element and Shift-Tab before the first control at its last (#930). Left and Right go along the row (around),
+  /// mirrored right to left; Up and Down go to the row above or below; Return, Enter and Space press the control; Esc
+  /// and F6 give the keyboard back to the page.
   private func handleKey(_ event: NSEvent) -> Bool {
     guard let focus = keyboardFocus else { return false }
     let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
@@ -215,8 +219,12 @@ final class InfobarPanel: AnchoredPanel {
     case KeyCode.tab:
       let flat = reachable.flatMap { row in row.keyboardControls.indices.map { (row.infobar.id, $0) } }
       guard let at = flat.firstIndex(where: { $0.0 == focus.id && $0.1 == focus.index }) else { return false }
-      let next = flat[(at + (modifiers == .shift ? flat.count - 1 : 1)) % flat.count]
-      keyboardFocus = (next.0, next.1)
+      let target = at + (modifiers == .shift ? -1 : 1)
+      guard flat.indices.contains(target) else {
+        endKeyboard(returningToPage: true, at: target < 0 ? .last : .first)
+        return true
+      }
+      keyboardFocus = (flat[target].0, flat[target].1)
     case KeyCode.left, KeyCode.right:
       let count = reachable[rowIndex].keyboardControls.count
       let forward = (event.keyCode == KeyCode.right) != mirrored
