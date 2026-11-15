@@ -7810,3 +7810,105 @@ Follow-up to the #517 import smoke findings, with the maintainer's decisions on 
 - Not changed: the engine still counts visits with a scheme its history refuses as skipped. The coordinator does not
   filter schemes, so such visits would still count as in Arkt. Fixture profiles have none.
 - The `=sheet` engine smoke was not run again for this change; the model, coordinator and state tests cover it.
+
+## #930: Tab from the page into the infobar strip (seam, no patch)
+
+Date 2026-11-15. Branch `engine/930-tab-into-strip` from `main` at `63ec2155`. `$CR` branch `arkt` unchanged
+(0001-0016).
+
+### Gate
+
+- Seam, no patch. On an Arkt window `Browser`'s `TakeFocus` (`BrowserWebContentsDelegate`) returns false and the view
+  delegate has no Views focus manager, so `WebContentsViewMac::TakeFocus` ends in `selectNextKeyView:` /
+  `selectPreviousKeyView:` on the host window with the page's `WebContentsViewCocoa` as the sender. Checked on
+  `out/Arkt` before any shell change (smoke below). The shell windows ask the infobar presenter there first.
+- Facade header (both copies, additive, `cmp` identical, recorded on #930): `ArktTabHandle` gains
+  `-focusThroughTabTraversal:(BOOL)reverse`. `WebContents::FocusThroughTabTraversal` alone only moves the page's own
+  focus (`WebContentsViewMac::FocusThroughTabTraversal` is `SetInitialFocus`), so the facade calls `Focus()` first: the
+  contents become the first responder as a direct selection, which `OnBecameFirstResponder` does not traverse again.
+- `.patches` unchanged (16 lines, 16 `arkt` commits: in sync).
+- Builds: `nice -n 15 autoninja -j 4 -C out/Arkt chrome`; Chromium disk 1.9 TB free; internal disk 12 GB free; swap
+  19.2 of 20.5 GB used.
+
+### Decision recorded on #930
+
+Tab past the strip's last control enters the page at its first element, Shift-Tab before the strip's first control at
+its last, so page and strip are one ring both ways. This replaces #478's wrap-around inside the strip. Esc and F6 are
+unchanged (the page gets its own last focus back). While a tab shows a strip, Tab no longer goes on from the page to
+the rest of the window's key view loop; without a strip nothing changes.
+
+### What landed
+
+- Engine. `-[ArktFacadeTab focusThroughTabTraversal:]`: nothing for a parked tab, as `-focus`.
+- Self-test: the window host's window is an `ArktSelfTestWindow` that logs each `selectNextKeyView:` /
+  `selectPreviousKeyView:` with the sender's class and whether it is inside the card; `tab-key [shift]` focuses the
+  page and sends it a Tab or Shift-Tab; `traverse first|last` calls the new member and logs whether the page holds the
+  first responder.
+- Swift. `EngineAPI.PageFocusEdge` (`first`, `last`) and `EngineClient.focusPage(of:at:)`, with a default that gives the
+  page the keyboard as `focusPage(of:)` does; `ChromiumEngine` maps it onto the new facade member. `ShellWindow` and
+  `LittleArktWindow` gain `keyViewHandoff`, asked first in both key view selectors with the sender view; false (no
+  page, no strip, no control to reach) lets the window's own loop run. `InfobarPresenter.focusStrip(leaving:reverse:)`
+  finds the tab whose page holds the view and puts the keyboard on its strip's first or last control;
+  `focusPageAtEdge` takes the keyboard back to the page at an end. `InfobarPanel.focusKeyboard(at:)`, and Tab or
+  Shift-Tab off an end of the strip ends the keyboard with that edge.
+
+### Smoke (`out/Arkt/Arkt.app`, `--no-startup-window --arkt-facade-selftest --arkt-engine-test-api --remote-debugging-port`, fresh profiles under `profiles/930-20261115/`, `--use-mock-keychain --mute-audio`, `--host-resolver-rules="MAP * ~NOTFOUND, EXCLUDE 127.0.0.1"`, a loopback page with an input, a button and an input, commands through page titles over DevTools)
+
+| Step | Result |
+|---|---|
+| Focus the last input, `tab-key` | `selectKeyView next sender=WebContentsViewCocoa inCard=yes`; the page's focus leaves to `BODY` |
+| Focus the first input, `tab-key shift` | `selectKeyView previous sender=WebContentsViewCocoa inCard=yes`; `BODY` |
+| Run 3: focus the last input, `tab-key` (focus leaves to `BODY`), then `traverse first` | `inPage=yes`; `document.activeElement` the first input |
+| Run 3: focus the first input, `tab-key shift` (`BODY`), then `traverse last` | `inPage=yes`; the last input |
+| `FATAL`, `Check failed`, `DCHECK` (runs 1 to 3) | 0 |
+
+Run 3 starts each traversal from the state a strip exit leaves: the page has let its focus go through `TakeFocus`.
+`contentView(for:)` in `ChromiumEngine` is the tab's `containerView`; the self-test card holds only that container, so
+`inCard=yes` puts the sender inside it. Run 1 sent the Tab without focusing the page first: the window itself was the first responder and logged the selection
+with itself as the sender; `tab-key` focuses the page since. The self-test window is not a shell window, so the strip
+itself was not driven on the engine; the shell side is covered by `InfobarKeyboardTests` with key events delivered in
+the process.
+
+### Deliberate breaks
+
+- `ShellWindow.selectNextKeyView(_:)` without the handler: `testAShellWindowHandsTabOutOfThePageToItsHandlerFirst`
+  fails on all three of its checks (the loop ran, the handler was asked only for Shift-Tab, the declined case).
+- The controllers' `keyViewHandoff =` lines taken out (the `ShellWindowController` one sits in the presenter's lazy
+  factory): `InfobarWindowTests.testTabOutOfThePageReachesTheStripThroughTheWindow` 3 failures,
+  `LittleArktDialogTests.testTabOutOfThePageReachesTheStripThroughTheWindow` 2.
+- #478's wrap-around back in the strip's Tab handling: 9 failures in `testADisabledControlIsSkipped`,
+  `testShiftTabBeforeTheStripsFirstControlEntersThePageAtItsLastElement`,
+  `testTabPastTheStripsLastControlEntersThePageAtItsFirstElement` and
+  `testWithoutAnEdgeHandlerTheStripFallsBackToThePagesLastFocus`. Restored: passing.
+
+### Tests
+
+- ShellKit `swift test --skip ShellKitGUITests`: every bundle passes (Swift Testing runs of 1567, 44, 60, 29, 289, 49,
+  343, 227 and 39 tests), including `EngineABIIsolationTests`; 1 new
+  (`focusPageAtAnEdgeAsksTheTabHandleToTraverse`).
+- GUI, `AAWindowLeakGuardTests`, `InfobarKeyboardTests` (29, 9 new), `InfobarPresenterTests`, `InfobarWindowTests`
+  (1 new), `LittleArktDialogTests` (1 new), `ZzzWindowLeakGuardEndTests`: 105 run, 0 failures (after the breaks were
+  restored).
+- Whole `ShellKitGUITests` bundle (`ShellWindow` is shared), before merging `main`: 2265 run, 51 skipped, 0 failures
+  (load average 14 to 15, so the pacing gates only reported).
+- After merging `main` (`805e9ff9`): ShellKit `swift test --skip ShellKitGUITests` passes (1573, 44, 60, 29, 289, 49,
+  350, 227, 39); `--filter 'LintTests|IsolationTests'` 13 + 60; ArktCore 235.
+- ArktCore `swift test`: 235 tests passed.
+- 20 runs of `AAWindowLeakGuardTests`, `InfobarKeyboardTests`, `InfobarWindowTests`, `LittleArktDialogTests`, `ZzzWindowLeakGuardEndTests` (69 tests each), under the machine's own load (1-minute load average 6.6 to 9.1, no load added): 20 passed, 0 failed.
+
+### Patch budget
+
+Unchanged: 16 patch files, 8 seam and hook patch files, 22 upstream files outside 0001-0004. `.patches` 16 lines, 16
+`arkt` commits: in sync. Facade header copies `cmp` identical. `gn check out/Arkt "//arkt/*"`: `Header dependency check
+OK`.
+
+### Left open
+
+- Real keys and VoiceOver in the shell app on an Engine build: #932 (needs the user).
+- Whether Tab should also reach the sidebar while a strip is up (the ring above keeps it in page and strip).
+
+### Cleanup
+
+Both engine runs and the fixture server stopped by exact PID (`ps -p` prints nothing). No crash reports from these
+runs. Throwaway profiles under `profiles/930-20261115/` deleted. Nothing touched the Keychain (mock keychain only), the
+clipboard or `/Applications/Arkt.app`.

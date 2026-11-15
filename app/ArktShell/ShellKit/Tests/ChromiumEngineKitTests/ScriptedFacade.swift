@@ -770,6 +770,9 @@ final class ScriptedTab: NSObject, ArktTabHandle {
   /// How often the client asked for focus.
   private(set) var focusCount = 0
   func focus() { focusCount += 1 }
+  /// The `reverse` of each tab traversal the client asked for (#930), in order.
+  private(set) var traversals: [Bool] = []
+  func focusThroughTabTraversal(reverse: Bool) { traversals.append(reverse) }
 
   /// Little Arkt's Open in (#314): `TabMoved`, then the tab becomes the target's active tab; an emptied window
   /// closes, as Chromium closes a Browser whose last tab left.

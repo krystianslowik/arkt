@@ -3876,6 +3876,20 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
   }
 }
 
+- (void)focusThroughTabTraversal:(BOOL)reverse {
+  arkt::CheckFacadeEntry();
+  if (_parked) {
+    return;
+  }
+  // FocusThroughTabTraversal only moves the page's own focus
+  // (SetInitialFocus); Focus makes the contents the first responder first, as
+  // a direct selection, so WebContentsViewMac does not traverse a second time.
+  if (content::WebContents* contents = self.contents) {
+    contents->Focus();
+    contents->FocusThroughTabTraversal(reverse);
+  }
+}
+
 - (void)moveToBrowser:(id<ArktBrowserHandle>)target {
   ArktFacadeBrowser* destination =
       [(NSObject*)target isKindOfClass:[ArktFacadeBrowser class]]

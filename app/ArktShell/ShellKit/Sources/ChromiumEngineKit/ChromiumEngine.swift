@@ -261,6 +261,9 @@ public final class ChromiumEngine: EngineClient, EngineExtensions, EngineDownloa
 
   /// The container is not the page: the facade focuses the tab's contents (`WebContents::Focus`).
   public func focusPage(of id: TabID) { tabs[id]?.handle.focus() }
+  public func focusPage(of id: TabID, at edge: PageFocusEdge) {
+    tabs[id]?.handle.focusThroughTabTraversal(reverse: edge == .last)
+  }
 
   /// The facade moves the tab's model between the two Browsers; its `TabMoved` (same handle) reassigns the tab here
   /// and its `ActiveTabChanged` follows. Chromium closes the emptied Browser (`WindowClosed`).
