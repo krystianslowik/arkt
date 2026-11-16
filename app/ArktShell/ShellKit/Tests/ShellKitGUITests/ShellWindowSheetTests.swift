@@ -142,7 +142,8 @@ final class ShellWindowSheetTests: XCTestCase {
     let tab = try shownTab(rows: 3)
     let window = try XCTUnwrap(controller.window)
     let strip = try XCTUnwrap(controller.infobarStrips.strip(for: tab))
-    let sheet = makeSheet(height: 600)                                  // centered, its top would be over the rows
+    // Fits below the rows, and centered its top would be over them, whatever size the screen lets the window keep.
+    let sheet = makeSheet(height: try pageTop(of: tab) - 3 * InfobarMetrics.rowHeight - 40)
 
     window.beginSheet(sheet)
     defer { end(sheet, on: window) }
@@ -156,7 +157,7 @@ final class ShellWindowSheetTests: XCTestCase {
   func testASheetUpWhenRowsArriveStaysUntilTheWindowResizes() throws {
     let tab = try shownTab(rows: 0)
     let window = try XCTUnwrap(controller.window)
-    let sheet = makeSheet(height: 600)
+    let sheet = makeSheet(height: try pageTop(of: tab) - 3 * InfobarMetrics.rowHeight - 60)   // fits after the resize
     window.beginSheet(sheet)
     defer { end(sheet, on: window) }
     let begun = sheet.frame
@@ -183,7 +184,7 @@ final class ShellWindowSheetTests: XCTestCase {
   func testASheetTooTallForTheCapStaysInsideTheWindow() throws {
     let tab = try shownTab(rows: 3)
     let window = try XCTUnwrap(controller.window)
-    let sheet = makeSheet(height: 780)
+    let sheet = makeSheet(height: try pageTop(of: tab) - 3 * InfobarMetrics.rowHeight + 60)
 
     window.beginSheet(sheet)
     defer { end(sheet, on: window) }
@@ -250,7 +251,7 @@ final class ShellWindowSheetTests: XCTestCase {
     let rect = try XCTUnwrap(window.delegate?.window?(window, willPositionSheet: probe, using: defaultRect))
     XCTAssertEqual(rect.maxY, top, accuracy: 0.5, "the top pane's page top")
 
-    let sheet = makeSheet(height: 600)
+    let sheet = makeSheet(height: top - 40)                             // taller than the lower pane's top
     window.beginSheet(sheet)
     defer { end(sheet, on: window) }
     XCTAssertGreaterThanOrEqual(sheet.frame.minY, window.frame.minY - 0.5, "the sheet's bottom inside the window")
@@ -270,7 +271,7 @@ final class ShellWindowSheetTests: XCTestCase {
     XCTAssertEqual(rect.maxY, window.convertFromScreen(strip.panel.frame).minY, accuracy: 0.5,
                    "below the unfocused pane's rows")
 
-    let sheet = makeSheet(height: 600)
+    let sheet = makeSheet(height: rect.maxY - 40)
     window.beginSheet(sheet)
     defer { end(sheet, on: window) }
     XCTAssertFalse(sheet.frame.intersects(strip.panel.frame), "the sheet covers none of the other pane's rows")
