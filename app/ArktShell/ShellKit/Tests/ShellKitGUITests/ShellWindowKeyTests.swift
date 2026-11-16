@@ -50,6 +50,11 @@ final class ShellWindowKeyTests: XCTestCase {
     space.keyEquivalentModifierMask = .control
     space.target = probe
     file.addItem(space)
+    let f12 = String(UnicodeScalar(NSF12FunctionKey)!)
+    let devTools = NSMenuItem(title: "Developer Tools", action: #selector(MenuProbe.hit(_:)), keyEquivalent: f12)
+    devTools.keyEquivalentModifierMask = []
+    devTools.target = probe
+    file.addItem(devTools)
     holder.submenu = file
     menu.addItem(holder)
     NSApp.mainMenu = menu
@@ -74,6 +79,16 @@ final class ShellWindowKeyTests: XCTestCase {
 
     XCTAssertEqual(probe.hits, ["Space 1"])
     XCTAssertEqual(view.keyEquivalents, 0, "the focused view never saw Ctrl-1")
+  }
+
+  /// KB-049 (#119): F12 has no Cmd either, so it reaches Developer Tools before a focused page.
+  func testF12ReachesTheMenuBeforeAFocusedViewThatSwallowsKeyEquivalents() throws {
+    let (window, view, probe) = try makeWindow()
+
+    XCTAssertTrue(window.performKeyEquivalent(with: try key(kVK_F12, [])))
+
+    XCTAssertEqual(probe.hits, ["Developer Tools"])
+    XCTAssertEqual(view.keyEquivalents, 0, "the focused view never saw F12")
   }
 
   /// The page keeps the Ctrl keys the menu has no item for (a terminal in the page uses Ctrl-A, Ctrl-C).

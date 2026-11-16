@@ -617,6 +617,39 @@ final class PinnedTabTests: XCTestCase {
     harness.controller.close()
   }
 
+  /// Spaces > Collapse / Expand Pinned Section (KB-043, #119) toggles the current Space's Pinned section in this window,
+  /// as the header caret does; its title follows the state, and it is disabled while the Space has no pinned tab.
+  func testThePinnedSectionMenuItemTogglesTheCurrentSpacesPinnedSection() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let page = try XCTUnwrap(harness.sidebarController.currentPage)
+    let item = harness.menuItem(#selector(ShellWindowController.togglePinnedSection(_:)))
+    let expanded = try rowCount(harness)
+
+    XCTAssertTrue(harness.controller.validateMenuItem(item))
+    XCTAssertEqual(item.title, "Collapse Pinned Section")
+    harness.controller.togglePinnedSection(item)
+    XCTAssertTrue(page.isPinnedCollapsed)
+    XCTAssertEqual(try rowCount(harness), expanded - 4)
+
+    XCTAssertTrue(harness.controller.validateMenuItem(item))
+    XCTAssertEqual(item.title, "Expand Pinned Section")
+    harness.controller.togglePinnedSection(item)
+    XCTAssertFalse(page.isPinnedCollapsed)
+    XCTAssertEqual(try rowCount(harness), expanded)
+    harness.controller.close()
+
+    var empty = SidebarModel.Sidebar()
+    let space = empty.addSpace(title: "Empty")
+    _ = try empty.addTab(url: Self.url("t0"), title: "T0", in: .today(space))
+    let other = Harness(empty)
+    let otherItem = other.menuItem(#selector(ShellWindowController.togglePinnedSection(_:)))
+    XCTAssertFalse(other.controller.validateMenuItem(otherItem), "nothing to collapse without pinned tabs")
+    other.controller.togglePinnedSection(otherItem)
+    XCTAssertFalse(try XCTUnwrap(other.sidebarController.currentPage).isPinnedCollapsed)
+    other.controller.close()
+  }
+
   /// DM 3.1: the collapsed state is per window; a second window on the same source keeps its own.
   func testTheCollapsedStateIsPerWindow() throws {
     let world = try Self.makeWorld()

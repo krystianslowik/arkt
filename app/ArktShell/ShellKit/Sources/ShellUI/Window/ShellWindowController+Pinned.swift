@@ -225,11 +225,18 @@ extension ShellWindowController {
     sidebarController.openEditPin(node: node, focus: focus, currentPage: live)
   }
 
+  /// Spaces > Collapse / Expand Pinned Section (KB-043, unbound): the current Space's Pinned section in this window,
+  /// as the header caret does (BH-065); nothing while the Space has no pinned tab.
+  @objc public func togglePinnedSection(_ sender: Any?) {
+    guard let page = sidebarController.currentPage, !page.collapsePinnedButton.isHidden else { return }
+    page.setPinnedCollapsed(!page.isPinnedCollapsed)
+  }
+
   // MARK: Menu validation
 
   /// Titles File > Pin / Unpin Tab for the current tab and gates the three pinned commands; nil for other items.
   /// Pin needs a pinnable current node, Reset a navigated current pinned tab, Reset Space a navigated pinned tab
-  /// in the current Space.
+  /// in the current Space. Collapse / Expand Pinned Section is titled for the section's state and needs a pinned tab.
   func validatePinnedMenuItem(_ item: NSMenuItem) -> Bool? {
     switch item.action {
     case #selector(pinCurrentTab(_:)):
@@ -244,6 +251,10 @@ extension ShellWindowController {
     case #selector(resetSpace(_:)):
       guard let space = currentSpace, !resettablePinnedTabs(in: space).isEmpty else { return false }
       return true
+    case #selector(togglePinnedSection(_:)):
+      guard let page = sidebarController.currentPage else { return false }
+      item.title = page.isPinnedCollapsed ? "Expand Pinned Section" : "Collapse Pinned Section"
+      return !page.collapsePinnedButton.isHidden
     default:
       return nil
     }
