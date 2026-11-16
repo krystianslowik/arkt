@@ -62,7 +62,11 @@ public final class ShortcutEditorModel {
   }
   public private(set) var protectedConflicts: [ProtectedConflict] = []
   /// Why the last key pressed while recording was refused; nil once a key is accepted or recording ends.
-  public enum Rejection: Equatable, Sendable { case needsCommandOrControl, textEditing, confirmOrFocusKey }
+  public enum Rejection: Equatable, Sendable {
+    case needsCommandOrControl, textEditing, confirmOrFocusKey
+    /// Extension shortcuts only (#597): a key `chrome.commands` cannot name, and Option with Command or Control.
+    case notAnExtensionKey, optionWithCommandOrControl
+  }
   public private(set) var rejection: Rejection?
   /// Saved entries for actions this build does not list (a newer build's catalog); written back on every save.
   private var foreignOverrides: [String: StoredOverride] = [:]
@@ -71,6 +75,17 @@ public final class ShortcutEditorModel {
   public var pendingShortcut: ShortcutBinding? { pendingBinding }
   var protectedOwners: (@MainActor (ShortcutBinding) -> [ProtectedConflict])? {
     didSet { refreshBlockedOverrides() }
+  }
+  /// The extension commands that hold a binding (#597, `ExtensionShortcutsModel.connect`). Unlike a protected owner,
+  /// Use takes the binding from them (`releaseExtensionOwners`).
+  var extensionOwners: (@MainActor (ShortcutBinding) -> [ProtectedConflict])?
+  /// Clears the binding from every extension command that holds it.
+  var releaseExtensionOwners: (@MainActor (ShortcutBinding) -> Void)?
+  /// The extension commands holding the recorded binding while the conflict notice is open.
+  public private(set) var extensionConflicts: [ProtectedConflict] = []
+  /// The recorded binding has an owner, so the conflict notice is open.
+  public var hasConflict: Bool {
+    !conflictingActions.isEmpty || !protectedConflicts.isEmpty || !extensionConflicts.isEmpty
   }
   private var pendingBinding: ShortcutBinding?
   private let defaults: UserDefaults
@@ -133,11 +148,13 @@ public final class ShortcutEditorModel {
     if let binding = definition.defaultBinding {
       let conflicts = catalog.filter { $0.id != id && self.binding(for: $0.id) == binding }.map(\.id)
       let protected = protectedOwners?(binding) ?? []
-      if !conflicts.isEmpty || !protected.isEmpty {
+      let extensions = extensionOwners?(binding) ?? []
+      if !conflicts.isEmpty || !protected.isEmpty || !extensions.isEmpty {
         beginRecording(id)
         pendingBinding = binding
         conflictingActions = conflicts
         protectedConflicts = protected
+        extensionConflicts = extensions
         return
       }
     }
@@ -164,6 +181,7 @@ public final class ShortcutEditorModel {
     pendingBinding = nil
     conflictingActions = []
     protectedConflicts = []
+    extensionConflicts = []
     rejection = nil
   }
 
@@ -186,13 +204,15 @@ public final class ShortcutEditorModel {
     let binding = ShortcutBinding(key: key.lowercased(), modifiers: event.modifierFlags)
     let conflicts = catalog.filter { $0.id != id && self.binding(for: $0.id) == binding }.map(\.id)
     let protected = protectedOwners?(binding) ?? []
-    if conflicts.isEmpty && protected.isEmpty {
+    let extensions = extensionOwners?(binding) ?? []
+    if conflicts.isEmpty && protected.isEmpty && extensions.isEmpty {
       setBinding(binding, for: id)
       cancelRecording()
     } else {
       pendingBinding = binding
       conflictingActions = conflicts
       protectedConflicts = protected
+      extensionConflicts = extensions
     }
   }
 
@@ -203,6 +223,8 @@ public final class ShortcutEditorModel {
     // A dynamic menu owner may have appeared while the notice was open.
     protectedConflicts = protectedOwners?(binding) ?? []
     guard protectedConflicts.isEmpty else { return }
+    // Extension commands holding it now (one may have taken it while the notice was open) lose it.
+    if !(extensionOwners?(binding) ?? []).isEmpty { releaseExtensionOwners?(binding) }
     // Recompute conflicts so changes made while the notice is open cannot create duplicates.
     for definition in catalog where definition.id != id && self.binding(for: definition.id) == binding {
       setBinding(nil, for: definition.id)

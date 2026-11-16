@@ -1,4 +1,5 @@
 import AppKit
+import EngineAPI
 import Motion
 
 /// The Settings window (#307; docs/design/settings.md, design/settings/): seven panes under one unified bar. Arkt >
@@ -69,6 +70,13 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
   var shortcutObserver: UUID?
   var shortcutConflictView: NSView?
   var shortcutWarningView: NSView?
+  /// Settings > Shortcuts > Extension Shortcuts (#597): the model while the engine runs extensions, each command's
+  /// controls (kept across rebuilds), and the engine's observation.
+  var extensionShortcuts: ExtensionShortcutsModel?
+  var extensionShortcutControls: [ExtensionCommandID: ExtensionShortcutControls] = [:]
+  var extensionCommandsObservation: EngineObservation?
+  /// The last value sent to `setExtensionShortcutHandlingSuspended`.
+  var isExtensionShortcutHandlingSuspended = false
   /// Settings > General > Downloads (#132): the mode, the folder row and the Library row.
   var downloadModeControl: SettingsSegmentedControl?
   var downloadModeRow: SettingsRowView?
@@ -165,6 +173,7 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
     guard let window = window as? SettingsWindow else { return }
     let wasVisible = window.isVisible
     observeShortcutEditor()
+    observeExtensionShortcuts()
     if !wasVisible {
       // The Spaces (and the preview's theme) may have changed while the window was closed.
       paneViews[.spaces] = nil
@@ -350,6 +359,8 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
   @objc public func goToSidebarItem(_ sender: Any?) {}
 
   public func windowDidResignKey(_ notification: Notification) {
+    // A recorder stops listening when Settings loses focus, so extension shortcuts run again (#597).
+    cancelShortcutRecording()
     for (item, title) in retitled { item.title = title }
     retitled = []
   }
@@ -366,6 +377,8 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
 
   public func windowWillClose(_ notification: Notification) {
     cancelShortcutRecording()
+    extensionCommandsObservation?.cancel()
+    extensionCommandsObservation = nil
     if let observer = shortcutObserver { services.shortcutEditor?.removeObserver(observer); shortcutObserver = nil }
     rememberPosition()
   }

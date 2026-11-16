@@ -1,4 +1,5 @@
 import AppKit
+import EngineAPI
 
 /// What the Settings window asks the app for: plain values and actions, so ShellUI needs no core module (the app
 /// target answers with LaunchServices, the import coordinator and the data folder).
@@ -22,6 +23,8 @@ public struct SettingsServices {
   public var shortcutsMenu: @MainActor () -> NSMenu? = { NSApp.mainMenu }
   /// Optional editor supplied by the app for shortcut changes.
   public var shortcutEditor: ShortcutEditorModel?
+  /// The engine's extensions (#597): Settings > Shortcuts lists their commands under Extension Shortcuts when set.
+  public var extensions: (any EngineExtensions)?
   /// Whether a binding conflicts with a system shortcut (BH-199): the static list of macOS defaults.
   public var isSystemShortcut: @MainActor (ShortcutBinding) -> Bool = { SystemShortcuts.contains($0) }
   /// The Spaces, in sidebar order.

@@ -314,7 +314,7 @@ extension SettingsWindowController {
     refreshShortcutCatalog()
     let search = SettingsFixedBlock(shortcutsSearch, height: SettingsMetrics.searchHeight)
     return [search] + shortcutSectionBlocks(ShortcutCatalog.filter(shortcutSections, query: shortcutsSearch.stringValue))
-      + [shortcutsFooter()]
+      + extensionShortcutBlocks() + [shortcutsFooter()]
   }
 
   private func refreshShortcutCatalog() {
@@ -391,7 +391,7 @@ extension SettingsWindowController {
       return
     }
     let found = ShortcutCatalog.filter(shortcutSections, query: shortcutsSearch.stringValue)
-    pane.setBlocks([search] + shortcutSectionBlocks(found) + [footer])
+    pane.setBlocks([search] + shortcutSectionBlocks(found) + extensionShortcutBlocks() + [footer])
     if selectedPane == .shortcuts { layoutPane() }
     updateKeyViewLoop()
   }
