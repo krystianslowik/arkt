@@ -62,7 +62,7 @@ engine bridge), **out** (deliberately not offered; see section 9).
 | Appearance | Command-9 opens the ninth tab | toggle | `switchToNinthSidebarItemEnabled` | off | planned | BH-015 |
 | Appearance | Haptic feedback when reordering tabs | toggle | `tabReorderingHapticsDisabled` (inverted) | on | planned | BH-024 |
 | Appearance | Play sound effects | toggle | `playUserInterfaceSoundsDisabled` (inverted) | on | planned (Arkt has no sounds yet) | BH-207 |
-| Shortcuts | Every menu action: view, record, reset | recorder per row | `StorableKeyBindings` (overrides only) | menu defaults | view: exists as menus; rebind: planned | BH-198, BH-199, BH-202 |
+| Shortcuts | Every menu action: view, record, reset | recorder per row | `StorableKeyBindings` (overrides only) | menu defaults | view: exists as menus; rebind: six commands (#119), the rest planned (#946) | BH-198, BH-199, BH-202 |
 | Shortcuts | Arkt first / Website first / Press twice for Arkt | popup per customized row and in the row's context menu | per-binding priority | Arkt first | planned | BH-200, BH-201 |
 | Extensions | Installed list: enable, pin, details | toggle, pin button, row click | Chromium extension prefs | n/a | engine, planned (#121) | 2.x extensions |
 | Extensions | Developer mode | toggle | Chromium `extensions.ui.developer_mode` | off | engine, planned | none |
