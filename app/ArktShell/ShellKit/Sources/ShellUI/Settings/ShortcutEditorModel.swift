@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import Foundation
 
 /// A stable identifier supplied by the shortcut catalog, independent of the displayed title.
@@ -60,6 +61,11 @@ public final class ShortcutEditorModel {
     public let binding: ShortcutBinding
   }
   public private(set) var protectedConflicts: [ProtectedConflict] = []
+  /// Why the last key pressed while recording was refused; nil once a key is accepted or recording ends.
+  public enum Rejection: Equatable, Sendable { case needsCommandOrControl, textEditing, confirmOrFocusKey }
+  public private(set) var rejection: Rejection?
+  /// Saved entries for actions this build does not list (a newer build's catalog); written back on every save.
+  private var foreignOverrides: [String: StoredOverride] = [:]
   /// Saved requests that cannot currently be applied without taking a noneditable command's key.
   public private(set) var blockedOverrides: [ShortcutActionID: [ProtectedConflict]] = [:]
   public var pendingShortcut: ShortcutBinding? { pendingBinding }
@@ -85,6 +91,10 @@ public final class ShortcutEditorModel {
     self.defaults = defaults
     guard let data = defaults.data(forKey: Self.defaultsKey),
           let stored = try? JSONDecoder().decode([String: DecodedOverride].self, from: data) else { return }
+    let known = Set(self.catalog.map(\.id.rawValue))
+    for (id, entry) in stored where !known.contains(id) {
+      if let value = entry.value { foreignOverrides[id] = value }
+    }
     for definition in self.catalog {
       guard let value = stored[definition.id.rawValue]?.value else { continue }
       if let key = value.key, let flags = value.modifiers, !key.isEmpty {
@@ -137,6 +147,7 @@ public final class ShortcutEditorModel {
 
   public func resetAll() {
     overrides.removeAll()
+    foreignOverrides.removeAll()
     cancelRecording()
     persist()
   }
@@ -152,17 +163,25 @@ public final class ShortcutEditorModel {
     pendingBinding = nil
     conflictingActions = []
     protectedConflicts = []
+    rejection = nil
   }
 
   public func record(event: NSEvent) {
     guard event.type == .keyDown, let id = recordingAction else { return }
-    if event.keyCode == 53 { cancelRecording(); return }
-    if event.keyCode == 51 || event.keyCode == 117 {
+    let flags = event.modifierFlags.intersection([.command, .option, .control, .shift])
+    let code = Int(event.keyCode)
+    if code == kVK_Escape && flags.isEmpty { cancelRecording(); return }
+    if (code == kVK_Delete || code == kVK_ForwardDelete) && flags.isEmpty {
       setBinding(nil, for: id)
       cancelRecording()
       return
     }
     guard let key = event.charactersIgnoringModifiers, !key.isEmpty else { return }
+    if let reason = Self.rejection(keyCode: code, key: key, flags: flags) {
+      rejection = reason
+      return
+    }
+    rejection = nil
     let binding = ShortcutBinding(key: key.lowercased(), modifiers: event.modifierFlags)
     let conflicts = catalog.filter { $0.id != id && self.binding(for: $0.id) == binding }.map(\.id)
     let protected = protectedOwners?(binding) ?? []
@@ -185,15 +204,33 @@ public final class ShortcutEditorModel {
     guard protectedConflicts.isEmpty else { return }
     // Recompute conflicts so changes made while the notice is open cannot create duplicates.
     for definition in catalog where definition.id != id && self.binding(for: definition.id) == binding {
-      overrides[definition.id] = .cleared
+      setBinding(nil, for: definition.id)
     }
     setBinding(binding, for: id)
     cancelRecording()
   }
 
+  /// The recorder's key rules (maintainer decision 2026-11-16, #828): an edited binding goes to the menu before the
+  /// focused view (`ShortcutCatalog.reserves`), so it must never take typing or text editing from a field or a page.
+  /// It needs Command or Control, bare F1 ... F20 aside; Return, Tab and Escape stay theirs with any modifier; Cmd or
+  /// Opt with an arrow or Delete, and Ctrl with an Emacs editing letter, stay the text system's.
+  static func rejection(keyCode: Int, key: String, flags: NSEvent.ModifierFlags) -> Rejection? {
+    if [kVK_Return, kVK_ANSI_KeypadEnter, kVK_Tab, kVK_Escape].contains(keyCode) { return .confirmOrFocusKey }
+    let unshifted = flags.subtracting(.shift)
+    let arrows = [kVK_LeftArrow, kVK_RightArrow, kVK_UpArrow, kVK_DownArrow, kVK_Delete, kVK_ForwardDelete]
+    if arrows.contains(keyCode), unshifted == .command || unshifted == .option { return .textEditing }
+    if unshifted == .control, key.count == 1, "abdefhklnoptvy".contains(key.lowercased()) { return .textEditing }
+    if flags.contains(.command) || flags.contains(.control) { return nil }
+    let functionKeys = UInt32(NSF1FunctionKey)...UInt32(NSF20FunctionKey)
+    if key.unicodeScalars.count == 1, let scalar = key.unicodeScalars.first, functionKeys.contains(scalar.value) {
+      return nil
+    }
+    return .needsCommandOrControl
+  }
+
   private func persist() {
     refreshBlockedOverrides()
-    var stored: [String: StoredOverride] = [:]
+    var stored = foreignOverrides
     for (id, value) in overrides {
       switch value {
       case .binding(let binding):
