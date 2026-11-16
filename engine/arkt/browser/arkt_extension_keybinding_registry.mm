@@ -3,7 +3,9 @@
 #import <AppKit/AppKit.h>
 
 #include "base/apple/owned_objc.h"
+#include "base/containers/flat_set.h"
 #include "base/logging.h"
+#include "base/no_destructor.h"
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/browser/extensions/commands/command_service.h"
 #include "chrome/browser/extensions/extension_commands_global_registry.h"
@@ -70,7 +72,37 @@ bool MenuHolds(NSMenu* menu, const KeyEquivalent& wanted) {
   return false;
 }
 
+// The registries constructed and not yet destroyed, and whether extension
+// shortcut handling is suspended (#954).
+base::flat_set<ArktExtensionKeybindingRegistry*>& LiveRegistries() {
+  static base::NoDestructor<base::flat_set<ArktExtensionKeybindingRegistry*>>
+      registries;
+  return *registries;
+}
+bool g_shortcut_handling_suspended = false;
+
 }  // namespace
+
+void SetExtensionShortcutHandlingSuspended(Profile* profile, bool suspended) {
+  g_shortcut_handling_suspended = suspended;
+  extensions::ExtensionCommandsGlobalRegistry* global =
+      profile ? extensions::ExtensionCommandsGlobalRegistry::Get(profile)
+              : nullptr;
+  if (global) {
+    global->SetShortcutHandlingSuspended(suspended);
+  }
+  for (ArktExtensionKeybindingRegistry* registry : LiveRegistries()) {
+    registry->SetShortcutHandlingSuspended(suspended);
+  }
+  LOG(WARNING) << "ARKT: extension shortcut handling "
+               << (suspended ? "suspended" : "resumed") << " windows="
+               << LiveRegistries().size()
+               << " global=" << (global ? "yes" : "no");
+}
+
+bool ExtensionShortcutHandlingSuspended() {
+  return g_shortcut_handling_suspended;
+}
 
 bool MainMenuHasAccelerator(const ui::Accelerator& accelerator) {
   NSMenu* main_menu = NSApp.mainMenu;
@@ -132,9 +164,14 @@ ArktExtensionKeybindingRegistry::ArktExtensionKeybindingRegistry(
                        ? "yes"
                        : "no");
   Init();
+  LiveRegistries().insert(this);
+  if (g_shortcut_handling_suspended) {
+    SetShortcutHandlingSuspended(true);
+  }
 }
 
 ArktExtensionKeybindingRegistry::~ArktExtensionKeybindingRegistry() {
+  LiveRegistries().erase(this);
   OnWindowKeyChanged(false);
 }
 

@@ -68,6 +68,10 @@ public protocol EngineExtensions: AnyObject {
   /// `.unknownCommand`.
   func setExtensionCommandShortcut(_ id: ExtensionCommandID, to shortcut: ExtensionShortcut?,
                                    scope: ExtensionCommandScope, replacingConflict: Bool) -> ExtensionShortcutResult
+  /// Suspends (true) or resumes (false) extension shortcut handling while the shell's shortcut recorder listens, so a
+  /// key that is already an extension shortcut reaches the recorder: no In Arkt shortcut runs in any window and no All
+  /// Apps shortcut holds its system hot key. Setting a shortcut while suspended still works. Default: a no-op.
+  func setExtensionShortcutHandlingSuspended(_ suspended: Bool)
   /// Uninstalls the extension as the user's own choice, with no prompt of the engine's: the shell has asked already
   /// (the remove sheet, #720). `reportAbuse`: the user checked Report abuse, so the engine also opens the Web Store's
   /// report page for it. The removal arrives as `.extensionActionsChanged` for each window that listed its action
@@ -93,6 +97,7 @@ extension EngineExtensions {
   public func setExtensionCommandShortcut(_ id: ExtensionCommandID, to shortcut: ExtensionShortcut?,
                                           scope: ExtensionCommandScope,
                                           replacingConflict: Bool) -> ExtensionShortcutResult { .unknownCommand }
+  public func setExtensionShortcutHandlingSuspended(_ suspended: Bool) {}
   public func uninstallExtension(_ extensionID: String, reportAbuse: Bool) {}
   public func uninstallExtension(_ extensionID: String, reportAbuse: Bool, in window: EngineWindowID?) {
     uninstallExtension(extensionID, reportAbuse: reportAbuse)

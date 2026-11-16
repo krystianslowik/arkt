@@ -21,6 +21,7 @@
 #include "arkt/browser/arkt_extension_calls.h"
 #include "arkt/browser/arkt_extension_commands.h"
 #include "arkt/browser/arkt_extension_installs.h"
+#include "arkt/browser/arkt_extension_keybinding_registry.h"
 #include "arkt/browser/arkt_extension_uninstall.h"
 #include "arkt/browser/arkt_extensions_container.h"
 #include "arkt/browser/arkt_extensions_menu.h"
@@ -4677,12 +4678,23 @@ void DeliverImportResult(void (^completion)(id<ArktImportResult>),
   arkt::CheckFacadeEntry();
   std::string conflict_extension;
   std::string conflict_command;
+  // While suspended (#954) the global listener refuses new hot keys, which
+  // would read as GlobalShortcutTaken: handling resumes for the write and is
+  // suspended again after it, which also unregisters a hot key the write
+  // registered.
+  const bool suspended = arkt::ExtensionShortcutHandlingSuspended();
+  if (suspended) {
+    arkt::SetExtensionShortcutHandlingSuspended(arkt::EmbedderProfile(), false);
+  }
   const arkt::ExtensionShortcutResult result =
       arkt::SetExtensionCommandShortcut(
           arkt::EmbedderProfile(), base::SysNSStringToUTF8(extensionID),
           base::SysNSStringToUTF8(commandName),
           shortcut ? base::SysNSStringToUTF8(shortcut) : std::string(), global,
           replacingConflict, &conflict_extension, &conflict_command);
+  if (suspended) {
+    arkt::SetExtensionShortcutHandlingSuspended(arkt::EmbedderProfile(), true);
+  }
   ArktFacadeShortcutChange* change = [[ArktFacadeShortcutChange alloc] init];
   switch (result) {
     case arkt::ExtensionShortcutResult::kApplied:
@@ -4715,6 +4727,14 @@ void DeliverImportResult(void (^completion)(id<ArktImportResult>),
                        : " conflict=" + conflict_extension + " " +
                              conflict_command);
   return change;
+}
+
+- (void)setExtensionShortcutHandlingSuspended:(BOOL)suspended {
+  arkt::CheckFacadeEntry();
+  // Flags only, so it runs now even inside a notification or a nested run
+  // loop: a release must never wait behind other work or be dropped.
+  arkt::SetExtensionShortcutHandlingSuspended(arkt::EmbedderProfile(),
+                                              suspended);
 }
 
 - (void)uninstallExtension:(NSString*)extensionID
