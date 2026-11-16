@@ -22,8 +22,8 @@ public struct SettingsServices {
   public var shortcutsMenu: @MainActor () -> NSMenu? = { NSApp.mainMenu }
   /// Optional editor supplied by the app for shortcut changes.
   public var shortcutEditor: ShortcutEditorModel?
-  /// Whether a binding conflicts with a system shortcut.
-  public var isSystemShortcut: @MainActor (ShortcutBinding) -> Bool = { _ in false }
+  /// Whether a binding conflicts with a system shortcut (BH-199): the static list of macOS defaults.
+  public var isSystemShortcut: @MainActor (ShortcutBinding) -> Bool = { SystemShortcuts.contains($0) }
   /// The Spaces, in sidebar order.
   public var spaces: @MainActor () -> [SettingsSpaceSummary] = { [] }
   /// The system Downloads folder, what the Downloads pop-up calls "Downloads" (#132).

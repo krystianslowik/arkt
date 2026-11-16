@@ -35,7 +35,7 @@ final class SettingsWindowTests: XCTestCase {
   private func make(settings: AppSettings? = nil, services: Services = Services(),
                     menu: NSMenu? = nil, sidebar: StubSidebar? = nil,
                     editor: ShortcutEditorModel? = nil,
-                    isSystemShortcut: @escaping @MainActor (ShortcutBinding) -> Bool = { _ in false }
+                    isSystemShortcut: (@MainActor (ShortcutBinding) -> Bool)? = { _ in false }
   ) -> SettingsWindowController {
     var env = SettingsServices()
     env.isDefaultBrowser = { services.isDefault }
@@ -49,7 +49,7 @@ final class SettingsWindowTests: XCTestCase {
     let shortcuts = menu ?? MainMenu.make(commands: AppCommands()).menu
     env.shortcutsMenu = { shortcuts }
     env.shortcutEditor = editor
-    env.isSystemShortcut = isSystemShortcut
+    if let isSystemShortcut { env.isSystemShortcut = isSystemShortcut }      // nil keeps the static list
     if let sidebar { env.spaces = { SettingsSpaceSummary.list(from: sidebar) } }
     let controller = SettingsWindowController(settings: settings ?? AppSettings(defaults: defaults), services: env)
     controllers.append(controller)
@@ -648,6 +648,55 @@ final class SettingsWindowTests: XCTestCase {
     recorder.performClick(nil)
     window.sendEvent(try shortcutEvent("k", [.control, .option], code: 40, in: window))
     XCTAssertNil(Self.view("settings.shortcuts.systemConflict", in: root), "an ordinary replacement clears the warning")
+  }
+
+  /// #119: Ctrl-Space (input sources) and Ctrl-1 ... 9 (Mission Control desktops) belong to read-only Arkt items, so
+  /// recording one always opens the conflict notice; the notice itself names the system conflict. A free system key
+  /// still shows the separate warning. Both use the static list (`SystemShortcuts`), never system preferences.
+  func testConflictNoticeNamesSystemShortcutsForArktOwnedKeys() throws {
+    let menu = MainMenu.make(commands: AppCommands()).menu
+    if let spaces = menu.items.first(where: { $0.title == SpacesMenu.menuTitle })?.submenu as? SpacesMenu {
+      let entries = (1...9).map { SpacesMenu.Entry(id: SpaceID(), title: "Space \($0)") }
+      spaces.entries = { entries }
+      spaces.refreshList()
+    }
+    let model = ShortcutEditorModel(catalog: ShortcutCatalog.definitions(from: menu), defaults: defaults)
+    ShortcutCatalog.bind(model: model, to: menu)
+    defer { ShortcutCatalog.unbind(from: menu) }
+    let controller = make(menu: menu, editor: model, isSystemShortcut: nil)
+    controller.show(pane: .shortcuts)
+    let window = try XCTUnwrap(controller.window)
+    let root = try XCTUnwrap(window.contentView)
+    let id = ShortcutActionID("toggleSidebarVisibility")
+    let system = "System shortcuts may take priority over this shortcut."
+    let cases: [(String, UInt16, String)] = [(" ", 49, "Control Space is already used by Reveal Current Tab."),
+                                             ("1", 18, "Control 1 is already used by Space 1.")]
+    for (key, code, owner) in cases {
+      try find("settings.shortcuts.record.toggleSidebarVisibility", in: controller, as: NSButton.self).performClick(nil)
+      window.sendEvent(try shortcutEvent(key, .control, code: code, in: window))
+      let notice = try find("settings.shortcuts.conflict.message", in: controller, as: NSTextField.self)
+      XCTAssertTrue(notice.stringValue.hasPrefix(owner), notice.stringValue)
+      XCTAssertTrue(notice.stringValue.hasSuffix(system), notice.stringValue)
+      XCTAssertEqual(notice.accessibilityLabel(), notice.stringValue)
+      let needed = try XCTUnwrap(notice.cell).cellSize(forBounds: NSRect(x: 0, y: 0, width: notice.bounds.width,
+                                                                         height: .greatestFiniteMagnitude))
+      XCTAssertLessThanOrEqual(needed.height, notice.bounds.height, "the longest notice is not clipped")
+      try find("settings.shortcuts.conflict.keep", in: controller, as: NSButton.self).performClick(nil)
+      XCTAssertEqual(model.binding(for: id), ShortcutBinding(key: "s", modifiers: .command), key)
+    }
+
+    try find("settings.shortcuts.record.toggleSidebarVisibility", in: controller, as: NSButton.self).performClick(nil)
+    window.sendEvent(try shortcutEvent(" ", [.control, .option], code: 49, in: window))
+    XCTAssertNil(Self.view("settings.shortcuts.conflict.message", in: root), "no Arkt item owns Ctrl-Opt-Space")
+    let warning = try find("settings.shortcuts.systemConflict", in: controller)
+    XCTAssertEqual(warning.accessibilityLabel(), system)
+    XCTAssertEqual(model.binding(for: id), ShortcutBinding(key: " ", modifiers: [.control, .option]))
+
+    try find("settings.shortcuts.record.toggleSidebarVisibility", in: controller, as: NSButton.self).performClick(nil)
+    window.sendEvent(try shortcutEvent("t", .command, code: 17, in: window))
+    let notice = try find("settings.shortcuts.conflict.message", in: controller, as: NSTextField.self)
+    XCTAssertEqual(notice.stringValue, "Command T is already used by New Tab.", "Cmd-T is not a system shortcut")
+    try find("settings.shortcuts.conflict.keep", in: controller, as: NSButton.self).performClick(nil)
   }
 
   /// Return keeps the default choice; Space activates an explicitly focused Use control.

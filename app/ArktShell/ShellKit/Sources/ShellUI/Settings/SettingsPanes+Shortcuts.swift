@@ -6,6 +6,9 @@ private final class ShortcutRecorderButton: NSButton {
 }
 
 extension SettingsWindowController {
+  /// BH-199's system-shortcut warning.
+  static let systemShortcutWarning = "System shortcuts may take priority over this shortcut."
+
   func observeShortcutEditor() {
     guard shortcutObserver == nil, let editor = services.shortcutEditor else { return }
     shortcutObserver = editor.observe { [weak self] in self?.refreshShortcutPresentation() }
@@ -147,7 +150,10 @@ extension SettingsWindowController {
     panel.layer?.cornerRadius = ShellRadius.popover
     panel.autoresizingMask = [.width]
     let explanation = protected == nil ? "" : " This command cannot be changed here; keep the existing shortcut and try another."
-    let message = settingsLabel("\(shortcutDescription(binding)) is already used by \(title).\(explanation)", size: 13)
+    // Ctrl-Space and Ctrl-1 ... 9 are both Arkt items and macOS shortcuts, so the notice carries the system warning too.
+    let system = services.isSystemShortcut(binding) ? " \(Self.systemShortcutWarning)" : ""
+    let message = settingsLabel("\(shortcutDescription(binding)) is already used by \(title).\(explanation)\(system)",
+                                size: 13)
     message.setAccessibilityLabel(message.stringValue)
     message.setAccessibilityIdentifier("settings.shortcuts.conflict.message")
     message.frame = NSRect(x: 12, y: 12, width: panel.bounds.width - 24, height: 64)
@@ -192,7 +198,7 @@ extension SettingsWindowController {
   private func showShortcutWarning() {
     shortcutWarningView?.removeFromSuperview()
     guard let root = window?.contentView else { return }
-    let warning = settingsLabel("System shortcuts may take priority over this shortcut.", size: 12)
+    let warning = settingsLabel(Self.systemShortcutWarning, size: 12)
     warning.setAccessibilityIdentifier("settings.shortcuts.systemConflict")
     warning.setAccessibilityLabel(warning.stringValue)
     warning.frame = NSRect(x: 40, y: 85, width: root.bounds.width - 80, height: 28)
