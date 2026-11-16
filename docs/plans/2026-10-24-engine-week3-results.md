@@ -8100,17 +8100,21 @@ not moved until a resize. Follow-ups: Little Arkt windows #950, moving an up she
 `window.delegate`: 0, 1 and 3 rows (the rect's top on the strip's bottom, the horizontal place unchanged); HTML
 fullscreen with 2 rows (the card's top, then back below the rows); no page (the card's top); the rect AppKit passes,
 recorded from a real `beginSheet` (the cap is not above it); a stacked split with the lower pane focused (the top
-pane's page top; a 600 pt sheet inside the window); side by side with the unfocused pane holding 3 rows (the cap below
-them, a 600 pt sheet covering none). Real sheets: a 600 pt sheet under 3 rows (its top on the rows' bottom); a 780 pt
-sheet under 3 rows (inside the window); the up sheet above. Before the change: the first 7 failed (the delegate
+pane's page top; a sheet taller than the lower pane's top inside the window); side by side with the unfocused pane
+holding 3 rows (the cap below them, a tall sheet covering none). Real sheets under 3 rows: one that fits below the rows
+(its top on the rows' bottom) and one 60 pt too tall for that (inside the window); the up sheet above. Sheet heights
+are taken from the window's page top, not fixed: CI's runner keeps the 800 pt window shorter on its screen, and fixed
+600 pt and 780 pt sheets failed there on the bottom clamp (`("663.0") is not equal to ("607.0")`). Checked locally with
+the window set to 660 pt and 480 pt: 11 passed each. Before the change: the first 7 failed (the delegate
 answered nil); before the review fix: the stacked, side-by-side and too-tall tests failed (cap at 395 instead of 790,
 790 instead of 670, the sheet's bottom 110 pt below the window's).
 
 - `swift test --filter ShellWindowSheetTests`: 11 tests, 0 failures.
-- `swift test --filter 'Infobar|ShellWindow|Sheet|Split'`: 406 tests, 5 skipped, 0 failures (402 on the first
+- `swift test --filter 'Infobar|ShellWindow|Sheet|Split'`: 406 tests, 4 skipped, 0 failures (402 on the first
   version of the branch, 395 on `main`; the skipped count follows the load, as the pacing gates skip).
-- 20 runs of `AAWindowLeakGuardTests|ShellWindowSheetTests|ZzzWindowLeakGuardEndTests` (22 tests each), 1-minute load
-  average 9.1 to 25.0 on 10 cores: 20 passed, 0 failed.
+- 20 runs of `AAWindowLeakGuardTests|ShellWindowSheetTests|ZzzWindowLeakGuardEndTests` (22 tests each): 20 passed, 0
+  failed, at a 1-minute load average of 9.1 to 25.0 on 10 cores with the fixed sizes, and again 20 passed, 0 failed at
+  5.8 to 8.3 with the sizes taken from the window.
 - `swift test --skip ShellKitGUITests`: 1573, 44, 60, 29, 289, 49, 352, 227, 39, unchanged. Lints 13 + 60.
 
 ### Deliberate breaks
@@ -8120,7 +8124,7 @@ answered nil); before the review fix: the stacked, side-by-side and too-tall tes
   `testSideBySideTheCapIsBelowTheTallestStripOfThePanes` fails (`("790.0") is not equal to ("670.0")`, and the sheet
   covers the other pane's rows).
 - The bottom clamp dropped (`let top = min(rect.maxY, cap)`): `testASheetTooTallForTheCapStaysInsideTheWindow` fails
-  (`("58.0") is less than ("167.5") - the sheet's bottom inside the window`).
+  (`("58.0") is less than ("117.5") - the sheet's bottom inside the window`).
 - First version: the strip's height dropped from the cap: 5 of 7 failed, for example `("790.0") is not equal to
   ("670.0") +/- ("0.5") - three rows`.
 
