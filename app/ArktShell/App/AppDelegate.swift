@@ -30,7 +30,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
       }
     }
     #endif
-    MainMenu.install(commands: composition.commands)
+    composition.installMenu()
     #if DEBUG
     switch EnvironmentOverrides(environment: ProcessInfo.processInfo.environment).appearance {
     case .light?: NSApp.appearance = NSAppearance(named: .aqua)

@@ -17,6 +17,12 @@ final class AppComposition {
   private(set) var session: AppSession?
   /// The main menu's app-level target.
   let commands = AppCommands()
+  /// Shared by Settings and each installed menu; the catalog comes from an untouched menu.
+  private lazy var shortcutEditor = ShortcutEditorModel(
+    catalog: ShortcutCatalog.definitions(from: MainMenu.make(commands: commands).menu),
+    defaults: AppEnvironment.userDefaults)
+
+  func installMenu() { MainMenu.install(commands: commands, shortcutEditor: shortcutEditor) }
   /// How the app quits: `NSApp.terminate` in both builds. In the Engine build `NSApp` is Chromium's
   /// `BrowserCrApplication`, whose `terminate:` takes Chromium's quit path (the quit seams run as for the Quit item,
   /// week-3 results W3-8 run B); the facade has no `chrome::AttemptExit()` call of its own.
@@ -45,7 +51,7 @@ final class AppComposition {
         let recoveryPages = try await SettingsStore(database: state.database).load(RecoveryPageState.self)
         let favicons = await AppEnvironment.faviconStore(in: location)
         let session = AppSession(state: state, recoveryState: recoveryPages, location: location, engine: engine,
-                                 faviconStore: favicons, hostLookup: hostLookup)
+                                 faviconStore: favicons, shortcutEditor: shortcutEditor, hostLookup: hostLookup)
         self.session = session
         // The first run's record decides whether the launch window opens on it; loaded before the window exists.
         session.onboardingRecord = (try? await session.settingsStore.load(OnboardingRecord.self)) ?? .defaultValue

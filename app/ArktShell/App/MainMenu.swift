@@ -38,8 +38,10 @@ enum MainMenu {
   /// its own menu after the swap, so all three are set on every install. AppKit keeps the first Services menu it was
   /// given (a later `servicesMenu` assignment is ignored), so a Services menu that exists already is moved into
   /// Arkt's App menu instead of replaced.
-  static func install(commands: AppCommands) {
+  static func install(commands: AppCommands, shortcutEditor: ShortcutEditorModel? = nil) {
     let built = make(commands: commands)
+    if let previous = NSApp.mainMenu { ShortcutCatalog.unbind(from: previous) }
+    if let shortcutEditor { ShortcutCatalog.bind(model: shortcutEditor, to: built.menu) }
     if let current = NSApp.servicesMenu, current !== built.services,
        let holder = built.menu.items.first?.submenu?.items.first(where: { $0.submenu === built.services }) {
       current.supermenu?.items.first { $0.submenu === current }?.submenu = nil
@@ -165,9 +167,11 @@ enum MainMenu {
   /// Show / Hide Sidebar and Show / Hide Toolbar). Split View
   /// (S5): Arc's four View menu items plus a Split View submenu, built by ShellUI's SplitMenu.
   private static func viewItems() -> [NSMenuItem] {
+    let f12 = String(UnicodeScalar(NSF12FunctionKey)!)
     let developer = submenu(title: "Developer", items: [                                   // KB-049, KB-050
       page("View Source", .viewSource, "u", [.command, .option]),
       page("Developer Tools", .devTools, "i", [.command, .option]),
+      hiddenAlias(page("Developer Tools", .devTools, f12, [])),                           // KB-049: F12, reserved
       page("Inspect Elements", .inspect, "c", [.command, .option]),
       page("JavaScript Console", .console, "j", [.command, .option]),
     ])
@@ -183,6 +187,7 @@ enum MainMenu {
       .separator(),
       page("Actual Size", .zoomReset, "0"),                                                // KB-057
       page("Zoom In", .zoomIn, "+"),
+      hiddenAlias(page("Zoom In", .zoomIn, "=")),                                          // KB-057: Cmd-= too
       page("Zoom Out", .zoomOut, "-"),
       .separator(),
       item("Enter Full Screen", #selector(NSWindow.toggleFullScreen(_:)), "f", [.command, .control]),   // KB-051
@@ -215,6 +220,8 @@ enum MainMenu {
       item("Move Space Right", #selector(ShellWindowController.moveSpaceRight(_:)), "", []),
       // BH-059: every navigated pinned tab of the current Space returns to its pinned URL.
       item("Reset Space", #selector(ShellWindowController.resetSpace(_:)), "", []),
+      // KB-043 (unbound), BH-065: titled Expand Pinned Section while collapsed. PARITY(NEEDS-RUNTIME-CHECK): Arc's place.
+      item("Collapse Pinned Section", #selector(ShellWindowController.togglePinnedSection(_:)), "", []),
       .separator(),
       item("Next Space", #selector(ShellWindowController.nextSpace(_:)), right, [.command, .option]),
       item("Previous Space", #selector(ShellWindowController.previousSpace(_:)), left, [.command, .option]),
@@ -228,6 +235,8 @@ enum MainMenu {
   private static func windowItems(commands: AppCommands) -> [NSMenuItem] {
     [
       item("Minimize", #selector(NSWindow.performMiniaturize(_:)), "m"),                   // KB-069
+      alternate(item("Minimize All", #selector(NSApplication.miniaturizeAll(_:)), "m", [.command, .option],
+                     target: NSApp)),                                                  // KB-069
       item("Zoom", #selector(NSWindow.performZoom(_:)), "", []),
       .separator(),
       // KB-065, #132: the native Library; Downloads and Show All History claim their ids in the window host.
@@ -285,6 +294,19 @@ enum MainMenu {
     let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
     item.keyEquivalentModifierMask = modifiers
     item.target = target
+    return item
+  }
+
+  /// A second key for `item`'s command: hidden, so the menu lists the command once, and still live as a key.
+  static func hiddenAlias(_ item: NSMenuItem) -> NSMenuItem {
+    item.isHidden = true
+    item.allowsKeyEquivalentWhenHidden = true
+    return item
+  }
+
+  /// Shown in place of the item before it while Option is held.
+  static func alternate(_ item: NSMenuItem) -> NSMenuItem {
+    item.isAlternate = true
     return item
   }
 

@@ -56,6 +56,15 @@ NEEDS-RUNTIME-CHECK row.
 
 All shortcuts are user-remappable (see BH-198). Mouse modifier-clicks are in section 3.
 
+System shortcuts: macOS takes some keys before any app sees them, and two of Arc's defaults are among them.
+Ctrl-Space (KB-036) is "Select the previous input source" (Ctrl-Opt-Space the next) and Ctrl-1 ... Ctrl-9 (KB-035)
+are Mission Control's "Switch to Desktop N" (System Settings > Keyboard > Keyboard Shortcuts). Arkt keeps Arc's
+defaults; where the system shortcut is turned on, macOS takes the key first. The shortcut editor warns "System
+shortcuts may take priority over this shortcut" (BH-199) for these keys and for the other macOS defaults (Mission
+Control's Ctrl-arrows, Spotlight's Cmd-Space and Cmd-Opt-Space, Cmd-Tab, the Cmd-Shift-3 / 4 / 5 screenshots and
+Ctrl-Cmd-Q), in the warning line and in the conflict notice when an Arkt item also owns the key. The list is static
+(`SystemShortcuts`), not read from the user's settings (#119).
+
 ### 1.1 Tabs, windows, sidebar, navigation (global)
 
 | ID | Action | Default shortcut | Context | Rebindable action id | Evidence | Status |

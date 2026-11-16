@@ -72,7 +72,7 @@ final class SpacesMenuTests: XCTestCase {
     assertItems(menu, [])
     let titles = menu.items.filter { !$0.isSeparatorItem }.map(\.title)
     XCTAssertEqual(titles, ["New Space", "Rename Space", "Move Space Left", "Move Space Right", "Reset Space",
-                            "Next Space", "Previous Space", "Delete Space..."])
+                            "Collapse Pinned Section", "Next Space", "Previous Space", "Delete Space..."])
     XCTAssertFalse(zip(menu.items, menu.items.dropFirst()).contains { $0.isSeparatorItem && $1.isSeparatorItem },
                    "no doubled separator")
   }

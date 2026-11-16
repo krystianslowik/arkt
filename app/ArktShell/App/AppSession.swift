@@ -24,6 +24,7 @@ final class AppSession {
   /// windows the engine asks for (Chromium: a Dock reopen, `chrome.windows.create`, a startup URL). A closed window is
   /// never shown again.
   let windows: ShellWindowSet
+  private let shortcutEditor: ShortcutEditorModel
   private let recoveryPages: RecoveryPages
   /// One instance for every window, so Show / Hide Toolbar reaches all of them.
   let toolbarSetting = ToolbarSetting(defaults: AppEnvironment.userDefaults)
@@ -88,7 +89,8 @@ final class AppSession {
   /// `hostLookup` pairs the engine's own windows with the windows built for them (`ChromiumEngine.host(of:)`); nil
   /// for an engine that never asks for a window (FakeEngine).
   init(state: LaunchState, recoveryState: RecoveryPageState, location: DatabaseLocation, engine: any EngineClient,
-       faviconStore: FaviconStore?, hostLookup: ShellWindowSet.HostLookup? = nil) {
+       faviconStore: FaviconStore?, shortcutEditor: ShortcutEditorModel, hostLookup: ShellWindowSet.HostLookup? = nil) {
+    self.shortcutEditor = shortcutEditor
     self.location = location
     self.database = state.database
     self.engine = engine
@@ -502,6 +504,7 @@ final class AppSession {
   /// import (File > Import Browser Data...), the data folder and the Spaces.
   private func settingsServices() -> SettingsServices {
     var services = SettingsServices()
+    services.shortcutEditor = shortcutEditor
     services.openLibrary = { [weak self] in self?.showLibrary() }                     // #132
     services.isDefaultBrowser = { DefaultBrowser.isDefault() }
     services.makeDefaultBrowser = { await DefaultBrowser.makeDefault() }

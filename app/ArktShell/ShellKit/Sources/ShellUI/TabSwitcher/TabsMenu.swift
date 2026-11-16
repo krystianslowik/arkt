@@ -26,6 +26,8 @@ public enum TabsMenu {
            [.command, .control]),                                                                // KB-027
       .separator(),
       item("Reveal Current Tab", #selector(ShellWindowController.revealCurrentTab(_:)), " ", [.control]),  // KB-036
+      // KB-042: unbound; the current tab, a pane's split or the selection, as the rows' menus duplicate them.
+      item("Duplicate", #selector(ShellWindowController.duplicateSelectedTabs(_:)), "", []),
       .separator(),
     ]
     for number in 1...8 {                                                                        // KB-020

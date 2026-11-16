@@ -466,6 +466,77 @@ final class TabActionsTests: XCTestCase {
     harness.controller.close()
   }
 
+  /// Tabs > Duplicate (KB-042, #119) duplicates what the rows' context menus would: the current tab, a pane's whole
+  /// split (a pane's menu offers Duplicate Split View), or every row of a multi-selection.
+  func testTheDuplicateMenuItemDuplicatesTheCurrentTabAPanesSplitOrTheSelection() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    let item = NSMenuItem(title: "Duplicate", action: #selector(ShellWindowController.duplicateSelectedTabs(_:)),
+                          keyEquivalent: "")
+    item.target = harness.controller
+
+    harness.controller.activate(node: world.today[1])
+    XCTAssertTrue(harness.controller.validateMenuItem(item))
+    harness.controller.duplicateSelectedTabs(item)
+    var today = harness.children(.today(world.work))
+    XCTAssertEqual(today.count, world.today.count + 2)
+    XCTAssertEqual(today[1], world.today[1])
+    let copy = today[2]
+    XCTAssertEqual(harness.current, copy, "the copy becomes current, as from the row's menu")
+
+    harness.controller.activate(node: world.panes[1])
+    XCTAssertTrue(harness.controller.validateMenuItem(item))
+    harness.controller.duplicateSelectedTabs(item)
+    today = harness.children(.today(world.work))
+    let splitIndex = try XCTUnwrap(today.firstIndex(of: world.split))
+    let splitCopy = today[splitIndex + 1]
+    guard case .split? = harness.source.node(splitCopy) else { return XCTFail("the pane's split is duplicated") }
+    XCTAssertEqual(harness.children(.split(splitCopy)).count, world.panes.count)
+    XCTAssertEqual(harness.children(.split(world.split)), world.panes, "the pane stays in its split")
+
+    harness.controller.activate(node: world.today[0])
+    try harness.click(world.today[3], .command)
+    XCTAssertEqual(try harness.outline().selectedNodes, [world.today[0], world.today[3]])
+    let before = harness.children(.today(world.work)).count
+    harness.controller.duplicateSelectedTabs(item)
+    today = harness.children(.today(world.work))
+    XCTAssertEqual(today.count, before + 2)
+    let first = try XCTUnwrap(today.firstIndex(of: world.today[0]))
+    let last = try XCTUnwrap(today.firstIndex(of: world.today[3]))
+    XCTAssertEqual(harness.source.node(today[first + 1]).map(Self.title), "T0")
+    XCTAssertEqual(harness.source.node(today[last + 1]).map(Self.title), "T3")
+    harness.controller.close()
+  }
+
+  /// #374 class (#828 review): a pane row never joins a multi-selection (`SidebarOutlineController.isSelectable`), so
+  /// Duplicate on a selection gets the split row; it duplicates the split whole once and never adds a pane to it.
+  func testDuplicatingASelectionWithASplitKeepsTheSplitIntact() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    harness.controller.activate(node: world.today[0])
+    try harness.click(world.panes[0], .command)
+    XCTAssertFalse(try harness.outline().selectedNodes.contains(world.panes[0]), "a pane is not selectable")
+    harness.controller.activate(node: world.today[0])
+    try harness.click(world.split, .command)
+    XCTAssertEqual(Set(try harness.outline().selectedNodes), [world.today[0], world.split])
+    let before = harness.children(.today(world.work))
+
+    harness.controller.duplicateSelectedTabs(nil)
+
+    let today = harness.children(.today(world.work))
+    XCTAssertEqual(today.count, before.count + 2, "one copy of T0 and one of the split")
+    XCTAssertEqual(harness.children(.split(world.split)), world.panes, "the split keeps its two panes")
+    let splitIndex = try XCTUnwrap(today.firstIndex(of: world.split))
+    let copy = today[splitIndex + 1]
+    guard case .split? = harness.source.node(copy) else { return XCTFail("the split is duplicated whole") }
+    XCTAssertEqual(harness.children(.split(copy)).count, world.panes.count)
+    harness.controller.close()
+  }
+
+  private static func title(_ node: SidebarNodeInfo) -> String? {
+    if case .tab(_, _, let title) = node { title } else { nil }
+  }
+
   // MARK: Multi-selection (BH-028)
 
   func testCommandClickSelectsTheCurrentRowAndTheClickedRow() throws {

@@ -188,6 +188,24 @@ extension ShellWindowController {
     }
   }
 
+  /// Tabs > Duplicate (KB-042, unbound): what the rows' context menus duplicate. Two or more selected rows go through
+  /// the multi-selection's Duplicate; otherwise the current tab, a pane through its split (a pane's menu offers
+  /// Duplicate Split View). Not named `duplicate(_:)`, which would shadow the bulk method above.
+  @objc public func duplicateSelectedTabs(_ sender: Any?) {
+    guard let targets = duplicateTargets else { return }
+    duplicate(targets)
+  }
+
+  /// nil when nothing can be duplicated: no current tab, or a Favorite (its menu has no Duplicate).
+  var duplicateTargets: [NodeID]? {
+    let selected = sidebarController.selectedNodes
+    if selected.count >= 2 { return selected }
+    guard let node = currentNode else { return nil }
+    if case .favorites? = sidebar.section(containing: node) { return nil }
+    if case .split(let split)? = sidebar.parent(of: node) { return [split] }
+    return [node]
+  }
+
   /// The copy's node, with the engine's duplicate of the live tab mapped to it (history and all).
   private func duplicateTab(_ id: NodeID) -> NodeID? {
     let copy: NodeID

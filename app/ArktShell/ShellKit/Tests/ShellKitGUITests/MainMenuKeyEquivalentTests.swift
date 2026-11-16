@@ -1,5 +1,7 @@
 import AppKit
 import Carbon.HIToolbox
+import EngineAPI
+import EngineAPITestSupport
 import XCTest
 @testable import ShellUI
 
@@ -47,6 +49,73 @@ final class MainMenuKeyEquivalentTests: XCTestCase {
     }
     collect(menu)
     return items
+  }
+
+  /// IDs come from the command, not the title that validation can change; defaults match the actual menu.
+  func testEditableDefinitionsIdentifyActualMenuCommands() throws {
+    let menu = MainMenu.make(commands: AppCommands()).menu
+    let definitions = ShortcutCatalog.definitions(from: menu)
+    let sidebar = try XCTUnwrap(definitions.first { $0.id == ShortcutActionID("toggleSidebarVisibility") })
+    let tab = try XCTUnwrap(definitions.first { $0.id == ShortcutActionID("newTab") })
+    XCTAssertEqual(sidebar.defaultBinding, ShortcutBinding(key: "s", modifiers: .command))
+    XCTAssertEqual(tab.defaultBinding, ShortcutBinding(key: "t", modifiers: .command))
+    XCTAssertEqual(Set(definitions.map(\.id)).count, definitions.count)
+    let view = try XCTUnwrap(menu.items.first { $0.title == "View" }?.submenu)
+    let item = try XCTUnwrap(view.items.first { $0.action == #selector(ShellWindowController.toggleSidebarVisibility(_:)) })
+    item.title = "Show Sidebar"
+    let renamed = ShortcutCatalog.definitions(from: menu)
+    XCTAssertNotNil(renamed.first { $0.id == sidebar.id && $0.defaultBinding == sidebar.defaultBinding })
+  }
+
+  /// The manually bound menu keeps its selector and dispatches to an explicitly assigned window controller.
+  /// App composition and responder-chain wiring are covered separately by ShortcutWiringTests.
+  func testOverridesDriveRealMenuAndCommandAfterReload() throws {
+    _ = NSApplication.shared
+    let suite = "dev.arkt.tests.shortcutMenu.\(UUID().uuidString)"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+    defer { UserDefaults().removePersistentDomain(forName: suite) }
+    let commands = AppCommands()
+    let menu = MainMenu.make(commands: commands).menu
+    let definitions = ShortcutCatalog.definitions(from: menu)
+    let id = ShortcutActionID("toggleSidebarVisibility")
+    let model = ShortcutEditorModel(catalog: definitions, defaults: defaults)
+    let controller = ShellWindowController(engine: InMemoryEngine(), sidebar: StubSidebar.sample())
+    defer { controller.close() }
+    let view = try XCTUnwrap(menu.items.first { $0.title == "View" }?.submenu)
+    let item = try XCTUnwrap(view.items.first { $0.action == #selector(ShellWindowController.toggleSidebarVisibility(_:)) })
+    item.target = controller
+    ShortcutCatalog.bind(model: model, to: menu)
+    model.setBinding(ShortcutBinding(key: "k", modifiers: .command), for: id)
+    XCTAssertEqual(item.keyEquivalent, "k")
+    XCTAssertEqual(item.keyEquivalentModifierMask, [.command])
+    XCTAssertEqual(item.action, #selector(ShellWindowController.toggleSidebarVisibility(_:)))
+
+    let reloaded = ShortcutEditorModel(catalog: definitions, defaults: defaults)
+    ShortcutCatalog.bind(model: reloaded, to: menu)
+    func event(_ key: String) throws -> NSEvent {
+      try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command, timestamp: 0,
+                                     windowNumber: 0, context: nil, characters: key,
+                                     charactersIgnoringModifiers: key, isARepeat: false, keyCode: 0))
+    }
+    XCTAssertFalse(try view.performKeyEquivalent(with: event("s")))
+    XCTAssertTrue(controller.isSidebarVisible)
+    XCTAssertTrue(try view.performKeyEquivalent(with: event("k")))
+    XCTAssertFalse(controller.isSidebarVisible)
+    reloaded.setBinding(nil, for: id)
+    XCTAssertEqual(item.keyEquivalent, "")
+    XCTAssertFalse(try view.performKeyEquivalent(with: event("k")))
+    let cleared = ShortcutEditorModel(catalog: definitions, defaults: defaults)
+    ShortcutCatalog.bind(model: cleared, to: menu)
+    XCTAssertEqual(item.keyEquivalent, "")
+    XCTAssertFalse(try view.performKeyEquivalent(with: event("k")))
+    cleared.reset(id)
+    XCTAssertEqual(item.keyEquivalent, "s")
+    XCTAssertTrue(try view.performKeyEquivalent(with: event("s")))
+    XCTAssertTrue(controller.isSidebarVisible)
+    let restored = ShortcutEditorModel(catalog: definitions, defaults: defaults)
+    ShortcutCatalog.bind(model: restored, to: menu)
+    XCTAssertEqual(item.keyEquivalent, "s")
+    XCTAssertEqual(restored.binding(for: id), ShortcutBinding(key: "s", modifiers: .command))
   }
 
   func testNoMenuItemBindsCommandOrOptionReturn() {
@@ -137,6 +206,84 @@ final class MainMenuKeyEquivalentTests: XCTestCase {
     XCTAssertEqual(item.action, #selector(ShellWindowController.deleteSpace(_:)))
     XCTAssertEqual(item.keyEquivalent, "")
     XCTAssertTrue(spaces.items.dropLast().last?.isSeparatorItem ?? false)
+  }
+
+  // MARK: Remaining defaults (#119, P10 gap review)
+
+  /// The items a key press reaches, each probed alone.
+  private func items(reachedBy event: NSEvent) -> [NSMenuItem] {
+    allItems().filter { !$0.keyEquivalent.isEmpty && Self.matches($0, event) }
+  }
+
+  private func key(_ keyCode: Int, _ flags: CGEventFlags) throws -> NSEvent {
+    let source = CGEventSource(stateID: .privateState)
+    let event = try XCTUnwrap(CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(keyCode), keyDown: true))
+    event.flags = flags
+    return try XCTUnwrap(NSEvent(cgEvent: event))
+  }
+
+  /// KB-057: Cmd-= zooms in as well as Cmd-+ (Shift-Cmd-=), through a hidden alias of View > Zoom In.
+  func testCommandEqualsIsAHiddenAliasOfZoomIn() throws {
+    let equals = items(reachedBy: try key(kVK_ANSI_Equal, .maskCommand))
+    XCTAssertEqual(equals.map(\.title), ["Zoom In"])
+    let alias = try XCTUnwrap(equals.first)
+    XCTAssertEqual(alias.tag, EngineCommand.zoomIn.rawValue)
+    XCTAssertEqual(alias.action, #selector(ShellWindow.commandDispatch(_:)))
+    XCTAssertTrue(alias.isHidden, "one Zoom In in the View menu")
+    XCTAssertTrue(alias.allowsKeyEquivalentWhenHidden)
+    let plus = items(reachedBy: try key(kVK_ANSI_Equal, [.maskCommand, .maskShift]))
+    XCTAssertEqual(plus.map(\.title), ["Zoom In"])
+    XCTAssertEqual(plus.first?.isHidden, false, "Cmd-+ is the visible item")
+  }
+
+  /// KB-049: F12 opens Developer Tools, a hidden alias of View > Developer > Developer Tools (Opt-Cmd-I). It has no
+  /// Cmd, so it is reserved: a focused page would otherwise keep it.
+  func testF12IsAHiddenAliasOfDeveloperToolsAndReserved() throws {
+    let event = try key(kVK_F12, [])
+    let hits = items(reachedBy: event)
+    XCTAssertEqual(hits.map(\.title), ["Developer Tools"])
+    let alias = try XCTUnwrap(hits.first)
+    XCTAssertEqual(alias.tag, EngineCommand.devTools.rawValue)
+    XCTAssertTrue(alias.isHidden)
+    XCTAssertTrue(alias.allowsKeyEquivalentWhenHidden)
+    XCTAssertTrue(ReservedKeys.arkt.matches(event))
+    XCTAssertEqual(items(reachedBy: try key(kVK_ANSI_I, [.maskCommand, .maskAlternate])).first?.isHidden, false)
+  }
+
+  /// KB-069: Window > Minimize All on Opt-Cmd-M, the Option alternate of Minimize, sent to `NSApp` like the other
+  /// app-level items.
+  func testMinimizeAllIsTheOptionAlternateOfMinimize() throws {
+    let window = try XCTUnwrap(MainMenu.make(commands: AppCommands()).windows)
+    let index = window.indexOfItem(withTitle: "Minimize")
+    XCTAssertGreaterThanOrEqual(index, 0)
+    let all = try XCTUnwrap(window.item(at: index + 1))
+    XCTAssertEqual(all.title, "Minimize All")
+    XCTAssertEqual(all.action, #selector(NSApplication.miniaturizeAll(_:)))
+    XCTAssertTrue(all.target === NSApp)
+    XCTAssertTrue(all.isAlternate)
+    XCTAssertEqual(all.keyEquivalent, "m")
+    XCTAssertEqual(all.keyEquivalentModifierMask, [.command, .option])
+    XCTAssertEqual(items(reachedBy: try key(kVK_ANSI_M, [.maskCommand, .maskAlternate])).map(\.title), ["Minimize All"])
+    XCTAssertEqual(items(reachedBy: try key(kVK_ANSI_M, .maskCommand)).map(\.title), ["Minimize"])
+  }
+
+  /// KB-042 and KB-043: Tabs > Duplicate and Spaces > Collapse Pinned Section, both unbound, reach the main window's
+  /// controller through the responder chain. `NSWindow` answers neither selector, so the window cannot take them.
+  func testDuplicateAndCollapsePinnedSectionAreUnboundControllerItems() throws {
+    let expected: [(String, String, Selector)] = [
+      (TabsMenu.title, "Duplicate", #selector(ShellWindowController.duplicateSelectedTabs(_:))),
+      (SpacesMenu.menuTitle, "Collapse Pinned Section", #selector(ShellWindowController.togglePinnedSection(_:))),
+    ]
+    let menu = MainMenu.make(commands: AppCommands()).menu
+    for (menuTitle, title, action) in expected {
+      let submenu = try XCTUnwrap(menu.items.first { $0.title == menuTitle }?.submenu, menuTitle)
+      let item = try XCTUnwrap(submenu.items.first { $0.title == title }, title)
+      XCTAssertEqual(item.action, action, title)
+      XCTAssertEqual(item.keyEquivalent, "", "\(title) is unbound by default")
+      XCTAssertNil(item.target, title)
+      XCTAssertFalse(NSWindow.instancesRespond(to: action), title)
+      XCTAssertTrue(ShellWindowController.instancesRespond(to: action), title)
+    }
   }
 
   /// No two items share a key equivalent.
@@ -370,7 +517,9 @@ final class MainMenuInventoryTests: XCTestCase {
       XCTAssertEqual(item.keyEquivalentModifierMask, modifiers, title)
     }
     let dispatching = allItems().filter { $0.action == #selector(ShellWindow.commandDispatch(_:)) }
-    XCTAssertEqual(dispatching.count, expected.count, "no other commandDispatch: item")
+    XCTAssertEqual(dispatching.filter { !$0.isHidden }.count, expected.count, "no other commandDispatch: item")
+    // KB-057 and KB-049 (#119): Cmd-= and F12, hidden second keys of listed commands.
+    XCTAssertEqual(dispatching.filter(\.isHidden).map(\.tag), [38001, 40004])
   }
 
   /// `IDC_NEW_WINDOW`, the one id the menu and host use that has no `EngineCommand` constant, matches
@@ -466,6 +615,47 @@ final class MainMenuInventoryTests: XCTestCase {
       let target = try XCTUnwrap(target, name)
       XCTAssertTrue(submenus.contains { $0 === target }, "\(name) menu is inside Arkt's menu")
     }
+  }
+
+  func testReinstallBindsSharedEditorAndDisconnectsReplacedMenu() throws {
+    let saved = (NSApp.mainMenu, NSApp.servicesMenu, NSApp.windowsMenu, NSApp.helpMenu)
+    let suite = "dev.arkt.tests.menuInstall.\(UUID().uuidString)"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+    defer {
+      if let menu = NSApp.mainMenu { ShortcutCatalog.unbind(from: menu) }
+      NSApp.mainMenu = saved.0
+      NSApp.servicesMenu = saved.1
+      NSApp.windowsMenu = saved.2
+      NSApp.helpMenu = saved.3
+      defaults.removePersistentDomain(forName: suite)
+    }
+    let definitions = ShortcutCatalog.definitions(from: MainMenu.make(commands: commands).menu)
+    XCTAssertEqual(definitions.count, 6)
+    let id = ShortcutActionID("newTab")
+    let editor = ShortcutEditorModel(catalog: definitions, defaults: defaults)
+    let override = ShortcutBinding(key: "j", modifiers: .control)
+    editor.setBinding(override, for: id)
+    MainMenu.install(commands: commands, shortcutEditor: editor)
+    let first = try XCTUnwrap(NSApp.mainMenu)
+    let oldItem = try XCTUnwrap(allItems(first).first { $0.action == #selector(ShellWindowController.newTab(_:)) })
+    XCTAssertEqual(oldItem.keyEquivalent, "j")
+    XCTAssertEqual(oldItem.keyEquivalentModifierMask, .control)
+    MainMenu.install(commands: commands, shortcutEditor: editor)
+    let second = try XCTUnwrap(NSApp.mainMenu)
+    let current = try XCTUnwrap(allItems(second).first { $0.action == #selector(ShellWindowController.newTab(_:)) })
+    XCTAssertEqual(current.keyEquivalent, "j")
+    XCTAssertEqual(current.keyEquivalentModifierMask, .control)
+    editor.setBinding(nil, for: id)
+    XCTAssertEqual(current.keyEquivalent, "")
+    XCTAssertEqual(oldItem.keyEquivalent, "j")
+    XCTAssertEqual(oldItem.keyEquivalentModifierMask, .control)
+    XCTAssertEqual(ShortcutCatalog.definitions(from: second).first { $0.id == id }?.defaultBinding,
+                   ShortcutBinding(key: "t", modifiers: .command))
+    let reopened = ShortcutEditorModel(catalog: definitions, defaults: defaults)
+    XCTAssertNil(reopened.binding(for: id))
+    editor.reset(id)
+    XCTAssertEqual(current.keyEquivalent, "t")
+    XCTAssertNil(current.target)
   }
 
   /// Onboarding spec, section 12: "Welcome to Arkt" is the first Help item, with no shortcut and an explicit target.

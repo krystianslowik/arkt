@@ -49,7 +49,7 @@ public struct ReservedKeys: Sendable {
   /// #489: every main-menu key equivalent without Cmd is reserved too: Space 1 to 9 (Ctrl-1 ... Ctrl-9) and the Split
   /// View items (Ctrl-Shift-=, -, ], [, 1 ... 4). A focused page takes any key equivalent first, and the engine hands
   /// only the Cmd keys it did not use back to the menu (`ArktBrowserWindow::HandleKeyboardEvent`), so without this a
-  /// page that has focus (after every reload) drops them.
+  /// page that has focus (after every reload) drops them. F12 (Developer Tools, KB-049) has no Cmd either.
   public static let arkt = ReservedKeys([
     Key(keyCode: kVK_ANSI_T, character: "t", modifiers: .command),
     Key(keyCode: kVK_ANSI_T, character: "t", modifiers: [.command, .shift]),
@@ -70,6 +70,7 @@ public struct ReservedKeys: Sendable {
     Key(keyCode: kVK_LeftArrow, character: "", modifiers: [.command, .option]),
     Key(keyCode: kVK_Tab, character: "", modifiers: .control),
     Key(keyCode: kVK_Tab, character: "", modifiers: [.control, .shift]),
+    Key(keyCode: kVK_F12, character: "", modifiers: []),                                // KB-049 (#119)
   ] + spaceKeys + splitKeys)
 
   /// Ctrl-1 ... Ctrl-9 (KB-035, BH-041: `SpacesMenu`). The numeric keypad digits count too, with or without Shift:

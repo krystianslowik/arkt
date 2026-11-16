@@ -50,6 +50,11 @@ final class ShellWindowKeyTests: XCTestCase {
     space.keyEquivalentModifierMask = .control
     space.target = probe
     file.addItem(space)
+    let f12 = String(UnicodeScalar(NSF12FunctionKey)!)
+    let devTools = NSMenuItem(title: "Developer Tools", action: #selector(MenuProbe.hit(_:)), keyEquivalent: f12)
+    devTools.keyEquivalentModifierMask = []
+    devTools.target = probe
+    file.addItem(devTools)
     holder.submenu = file
     menu.addItem(holder)
     NSApp.mainMenu = menu
@@ -74,6 +79,16 @@ final class ShellWindowKeyTests: XCTestCase {
 
     XCTAssertEqual(probe.hits, ["Space 1"])
     XCTAssertEqual(view.keyEquivalents, 0, "the focused view never saw Ctrl-1")
+  }
+
+  /// KB-049 (#119): F12 has no Cmd either, so it reaches Developer Tools before a focused page.
+  func testF12ReachesTheMenuBeforeAFocusedViewThatSwallowsKeyEquivalents() throws {
+    let (window, view, probe) = try makeWindow()
+
+    XCTAssertTrue(window.performKeyEquivalent(with: try key(kVK_F12, [])))
+
+    XCTAssertEqual(probe.hits, ["Developer Tools"])
+    XCTAssertEqual(view.keyEquivalents, 0, "the focused view never saw F12")
   }
 
   /// The page keeps the Ctrl keys the menu has no item for (a terminal in the page uses Ctrl-A, Ctrl-C).
@@ -113,6 +128,88 @@ final class ShellWindowKeyTests: XCTestCase {
 
     XCTAssertEqual(view.keyEquivalents, 1)
     XCTAssertTrue(probe.hits.isEmpty)
+  }
+
+  /// #828 re-review: only real overrides are reserved. With a bound editor and no override, Cmd-S (Hide Sidebar's
+  /// default) still reaches a focused page first, as on main, so an editor page keeps its Save; an override (Ctrl-J)
+  /// beats the page, and clearing it reserves nothing.
+  func testDefaultBindingsKeepTheirRoutingAndOnlyOverridesBeatThePageInBothWindows() throws {
+    let menu = NSMenu()
+    let probe = MenuProbe()
+    let item = NSMenuItem(title: "Hide Sidebar", action: #selector(MenuProbe.toggleSidebarVisibility(_:)),
+                          keyEquivalent: "s")
+    item.target = probe
+    let view = NSMenu()
+    view.addItem(item)
+    let holder = NSMenuItem(title: "View", action: nil, keyEquivalent: "")
+    holder.submenu = view
+    menu.addItem(holder)
+    NSApp.mainMenu = menu
+    let suite = "dev.arkt.tests.defaults.\(UUID().uuidString)"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite); ShortcutCatalog.unbind(from: menu) }
+    let model = ShortcutEditorModel(catalog: ShortcutCatalog.definitions(from: menu), defaults: defaults)
+    ShortcutCatalog.bind(model: model, to: menu)
+    let id = ShortcutActionID("toggleSidebarVisibility")
+    XCTAssertTrue(model.overrides.isEmpty)
+    let windows: [NSWindow] = [ShellWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 600)),
+                               LittleArktWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 600))]
+    for window in windows {
+      model.reset(id)
+      let page = SwallowingView(frame: .zero)
+      window.contentView?.addSubview(page)
+      XCTAssertTrue(window.makeFirstResponder(page))
+      XCTAssertTrue(window.performKeyEquivalent(with: try key(kVK_ANSI_S, .maskCommand)))
+      XCTAssertEqual(page.keyEquivalents, 1, "the page keeps Cmd-S, the default")
+      model.setBinding(ShortcutBinding(key: "j", modifiers: .control), for: id)
+      XCTAssertTrue(window.performKeyEquivalent(with: try key(kVK_ANSI_J, .maskControl)))
+      XCTAssertEqual(page.keyEquivalents, 1, "the override beats the page")
+      model.setBinding(nil, for: id)
+      XCTAssertTrue(window.performKeyEquivalent(with: try key(kVK_ANSI_S, .maskCommand)))
+      XCTAssertEqual(page.keyEquivalents, 2, "a cleared action reserves nothing")
+    }
+    XCTAssertEqual(probe.hits, ["Hide Sidebar", "Hide Sidebar"])
+  }
+
+  func testEditedBindingsReachMenuBeforePageInBothWindows() throws {
+    let menu = NSMenu()
+    let item = NSMenuItem(title: "New Tab", action: #selector(MenuProbe.newTab(_:)), keyEquivalent: "t")
+    let probe = MenuProbe()
+    item.target = probe
+    let file = NSMenu()
+    file.addItem(item)
+    let holder = NSMenuItem(title: "File", action: nil, keyEquivalent: "")
+    holder.submenu = file
+    menu.addItem(holder)
+    NSApp.mainMenu = menu
+    let suite = "dev.arkt.tests.route.\(UUID().uuidString)"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite); ShortcutCatalog.unbind(from: menu) }
+    let first = ShortcutEditorModel(catalog: ShortcutCatalog.definitions(from: menu), defaults: defaults)
+    let id = ShortcutActionID("newTab")
+    ShortcutCatalog.bind(model: first, to: menu)
+    let windows: [NSWindow] = [ShellWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 600)),
+                                LittleArktWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 600))]
+    for window in windows {
+      let view = SwallowingView(frame: .zero)
+      window.contentView?.addSubview(view)
+      XCTAssertTrue(window.makeFirstResponder(view))
+      first.setBinding(ShortcutBinding(key: "j", modifiers: .control), for: id)
+      XCTAssertTrue(window.performKeyEquivalent(with: try key(kVK_ANSI_J, .maskControl)))
+      XCTAssertEqual(view.keyEquivalents, 0)
+      first.setBinding(nil, for: id)
+      XCTAssertTrue(window.performKeyEquivalent(with: try key(kVK_ANSI_J, .maskControl)))
+      XCTAssertEqual(view.keyEquivalents, 1)
+      first.reset(id)
+      XCTAssertTrue(window.performKeyEquivalent(with: try key(kVK_ANSI_J, .maskControl)))
+      XCTAssertEqual(view.keyEquivalents, 2)
+    }
+    let second = ShortcutEditorModel(catalog: first.catalog, defaults: defaults)
+    ShortcutCatalog.bind(model: second, to: menu)
+    second.setBinding(ShortcutBinding(key: "j", modifiers: .control), for: id)
+    first.setBinding(nil, for: id)
+    XCTAssertTrue(windows[0].performKeyEquivalent(with: try key(kVK_ANSI_J, .maskControl)))
+    XCTAssertEqual(probe.hits.count, 3)
   }
 
   // MARK: Window menu items on the borderless window
@@ -160,5 +257,7 @@ private final class SwallowingView: NSView {
 @MainActor
 private final class MenuProbe: NSObject {
   var hits: [String] = []
+  @objc func newTab(_ sender: Any?) { hit(sender) }
+  @objc func toggleSidebarVisibility(_ sender: Any?) { hit(sender) }
   @objc func hit(_ sender: Any?) { hits.append((sender as? NSMenuItem)?.title ?? "") }
 }
