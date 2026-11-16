@@ -68,9 +68,10 @@ public protocol EngineExtensions: AnyObject {
   /// `.unknownCommand`.
   func setExtensionCommandShortcut(_ id: ExtensionCommandID, to shortcut: ExtensionShortcut?,
                                    scope: ExtensionCommandScope, replacingConflict: Bool) -> ExtensionShortcutResult
-  /// Suspends (true) or resumes (false) extension shortcut handling while the shell's shortcut recorder listens, so a
-  /// key that is already an extension shortcut reaches the recorder: no In Arkt shortcut runs in any window and no All
-  /// Apps shortcut holds its system hot key. Setting a shortcut while suspended still works. Default: a no-op.
+  /// Suspends (true) or resumes (false) every extension shortcut of the profile, In Arkt and All Apps, as Chrome's
+  /// `setShortcutHandlingSuspended` does while its shortcut recorder listens: a key that is an extension's shortcut
+  /// then reaches the recorder instead of running the command (#597; engine side #954). The shell resumes when the
+  /// recorder stops listening. Default: a no-op.
   func setExtensionShortcutHandlingSuspended(_ suspended: Bool)
   /// Uninstalls the extension as the user's own choice, with no prompt of the engine's: the shell has asked already
   /// (the remove sheet, #720). `reportAbuse`: the user checked Report abuse, so the engine also opens the Web Store's

@@ -1096,11 +1096,10 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
   const ui::Accelerator accelerator =
       ui::Command::StringToAccelerator(shortcut);
   unichar plain = 0;
-  const int key_code =
-      accelerator.key_code() == ui::VKEY_UNKNOWN
-          ? -1
-          : ui::MacKeyCodeForWindowsKeyCode(accelerator.key_code(), 0,
-                                            nullptr, &plain);
+  const int key_code = accelerator.key_code() == ui::VKEY_UNKNOWN
+                           ? -1
+                           : ui::MacKeyCodeForWindowsKeyCode(
+                                 accelerator.key_code(), 0, nullptr, &plain);
   if (key_code < 0) {
     LOG(WARNING) << "ARKT selftest hotkey-held " << shortcut << " unknown";
     return;

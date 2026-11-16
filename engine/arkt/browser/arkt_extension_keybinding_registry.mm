@@ -95,8 +95,8 @@ void SetExtensionShortcutHandlingSuspended(Profile* profile, bool suspended) {
     registry->SetShortcutHandlingSuspended(suspended);
   }
   LOG(WARNING) << "ARKT: extension shortcut handling "
-               << (suspended ? "suspended" : "resumed") << " windows="
-               << LiveRegistries().size()
+               << (suspended ? "suspended" : "resumed")
+               << " windows=" << LiveRegistries().size()
                << " global=" << (global ? "yes" : "no");
 }
 

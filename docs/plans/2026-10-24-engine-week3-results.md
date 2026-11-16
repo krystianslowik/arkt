@@ -8180,8 +8180,10 @@ unchanged (0001-0016). Partner of #597, which builds the recorder in parallel.
   application target with the key code Chromium's listener uses: `eventHotKeyExistsErr` (-9878) means this process
   holds it, `noErr` that it is free (the probe's own registration is removed at once). The embedder target links
   `Carbon.framework` for it.
-- Swift: `EngineExtensions.setExtensionShortcutHandlingSuspended(_:)` with a no-op default (the lines were posted on
-  #597 so both branches carry them identically); `ChromiumEngine` forwards it to the facade. Tests:
+- Swift: `EngineExtensions.setExtensionShortcutHandlingSuspended(_:)` with a no-op default, a protocol requirement so
+  `ChromiumEngine`'s version is reached through `any EngineExtensions`. The lines are #597's own (commit `805add17` on
+  its branch), taken verbatim so the two branches merge without a conflict; InMemoryEngine's recording is #597's.
+  `ChromiumEngine` forwards it to the facade. Tests:
   `suspendingAndResumingReachTheFacadeInOrder` (through `any EngineExtensions` and `ScriptedFacade`) and
   `shortcutSuspensionGoesThroughTheProtocol` (`ConformanceTests`).
 
@@ -8208,14 +8210,17 @@ below the table.
 | 12. Run 1 `quit` while suspended | `app terminating`, `releasing extension shortcut suspension`, `resumed windows=0 global=yes`, `keep-alive released`; with the CDP port the process then stays (W3-3), stopped by PID |
 | 13. Run 2 (no CDP port, a page that sends its own commands): global set, `ext-suspend on` before any registry exists, `quit` | `suspended windows=0 global=yes`, 9 `free`; at quit the suspension is released; the process exited 0 |
 | 14. Run 4 (restored build, as run 2): suspended before the window's registry exists, then Ctrl+Shift+Y page | the registry made after the suspend dispatches nothing; after `off` 9 `held` and Y `dispatched`; exit 0 |
-| `FATAL`, `Check failed`, `DCHECK` | 0 in runs 1 to 4; no crash reports |
+| 15. Run 5 (the committed code, after the format pass), as run 4 plus the window-focused key and a quit while suspended | on: 9 `free`, Y page and window nothing; off: 9 `held`, Y page and window `dispatched`; quit while suspended releases it; exit 0 |
+| `FATAL`, `Check failed`, `DCHECK` | 0 in runs 1 to 5; no crash reports |
 
-All Apps by a real key press was not run. Synthetic input does not reach Carbon hot keys: a standalone check registered
-Control-Shift-F17 with a `kEventHotKeyPressed` handler under a running `NSApplication` and posted the key with
-`CGEventPost` at the HID and the session taps; the handler never ran (0 of 2). Synthesizing `kEventHotKeyPressed`
-directly would hit the `CHECK` in `GlobalAcceleratorListener::NotifyKeyPressed` for an id the listener does not know.
-So the global rows check what decides whether a press fires: whether the system hot key is registered. A real press in
-another app while recording is part of #921.
+All Apps by a real key press was not run. A standalone check registered Control-Shift-F17 with a
+`kEventHotKeyPressed` handler under a running `NSApplication` and posted the key with `CGEventPost` at the HID and the
+session taps: the handler did not run (0 of 2). The cause was not established (the check has no control showing the
+posted event was delivered at all). Posting into the engine was not tried either way: the self-test app was not
+frontmost (`appActive=no`), so while suspended the key would have gone to another app. Synthesizing
+`kEventHotKeyPressed` directly would hit the `CHECK` in `GlobalAcceleratorListener::NotifyKeyPressed` for an id the
+listener does not know. So the global rows check what decides whether a press fires: whether the system hot key is
+registered. A real press, in Arkt and in another app, while recording is part of #921.
 
 ### Deliberate breaks
 
@@ -8229,7 +8234,7 @@ another app while recording is part of #921.
 
 | Step | Result |
 |---|---|
-| Builds | first 2 min (incremental), break 18 s (`-Wunreachable-code` stopped the first form of the break), 71 s, restore 69 s; `FAILED:` 0 except the stopped break |
+| Builds | first 2 min (incremental), break 18 s (`-Wunreachable-code` stopped the first form of the break), 71 s, restore 69 s, format 89 s; `FAILED:` 0 except the stopped break |
 | `gn check out/Arkt "//arkt/*"` | `Header dependency check OK` |
 
 ### Tests
@@ -8237,7 +8242,9 @@ another app while recording is part of #921.
 - ShellKit `nice -n 20 swift test -j 2 --skip ShellKitGUITests` (while the engine build machine was loaded, 1-minute
   load 7.7 to 9.3): every bundle passes, Swift Testing runs of 1604, 44, 60, 29, 289, 49, 352, 228 and 40 tests.
   `ChromiumEngineKitTests` 227 + 1 (`suspendingAndResumingReachTheFacadeInOrder`) and `ArktEngineABITests` 39 + 1
-  (`shortcutSuspensionGoesThroughTheProtocol`); no other bundle gained or lost a test in this diff.
+  (`shortcutSuspensionGoesThroughTheProtocol`): `git diff origin/main | grep -c '^+ *@Test'` is 2, and the diff
+  removes none, so the other bundles are `main`'s counts. Run again after the format pass and #597's EngineAPI lines:
+  the same counts, all passing (1-minute load 16 to 44 from other work on the machine).
 - Lints `--filter 'LintTests|IsolationTests'`: 13 + 60 pass.
 - No GUI test added or changed, no shell UI touched; ArktCore untouched.
 
