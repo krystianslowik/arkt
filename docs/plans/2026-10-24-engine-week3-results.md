@@ -8044,3 +8044,66 @@ profiles under `profiles/941-20261115/` deleted. Nothing touched the Keychain (m
   `InfobarKeyboardTests`, `InfobarWindowTests`, `ZzzWindowLeakGuardEndTests` (59 tests each, 1-minute load average 5.0
   to 7.1): 20 passed, 0 failed; ShellKit `--skip ShellKitGUITests` passes (1573, 44, 60, 29, 289, 49, 352, 227, 39); lints 13 + 60; engine rebuilt
   (`The build has finished successfully.`).
+
+## #924: window-modal sheets below the infobar rows on the shell window (shell only, no engine change)
+
+Date 2026-11-16. Branch `feat/924-sheets-below-infobars` from `main` at `1f28a6ad`. No engine, facade or patch change;
+no engine build run. Follows "#586", "Left open".
+
+### What landed
+
+- `ShellWindowController` is the shell window's delegate (set in its init) and had no
+  `window(_:willPositionSheet:using:)`; it now answers it in `ShellWindowController+Sheets.swift`. The rect has no
+  height, keeps the x and width AppKit passed in, and its top is the current tab's page top less the strip's height
+  (`InfobarPresenter.height(of:)`: 40 pt per row, 0 in HTML fullscreen), so the page's top without rows or in HTML
+  fullscreen. With no page of the current tab on screen in the window (no Space, the welcome card) it is the card's top;
+  with the card hidden too, AppKit's own rect. Every sheet begun on the shell window goes through it: the overlay's
+  `-[ArktDialogSheet beginOnWindow:]` sheets, the file chooser, and the shell's own (Delete Space, the import sheet,
+  the save panel, the Space emoji prompt, the onboarding skip alert).
+
+### How AppKit uses the rect (macOS 27.0, checked with a stub delegate on a plain window)
+
+- AppKit asks twice when a sheet begins and again when the window resizes; it does not ask on a `setFrame` to the same
+  frame or on a layout pass.
+- The sheet is centered vertically in the window, and the rect's top is only the highest the sheet's top may sit: the
+  sheet's top is the lower of the centered top and the rect's top. A 150 pt sheet stayed centered for any rect top
+  above its centered top; a 600 pt sheet's top followed the rect's top. So a short sheet (an `NSAlert`) does not move;
+  a tall one (the file chooser, as in the "#586" run: top at 690 inside the rows' 630 to 750) starts below the rows.
+- The frame is final as soon as `beginSheet` returns; there is no slide to wait for.
+
+### A sheet that is up when the rows change
+
+It stays where it began: the rows' change does not make AppKit ask again, so a tall sheet begun without rows covers
+rows that arrive while it is up. The next window resize places it below them. Checked with a real sheet in
+`ShellWindowSheetTests.testASheetUpWhenRowsArriveStaysUntilTheWindowResizes` (deterministic: the frame is final at
+once and the resize is synchronous). Moving an up sheet when the rows change is not done; it would mean moving the
+sheet window by hand, outside AppKit's placement.
+
+### Tests
+
+New `ShellKitGUITests.ShellWindowSheetTests` (7), InMemoryEngine emitting infobars, the rect asked through
+`window.delegate`: 0, 1 and 3 rows (the rect's top on the strip's bottom, the horizontal place unchanged); HTML
+fullscreen with 2 rows (the card's top, then back below the rows); no page (the card's top); a 700 pt sheet begun under
+3 rows (its top on the rows' bottom, overlapping none); the up sheet above. Before the change: all 7 failed (the
+delegate answered nil; the real sheet's top at 850, centered, over the rows' 770 to 890).
+
+- `swift test --filter ShellWindowSheetTests`: 7 tests, 0 failures.
+- `swift test --filter 'Infobar|ShellWindow|Sheet'`: 154 tests, 3 skipped, 0 failures (147 + 7).
+- 20 runs of `AAWindowLeakGuardTests|ShellWindowSheetTests|ZzzWindowLeakGuardEndTests` (18 tests each), 1-minute load
+  average 6.6 to 8.8 on 10 cores: 20 passed, 0 failed.
+- `swift test --skip ShellKitGUITests`: 1573, 44, 60, 29, 289, 49, 352, 227, 39, unchanged. Lints 13 + 60.
+
+### Deliberate break
+
+`return page.convert(page.bounds, to: nil).maxY - infobarStrips.height(of: tab)` without the strip's height: 5 of the 7
+tests fail, for example `XCTAssertEqualWithAccuracy failed: ("790.0") is not equal to ("670.0") +/- ("0.5") - three
+rows` and `("850.0") is not equal to ("770.0") ... - the sheet's top at the rows' bottom`. Restored: passing.
+
+### Left open
+
+- The file chooser and the overlay's extension sheets were not run on an Engine build; the rect they get is the one the
+  tests check, and AppKit's placement is the same for any sheet window. A live check of the file chooser under 3 rows
+  needs the engine build.
+- Little Arkt windows also show infobars; their sheets still hang where AppKit puts them.
+- A short sheet stays centered in the window, as AppKit places it; only its top is capped.
+- A tall sheet below 3 rows can reach past the window's bottom edge; AppKit does not clamp it.
