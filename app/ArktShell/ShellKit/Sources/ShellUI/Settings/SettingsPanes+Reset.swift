@@ -39,4 +39,27 @@ extension SettingsWindowController {
     archiveTabsPopUp?.show(rows.tabsAfter())
     archiveLittleArktPopUp?.show(rows.littleArktAfter())
   }
+
+  /// Settings > Shortcuts > Reset All Shortcuts... (maintainer decision 2026-11-16): asks first on the same sheet;
+  /// Cancel is the default answer and Escape's.
+  static var resetShortcutsContent: DialogContent {
+    DialogContent(title: "Reset all shortcuts to their defaults?",
+                  paragraphs: [.init("Every shortcut you changed or cleared returns to its default.")],
+                  primaryTitle: "Reset All", cancelTitle: "Cancel", defaultButton: .cancel, isDestructive: true,
+                  primaryHelp: "Returns every shortcut to its default", width: resetSettingsWidth)
+  }
+
+  func askToResetShortcuts() {
+    guard resetSheet == nil, let window else { return }
+    cancelShortcutRecording()
+    let sheet = DialogSheet(content: Self.resetShortcutsContent)
+    sheet.onAnswer = { [weak self] answer in
+      self?.resetSheet = nil
+      guard answer == .primary, let self else { return }
+      self.services.shortcutEditor?.resetAll()
+      self.cancelShortcutRecording()
+    }
+    resetSheet = sheet
+    sheet.begin(on: window)
+  }
 }

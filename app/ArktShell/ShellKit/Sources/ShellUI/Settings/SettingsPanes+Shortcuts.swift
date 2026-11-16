@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 
 @MainActor
 private final class ShortcutRecorderButton: NSButton {
@@ -91,20 +92,22 @@ extension SettingsWindowController {
     guard selectedPane == .shortcuts, let editor = services.shortcutEditor,
           editor.recordingAction != nil else { return false }
     if (!editor.conflictingActions.isEmpty || !editor.protectedConflicts.isEmpty) {
-      if event.keyCode == 53 || event.keyCode == 36 || event.keyCode == 76 {
+      if [kVK_Escape, kVK_Return, kVK_ANSI_KeypadEnter].contains(Int(event.keyCode)) {
         editor.keepExisting()
         dismissShortcutConflict()
         refreshShortcutControls()
         return true
       }
-      return false
+      // The notice is the one thing to answer: other shortcuts go neither to the menu nor to the panes. Tab and Space
+      // still move between and press its buttons.
+      return !event.modifierFlags.intersection([.command, .control]).isEmpty
     }
     guard let id = editor.recordingAction, let recorder = shortcutRecorders[id],
           window?.firstResponder === recorder else {
       cancelShortcutRecording()
       return false
     }
-    if event.keyCode == 48 {
+    if Int(event.keyCode) == kVK_Tab && event.modifierFlags.intersection([.command, .control, .option]).isEmpty {
       cancelShortcutRecording()
       if event.modifierFlags.contains(.shift) { window?.selectPreviousKeyView(nil) }
       else { window?.selectNextKeyView(nil) }
@@ -112,13 +115,36 @@ extension SettingsWindowController {
     }
     editor.record(event: event)
     refreshShortcutPresentation()
+    showShortcutRejection(editor.rejection, for: event)
     if (!editor.conflictingActions.isEmpty || !editor.protectedConflicts.isEmpty) {
       showShortcutConflict()
-    } else if event.keyCode != 53, let binding = editor.binding(for: id),
+    } else if editor.rejection == nil, editor.recordingAction == nil, let binding = editor.binding(for: id),
               services.isSystemShortcut(binding) {
       showShortcutWarning()
     }
     return true
+  }
+
+  /// Why the recorder refused a key (maintainer decision 2026-11-16), in the warning's place; nil removes it.
+  private func showShortcutRejection(_ rejection: ShortcutEditorModel.Rejection?, for event: NSEvent) {
+    shortcutWarningView?.removeFromSuperview()
+    shortcutWarningView = nil
+    guard let rejection, let root = window?.contentView, let key = event.charactersIgnoringModifiers else { return }
+    let reason = switch rejection {
+    case .needsCommandOrControl:
+      "shortcuts need Command or Control (F1 to F20 can be used alone), so typing keeps working."
+    case .textEditing: "text fields use it to move, select or delete text."
+    case .confirmOrFocusKey: "Return, Tab and Escape confirm, move focus and cancel."
+    }
+    let flags = event.modifierFlags.intersection([.command, .option, .control, .shift])
+    let keys = [kVK_Return, kVK_ANSI_KeypadEnter].contains(Int(event.keyCode)) && flags.isEmpty
+      ? "Return" : shortcutDescription(ShortcutBinding(key: key, modifiers: flags))
+    let notice = settingsLabel("\(keys) can\u{2019}t be a shortcut: \(reason)", size: 12)
+    notice.setAccessibilityIdentifier("settings.shortcuts.rejected")
+    notice.setAccessibilityLabel(notice.stringValue)
+    notice.frame = NSRect(x: 40, y: 85, width: root.bounds.width - 80, height: 34)
+    root.addSubview(notice)
+    shortcutWarningView = notice
   }
 
   func cancelShortcutRecording() {

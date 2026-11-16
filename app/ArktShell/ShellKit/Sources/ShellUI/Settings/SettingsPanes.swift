@@ -360,8 +360,7 @@ extension SettingsWindowController {
     let note = settingsLabel("App shortcuts take priority over page shortcuts.", size: 12)
     note.textColor = ShellTokens.secondaryText.resolve(window?.contentView?.archiveFlavor ?? .light).nsColor()
     let reset = destructiveLink(.shortcuts, "resetAll", "Reset All Shortcuts...") { [weak self] in
-      self?.services.shortcutEditor?.resetAll()
-      self?.cancelShortcutRecording()
+      self?.askToResetShortcuts()
     }
     reset.isEnabled = !(services.shortcutEditor?.overrides.isEmpty ?? true)
     reset.disabledOpacity = Float(SettingsTokens.disabledControlAlpha)
