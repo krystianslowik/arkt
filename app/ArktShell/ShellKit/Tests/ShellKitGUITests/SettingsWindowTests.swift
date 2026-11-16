@@ -806,6 +806,7 @@ final class SettingsWindowTests: XCTestCase {
     XCTAssertTrue(controller.window?.attachedSheet === sheet.window)
     XCTAssertEqual(sheet.view.titleField.stringValue, "Reset all shortcuts to their defaults?")
     XCTAssertEqual(sheet.view.primaryButton.title, "Reset All")
+    XCTAssertEqual(sheet.view.primaryButton.accessibilityIdentifier(), AXID.Settings.resetShortcutsConfirm)
     XCTAssertEqual(sheet.view.cancelButton?.title, "Cancel")
     XCTAssertEqual(sheet.content.defaultButton, .cancel)
     XCTAssertEqual(sheet.view.primaryButton.keyEquivalent, "", "a stray Return never resets")

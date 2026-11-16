@@ -53,6 +53,7 @@ extension SettingsWindowController {
     guard resetSheet == nil, let window else { return }
     cancelShortcutRecording()
     let sheet = DialogSheet(content: Self.resetShortcutsContent)
+    sheet.view.primaryButton.setAccessibilityIdentifierWithCell(AXID.Settings.resetShortcutsConfirm)
     sheet.onAnswer = { [weak self] answer in
       self?.resetSheet = nil
       guard answer == .primary, let self else { return }

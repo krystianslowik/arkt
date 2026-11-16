@@ -144,30 +144,30 @@ final class ShortcutWiringTests: ArktUITestCase {
     }
 
     openRecorder(app)
-    app.typeKey("y", modifierFlags: .control)
+    app.typeKey("j", modifierFlags: .control)        // Ctrl-Y is the text system's yank, which the recorder refuses
     closeSettings(app)
     guard loadBarrierPage(app), waitFor(app.webViews.firstMatch) else { return }
     app.webViews.firstMatch.click()
-    let pageCount = server.requestedPaths.filter { $0 == "/events/shortcut-key-page-y" }.count
-    expectNewTab(app, key: "y", modifiers: .control)
+    let pageCount = server.requestedPaths.filter { $0 == "/events/shortcut-key-page-j" }.count
+    expectNewTab(app, key: "j", modifiers: .control)
     app.webViews.firstMatch.click()
     let barrierCount = server.requestedPaths.filter { $0.hasPrefix("/events/shortcut-key-barrier/") }.count
     app.typeKey("z", modifierFlags: [])
-    guard Waits.until("page reports its Control-Y count after a later key", {
+    guard Waits.until("page reports its Control-J count after a later key", {
       server.requestedPaths.filter { $0.hasPrefix("/events/shortcut-key-barrier/") }.count > barrierCount
     }) else { return }
     let witness = server.requestedPaths.last { $0.hasPrefix("/events/shortcut-key-barrier/") }
-    XCTAssertTrue(witness?.hasSuffix("/page-y/0") == true, "the focused page did not receive assigned Control-Y before the barrier")
-    XCTAssertEqual(server.requestedPaths.filter { $0 == "/events/shortcut-key-page-y" }.count, pageCount)
+    XCTAssertTrue(witness?.hasSuffix("/page-j/0") == true, "the focused page did not receive assigned Control-J before the barrier")
+    XCTAssertEqual(server.requestedPaths.filter { $0 == "/events/shortcut-key-page-j" }.count, pageCount)
     openRecorder(app)
     app.typeKey("k", modifierFlags: [.control, .option])
     closeSettings(app)
     guard loadBarrierPage(app), waitFor(app.webViews.firstMatch) else { return }
     app.webViews.firstMatch.click()
-    let beforePageY = server.requestedPaths.filter { $0 == "/events/shortcut-key-page-y" }.count
-    app.typeKey("y", modifierFlags: .control)
-    guard Waits.until("unassigned Control-Y reached page", {
-      server.requestedPaths.filter { $0 == "/events/shortcut-key-page-y" }.count > beforePageY
+    let beforePageJ = server.requestedPaths.filter { $0 == "/events/shortcut-key-page-j" }.count
+    app.typeKey("j", modifierFlags: .control)
+    guard Waits.until("unassigned Control-J reached page", {
+      server.requestedPaths.filter { $0 == "/events/shortcut-key-page-j" }.count > beforePageJ
     }) else { return }
     guard loadBarrierPage(app),
           expectNoNewTab(app, key: "t", modifiers: .command,
@@ -195,6 +195,11 @@ final class ShortcutWiringTests: ArktUITestCase {
     let reset = Shell.element(app, AXID.Settings.control("shortcuts", "resetAll"))
     XCTAssertTrue(waitForEnabled(reset))
     reset.click()
+    // Reset All Shortcuts... asks first; Reset All answers the sheet.
+    let confirm = Shell.element(app, AXID.Settings.resetShortcutsConfirm)
+    XCTAssertTrue(waitFor(confirm))
+    confirm.click()
+    XCTAssertTrue(waitUntilGone(confirm))
     closeSettings(app)
     expectNewTab(app, key: "t", modifiers: .command)
     quit(app)
