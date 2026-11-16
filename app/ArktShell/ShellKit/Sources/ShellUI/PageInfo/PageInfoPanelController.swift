@@ -34,8 +34,11 @@ public final class PageInfoPanelController: NSObject {
   var isReadOnly: @MainActor () -> Bool = { false }
   /// The favicon of a tab's page, for the header badge.
   var favicon: @MainActor (TabID) -> Data? = { _ in nil }
-  /// The permissions macOS denies Arkt itself, read each time the panel shows a page (tests set them) (#786).
-  var deniedInMacOS: @MainActor () -> Set<SitePermissionKind> = { SystemPermissions.deniedKinds() }
+  /// The permissions macOS keeps from every site, and why, read each time the panel shows a page and when
+  /// `SystemPermissions.didChange` says the cached state changed (tests set them) (#786, #856).
+  var deniedInMacOS: @MainActor () -> [SitePermissionKind: SystemPermissionBlock] = {
+    SystemPermissions.blockedKinds()
+  }
 
   public var isShown: Bool { panel?.isVisible == true }
 
@@ -244,6 +247,9 @@ public final class PageInfoPanelController: NSObject {
       },
       center.addObserver(forName: NSWindow.didResignMainNotification, object: parent, queue: .main) { [weak self] _ in
         MainActor.assumeIsolated { self?.parentDidResignMain() }
+      },
+      center.addObserver(forName: SystemPermissions.didChange, object: nil, queue: .main) { [weak self] _ in
+        MainActor.assumeIsolated { self?.reread() }
       },
       center.addObserver(forName: NSApplication.didResignActiveNotification, object: nil,
                          queue: .main) { [weak self] _ in

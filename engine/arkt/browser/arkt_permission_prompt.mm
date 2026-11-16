@@ -284,16 +284,19 @@ class ArktPermissionPrompt : public PermissionPrompt {
     [sheet_ beginPanelOnView:anchor rightToLeft:base::i18n::IsRTL()];
     NSRect frame = sheet_.window.frame;
     NSRect host = [anchor.window frame];
-    LOG(WARNING) << "ARKT: permission prompt shown requests="
-                 << visible.size() << " one_time=" << one_time
+    NSRect below = [anchor.window
+        convertRectToScreen:[anchor convertRect:anchor.bounds toView:nil]];
+    LOG(WARNING) << "ARKT: permission prompt shown requests=" << visible.size()
+                 << " one_time=" << one_time
                  << " quiet=" << delegate->ShouldCurrentRequestUseQuietUI()
                  << " parent=" << anchor.window.windowNumber
                  << " child=" << (sheet_.window.parentWindow == anchor.window)
                  << " frame " << NSMinX(frame) << "," << NSMinY(frame) << " "
                  << NSWidth(frame) << "x" << NSHeight(frame) << " window "
-                 << NSMinX(host) << "," << NSMinY(host) << " "
-                 << NSWidth(host) << "x" << NSHeight(host)
-                 << " rtl=" << base::i18n::IsRTL();
+                 << NSMinX(host) << "," << NSMinY(host) << " " << NSWidth(host)
+                 << "x" << NSHeight(host) << " anchor " << NSMinX(below) << ","
+                 << NSMinY(below) << " " << NSWidth(below) << "x"
+                 << NSHeight(below) << " rtl=" << base::i18n::IsRTL();
   }
 
   ArktPermissionPrompt(const ArktPermissionPrompt&) = delete;

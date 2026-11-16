@@ -6390,3 +6390,1657 @@ profiles under `profiles/784-20261108/` deleted. The three GPU crashes (runs A, 
 crash wrote their dumps to Chromium's shared `Crashpad/pending` folder, not to the profile; those four files (matched
 by time) were deleted, nothing else there. Nothing touched the clipboard (no copy or
 paste command was sent). Nothing under `~/Applications/ArktTest` or `/Applications/Arkt.app` was touched.
+
+## #806: Unity audio decoding fails (Space Waves)
+
+Date 2026-11-09. Branch `engine/806-unity-audio` from `origin/main` (`801383c`). No overlay, patch or facade
+change. The maintainer chose option 1 below the same day: `out/Arkt` now builds with `proprietary_codecs = true` and
+`ffmpeg_branding = "Chrome"` (`engine/README.md`). The maintainer accepted shipping the AAC and H.264 decoders on
+2026-11-09; patent licensing is the maintainer's call. Results in "Fix" below.
+
+### Gate
+
+- Seam: none needed to diagnose. The cause is two GN args, so a fix would be an `args.gn` change, not a patch.
+- Facade header: unchanged; both copies `cmp` identical.
+- `.patches`: unchanged, 15 lines, 15 `arkt` commits above `156.0.8078.48`, in sync.
+- Overlay link: `$CR/arkt` points at this worktree's `engine/arkt`.
+- Build: none. The existing `out/Spike` (`$CR` at `bd284c54bd`, patch 0015) was run as is. Chromium disk 1.9 TB
+  free, internal 71 GB, swap 7.6 of 9 GB used at the start and at the end.
+- Environment: macOS 27.0, Mac14,9 (arm64).
+
+### Cause
+
+Unity's web build stores every compressed `AudioClip` as AAC in an MP4 container (Unity manual, "Audio in Web":
+AAC is the only compression it uses there) and decodes it in the page with `decodeAudioData`. Our builds cannot
+decode AAC:
+
+- Both `out/Spike` and `out/Arkt` leave the codec args at their defaults
+  (`gn args out/<dir> --list=proprietary_codecs --short` and `--list=ffmpeg_branding`): `proprietary_codecs = false`
+  (it defaults to `is_chrome_branded`) and `ffmpeg_branding = "Chromium"`.
+- `decodeAudioData` runs through `media::AudioFileReader` (`content/renderer/media/audio_decoder.cc`), which is FFmpeg
+  only. There is no platform-decoder path for it.
+- `ffmpeg_branding = "Chromium"` compiles FFmpeg without the AAC decoder:
+  `third_party/ffmpeg/chromium/config/Chromium/mac/arm64/config_components.h` has `CONFIG_AAC_DECODER 0` and
+  `CONFIG_AAC_DEMUXER 0`; the `Chrome` config has both at `1`. `CONFIG_MOV_DEMUXER` is `1` in both, so the MP4 opens
+  and the decode fails.
+- `proprietary_codecs = false` also keeps `aac` out of FFmpeg's allow lists at run time
+  (`GetAllowedAudioDecoders` in `media/ffmpeg/ffmpeg_common.cc`, `GetAllowedDemuxers` in `media/filters/ffmpeg_glue.cc`).
+  A fix needs both args; either one alone still fails.
+
+Not the cause: delivery and Content-Encoding (Vorbis decodes when served with `br` and `gzip`, AAC fails in every
+form), the sandbox or audio service (WAV, MP3, Vorbis and Opus decode in the same page), and Arkt windows (the failure
+is in the renderer's decoder, before any window code).
+
+### The game's own audio
+
+The game's `.data.br` (`files.crazygames.com/space-waves/114/Build/`, 9.1 MB, 18.4 MB after `brotli -d`) holds four
+MP4 files (`ftyp mp42`, four `mp4a` tracks; no `OggS`, no `FSB5`). `ffprobe` on each: `aac`, profile `LC`, 44100 Hz,
+three stereo and one mono. Four clips, matching the four `Loading FSB failed` lines.
+
+### Reproduction (`out/Spike/Chromium.app`, fresh profiles under `arkt-artifacts/806/`, `--use-mock-keychain`)
+
+| Run | Result |
+|---|---|
+| The game, `https://www.crazygames.com/game/space-waves`, 60 s, `--enable-logging=stderr --log-level=0` | the reported log exactly: `Creating WebGL 2.0 context.`, four `Decode error: EncodingError: Unable to decode audio data`, `Loading FSB failed for audio clip` for `music_race_mode`, `music`, `music_endless_mode`, `explosion`, four `Uncaught (in promise) EncodingError: Unable to decode audio data` |
+| `engine/tools/audio-decode` (new, loopback `127.0.0.1:8806`) | server exit `1`. `canPlayType` empty for `audio/mp4; codecs="mp4a.40.2"` and `audio/aac`, `probably` for MP3, Vorbis, Opus. WAV, MP3, Vorbis, Opus decode; `aac.m4a`, `aac.aac` (ADTS) and `aac.m4a` with `br` and `gzip` fail with `EncodingError: Unable to decode audio data`; Vorbis with `br` and `gzip` decodes |
+
+Comparison: Chrome for Testing 158.0.8127.18 (the copy Playwright keeps in its cache, its own bundle id, a throwaway
+profile; the maintainer's own Chrome was not launched), same page: server exit `0`, every case decodes, `canPlayType`
+`probably` for both AAC types. Chrome for Testing is built with `ffmpeg_branding = "Chrome"` and proprietary codecs.
+
+Not established: whether gameplay continues without sound. The 60 s run had no user gesture, so the game never left
+its start screen (the `AudioContext was not allowed to start` lines are the autoplay policy, not this bug).
+
+### Regression fixture
+
+`engine/tools/audio-decode/`: `server.mjs`, `index.html` and six 0.25 s fixtures (72 KB: WAV, MP3, Vorbis, Opus,
+AAC in MP4, AAC in ADTS; AAC made with `afconvert`, the rest with `ffmpeg`). The server serves the fixtures as
+`application/octet-stream`, optionally with `Content-Encoding` `br` or `gzip` as Unity's loader receives them, prints
+the page's result and exits `0` only when every case decodes. Today it fails on the engine and passes on Chrome for
+Testing; once AAC is in the build it is the check that it works. Usage is in the file's header.
+
+### Options for the maintainer
+
+1. `proprietary_codecs = true` and `ffmpeg_branding = "Chrome"` in both `args.gn` (and `engine/README.md`). No patch.
+   Brings AAC and H.264 (and the HEVC and Dolby paths those args gate) into FFmpeg, as every major Chromium-based
+   browser ships. Costs a full rebuild of `out/Arkt` (4-7 h, swap-bound, `README`) and most of `out/Spike`. Shipping
+   AAC and H.264 decoders in a distributed binary raises patent licensing questions that are the maintainer's to
+   weigh.
+2. Platform decoders (AudioToolbox for AAC) behind `proprietary_codecs = true` with `ffmpeg_branding = "Chromium"`:
+   keeps the patented decoders out of our binary, but `decodeAudioData` has no platform path today, so this is a
+   patch series in `media/`, not a seam.
+3. Leave it: document that AAC and H.264 do not play (Unity web games silent, many MP4 videos fail). Not a fix.
+
+### Fix (`out/Arkt`, maintainer decision 2026-11-09)
+
+Option 1. `$CR/out/Arkt/args.gn` gained `proprietary_codecs = true` and `ffmpeg_branding = "Chrome"`; `gn gen` and
+`gn args --list` confirm both, `branding_file_path` unchanged. `.patches` unchanged.
+
+| Step | Result |
+|---|---|
+| Build, run 1: `nice -n 10 autoninja -j 4 -C out/Arkt chrome`, 12:55 | 10,162 steps (incremental on the 2026-10-23 `out/Arkt`, not a full rebuild). Stopped by its `siso` PID after 2,006 steps, 0 failed: swap used reached 9.3 GB (load average 18 from other work) |
+| Build, run 2: same at `-j 2`, about 13:05, guarded by `memory_pressure` (stop below 20 % free) | `The build has finished successfully.`, `exit=0`, `FAILED:` 0; framework linked 17:29. Free memory stayed 45-52 % |
+| `engine/tools/audio-decode` on `out/Arkt/Arkt.app` (bundle id `dev.arkt.Arkt`, by path, fresh profile, `--use-mock-keychain`) | server exit `0`. All ten cases decode, among them `aac.m4a`, `aac.aac` and `aac.m4a` over `br` and `gzip`. `canPlayType` `probably` for `audio/mp4; codecs="mp4a.40.2"`, `audio/aac`, `video/mp4; codecs="avc1.42E01E"` and `video/mp4; codecs="avc1.42E01E, mp4a.40.2"` |
+| Space Waves on the same bundle, fresh profile, `--enable-logging=stderr --log-level=0`, input sent as CDP `Input.dispatchMouseEvent` into the test page only (no OS input) | `EncodingError` 0 and `Loading FSB failed` 0 (were 4 + 4 + 4 on the old build). After the input: `IngameCurrencyEarned ... Placement: levelProgressReward_tutorial`, `Game successfully saved!`, then `Audio context resumed after 43.268 seconds.` The game runs, takes input and its audio context starts |
+
+Not checked: listening to the output (the run was not muted; later runs should pass `--mute-audio`). Gameplay beyond the
+tutorial step. `out/Spike` still has the old args and still fails the fixture; rebuild it with the same two args when it
+is next rebuilt.
+
+### Patch budget
+
+| Source | Count |
+|---|---|
+| `.patches` lines | 15 |
+| `arkt` commits above `156.0.8078.48` | 15 |
+
+In sync; no patch file changed. Facade header copies `cmp` identical.
+
+### Cleanup
+
+Every browser and loopback server stopped by exact PID (`ps -p` prints nothing for each), the fix runs included. The
+throwaway profiles, the downloaded game data, the scratch fixtures and the run logs under `arkt-artifacts/806/` deleted. Nothing touched the clipboard,
+the Keychain (mock keychain only) or `/Applications/Arkt.app`.
+
+## #588: page context menu on Arkt windows (patch 0016)
+
+Date 2026-11-12. Branch `engine/588-page-context-menu` from `main` at `4024dff5`. `$CR` branch `arkt` at `bd284c54bd`
+(0001-0015) before, `f970895cc9` (0001-0016) after.
+
+### Gate
+
+- Why a patch: `RenderViewContextMenuMacCocoa::Show()` returns when the page's window has no top-level Views widget
+  (week-2 results, seam 7; run 6 above). No delegate-level seam sits in front of it:
+  - `WebContentsDelegate::HandleContextMenu`: the delegate is `Browser`, which does not override it, and the overlay
+    cannot take `Browser`'s place as the delegate.
+  - The `WebContentsViewDelegate` comes from the single free function `CreateWebContentsViewDelegate`
+    (`chrome_web_contents_view_delegate_views_mac.mm`), reached from `ChromeContentBrowserClient`, which the overlay
+    does not subclass.
+  - `RenderViewContextMenuBase` offers only `*ForTesting` callbacks.
+- Shape: the maintainer chose (2026-11-12) Chromium's own menu as a native `NSMenu` on the page view's own window, with
+  the items whose follow-up UI is Views hidden in the same pull request (decision 3). No facade change.
+- Item hiding: no overlay seam hides single items. The prefs and feature switches that remove some of them (QR code
+  policy pref, Translate, Cast, printing) switch the whole feature off everywhere, so the hiding is in the same patch.
+- Facade header: unchanged (`cmp` identical). `.patches`: 15 to 16, number 0016 claimed in the pull request; no open
+  engine pull request touches `engine/patches`, and no earlier patch touches these files.
+- Overlay link checked before each build: `$CR/arkt` points at this worktree's `engine/arkt`.
+- Builds: `nice -n 15 autoninja -j 4 -C out/Arkt chrome` in the background with a bounded wait. Chromium disk 1.9 TB
+  free; internal disk 48 GB free at the start, 37 GB at the end; swap 11.7 of 12 GB at the start and 16.3 of 17.4 GB
+  at the end (other lanes were building; `-j 4` as the README says above 6 GB); load average 4 to 25.
+
+### What patch 0016 does
+
+Two files, `render_view_context_menu_mac_cocoa.h` and `.mm` (one patch):
+
+- `Show()`: with no Views widget (and not headless), the menu is shown on `parent_view_`'s own window, and returns
+  only if that view has no window. The `MenuControllerCocoa` params (badge font, colours, radius) are built as
+  `views::MenuControllerParamsForWidget` builds them, with the colours from the page's color provider; the element
+  context is empty. Positioning and `ui::ShowContextMenu(..., allow_nested_tasks=true)` are upstream's, unchanged. It
+  logs `ARKT: page context menu on a window without a Views widget`.
+- On such a window, `IsCommandIdVisible` returns false for the commands whose follow-up UI is a Views bubble, dialog,
+  side panel, popup or tab-modal sheet: QR code, send to devices, click to call, Translate and partial translate,
+  every Lens and region search entry, Print, Cast, reading mode, Listen to This Page, Open Link in Split View, image
+  descriptions, Live Caption, compose, the Glic and contextual-task entries, Ask Google about this page, generate
+  password, passkey from another device, the password and autofill fallbacks that open a popup, and autofill
+  feedback. The override reaches
+  submenus, since their models use the menu as delegate. `UpdateToolkitMenuItem` keeps them hidden when an observer
+  updates them later.
+- Submenus left with no visible item are hidden. `MenuControllerCocoa` shows every separator, so after it builds the
+  menu, the separators that would lead, trail or double up are hidden as `NSMenuItem`s, in submenus too (review of
+  #904). A separator left over when an observer hides an item later is not tidied (looks only).
+
+The engine self-test embedder gained a probe (`--arkt-facade-selftest` only): it logs a context menu's items once
+validated (`ARKT selftest context menu open items=[...]`, `(off)` for disabled items) and its close, and the commands
+`ctx-pick <title prefix>` and `ctx-cancel` run an item or close the menu; after the close they find no menu
+(`ctx-pick "Reload" menu=none`). Scripted runs need no Accessibility access.
+
+### Smoke (`out/Arkt/Arkt.app`, `--no-startup-window --arkt-facade-selftest --arkt-engine-test-api --remote-debugging-port`, a fresh profile per run, `--use-mock-keychain --mute-audio`, `--host-resolver-rules="MAP * ~NOTFOUND, EXCLUDE 127.0.0.1"`, a loopback fixture page and an unpacked probe extension with one `contextMenus` item)
+
+Right-clicks and Ctrl-clicks were sent with DevTools `Input.dispatchMouseEvent`. The machine allows no synthetic OS
+input or Accessibility access for these runs, and none was granted.
+
+Menus on the final build, as the probe logs them:
+
+| Context | Items |
+|---|---|
+| Page | Back (off), Forward (off), Reload, -, Save As..., -, probe extension item, -, View Page Source, Inspect |
+| Link (right-click and Ctrl-click) | Open Link in New Tab, in New Window, in Incognito Window, -, Save Link As..., Copy Link Address, Add Link to Reading List, -, Copy, Copy Link to "..." , Search Google for "...", -, probe extension item, -, Inspect, -, Speech |
+| Image | Open Image in New Tab, Save Image As..., Copy Image, Copy Image Address, -, probe extension item, -, Inspect |
+| Selected text | Look Up "...", -, Copy, Copy Link to "...", -, Search Google for "...", -, probe extension item, -, Inspect, -, Speech |
+| Editable field | Look Up "...", -, Emoji & Symbols, -, Undo, Redo, -, Cut, Copy, Paste, Paste and Match Style, Select All, -, Search Google for "...", -, Language Settings, Writing Direction, -, probe extension item, -, Inspect, -, Speech |
+| Password field | Emoji & Symbols, -, Import Passwords, -, Undo, Redo, -, Cut, Copy, Paste, Paste and Match Style, Select All, -, Writing Direction, -, probe extension item, -, Inspect |
+
+Per item. "Live" means the item was run from the menu (`ctx-pick`) and the result checked; each risky item ran on its
+own fresh instance. Clipboard items ran with the general pasteboard saved first (every item and type) and restored
+after; each restore compared byte-identical.
+
+| Item | Shown | Live | Result |
+|---|---|---|---|
+| Open Link in New Tab | shown | yes | background tab in the same window, opener set (`tabCreated ... active=no opener=<tab> url=.../b.html`) |
+| Open Link in New Window | shown | yes | new Arkt window, tab active, opener set |
+| Open Link in Incognito Window | shown | yes | new off-the-record Arkt window |
+| Copy (selection) | shown | yes | pasteboard `serendipity`, plain text and HTML types |
+| Copy Link Address, Copy Image Address | shown | yes | the URL on the pasteboard |
+| Copy Link to Highlight | shown | yes | the page URL with a `#:~:text=` fragment |
+| Copy Image | shown | yes | PNG and HTML types on the pasteboard |
+| Cut (editable) | shown | yes | the field's text on the pasteboard |
+| Inspect | shown | yes | DevTools opens on the page (`devtools://` target) |
+| Probe extension item | shown | yes | `contextMenus.onClicked` in the extension with the menu item id, page URL and tab id |
+| View Page Source, Open Image in New Tab, Search Google for | shown | yes | new tab with the expected URL (Google was not reached) |
+| Language Settings | shown | yes | `chrome://settings/languages` tab |
+| Reload, Back, Undo, Select All | shown | yes | no crash |
+| Save As, Save Link As, Save Image As | shown | ran | no crash; the save panel was not observed (the test window is never key) |
+| Add Link to Reading List | shown | ran | no crash, no UI |
+| Look Up | shown | ran | no crash; the Look Up panel was not observed (the test window is never key) |
+| Emoji & Symbols, Dictation, Redo, Paste, Paste and Match Style, Writing Direction, Speech, Import Passwords | shown | no | not run: they open system UI over the user's screen, use the microphone, or would paste the user's clipboard |
+| Spelling suggestions, Spelling and Grammar | shown when present | no | none appeared: the renderer did not mark misspellings in the hidden, unfocused test window (with focus emulation either); the patch does not touch that path |
+| Services | system | no | not observable without Accessibility access |
+| Create QR Code | hidden | yes | before hiding: SIGSEGV 3 of 5 runs in `QRCodeWindowController::ShowBubble` (`ToolbarButtonProvider::From(browser)` is null); hidden: `ctx-pick` finds no such item |
+| Search with Image Search (Lens) | hidden | yes | before hiding: `Check failed: contents_web_view` in `OverlayBaseController::CloseUI`, 3 of 3 runs; hidden now |
+| Search This Image with Image Search (Lens) | hidden | yes | before hiding: the tab-modal was cancelled by 0015; hidden now |
+| Print, Print Text Selection | hidden | yes | before hiding: Chromium's print preview as a tab-modal on the Arkt window (the #250 path, as Cmd-P today); hidden now |
+| Translate, Cast, Open in Reading Mode, Listen to This Page | hidden | yes | before hiding: no crash and nothing shown; hidden now |
+| Open Link in Split View | hidden | yes | before hiding: only a background tab (Chromium's split view needs the Views tab strip); hidden now |
+| Send to devices, click to call, partial translate, region search, video frame Lens, image descriptions, Live Caption, compose, Glic, contextual tasks, generate password, passkey from another device, password and autofill fallbacks, autofill feedback | hidden | no | not offered on the fixture (signed out, no saved passwords, no video) |
+| Picture in Picture, Open Link as another profile, Open Link With, Paste from clipboard | shown when present | no | not offered on the fixture; Picture in Picture opens Chromium's own overlay window (E2 item 6) |
+
+Not verified here: that the menu opens exactly at a real pointer (the positioning code is upstream's and unchanged; the
+DevTools clicks moved the menu linearly with the click point); Main window, Split View pane, Peek, Little Arkt and
+"Open Link in New Tab lands in the right Space", which are shell surfaces the self-test cannot reach.
+
+Nested loop: commands sent over DevTools while a menu was open (title changes, `ctx-pick`, `ctx-cancel`, script
+evaluation) ran inside it, and facade batches were delivered in it: the W3-3 model (an `NSMenu` tracked from a Chromium
+task with application tasks allowed).
+
+| Step | Result |
+|---|---|
+| Build, first version | `The build has finished successfully.`, `FAILED:` 0, about 80 s |
+| Break build (`.mm` back to `156.0.8078.48`) | finished, `FAILED:` 0, 125 s. Three right-clicks reached the page (`contextmenu` count 3); `ARKT: page context menu` lines 0, menus 0 |
+| Restore build | finished, `FAILED:` 0, 85 s; the menu is back |
+| Build with item hiding | finished, `FAILED:` 0, 85 s and 75 s |
+| Build after the #904 review (Ask Google item, separators in submenus, probe) | finished, `FAILED:` 0, 75 s; the smoke above re-run on it: same menus, every hidden item `index=-1`, Open Link in New Tab, Copy (restored identical), Inspect and the extension item pass; FATAL, `Check failed` and signal lines 0 |
+| `gn check out/Arkt "//chrome/browser/ui/cocoa:*"` and `"//arkt/*"` | `Header dependency check OK` (both) |
+
+### Patch budget
+
+| Source | Count |
+|---|---|
+| `.patches` lines | 16 |
+| `arkt` commits above `156.0.8078.48` | 16 |
+
+In sync. Export added 0016 and its `.patches` line; 0001 to 0015 byte-identical. Facade header copies `cmp` identical.
+
+| Gate (design section 2.5) | Before | After #588 |
+|---|---|---|
+| Patch files | 15 | 16 |
+| Seam and hook patch files | 7 | 8 |
+| Upstream files outside 0001-0004 | 20 | 22 |
+| Hunks in `browser_actions.cc` and `browser_commands.cc` | 4 | 4 |
+| Hot-file hunks (`browser_window_features.cc`, `tab_features.cc`) | 0 | 0 |
+| Widely included headers changed | 0 | 0 (`render_view_context_menu_mac_cocoa.h` has 2 includers) |
+
+### Left open
+
+- #905 (needs the user): the acceptance items not verifiable here, once the shell hosts this build, with real input:
+  the menu at the pointer in a main window, a Split View pane, a Peek and Little Arkt; Open Link in New Tab landing in
+  the right Space; spelling suggestions, Look Up and Services; the save panels.
+- Hidden items to bring back natively (not preview must-haves; they stay hidden for the preview): #906 Print (Cmd-P
+  still shows Chromium's preview sheet), #907 Open Link in Split View mapped to Arkt's split, #908 Translate, #909
+  Cast. Reading mode has no issue yet.
+- The QR code and Lens crashes stay reachable from other entry points if any calls them on an Arkt window; none is
+  wired today.
+- Upstream unit tests for the Mac context menu were not run.
+
+### Cleanup
+
+Every engine run and the loopback server stopped by exact PID (`ps -p` prints nothing for each). Seven macOS crash
+reports from the test build (QR code and Lens) were moved from `DiagnosticReports` to the artifacts folder. The
+throwaway profiles and run logs were deleted. Clipboard runs saved and restored the general pasteboard, every item and
+type, and each restore compared identical. Nothing touched the Keychain (mock keychain only) or
+`/Applications/Arkt.app`.
+
+## #585: leave-site dialog to the shell panel (seam, no patch)
+
+Date 2026-11-12. Branch `engine/585-beforeunload-panel` from `main` at `ceb2afd1`. `$CR` branch `arkt` unchanged at
+`e483001f98` (0001-0016).
+
+### Gate
+
+- Seam, no patch. `TabModalDialogManager::RunBeforeUnloadDialog` hands every beforeunload dialog to
+  `AppModalDialogManager`, whose native dialog factory is public (`SetNativeDialogFactory`). Chromium installs its
+  Cocoa factory in `ChromeBrowserMainParts::PreProfileInit`, after the extra parts' `PreProfileInit`, so the overlay
+  wraps it in `PreBrowserStart`. A leave-site dialog of a tab in an Arkt window with an embedder host becomes an
+  `ArktBeforeUnloadDialog` that goes to the facade as a dialog request; every other app-modal dialog, and one the
+  facade declines, goes to the saved Chromium factory.
+- Facade header: additive. `ArktDialogKindBeforeUnload = 3`, and the comments that said beforeunload is not a dialog
+  updated. Both copies `cmp` identical. Lanes-agree note on #585.
+- `.patches` unchanged (16 lines, 16 commits above `156.0.8078.48`: in sync).
+- Builds: `nice -n 15 autoninja -j 4 -C out/Arkt chrome` (swap above 6 GB). Chromium disk 1.9 TB free throughout;
+  internal disk 37 GB free at the start, 35 GB at the end; swap 15.0 of 16.4 GB at the start, 18.1 of 18.4 GB at the
+  end (other lanes building); load average 8 to 62.
+
+### What landed
+
+- `arkt_javascript_dialog.{h,mm}`: `ArktPageDialog`, the dialog the facade reads and answers, now a base of the
+  tab-modal `ArktJavaScriptDialog` and the new `ArktBeforeUnloadDialog` (an `AppModalDialogView` that owns its
+  controller). The factory activates the tab when the dialog is created (as Chromium's Cocoa dialog does), so the
+  prompt is always on the shown tab and `ActiveTabChanged` comes before `DialogRequested`. The answer records
+  `DialogEnded` first and then reaches the controller (`OnAccept`, or `CancelTerminate` and `OnCancel`), so the shell
+  sees the end before the `TabClosed` or `CloseCancelled` it brings. `CloseAppModalDialog` (the queue ending it: a
+  navigation, the tab closing, shutdown) ends it without an answer. `HandleJavaScriptDialog` (the test API, DevTools)
+  answers through the same path. Strings are Chromium's: "Leave site?" or "Reload site?", "Changes you made may not
+  be saved.", Leave or Reload. No decline title (`cancelTitle` nil, the header allows it for this kind): Chromium's
+  decline button is a plain Cancel and has no "Stay", and the shell's panel from #584 was designed as Stay / Leave, so
+  the shell draws Stay (decision on #585, 2026-11-12).
+- The app-modal queue keeps Chromium's accounting: one prompt at a time across all windows, a window close or a quit
+  prompting its held tabs in turn, the next one only after Leave, Stay cancelling the whole close or quit.
+- Facade: `ArktFacadeJavaScriptDialog` reads any `ArktPageDialog`. On a cancelled window close or quit, Chromium tells
+  only the prompted tab (`BeforeUnloadFired`); the facade now reports `CloseCancelled` for every other tab that showed
+  closing: the window's tabs, and for a quit the tabs of every window the quit had reached
+  (`RecordWindowCloseCancelled`). A quit is told by the facade's own terminating flag (set at
+  `OnClosingAllBrowsers(true)`, cleared by the cancel notification after this call), not by
+  `browser_shutdown::IsTryingToQuit()`: the #911 review found that the second window's Stay missed the first window's
+  tabs, and a diagnostic run observed `IsTryingToQuit()` false when that Stay was answered, cause not confirmed
+  (the dialog's `CancelTerminate` resets it too).
+- Swift: `ChromiumEngine+Dialogs.swift` maps the kind to `.beforeUnload`; a leave-site dialog nobody can show is answered
+  Leave (#897 review); a `CloseCancelled` ends the tab's pending leave-site dialog first. `ChromiumEngine` keeps its
+  own close as `TabLifecycle` (`live`, `closeHeld`) and the kept New Tab page as `NewTabPageSlot`; `.skipUnloadHandlers`
+  now closes a tab whose own close is held (below). `ScriptedHarness` maps `.beforeUnload`; `ScriptedFacade` can report
+  leave-site dialogs (`reportsLeaveSiteDialogs`).
+- Self-test embedder: `respond <session id> leave|stay` (answers through the reported dialog object, the shell's path),
+  `close-window`, `quit`, `new-tab <url>`, `new-window <url>`; `dialogRequested` logs the strings and whether the tab
+  is active.
+
+The two pinned tests (#877 finding): `skipUnloadHandlersClosesATabShowingTheWindowCloseDialog` states the intended rule.
+`.skipUnloadHandlers` closes a tab whatever close holds it; the shell sends it when the row is gone (Delete Space, an
+import merge) while the prompt is up, and the real facade closes under `ScopedSkipUnloadHandlers` (run 1, step 5).
+`secondCloseWhileHeldDoesNothing` now covers a second honouring close only. The new
+`skipUnloadHandlersClosesATabWhoseOwnCloseIsHeld` failed on `main` (5 issues: the tab stayed listed, and a Stay
+afterwards would have cancelled the close of a tab with no row).
+
+### Smoke (`out/Arkt/Arkt.app`, `--no-startup-window --arkt-facade-selftest --arkt-engine-test-api --remote-debugging-port`, fresh profiles under `profiles/585-20261112/`, `--use-mock-keychain --mute-audio`, `--host-resolver-rules="MAP * ~NOTFOUND, EXCLUDE 127.0.0.1"`, a loopback fixture server, commands through page titles over DevTools; `hold` sets a beforeunload handler with a user gesture)
+
+| Step | Result |
+|---|---|
+| 1. Client close (`close`), Stay (`respond stay`); re-run on the final build (no decline title) | `held`, `dialogRequested kind=3 active=yes title="Leave site?" message="Changes you made may not be saved." accept="Leave" cancel="(none)"`; then `dialogEnded`, `closeCancelled isClosing=no` (separate batches, in that order); `state` closing=no |
+| 1. Again, Leave | `dialogEnded`, then `tabClosed reason=client` |
+| 2. Held reload, Stay | `title="Reload site?" accept="Reload"`; Stay: `dialogEnded`, no `closeCancelled`, the old page stays |
+| 2. Held reload, Leave | `dialogEnded`, then the page reloads (title back to the fixture's) |
+| 3. Window close, two held tabs (the active one and a background one) | one prompt: `activeTabChanged` for the background tab, then its `dialogRequested`; Stay: `dialogEnded`, then `closeCancelled` for both tabs (`close cancelled with its window` for the other), the window stays |
+| 3. Window close again, Leave, Leave | the second tab is activated and prompted only after the first Leave; then both `tabClosed reason=windowClosing`, `windowClosed` |
+| 4. Extension `chrome.tabs.remove` on a held tab (tabs probe) | prompt; Stay: `closeCancelled`; again with Leave: `tabClosed reason=extension` |
+| 5. `close skip` while the tab's own close shows its prompt | `result=closed`, `tabClosed reason=client`, then `dialogEnded`; no `closeCancelled`; a Stay sent afterwards `answered=no` |
+| 6. Quit with held tabs in two windows, Stay | prompt in the first window; Stay: `closeCancelled` for both tabs of that window, `quit cancelled`, the process stays |
+| 6. Quit again, Leave, Leave | the second window's tab is prompted after the first Leave; every tab `tabClosed reason=appTerminating`, both windows closed |
+| 6b. Quit, held tabs in two windows, Leave in the first, Stay in the second (#911 review) | before the fix: `closeCancelled` only for the second window's tab; the first window's two tabs, which showed closing, got none. After: `closeCancelled` for all three, `quit cancelled` |
+| 6c. Window close Stay with a second window open | `closeCancelled` for the closing window's two tabs only; the other window's tab gets none |
+| 7. Test API `answer <id> cancel` | the same path: `leave-site dialog answered stay`, `dialogEnded`, `closeCancelled` |
+| No engine-drawn dialog | the process's on-screen windows while a prompt is up: only the 900x632 host window (CoreGraphics window list) |
+| `FATAL`, `Check failed`, signals | 0 in every run |
+
+After the quit in step 6 (and in a baseline run that quit with no held tab), the self-test process stayed up after
+`app terminating` and the keep-alive release; it was stopped by its PID. Not related to this change.
+
+### Deliberate break
+
+`UseArktBeforeUnloadDialogs()` commented out in `PreBrowserStart`, rebuilt (89 s, `FAILED:` 0): `close` on a held tab
+gave `result=held` and no `dialogRequested`, and Chromium's own Cocoa alert came up (a layer-8 260x218 window of the
+process); `answer cancel` dismissed it. Restored and rebuilt (74 s, `FAILED:` 0): the prompt is the shell's again, no
+second window.
+
+| Step | Result |
+|---|---|
+| Builds | first two stopped on compile errors (Chromium style: inline virtual bodies; a reference to a temporary), then `The build has finished successfully.`, `FAILED:` 0 on every later build |
+| `gn check out/Arkt "//arkt/*"` | `Header dependency check OK` (new dependency `//chrome/browser:chrome_browser_application_mac`) |
+
+### Patch budget
+
+Unchanged: 16 patch files, 8 seam and hook patch files, 22 upstream files outside 0001-0004. `.patches` 16 lines, 16
+`arkt` commits: in sync. Facade header copies `cmp` identical. Design section 3 (E3a) records beforeunload as a seam.
+
+### Left open
+
+- The shell panel itself (Cmd-W, the window close button and Quit in the real app, Stay as the primary, Escape) needs
+  the shell build that hosts this engine and real input: #910 (needs the user).
+- #889 (one phase for `ArktFacadeTab`) stays its own change; this one did not need those fields reshaped.
+
+### Cleanup
+
+Every engine run and the fixture server stopped by exact PID (`ps -p` prints nothing for each). No crash reports from
+these runs. Throwaway profiles under `profiles/585-20261112/` deleted after the runs. Nothing touched the Keychain
+(mock keychain only), the clipboard or `/Applications/Arkt.app`.
+
+## #593: pinned order, extension context menu and site access (seam, no patch)
+
+Date 2026-11-12. Branch `engine/593-extension-pins-menu` from `main` at `2fa0783f`. `$CR` branch `arkt` unchanged at
+`e483001f98` (0001-0016).
+
+### Gate
+
+- Seam, no patch. Pins and order are `ToolbarActionsModel`'s (`SetActionVisibility`, `MovePinnedAction`,
+  `pinned_action_ids()`), stored in the profile's `extensions.pinned_extensions`, which is also what
+  `chrome://extensions` reads and writes (`developerPrivate` `pinnedToToolbar`). The context menu is
+  `extensions::ExtensionContextMenuModel`, built for the window's `BrowserWindowInterface`: its active tab comes from
+  `TabListInterface`, and `SidePanelUI::From` is null on an Arkt window, so it needs no Views browser. On desktop
+  `kExtensionsMenuAccessControl` is off (the `InitMenu` path). Site access is `PermissionsManager` and
+  `SitePermissionsHelper`, reached through the model's own `ExecuteCommand`.
+- Facade header: additive. `ArktExtensionSiteAccess`, `ArktExtensionContextCommand` (the shell's
+  `ExtensionContextCommand` values), `ArktMenuItemKind` and the `ArktMenuItem` protocol; `ArktExtensionAction` gains
+  `isPinned`, `hasOptionsPage`, `siteAccess`; `ArktEngine` gains `pinnedExtensionIDs`, `setExtensionPinned:pinned:`,
+  `movePinnedExtension:toIndex:`, `extensionContextMenuForAction:inBrowser:`,
+  `performExtensionContextCommand:forAction:inBrowser:`. No existing member changed. Both copies `cmp` identical.
+  Gate and lanes note on #593.
+- `.patches` unchanged (16 lines, 16 commits above `156.0.8078.48`: in sync).
+- Builds: `nice -n 15 autoninja -j 4 -C out/Arkt chrome` (swap above 6 GB). Chromium disk 1.9 TB free throughout;
+  internal disk 34 GB free at the start and the end; swap 17.6 of 18.4 GB at the start, 17.6 at the end; load
+  average 4 to 9.
+
+### What landed
+
+- `arkt_extension_context_menu.{h,mm}` (new): `PinnedExtensionIds`, `SetExtensionPinned` and `MovePinnedExtension`
+  guard every case the model `CHECK`s or `DCHECK`s (no such action, already in that state, policy-pinned, off the
+  record, not pinned) and clamp the index. `GetExtensionSiteAccess` reports the user's site access under the same
+  conditions the model shows its submenu (none on a page the extension may not run on). `ArktExtensionContextMenu`
+  builds the model once and emits the items design/extensions fixes: the name as a disabled header, Options...
+  (enabled with an options page), Pin or Unpin, Move Up and Move Down (pinned only, each disabled at its end), the
+  site access submenu with the model's enabled and checked state, Manage Extension..., Remove from Arkt... (only when
+  the model offers Uninstall). Titles are the design's; the site item reads "On <host>" with the host the model
+  derives (Chromium's Mac string reads "Always on <host>"). Options and site access run through the model's
+  `ExecuteCommand`; Pin and the moves go straight to `ToolbarActionsModel` (the model's `TOGGLE_VISIBILITY` also
+  notifies the Views element tracker). A site choice after the tab left the origin the menu was built for is
+  ignored, as in Chrome.
+- `ArktExtensionsMenu`: actions listed pinned first in pin order, then the rest; `OnToolbarPinnedActionsChanged`
+  (an empty body until now, so a pin change never reached the shell) raises the change; observes
+  `PermissionsManager`, so a site access change from `chrome://extensions` reaches the shell too; keeps the last built
+  context menu per window for the shell's choice. `ShowContextMenuAsFallback` (a click on an action disabled on the
+  tab) used to log "no context menu yet"; it now shows the same items as a native menu at the action's anchor, on a
+  later task. There Manage and Remove run through the model (`chrome://extensions/?id=`, and the uninstall dialog
+  through the 0007 hook), as #593 asks; the shell's own menu keeps running them itself.
+- Facade: the listing fields, the five members, the menu item values. Swift: `ChromiumEngine+ExtensionPins.swift` maps
+  them onto the `EngineExtensions` members from #591; `FacadeValues.swift` maps site access and menu items.
+- Self-test embedder: `pin`, `unpin`, `move-pin <id> <index>`, `ext-menu <id>`, `ext-pick <id> <command>`; the
+  actions log prints `pinned`, `options`, `siteAccess` and the pinned list.
+- `engine/test-extensions/site-probe` (new): `<all_urls>` host permissions, an options page, a content script that
+  marks the page, a badge counting completed loads, and the action disabled on a page whose path holds "disabled".
+
+### Smoke (`out/Arkt/Arkt.app`, `--no-startup-window --arkt-facade-selftest --arkt-engine-test-api --remote-debugging-port`, fresh profiles under `profiles/593-20261112/`, `--use-mock-keychain --mute-audio`, `--host-resolver-rules="MAP * ~NOTFOUND, EXCLUDE 127.0.0.1"`, a loopback fixture server, `site-probe` and `action-probe` unpacked, commands through page titles over DevTools)
+
+| Step | Result |
+|---|---|
+| 1. Listing on the http page | site probe `options=1 siteAccess=3` (all sites), action probe `options=0 siteAccess=0`; `pinned []` |
+| 2. `pin` site, `pin` action, `move-pin` action 0, `unpin` site, `pin` site | each change one `extensionActionsChanged`; listing and `pinned` follow: `[site,action]`, `[action,site]`, `[action]`, `[action,site]` |
+| 3. `chrome://extensions` (`developerPrivate.getExtensionInfo`) | both `pinnedToToolbar=true`; site probe `hostAccess=ON_ALL_SITES` |
+| 3. Unpin from `chrome://extensions` (`updateExtensionConfiguration`) | `extensionActionsChanged`, site probe `pinned=0`, `pinned [action]` |
+| 4. Persistence: quit, relaunch on the same profile | `Preferences` `extensions.pinned_extensions` `[action, site]`; after relaunch `pinned [action,site]` in that order |
+| 5. `ext-menu` site probe on the http page | 9 items: name (off), Options..., Unpin, Move Up, Move Down (off, last), This Can Read and Change Site Data > When You Click the Extension, On 127.0.0.1, On All Sites (checked), -, Manage Extension..., Remove from Arkt... |
+| 5. `ext-menu` action probe | 8 items: no site submenu, Options... off, Move Up off (first) |
+| 5. `ext-menu` on the options page (an extension page) | 8 items, no site submenu |
+| 6. Site access: When You Click the Extension | `siteAccess=1`; `chrome://extensions` `ON_CLICK`; after a reload the content script did not run (`siteProbe=none`) |
+| 6. On 127.0.0.1 | `siteAccess=2`; `ON_SPECIFIC_SITES` with `http://127.0.0.1:8593/*`; after a reload the script ran |
+| 6. On All Sites | `siteAccess=3`; `ON_ALL_SITES` |
+| 6. `ON_CLICK` set from `chrome://extensions` | `extensionActionsChanged`, `siteAccess=1` |
+| 7. Stale menu: built on the http page, tab moved to a `data:` URL, then On click picked | `site access choice after the tab left http://127.0.0.1:8593`, `ignored`; `chrome://extensions` still `ON_ALL_SITES` |
+| 8. Menu Move Up, Move Down, Unpin, Pin; a second Pin from the same menu | order and pins follow; the second Pin `ignored` (already pinned), no `CHECK` |
+| 9. Options... | engine tab `chrome-extension://<site probe>/options.html`, active, opener the page |
+| 10. Badge (`chrome.action.setBadgeText` on each load) | a reload gives 2 `extensionActionsChanged`; badge text 4; the icon PNG changes size with each count |
+| 11. `run` on `disabled.html` (action `enabled=0`) | `extension context menu fallback ... 9 items`, the same items as step 5 at the action's anchor; closed by the dump timer |
+| `FATAL`, `Check failed`, `DCHECK`, signals | 0 in every run |
+
+Not exercised live: choosing Manage or Remove in the engine-drawn fallback menu. The self-test chooses menu items by
+page-title commands, which the facade defers out of a nested run loop, so they arrive after the menu closed. The
+shell's own menu runs Manage and Remove itself (#596, #720) and never sends them to the engine.
+
+### Deliberate break
+
+`OnToolbarPinnedActionsChanged` emptied again (its state on `main`), rebuilt (72 s, `FAILED:` 0): `pin` logged
+`setExtensionPinned ... changed` and `pinned [site]`, and no `extensionActionsChanged` reached the shell. Restored
+and rebuilt (80 s, `FAILED:` 0): the same `pin` gives `extensionActionsChanged`.
+
+| Step | Result |
+|---|---|
+| Builds | first two stopped on compile errors (a header path that moved to `ui/base/models/`, an incomplete `PermissionsData`), then `The build has finished successfully.`, `FAILED:` 0 on every later build (86 s, 76 s) |
+| `gn check out/Arkt "//arkt/*"` | `Header dependency check OK` (new dependency `//components/url_formatter`) |
+
+### Patch budget
+
+Unchanged: 16 patch files, 8 seam and hook patch files, 22 upstream files outside 0001-0004. `.patches` 16 lines, 16
+`arkt` commits: in sync. Facade header copies `cmp` identical.
+
+### Left open
+
+- Which of Chromium's other action menu items belong in the menu: the extension's own `chrome.contextMenus` items
+  for the `action` context, Rate, View web permissions, Inspect popup (developer mode), the side panel toggle. The
+  design table lists none of them; question on #593.
+- Revoking access to On click marks the page as needing a reload (`TabHelper::SetReloadRequired`); Chrome shows that
+  in its toolbar, Arkt shows nothing yet. (Checked in #913: Chromium's reload dialog does show, as the 0007 sheet.)
+- The shell's menu and panel against this engine with real input (right-click, Ctrl-click, VoiceOver show-menu) need
+  the shell build that hosts the engine.
+
+### Cleanup
+
+Every engine run and the fixture server stopped by exact PID (`ps -p` prints nothing for each). No crash reports from
+these runs. Throwaway profiles under `profiles/593-20261112/` deleted after the runs. Nothing touched the Keychain
+(mock keychain only), the clipboard or `/Applications/Arkt.app`.
+
+## #592: post-install event instead of Chromium's dialog (seam, no patch)
+
+Date 2026-11-13. Branch `engine/592-post-install-event` from `main` at `aaa87844`. `$CR` branch `arkt` unchanged at
+`e483001f98` (0001-0016).
+
+### Gate
+
+- Seam, no patch. The event comes from an `ExtensionRegistryObserver` on the embedder profile
+  (`OnExtensionInstalled`), as the `EngineExtensionEvent.installed` doc from #591 already describes. Chromium's
+  post-install dialog reaches the overlay through the 0007 hook (`ShowDialog(gfx::NativeWindow, ...)` without a Views
+  container). The hook receives no extension id and the dialog sets no internal name, so the overlay recognises it by
+  its title: `IDS_EXTENSION_INSTALLED_HEADING` with the display name of an extension the window's profile has
+  (`GetFixupExtensionNameForUIDisplay`, `AdjustStringForLocaleDirection`, as `ConfigurePostInstallDialogModel` builds
+  it), and neither OK nor Cancel (the desktop dialog has none). It is dropped only when the matched extension is an
+  install the facade reported and whose dialog has not come yet (review of #919, finding 1), so a dropped dialog
+  always has its event; any other dialog model, an update's post-install dialog included, still gets the sheet.
+- Facade header: additive. `ArktEngineEventKindExtensionInstalled = 31`; `ArktEngineEvent` gains `extensionID` and
+  `extensionName` (nil on every other kind). No existing member changed. Both copies `cmp` identical. Gate note on
+  #592.
+- `.patches` unchanged (16 lines, 16 commits above `156.0.8078.48`: in sync).
+- Builds: `nice -n 15 autoninja -j 4 -C out/Arkt chrome` (swap 16.5 of 17.4 GB at the start). Chromium disk 1.9 TB
+  free throughout; internal disk 44 GB free at the start; load average 5 to 7. First build 97 s, `FAILED:` 0.
+- `gn check out/Arkt "//arkt/*"`: first `Can't include this header` for `crx_installer.h`; with the
+  `//extensions/browser:crx_installer` dependency `Header dependency check OK`; rebuilt (16 s, `FAILED:` 0). Line
+  wraps only after run 3, rebuilt (68 s, `FAILED:` 0).
+- Review round (pending gate, `prompt` option): the first build stopped on the `chromium-rawptr` plugin (a raw
+  `const void*` member; now an integer key), then 75 s and 82 s, `FAILED:` 0; `gn check` OK.
+
+### What landed
+
+- `arkt_extension_installs.{h,cc}` (new, `//arkt/browser:window`): `ReportsExtensionInstall` (a first install at
+  `ManifestLocation::kInternal`, not a theme and not an app: the installs Chromium follows with its post-install
+  dialog, which are the Web Store, a user's .crx and the import batch), `ExtensionInstallWatcher` (the registry
+  observer) and `InstallCrxForSelfTest` (below).
+- Facade: the watcher on the embedder profile, created with the download watcher; each accepted install records one
+  profile-wide `ExtensionInstalled` (no tab, no browser) from inside the notification, delivered in the next batch.
+- `arkt_extension_dialogs.mm`: `ShowModalDialog` drops the post-install model on an Arkt window when one of the
+  extensions its title names (more than one when installed extensions share a name) is a pending reported install,
+  uses that up (`TakeReportedInstall`), and logs `post-install dialog not shown <id>`. The watcher adds each reported
+  id to the pending set; an update or an uninstall of that extension, or the registry's shutdown, removes it, so a
+  report whose install showed no dialog (a batch) cannot later swallow an update's dialog. The model goes without a
+  host, so its destroying callback (the pinned-by-default hint, which needs a `BrowserView` and which 0006 guards)
+  never runs. Chromium's "has been added ... Window menu" text is gone.
+- Swift: `ChromiumEngine.observeExtensions` (the protocol default delivered nothing until now, so neither `.installed`
+  nor `.commandsChanged` could reach the shell from this engine) and the `.installed` mapping. Ids of an
+  `installExtensionResults` batch are tagged `.browserImport` (#594): every id is tagged when the batch starts, an id
+  the batch did not install loses its tag when the batch answers, and an installed id keeps it until its event
+  arrives, because the facade's batch can be delivered after the import's completion has resumed. A tag is used once.
+- Batch (#513): one event per installed id (the decision the acceptance item leaves to this pull request; the shell's
+  toast already skips `.browserImport`).
+- Self-test embedder: `install-crx <path>` installs a packed .crx the way chrome://extensions installs a dropped one
+  (`CrxInstaller` with an `ExtensionInstallPrompt`, off-store allowed from the settings page); the prompt is accepted
+  by a `ScopedTestDialogAutoConfirm` held until the installer finishes, so Chromium continues to
+  `ExtensionInstallUI::OnInstallSuccess` and its post-install dialog, the same path a Web Store install takes. That
+  path updates an installed extension without a prompt or post-install UI (`CheckUpdateFromSettingsPage`, which is why
+  run 2 saw no dialog for the reinstall); `install-crx <path> prompt` allows off-store as for a test instead, so an
+  update also goes through the prompt and `OnInstallSuccess`, as a Web Store update does. The auto-confirm is
+  process-wide while held. The events log prints `extensionInstalled`.
+- `engine/test-extensions/install-probe` (new): an action and nothing else; packed locally for each run with the
+  engine's own `--pack-extension` (the .crx and key stay under `arkt-artifacts/592/`).
+
+### Smoke (`out/Arkt/Arkt.app`, `--no-startup-window --arkt-facade-selftest`, fresh profiles under `profiles/592-20261113/`, `--use-mock-keychain --mute-audio`, `--host-resolver-rules="MAP * ~NOTFOUND, EXCLUDE 127.0.0.1"`, a local `file://` drive page that sends commands through its title, no network)
+
+| Run | Steps | Result |
+|---|---|---|
+| 1 | `--load-extension` action probe (unpacked), then `install-crx` install probe | unpacked: `extension installed ... location=8 update=0 not reported`; crx: `location=1 update=0 reported`, one batch `ExtensionActionsChanged,ExtensionInstalled`, `extensionInstalled id=bmjf... name=Arkt install probe tab=nil browser=nil`, `post-install dialog not shown bmjf...`; no `dialog sheet shown` |
+| 2 | `install-crx` twice (the second is an update of the same version) | first as run 1, one `ExtensionInstalled`; second `update=1 not reported`, no dialog reached the hook, no sheet; 1 `ExtensionInstalled` in the whole run |
+| 4 (pending gate) | unpacked probe, `install-crx` v1, v1 again, v2 (same key) | v1: one `ExtensionInstalled`, `post-install dialog not shown`; v1 again and v2 (`update=1 not reported`): no dialog reached the hook (the chrome://extensions update path) |
+| 5 (pending gate) | as run 4, each `install-crx ... prompt` | v1: one `ExtensionInstalled`, dialog dropped; v1 again and v2: `update=1 not reported`, `dialog sheet shown` each time (Chromium's post-install text kept), no event |
+| 3 (restored build) | as run 1 | the same as run 1: unpacked `not reported`, crx `reported`, one `ExtensionInstalled`, `post-install dialog not shown`, no `dialog sheet shown` |
+| all | `FATAL`, `Check failed`, `DCHECK` | 0 |
+
+Component extensions on a fresh profile fire no `OnExtensionInstalled` (none logged in any run).
+
+Not exercised live: an install from the Chrome Web Store and a live import batch. Both need the network, which these
+runs do not use; they reach the same observer (`kInternal`) and, for the Web Store, the same
+`ExtensionInstallUI::OnInstallSuccess` path as the .crx. Tracked in #918 (needs the maintainer).
+
+### Deliberate break
+
+The title match made to fail (`+ u"BREAK"` on the expected heading), rebuilt (68 s, `FAILED:` 0): the same
+`install-crx` still reported one `ExtensionInstalled`, and `dialog sheet shown` came back (Chromium's post-install text
+as a sheet). Restored and rebuilt (72 s, `FAILED:` 0): run 3 above. A first attempt (`if (false && ...)`) stopped on
+`-Wunreachable-code`.
+
+Swift: releasing every tag when the batch answers (the naive rule) fails
+`anEventThatLandsAfterTheBatchCompletedIsStillBrowserImport` and `aTagIsConsumedByItsEvent` (the event arrives as
+`.user`); restored, all pass.
+
+### Patch budget
+
+Unchanged: 16 patch files, 8 seam and hook patch files, 22 upstream files outside 0001-0004. `.patches` 16 lines, 16
+`arkt` commits: in sync. Facade header copies `cmp` identical.
+
+### Left open
+
+- Decided on #919: first installs at `kInternal` except themes and apps report; external (sideloaded),
+  policy-installed, unpacked, command-line and component installs report nothing.
+- No icon (decided on #919, for now): the registry path has no decoded bitmap, `InstalledExtension.iconPNG` stays nil
+  (the toast shows none).
+- An update (a newer version, or the same version again) reports nothing. From chrome://extensions it shows nothing
+  (Chromium's own path); through a prompt (run 5, as a Web Store update) it keeps Chromium's sheet. Decision on #919:
+  updates keep the native sheet for now.
+- The shell's toast against this engine with a real Web Store install needs the shell build that hosts the engine.
+
+### Cleanup
+
+Every engine run ended by its own `quit` command under a 60 s `alarm`; `pgrep` on each profile path prints nothing. No
+crash reports from these runs. Throwaway profiles under `profiles/592-20261113*/` deleted after the runs. Nothing
+touched the Keychain (mock keychain only), the clipboard or `/Applications/Arkt.app`.
+
+## #915: the extension's own `chrome.contextMenus` items in the action context menu (seam, no patch)
+
+Date 2026-11-13. Branch `engine/915-action-context-items` from `main` at `03018350`. `$CR` branch `arkt` unchanged at
+`e483001f98` (0001-0016).
+
+### Gate
+
+- Seam, no patch. The items are already in the model the overlay keeps for the menu (#593):
+  `ExtensionContextMenuModel::InitMenu` calls `AppendExtensionItems` right after the name, and its `ContextMenuMatcher`
+  adds the extension's items for the action (`MenuItemMatchesAction`, at most `ACTION_MENU_TOP_LEVEL_LIMIT`, six, at
+  the top) to the model itself, with nested `SimpleMenuModel`s for submenus. Running one through the model's
+  `ExecuteCommand` reaches `MenuManager::ExecuteCommand`, which computes `checked` and `wasChecked`, adds the tab and
+  dispatches `chrome.contextMenus.onClicked`.
+- Facade header: additive. `ArktExtensionContextCommand` gains `CustomFirst = 1000` and `CustomLast = 2000`; the
+  extension's item n (Chromium's `IDC_EXTENSIONS_CONTEXT_CUSTOM_FIRST + n`) is `1000 + n`. Chromium's 49000-based ids
+  never cross the facade. No existing member changed. Both copies `cmp` identical. Gate note on #915.
+- `.patches` unchanged (16 lines, 16 commits above `156.0.8078.48`: in sync).
+- Builds: `nice -n 15 autoninja -j 4 -C out/Arkt chrome` (swap 16.5 of 17.4 GB at the start, 16.6 at the end).
+  Chromium disk 1.9 TB free throughout; internal disk 43 GB free; load average 5 to 7.
+
+### What landed
+
+- `arkt_extension_context_menu.{h,mm}`: `ArktExtensionContextMenu` walks the model's top level from its first to its
+  last custom command (`ContextMenuMatcher::IsExtensionsCustomCommandId`), separators between them included, and
+  recurses into submenus. Each item carries the model's state: title, type (normal, checkbox, radio, separator,
+  submenu), enabled, checked; invisible items are left out, and leading, trailing and doubled separators are dropped.
+  Titles go through `l10n_util::FixUpWindowsStyleLabel`, as Chrome's Mac menu controller does for every label (a
+  single `&` is a mnemonic marker, `&&` a literal `&`). The items come right after the header, between two
+  separators, only when the extension has any. The engine-drawn fallback menu (an action disabled on the tab) gets
+  them through the same list.
+- Running one (`Execute` with a custom command): it must be an enabled command item of the menu as built (submenus
+  searched too), the tab active when the menu was built must still be the active one (otherwise ignored and logged:
+  Chrome's model sends `onClicked` with the tab active at the time of the choice), and the model must still report
+  it visible and enabled (the matcher reports a removed item as invisible). Then the model's `ExecuteCommand`.
+- Facade: the argument for `performExtensionContextCommand` outside `[0, CustomLast]` becomes -1 (no command) instead
+  of being clamped to `[-1, 1000]`, which would have landed on a real item. `static_assert`s tie the overlay's range
+  to the header's.
+- Swift: `ExtensionContextCommand.customRange`, `custom(_:)`, `isCustom(_:)`; `ChromiumEngine` passes the commands
+  through unchanged (as before); `InMemoryEngine.setExtensionContextItems(_:forExtension:)` stands in for
+  `chrome.contextMenus` in shell tests. The shell's `ExtensionContextMenu` already sent every command other than
+  Manage and Remove to the engine.
+- `engine/test-extensions/menu-probe` (new): a normal item, a checkbox, a radio group, a submenu with a separator, an
+  enabled and a disabled child and a `&&` title, and a hidden item; `onClicked` records `menuItemId`,
+  `parentMenuItemId`, `checked`, `wasChecked`, the tab id and URL in `storage.local` and counts them on the badge.
+- Design: `design/extensions/README.md`, "The context menu", gains the row for the extension's own items.
+- Separate commit (carry-over from the #919 review): `ExtensionInstallWatcher` erases its profile's pending ids in its
+  destructor too, and the pending set checks `DCHECK_CURRENTLY_ON(content::BrowserThread::UI)`.
+
+### Smoke (`out/Arkt/Arkt.app`, `--no-startup-window --arkt-facade-selftest --arkt-engine-test-api --arkt-extensions-menu-dump --remote-debugging-port`, fresh profiles under `profiles/915-20261113/`, `--use-mock-keychain --mute-audio`, `--host-resolver-rules="MAP * ~NOTFOUND, EXCLUDE 127.0.0.1"`, a loopback fixture server, `menu-probe` unpacked, `ext-menu` / `ext-pick` through page titles over DevTools, the probe driven and read through its service worker)
+
+| Step | Result |
+|---|---|
+| 1. `ext-menu` on the http page | 15 items: name (off), -, Run Probe, Follow This Site (checked), - (Chromium's separator before a radio group), Mode A (checked), Mode B, -, More > [Child One, -, Save & Share, Child Off (off)], -, Options... (off), Pin, -, Manage Extension..., Remove from Arkt.... Hidden Item absent; `&&` shows as `&` |
+| 1. Commands | Run Probe 1000, Follow 1001, Mode A 1002, Mode B 1003, Child One 1005, Save & Share 1007, Child Off 1008 (More is 1004, a holder) |
+| 2. `ext-pick` 1000, 1001, 1003, 1005, 1007 | one `onClicked` each, tab 1126602057 (the page), in order: `run`; `follow` `checked=false wasChecked=true`; `mode-b` `checked=true wasChecked=false`; `more-one` `parentMenuItemId=more`; `more-save` |
+| 2. `ext-pick` 1008 (disabled), 1004 (submenu holder), 2001 and -5 (out of range) | `not offered` / `ignored`, no `onClicked` |
+| 3. `ext-menu` again | Follow unchecked, Mode B checked, Mode A unchecked |
+| 2b. Checkbox picked again (run 2) | `follow` `checked=true wasChecked=false` |
+| 4. Menu built on the page, a second tab made active, then `ext-pick` 1000 | `chosen after the active tab changed`, `ignored`, click count unchanged (5) |
+| 5. Menu built on the second tab, `ext-pick` 1000 | `run` with tab 1126602058, `two.html` |
+| 6. While closed: `update` (title, `checked: false`, `enabled: true`, `visible: true`), `remove("mode-b")`, `create("added")`; `ext-menu` | 16 items: Pause Probe, Follow unchecked, Mode A only, Child Off enabled, Hidden Item shown, Added Later; ids renumbered for the new menu |
+| 7. Menu built, `added` removed, then `ext-pick` 1009 | `gone, hidden or disabled since the menu was built`, `ignored`, no `onClicked` |
+| 8. `removeAll`, `ext-menu` | 6 items, the #593 layout: name, Options..., Pin, -, Manage Extension..., Remove from Arkt... |
+| 9. Action disabled on the tab, `run` | `extension context menu fallback ... 15 items`: the same items as a native menu at the action's anchor, closed by the dump timer |
+| Chromium's top-level cap (run 1, an older probe with six visible top-level items before More) | More and everything after it left out by the matcher, as in Chrome |
+| `FATAL`, `Check failed`, `DCHECK`, signals | 0 in every run |
+
+With these flags the self-test's `quit` left the process running after `lifetime keep-alive released`, also with no
+extension loaded and no menu built (runs 4 to 7; cause not investigated, every run had `--remote-debugging-port`, which
+#592's quitting runs did not); those runs were stopped by PID. Run 2 was stopped by PID while its fallback menu was still open (no dump flag): the SIGTERM watchdog wrote a
+crash report, which I deleted; every later run used `--arkt-extensions-menu-dump`.
+
+### Deliberate break
+
+`ArktExtensionContextMenu::Execute` returned `false` for a custom command instead of calling `ExecuteCustom`, rebuilt
+(71 s, `FAILED:` 0): `ext-menu` still listed 15 items, `ext-pick` 1000 and 1001 were `ignored` and the probe recorded
+no click. Restored and rebuilt (68 s, `FAILED:` 0): both `ran`, two clicks with the page's tab. A first attempt
+(`if (false && ...)`) stopped on `-Wunreachable-code`.
+
+| Step | Result |
+|---|---|
+| Builds | 83 s, 79 s (live check tightened), break 71 s, restore 68 s, final (format only) 68 s; `FAILED:` 0 each |
+| `gn check out/Arkt "//arkt/*"` | `Header dependency check OK` |
+
+### Patch budget
+
+Unchanged: 16 patch files, 8 seam and hook patch files, 22 upstream files outside 0001-0004. `.patches` 16 lines, 16
+`arkt` commits: in sync. Facade header copies `cmp` identical.
+
+### Left open
+
+- The shell's menu against this engine with real input (right-click on an action in the Extensions panel) needs the
+  shell build that hosts the engine (#912).
+- Icons: Chrome's action menu shows no icons for these items either; none are drawn.
+
+### Cleanup
+
+Every engine run and the fixture server stopped by exact PID (`ps -p` prints nothing for each). The one crash report
+(run 2, SIGTERM watchdog with a native menu open) deleted. Throwaway profiles under `profiles/915-20261113/` deleted
+after the runs. Nothing touched the Keychain (mock keychain only), the clipboard or `/Applications/Arkt.app`.
+
+## #598: chrome.commands in Arkt windows (seam, no patch)
+
+Date 2026-11-13. Branch `engine/598-extension-commands` from `main` at `6fc585e1`. `$CR` branch `arkt` unchanged
+(0001-0016).
+
+### Gate
+
+- Seam, no patch. Chrome keeps a window's extension shortcuts in `ExtensionKeybindingRegistryViews`, which needs a
+  `views::FocusManager` (week-2 grep 8). The overlay subclasses the platform-independent
+  `extensions::ExtensionKeybindingRegistry` the way Android does (`extension_keybinding_registry_android.cc`): named
+  commands and the action command, both from `CommandService`. Global commands stay with the profile's
+  `ExtensionCommandsGlobalRegistry`, a profile-keyed service created with the profile, which does not depend on Views.
+- Facade header: additive. `ArktExtensionCommand`, `ArktExtensionShortcutChange`, `ArktExtensionShortcutResult`,
+  `-extensionCommands`, `-setExtensionCommandShortcut:forCommand:ofExtension:global:replacingConflict:` and event kind
+  `ExtensionCommandsChanged = 32`. No existing member changed. Both copies `cmp` identical. Gate note on #598.
+- `.patches` unchanged (16 lines, 16 `arkt` commits: in sync).
+- Builds: `nice -n 15 autoninja -j 4 -C out/Arkt chrome`; swap 16.6 of 17.4 GB at the start, 16.9 at the end;
+  Chromium disk 1.9 TB free, internal disk 43 GB free; load average 4.5 to 6.2.
+- #591 review note: `kKeyTab` is in `ui::Command::ParseImpl` at the pin (`command.cc`, lines 282 and 318), so `.tab`
+  is exposed. User-set global shortcuts are not limited: only `CommandService::CanAutoAssign` (a manifest suggestion)
+  restricts a global one to Cmd+Shift+[0-9]. Global listening on the Mac is Carbon `RegisterEventHotKey` (and the
+  media keys listener): no Accessibility permission, released when the process exits.
+
+### What landed
+
+- `arkt_extension_keybinding_registry.{h,mm}` (new): `ArktExtensionKeybindingRegistry`, owned by `ArktBrowserWindow`
+  (made when the window first becomes key or sees a key), with `TabListInterface::From(browser)` for
+  `onCommand`'s tab. A named command goes to `NotifyEventTargets`; the action command runs the window's action view
+  model (`TryHandleAcceleratorPress`: the popup, or closes the open one), found through the window's
+  `ExtensionsContainer`. Key window changes set it as the global registry's `registry_for_active_window`, as
+  `ExtensionKeybindingRegistryViews` does. `MainMenuHasAccelerator`: whether a main-menu item (enabled or not) has the
+  key as its key equivalent.
+- `ArktBrowserWindow`: `PreHandleKeyboardEvent` asks the registry for a raw key down with the page focused (before the
+  page, where Chrome's `BrowserView` processes extension accelerators). A local key-down monitor, installed with the
+  host and removed with it, asks the registry for a key down of this window whose first responder is not inside a tab's
+  page view (the sidebar, a shell field), with Command, Control or Option held. Neither path takes a key the main
+  menu holds.
+- `arkt_extensions_menu.mm`: the `RegisterCommand()` stub and its "not supported" warning are gone; the delegate's
+  `RegisterCommand`/`UnregisterCommand` are documented no-ops (the window registry lists the action command).
+- `arkt_extension_commands.{h,mm}` (new): the listing (as Chrome's shortcuts page builds it, `ConstructCommands`:
+  action command first, "Activate the extension" as its description, named commands with the saved shortcut and
+  scope), the setter (through `CommandService`: `RemoveKeybindingPrefs` + `AddKeybindingPref`, and
+  `UpdateKeybindingPrefs` with no keystroke to clear, as `developerPrivate.updateExtensionCommand` does), and
+  `ExtensionCommandsWatcher` (changes merged into one event per task; a shortcut `CommandService` assigns on its own,
+  a manifest suggestion or Chrome's shortcuts page, that a main-menu item holds is cleared the way the user clears
+  one, so it stays unassigned across updates). Chrome on the Mac already refuses a suggestion its own menu holds
+  (`IsChromeAccelerator`), but only for items carrying Chrome command tags; Arkt's shell items do not.
+- Facade: the two calls and the event; the self-test gains `ext-commands`, `ext-set` and `ext-key` (a key down made in
+  this process: `-[NSWindow sendEvent:]` with the page focused, `-[NSApp postEvent:atStart:]` with the window itself
+  as first responder, so the window's monitor sees it).
+- Swift: `ChromiumEngine+ExtensionCommands.swift` (`extensionCommands`, `setExtensionCommandShortcut`, Chromium's
+  shortcut form both ways), `.extensionCommandsChanged` becomes `.commandsChanged`. Tests:
+  `ChromiumExtensionCommandTests` (new, 10 tests, every key times every modifier set round trips), two
+  `ConformanceTests`.
+- `engine/test-extensions/commands-probe` (new): `_execute_action` (Control+Shift+U), `run-probe` (Control+Shift+Y),
+  `menu-key` (asks for Command+T), `unset` (no suggestion); records each `onCommand` with its tab and each popup
+  opening in `storage.local`.
+- Separate commit (carry-over from the #920 review): the `customRange` comment, `MayHaveMnemonicsAt` before the title
+  fixup, the redundant condition in `CustomItems` dropped, a bounds check in `custom(_:)`, a comment that a disabled
+  submenu holder's children are not reachable.
+
+### Smoke (`out/Arkt/Arkt.app`, `--no-startup-window --arkt-facade-selftest --arkt-menu-probe=bookmarks --arkt-engine-test-api --remote-debugging-port`, fresh profiles under `profiles/598-20261113/`, `--use-mock-keychain --mute-audio`, `--host-resolver-rules="MAP * ~NOTFOUND, EXCLUDE 127.0.0.1"`, a loopback drive page, `commands-probe` packed and installed with `install-crx`, commands through page titles over DevTools, the probe read through its service worker)
+
+`--arkt-menu-probe` puts in a shell-like main menu (Archive Tab Cmd-W, Close Window Shift-Cmd-W, New Tab Cmd-T, Quit
+Cmd-Q, none with Chrome command tags). Without `=bookmarks` that probe stops on `bookmark_menu_bridge.mm:62`
+(`menu_root_`; the bookmark menu bridge needs the Bookmarks item, nothing this change touches); the one crash report from that run is in `598/crash/`.
+
+| Step | Result |
+|---|---|
+| Registry for the window | `tab list=yes global registry=yes` |
+| 1. Install v1.0 | one `ExtensionInstalled`, one `ExtensionCommandsChanged`; `menu-key`'s Command+T `is a main-menu key; left unassigned`; listing: `_execute_action` Ctrl+Shift+U, `menu-key` none, `run-probe` Ctrl+Shift+Y, `unset` none |
+| 2. Ctrl+Shift+Y, page focused / window focused | `dispatched` both; probe: two `run-probe` with the page's tab id and URL; the page's own keydown listener saw neither |
+| 3. Ctrl+Shift+U (page), again (page), again (window) | popup opens (`TriggerPopup ... by_user=1`, probe records `popup`), closes (`popup closed (hidden)`), opens |
+| 4. Set `run-probe` Ctrl+Shift+J | Applied, one change event; J dispatches at once (no relaunch); Y now reaches the page |
+| 5. Set `unset` Ctrl+Shift+J, then with replace | Conflict naming `run-probe`; then Applied, `run-probe` none |
+| 6. Alt+Command+Y; `_execute_action` global; `_execute_action` MediaPlayPause; unknown id; unknown command | NotAllowed, NotAllowed, NotAllowed, UnknownCommand, UnknownCommand |
+| 7. `run-probe` Ctrl+Tab; MediaPlayPause | Applied each; Ctrl+Tab dispatches page and window focused |
+| 8. `run-probe` Command+T (the shell's choice) | Applied and kept; the key is `left to the main menu`, New Tab runs (both paths) |
+| 9. `run-probe` Ctrl+Shift+9 global, then cleared | Applied (registered with the global listener), cleared about 3 s later; in-window the key reached the page (a global command is the global listener's) |
+| 10. Clear `run-probe`, set `unset` Ctrl+Shift+J, `menu-key` cleared at install; install v1.1 (update) | after the update: `run-probe` none, `menu-key` none, `unset` Ctrl+Shift+J; version 1.1 |
+| 11. `chrome.runtime.reload()` | listing unchanged; J dispatches (page, window); U opens and closes the popup |
+| 12. Relaunch on the same profile | listing unchanged; J dispatches |
+| 13. Clean quit (run 6, no `--remote-debugging-port`, a `file://` page that sends its own commands): install, Ctrl+Shift+Y page and window, Ctrl+Shift+U (popup open), `quit` | Command+T cleared, two `dispatched`, popup opened; the process exited 0 after `keep-alive released (embedder flushed)` |
+| `FATAL`, `Check failed`, `DCHECK`, signals | 0 in runs 1 to 6 |
+
+### Review round (run 7)
+
+Changes after the #922 review: `MainMenuHasAccelerator` matches a shifted key both ways a menu item can spell it (the
+shifted character without Shift, as Chromium writes Control-Shift-1 as "!" with Control, and the unshifted character
+with Shift, as the shell's Switch to Split View items do), still walking every item, enabled or not; the setter
+answers NotAllowed for global scope on a key the main menu holds, and on a failed global registration it restores the
+shortcut of the command a replaced conflict took it from; the window's key monitor leaves a key alone while the first
+responder has marked text (an input method composing); the registry skips key downs without Command, Control or
+Option before building an accelerator; per-key lines moved to `VLOG(1)`; the window answers no registry once its
+destructor has started. `--arkt-menu-probe` gains View > Switch to Split View 1 (Control-Shift-1, written "1" with
+Control and Shift), and the probe asks for MacCtrl+Shift+1 (`split-key`). The self-test's `ext-key` gains
+`page-queue`: the page is first responder and the event goes through the application's queue, so the monitor, the
+window, the page and `PreHandleKeyboardEvent` all see it.
+
+Run 7: `--vmodule=arkt_extension_keybinding_registry=1`, otherwise as above.
+
+| Step | Result |
+|---|---|
+| Install | Command+T (`menu-key`) and Ctrl+Shift+1 (`split-key`) each `is a main-menu key; left unassigned`; listing shows both without a shortcut |
+| Ctrl+Shift+Y, `page-queue` | one `dispatched` line, one `run-probe` record; the page did not see the key |
+| `split-key` set to Ctrl+Shift+1 through the facade | Applied (kept, the shell's choice) |
+| Ctrl+Shift+1, `page` | `left to the main menu`; the page gets the key (the self-test window sends only Command keys to the menu after the page; the shell's window reserves its Split View keys before the page) |
+| Ctrl+Shift+1, `sidebar` | `left to the main menu`, then Switch to Split View 1 runs |
+| Ctrl+Shift+1, `page-queue` | Switch to Split View 1 runs (the menu takes the key equivalent before the window); no extension command |
+| Global on Ctrl+Shift+1; global on Command+T | NotAllowed, NotAllowed |
+| Ctrl+Shift+Comma; Ctrl+Shift+9 global, then cleared | Applied; Applied (registered) and cleared within about 3 s |
+| `FATAL`, `Check failed`, `DCHECK` | 0 |
+
+The rollback of a replaced conflict after a refused global registration was not run live: a refusal needs a second
+profile in the process holding the same hot key.
+
+
+A first version of the clear used `RemoveKeybindingPrefs` alone: an update then brought a cleared suggestion back
+(`run-probe` Ctrl+Shift+Y after v1.1, run 1), because removal also clears the suggestion's "was assigned" mark. Chrome's
+page clears through `UpdateKeybindingPrefs` with no keystroke, which keeps the mark; the engine now does the same
+(step 10).
+
+### Deliberate break
+
+`PreHandleKeyboardEvent` asked `keyCode == 0xFFFF` instead of the registry, rebuilt (71 s, `FAILED:` 0): Ctrl+Shift+J
+with the page focused reached the page (`CSKeyJ`) and dispatched nothing; with the window focused it still dispatched.
+Restored and rebuilt (69 s, `FAILED:` 0): both paths dispatch, the page sees nothing. Swift: `facadeForm` wrote
+"Option" for `.option`: `everyKeyAndModifierSetRoundTripsThroughChromiumsForm` (432 issues) and
+`theFormListsModifiersInChromiumsOrder` failed; restored, all pass.
+
+| Step | Result |
+|---|---|
+| Builds | first 68 s after one include fix, nits 68 s, clear fix 68 s, break 71 s, restore 69 s, format 77 s, review round 82 s; `FAILED:` 0 each |
+| `gn check out/Arkt "//arkt/*"` | `Header dependency check OK` |
+
+### Patch budget
+
+Unchanged: 16 patch files, 8 seam and hook patch files, 22 upstream files outside 0001-0004. `.patches` 16 lines, 16
+`arkt` commits: in sync. Facade header copies `cmp` identical.
+
+### Left open
+
+- Real key presses: the shell window with the engine (#912) and a physical keyboard, for the page path, the sidebar
+  path, and a global shortcut pressed in another app (synthetic input cannot reach Carbon hot keys).
+- The shell's Settings recorder (#597) needs shortcut handling suspended while recording, or a global shortcut fires
+  while the user types it (Chrome's `developerPrivate.setShortcutHandlingSuspended`); not in `EngineExtensions` yet.
+- `ArktExtensionShortcutResultGlobalShortcutTaken` is reported only when the engine's global listener refuses the
+  registration (another profile of this process holds it); Carbon's non-exclusive registration does not tell whether
+  another application has the same hot key.
+- An action command in a host window whose shell has not listed the window's actions yet (no action menu) does
+  nothing and logs `has no action in this window`.
+
+### Cleanup
+
+Every engine run and the loopback server stopped by exact PID. Throwaway profiles under `profiles/598-20261113/`
+deleted after the runs. No global hot key left registered (step 9 cleared it, and the process exited). Nothing touched
+the Keychain (mock keychain only), the clipboard or `/Applications/Arkt.app`.
+
+## #586: tab-modal dialogs below the infobar rows, file chooser, docked DevTools (seam, no patch)
+
+Date 2026-11-13. Branch `engine/586-tab-modal-infobars` from `main` at `8f552f2f`. `$CR` branch `arkt` unchanged
+(0001-0016).
+
+### Gate
+
+- Seam, no patch. Every Chromium tab-modal dialog that reaches an Arkt window goes through
+  `WebContentsModalDialogManager` to the window's `ArktModalDialogHost` (`constrained_window::ShowWebModal`, so the
+  extension dialogs `ShowWebModalDialog` shows, print preview, and the other `ShowWebModalDialogViews` callers); the
+  host positions the dialog itself, so it can leave the rows' height free. The `TabDialogManager` path stays
+  cancelled by patch 0015.
+- The host view stays the tab's container (or the card): the host observes that view's frame, which is what makes a
+  dialog follow the container when the embedder moves it without a window resize (#261 review). The rows' height is
+  an inset asked on every placement, not a different host view.
+- Facade header: unchanged (`cmp` identical). The self-test probes go through the facade's internal header
+  (`RunDialogProbeForSelfTest`, as `InstallCrxForSelfTest`).
+- `.patches` unchanged (16 lines, 16 `arkt` commits: in sync).
+- Builds: `nice -n 15 autoninja -j 4 -C out/Arkt chrome`; swap 16.9 of 17.4 GB at the start and the end; Chromium disk
+  1.9 TB free, internal disk 42 GB free; load average 3.9 to 5.4.
+
+### What landed
+
+- `ArktModalDialogHost` takes a second block, the height of the tab's infobar rows at the top of the host view.
+  `GetDialogPosition` starts at that height, `GetMaximumDialogSize` leaves it out, and `Attach` puts the dialog's top
+  edge there. The attach log line gains `inset N`.
+- `ArktBrowserWindow::DialogTopInsetFor`: the height of the tab's infobar stack when the stack sits in the dialog
+  host view; 0 with no rows, in HTML fullscreen (the stack is taken out, #577) or when another tab is mounted. A stack
+  the shell presents is hidden but keeps its height (the shell draws its strip over that space), so it counts. Row
+  changes already end in `OnCardResized`, which re-places every dialog that is up.
+- The overlay's permission panel (the fallback when the host does not present the request: placeholder windows, no
+  event sink) anchors to the tab's page view when that view sits in the host view, so it starts below the rows;
+  `ArktDialogSheet` follows the anchor's superview's frame too, so a page view anchor still follows a container that
+  moves without a window resize.
+- `arkt_dialog_probe.{h,mm}` (new, self-test only) and self-test commands `infobars <n>` (test confirm infobars that do
+  not expire), `tab-modal` (`constrained_window::ShowWebModal` of a `ui::DialogModel`, as the extension dialogs),
+  `geometry` (the rows, the page's top and every child window and sheet of the tab's window, in screen points, with
+  `below_rows=yes|no`), `file-folder <path>`, `file-click`, `file-panel` (each open or save panel's parent, then
+  cancelled); `chrome-command` gains `print`, `devtools` and `devtools-toggle`.
+- Separate commit (carry-over from the #922 review), in `SetExtensionCommandShortcut`'s rollback after a refused global
+  registration: a command whose shortcut the user had cleared gets the cleared state back
+  (`UpdateKeybindingPrefs(id, name, "")`), so an update cannot bring the manifest's suggestion back; and a restored
+  global holder whose hot key does not register again is logged.
+
+### Smoke (`out/Arkt/Arkt.app`, fresh profiles under `profiles/586-20261113/`, `--use-mock-keychain --mute-audio`, `--host-resolver-rules="MAP * ~NOTFOUND, EXCLUDE 127.0.0.1"`, a local `file://` fixture page, `--remote-debugging-port`; runs 1, 2 and the break runs with `--no-startup-window --arkt-facade-selftest --arkt-engine-test-api`, commands through page titles over DevTools)
+
+The self-test window is a host-mode window with event sinks: the shell side presents the rows (the stack is hidden and
+keeps its height), as in the app. Rows are 40 pt; the container is 900x600 at 120,150 on screen, so its top is at 750.
+
+| Step (run 1) | Result |
+|---|---|
+| `tab-modal`, 0 rows | top 750, page top 750, gap 0, centred, `below_rows=yes` |
+| Dialog up, `infobars 1`, then `3`, then `0` | the dialog re-attaches with each row (`inset 40`, `80`, `120`, back to `0`); geometry: top 710 / 630 / 750, each equal to the page top, `below_rows=yes` |
+| 3 rows first, then `tab-modal` | attached at `inset 120`, top 630 = page top |
+| `layout 60` (container moved inside the card, no window resize), dialog up with 3 rows | follows: top 570 = page top, `inset 120` |
+| `chrome-command print` with 3 rows | print preview attached at `inset 120`, 850x455, top 630 = page top; `infobars 1`: grows to 850x535 with the freed height, top 710 = page top |
+| Navigation with a dialog up | dialog detached and closed, rows kept |
+| `FATAL`, `Check failed`, `DCHECK`, signals | 0 |
+
+Run 3 (placeholder host: a plain launch of the fixture with `--enable-automation`, no self-test, no event sink, so the
+engine draws its own rows and the overlay draws the permission panel): one row ("controlled by automated test
+software"); the card is 1200x880, its top at 1077, the page view's top at 1037.
+
+| Step (run 3) | Result |
+|---|---|
+| Notification request (button clicked with a user gesture over DevTools) | panel shown, `child=1`, top 1025: 12 pt (its inset) under the page's top, below the row |
+| `window.print()` | print preview attached at `inset 40`, top 1037 = the page's top |
+| Reload | panel closed (`permission prompt closed`), preview detached |
+
+File chooser (run 2): `file-folder` points the chooser at the fixture folder, `file-click` clicks an
+`<input type=file>` with a user gesture, `file-panel` inspects and cancels.
+
+| Step (run 2) | Result |
+|---|---|
+| 0 rows | `NSOpenPanel ... sheet=yes parent <Arkt window> attached to tab window=yes app modal=no folder <fixture>`; cancelled; the tab answers `state`, `crash=0` |
+| 3 rows | the same; the panel is a sheet of the window, frame 880x448 at 130,242, its top at 690, inside the rows' area (630 to 750) |
+
+So the file chooser was already parented to the Arkt window: Chromium's in-process `SelectFileDialogBridge` begins
+the panel as a sheet of the owning `NSWindow`. No fix. With a shell download handler installed, `ArktSaveDialog`
+passes `owning_window` unchanged to the platform dialog for every non-save type, so the shell path is the same.
+
+DevTools dock matrix (run 2): `chrome-command devtools` opens DevTools for the tab in its own window. The front-end
+URL has no `can_dock=true` and its dock controller reports `canDock: false, side: undocked`:
+`DevToolsWindow::Create` only docks when the browser has a `DevtoolsUIController` that can dock, which a Views
+`BrowserView` provides and an Arkt window does not.
+
+| Step (run 2) | Result |
+|---|---|
+| Dock side bottom, right, left, undocked (the front-end's `DockController.setDockSide`, what the menu items call) | the front-end records the side; the browser keeps DevTools in its own window; the tab answers `state` after each |
+| Cmd-Shift-D twice (key events into the DevTools front-end over DevTools) | no dock change, no new window, tab alive |
+| `InspectorFrontendHost.setIsDocked(true)`, then `false` (the binding docking calls) | both answer; `SetIsDocked` turns the request into undocked (`can_dock_` false; DCHECK is off in `out/Arkt`) |
+| `chrome-command devtools-toggle` | enabled; DevTools stays open (toggle closes only a docked DevTools), tab alive |
+| `FATAL`, `Check failed`, `DCHECK`, signals | 0 |
+
+### Deliberate break
+
+`ArktModalDialogHost::TopInset` returned 0, rebuilt (69 s, `FAILED:` 0): with 3 rows the dialog's top was 750 with the
+page's top at 630 (`gap=-120 below_rows=no`); with 1 row, 750 against 710 (`gap=-40 below_rows=no`). Restored and
+rebuilt (69 s, `FAILED:` 0): the same steps give `gap=0 below_rows=yes` both times.
+
+| Step | Result |
+|---|---|
+| Builds | first 82 s, stack-hidden fix 79 s, panel log 78 s, break 69 s, restore 69 s, format 72 s; `FAILED:` 0 each |
+| `gn check out/Arkt "//arkt/*"` | `Header dependency check OK` |
+
+### Patch budget
+
+Unchanged: 16 patch files, 8 seam and hook patch files, 22 upstream files outside 0001-0004. `.patches` 16 lines, 16
+`arkt` commits: in sync. Facade header copies `cmp` identical.
+
+### Left open
+
+- Docked DevTools: a known gap for the preview, as #586 planned. DevTools opens undocked in its own window and every
+  dock request stays undocked, with no crash.
+- Window sheets (the extension install, uninstall and other `ui::DialogModel` sheets the overlay shows with
+  `beginOnWindow:`, and the file chooser) are window-modal: AppKit hangs them from the window's top edge, over the
+  rows' area, as on any Mac window. Only the shell's window delegate (`window:willPositionSheet:usingRect:`) can move
+  them: #924.
+- The overlay permission panel following a row that closes while the panel is up was not run live (it follows the
+  page view's frame, which the row change sets); the shell draws the panel in the app (#581).
+- The carry-over's rollback was not run live: a refused global registration needs a second profile in the process
+  holding the same hot key (as in #598).
+- A Chromium tab-modal dialog under the shell-drawn rows on the shell window, with real input: #925 (needs the user).
+
+### Cleanup
+
+Every engine run stopped by exact PID (runs 1 to 3, break, restore). No crash reports from these runs. Throwaway
+profiles under `profiles/586-20261113/` deleted after the runs. Nothing touched the Keychain (mock keychain only), the
+clipboard, a user file (the chooser opened on the fixture folder and was cancelled) or `/Applications/Arkt.app`.
+
+## #589: the remaining Views stubs, eyedropper, close with pending downloads (seam, no patch)
+
+Date 2026-11-13. Branch `engine/589-views-stub-sweep` from `main` at `d8561d15`. `$CR` branch `arkt` unchanged
+(0001-0016).
+
+### Gate
+
+- Seam, no patch. The eyedropper is Chromium's own Mac eye dropper (`ShowEyeDropper`,
+  `//chrome/browser/ui/views/eye_dropper`, `NSColorSampler` with no Views), called from
+  `ArktBrowserWindow::OpenEyeDropper` as `BrowserView::OpenEyeDropper` does. The pending-downloads close is
+  `ArktBrowserWindow::ConfirmBrowserCloseWithPendingDownloads` answering its callback. Every other stub stays a stub;
+  this task classifies them and adds a no-crash check.
+- Facade header: unchanged (`cmp` identical). The self-test probes go through the facade's internal
+  `RunDialogProbeForSelfTest`, as #586's.
+- `.patches` unchanged (16 lines, 16 `arkt` commits: in sync).
+- Builds: `nice -n 15 autoninja -j 4 -C out/Arkt chrome`; swap 16.9 of 17.4 GB at the start; Chromium disk 1.9 TB free,
+  internal disk 42 GB free; load average 3.7 to 6.1.
+
+### Where the pending-downloads close is reached
+
+From Chromium 156 source, then live:
+
+- A regular window never asks. `UnloadController::CanCloseWithInProgressDownloads` returns early on Mac for a profile
+  that is not off the record: the window closes and its downloads keep running.
+- A quit never reaches the window. `BrowserCloseManager::CheckForDownloadsInProgress` skips the check on Mac; the
+  app delegate (`AppController`, `-shouldQuitWithInProgressDownloads`) asks first with its own AppKit alert
+  (Chromium's `IDS_ABANDON_DOWNLOAD_DIALOG_*` copy), before any window closes.
+- So only the last incognito or guest window of its profile, closing while that profile has a download running,
+  calls `ConfirmBrowserCloseWithPendingDownloads` (`DownloadCloseType::kLastWindowInIncognitoProfile` or
+  `kLastWindowInGuestSession`). In Arkt today an incognito Chromium window comes from `chrome.windows.create`
+  with `incognito: true` or Chromium's New Incognito Window command; the shell's own incognito windows do not use an
+  off-the-record profile yet (#557, #705).
+- Before: the stub never answered. `cancel_download_confirmation_state_` stayed `kWaitingForResponse`, so that close
+  and every later close of the window were refused: the window could not be closed until the app quit.
+- Now (maintainer decision on #589, 2026-11-13: no prompt): close, and the profile's downloads are cancelled with
+  it. The answer is posted to the next turn: `UnloadController` stores the callback it runs only after
+  `ConfirmBrowserCloseWithPendingDownloads` returns, so a synchronous answer would run an empty callback.
+
+### Stub classification
+
+28 stubs on `main` at `d8561d15` (19 in `arkt_browser_window.mm`, 9 in `arkt_browser_window_parts.mm`). The issue's
+30 was counted earlier; since 2026-11-05 `GetAutofillBubbleHandler` (#575, PR #769) and `GetAcceleratorProvider`
+(E1, PR #800) stopped being stubs. "Command" is the Chromium command that reaches the stub when the shell or an
+extension sends it (run 11: enabled or not on an Arkt window); "No-crash" is the direct call in the `stubs` probe.
+
+| Stub | Class | Owner or reason | Command (enabled) | No-crash |
+|---|---|---|---|---|
+| `OpenEyeDropper` | native (this task) | Chromium's `NSColorSampler` eye dropper | page `EyeDropper` API | open stays pending while the sampler is up |
+| `ConfirmBrowserCloseWithPendingDownloads` | native default (this task) | close and cancel, no prompt (decision on #589) | close of the last incognito window | window closes |
+| `Deactivate` | matches Chromium on Mac | `NativeWidgetMac::Deactivate` is not implemented either | - | yes |
+| `DisableTabStripEditingForTesting` | test only | no product caller | - | yes |
+| `SetFocusToLocationBar` | native in the shell | the shell's address and command bar | `IDC_FOCUS_LOCATION` (yes) | yes |
+| `FocusToolbar` | native in the shell | no Chromium toolbar | `IDC_FOCUS_TOOLBAR` (yes) | yes |
+| `FocusAppMenu` | native in the shell | the macOS menu bar | `IDC_FOCUS_MENU_BAR` (yes) | yes |
+| `ShowAppMenu` | native in the shell | the macOS menu bar | `IDC_SHOW_APP_MENU` (yes) | yes |
+| `ShowUpdateChromeDialog` | native in the shell | updates are the shell's (#126, sidebar banner #648) | `IDC_UPGRADE_DIALOG` (yes; relaunches, see below) | yes |
+| `ShowIntentPickerBubble` | known gap | Arkt installs no web apps | - | yes |
+| `ShowBookmarkBubble` | known gap | Arkt has no Chromium bookmarks UI; pins are the shell's | `IDC_BOOKMARK_THIS_TAB` (yes) | yes |
+| `ShowTranslateBubble` | covered | #908, #652; returns `kBrowserWindowNotValid` | `IDC_SHOW_TRANSLATE` (no) | yes |
+| `ShowAvatarBubbleFromAvatarButton` | known gap | profiles: #610, #101 | `IDC_SHOW_AVATAR_MENU` (yes) | yes |
+| `ShowHatsDialog` | never | Chrome surveys | - | yes |
+| `ShowCaretBrowsingDialog` | known gap | caret browsing | `IDC_CARET_BROWSING_TOGGLE` (no) | yes |
+| `CreateTabSearchBubble` | native in the shell | the command bar's open tabs | `IDC_TAB_SEARCH` (yes) | yes |
+| `ShowIncognitoClearBrowsingDataDialog` | known gap | incognito: #557 | - | yes |
+| `ShowIncognitoHistoryDisclaimerDialog` | known gap | incognito: #557 | - | yes |
+| `ShowChromeLabs` | never | Chrome Labs | `IDC_SHOW_CHROME_LABS` (yes) | yes |
+| `ExclusiveAccessContext::UpdateExclusiveAccessBubble` | covered | the full screen hint and exit control: #613; answers its hide callback `kNotShown` | - | yes, callback run |
+| `LocationBar::FocusLocation` | native in the shell | address and command bar | `IDC_FOCUS_LOCATION` (yes) | yes |
+| `LocationBar::FocusSearch` | native in the shell | address and command bar | `IDC_FOCUS_SEARCH` (yes) | yes |
+| `LocationBar::GetChipController` | native in the shell | permission prompts are the shell's (#133, #583); returns null | - | yes (null) |
+| `FindBar::Show` | native in the shell | the shell's find bar; `FindResult` events still reach the facade | `IDC_FIND` (yes) | yes |
+| `SidePanelUI::Show` (entry id) | known gap | side panel host: connector design E2 item 4 | `IDC_SHOW_READING_MODE_SIDE_PANEL` (yes) | yes |
+| `SidePanelUI::Show` (entry key) | known gap | as above | - | yes |
+| `SidePanelUI::ShowFrom` | known gap | as above | - | yes |
+| `SidePanelUI::Toggle` | known gap | as above | - | yes |
+
+The other #122 surfaces named in #589 (intent picker, bookmark bubble, translate, update dialog, caret browsing, tab
+search, incognito dialogs, surveys, Chrome Labs, avatar bubble, app menu, exclusive access bubble) are rows above.
+The tab-sharing and sign-in QR infobars are #478's (moved from #122 on 2026-11-03), not stubs here: they are drawn by
+the infobar presenter, which logs `not drawn (not a confirm infobar)` for both.
+
+`IDC_UPGRADE_DIALOG` does not reach the stub on 156: `chrome::OpenUpdateChromeDialog` calls `chrome::AttemptRelaunch`
+while `kFewerUpdateConfirmations` is on, so the command quits and relaunches the app (run 1; the relaunched instance
+was stopped by its PID). The shell's menu does not send it.
+
+### What landed
+
+- `ArktBrowserWindow::OpenEyeDropper` returns `ShowEyeDropper(frame, listener)`; `//chrome/browser/ui/views/eye_dropper`
+  joins the window target's deps.
+- `ArktBrowserWindow::ConfirmBrowserCloseWithPendingDownloads` logs the count and type and posts `callback(true)`.
+- `arkt_stub_probe.{h,mm}` (new, self-test only) and self-test commands: `stubs` (calls every remaining stub directly),
+  `stub-command <name>` (the Chromium command, when enabled), `incognito <url>`, `incognito-download <url> <file>` (an
+  incognito download to a forced path, so it never asks), `incognito-close` (`BrowserWindow::Close`, as the close
+  button), `incognito-state`; and in the self-test embedder `eyedropper` (the page's `EyeDropper().open()` with a user
+  gesture, the result in the page title), `app-windows`, `app-esc`.
+- Separate commit (carry-over from the #923 review): a ShellKit test pins `InfobarMetrics.rowHeight` at 40 with a
+  pointer to the engine's `kArktInfobarRowHeight`; the file-panel probe's header says it cancels every open or save
+  panel in the process.
+
+### Smoke (`out/Arkt/Arkt.app`, `--no-startup-window --arkt-facade-selftest --arkt-engine-test-api`, fresh profiles under `profiles/589-20261113/` with the download folder inside the profile, `--use-mock-keychain --mute-audio`, `--host-resolver-rules="MAP * ~NOTFOUND, EXCLUDE 127.0.0.1"`, a loopback fixture server whose download sends 64 KB and then one byte a second, commands through page titles)
+
+| Step | Result |
+|---|---|
+| `stubs` (run 11) | 25 distinct `ARKT: stub` lines (the two `SidePanelUI::Show` overloads share one), every call returned, `tab alive=yes`; the exclusive access hide callback ran |
+| `stub-command` x13 (run 11) | 11 enabled and run, `caret` and `translate` disabled; tab alive after each |
+| Incognito window, download running, close, before (run 5, stub) | `ConfirmBrowserCloseWithPendingDownloads` stub logged; 3 s later `windows=1 downloads=1 closing=no visible=yes`; a second close: the same |
+| The same, after (runs 8 and 11) | `close with 1 pending download(s), type 2: closing`; `windowClosed reason=1`; `windows=0 downloads=0`; the partial file removed |
+| Twice in one session (run 13): a second incognito window with a new download, closed | the same lines again for the second window; `windows=0 downloads=0` both times |
+| Regular window closed with a regular download running (run 11) | `windowClosed reason=1`; no `pending download` line; the `.crdownload` kept growing after the close |
+| Quit with an incognito download running (run 7) | `AppController`'s alert (`_NSAlertPanel`, level 8, key); the stub not reached; stopped by PID |
+| `eyedropper`, before (run 9, break) | `rejected AbortError` at once |
+| `eyedropper`, after (runs 6, 8, 11) | `opened`, no rejection while the sampler is up; the sampler is the system's `ColorSampler` XPC service, not a window of the app, so `app-esc` (key window `none`) cannot answer it; a pick needs real input |
+| `FATAL`, `Check failed`, `DCHECK`, signals (run 11) | 0 |
+
+Also seen: a download in an incognito Arkt window that does not force a path opens a Save panel (an out-of-process
+`NSSavePanel` sheet on the incognito window, folder: the profile's download folder) even with
+`download.prompt_for_download` false; the panel counts as a running download until it is answered. Not changed here.
+
+### Deliberate break
+
+`ConfirmBrowserCloseWithPendingDownloads` without its `PostTask` and `OpenEyeDropper` returning `nullptr`, rebuilt
+(69 s, `FAILED:` 0), run 9: after the close `windows=1 downloads=1 closing=no visible=yes`; `eyedropper rejected
+AbortError` at once. Restored and rebuilt (76 s, `FAILED:` 0): run 11 above.
+
+| Step | Result |
+|---|---|
+| Builds | 70, 75, 74, 71, 72 (fix), 69 (break), 76 (restore), 71 (format), 73 (probe tidy) s; `FAILED:` 0 each |
+| `gn check out/Arkt "//arkt/*"` | `Header dependency check OK` |
+| ShellKit `swift test --filter InfobarMetricsTests` | 1 test passed; with `rowHeight` 41: 1 issue, `Expectation failed: InfobarMetrics.rowHeight == 40`; restored: passed |
+
+### Patch budget
+
+Unchanged: 16 patch files, 8 seam and hook patch files, 22 upstream files outside 0001-0004. `.patches` 16 lines, 16
+`arkt` commits: in sync. Facade header copies `cmp` identical.
+
+### Left open
+
+- The pending-downloads close follows the maintainer's decision on #589 (close and cancel the private downloads, no
+  prompt); no sheet is planned.
+- The eyedropper's pick and Esc need real input in the system sampler: #926 (needs the user).
+- Quit with downloads running asks with Chromium's own alert and copy until #928 shows it through Arkt's dialog system.
+- The incognito download Save panel above.
+
+### Cleanup
+
+Every engine run stopped by exact PID (runs 1 to 13; runs 12 and 13 are on the last build; run 1's relaunched instance too). One crash report, from run 4
+(a self-test probe called `-[NSSavePanel ok:]` on an out-of-process panel, which throws; the probe was removed), moved
+to the artifacts folder. The `ColorSampler` XPC service the eyedropper runs started was left to launchd (idle).
+Throwaway profiles under `profiles/589-20261113/` deleted after the runs; the fixture server stopped. Nothing touched
+the Keychain (mock keychain only), the clipboard, `~/Downloads` or `/Applications/Arkt.app`.
+
+## #478: infobar strip keyboard focus, the tab-sharing row, seen-before rows (seam, no patch)
+
+Date 2026-11-13. Branch `engine/478-infobar-strip` from `main` at `b1e8024d`. `$CR` branch `arkt` unchanged
+(0001-0016).
+
+### Gate
+
+- Seam, no patch. Chromium builds the tab-sharing infobar (`TAB_SHARING_INFOBAR_DELEGATE`, 93) as the Views
+  `TabSharingInfoBar` with a non-confirm delegate. Its whole message is the accessible name of its status view
+  (`TabSharingStatusMessageView::SetupMessage`), or the text of a plain label when the capturer is an extension; both
+  are set in the constructor, so no widget is needed. The overlay's infobar presenter reads it, takes Stop sharing as
+  OK and Share this tab instead as Cancel, and acts through `TabSharingInfoBarDelegate::Stop` and
+  `ShareThisTabInstead`, as the Views buttons do. `//chrome/browser/ui/tab_sharing` and
+  `//chrome/browser/ui/views/tab_sharing` join the window target's deps.
+- Facade header (both copies, additive, `cmp` identical, recorded on #478): `enum { ArktInfobarRowHeight = 40 };`, which
+  the engine's `kArktInfobarRowHeight` now takes; and the comment of `-unhandledKeyDown:inTab:` names F6 next to Esc.
+- `.patches` unchanged (16 lines, 16 `arkt` commits: in sync).
+- Builds: `nice -n 15 autoninja -j 4 -C out/Arkt chrome`; swap 16.6 to 17.0 of 17.4-18.4 GB; Chromium disk 1.9 TB free,
+  internal disk 35-40 GB free; load average 5 to 9. The Chromium disk was unmounted for part of the day (not by this
+  task); nothing was built or written while it was gone.
+
+### Maintainer decisions (2026-11-13, on #478)
+
+1. F6 moves the keyboard into the strip of the focused tab, onto its first control; Tab / Shift-Tab and the arrows move;
+   Return or Space presses; Esc or F6 gives the keyboard back to the page; the strip never takes it on its own;
+   `ShellTokens.focusRing`. Tab from the page into the strip: #930.
+2. The tab-sharing row draws Chromium 156's own strings ("Sharing this tab to <host>", "Sharing <tab> to <host>",
+   "Stop sharing", "Share this tab instead"); the quote in the acceptance list predates them.
+3. Row height: one facade constant, used by the engine; the ShellUI test compares against it.
+4. Stop sharing as OK, Share this tab instead as Cancel, no close. The captured-surface-control indicator and the
+   message's switch-to-tab buttons are a gap: #931.
+
+### What landed
+
+- Engine. `arkt_infobars.mm` draws the tab-sharing infobar as a row (`ContentForTabSharing`) and acts on it; any other
+  non-confirm infobar (the sign-in QR code, the alternate-URL bar) is still logged `not drawn (not a confirm
+  infobar)`. `ForwardUnhandledKeyDown` forwards an F6 without modifiers the page did not use, as it does Esc.
+- Self-test (`--arkt-facade-selftest`): `infobarsChanged` logs every row's values; `infobar-act <index>
+  ok|cancel|close` acts through the reported object; `tab-share [stop]` (`getDisplayMedia` with `preferCurrentTab`,
+  run with `--auto-accept-this-tab-capture`, so no picker and never a screen or window); `nonconfirm-infobar [remove]`
+  (a non-confirm infobar under the sign-in QR identifier, 137: the real one needs Chromium's sign-in page and a hybrid
+  passkey transport); `f6` (an F6 into the focused page, as `esc`).
+- Shell. F6: `ShellEngineHost` and `LittleArktEngineHost` hand an unhandled F6 to `InfobarPresenter.focusStrip`, which
+  finds the tab (the engine names none: the tab whose page holds the first responder). The strip panel becomes key and
+  its stack view takes the keys; the controls are reached in reading order and only enabled ones; the ring is the
+  controls' own `KeyboardFocusRingView` (the close button gains one). Keys with Command, Control or Option go on to the
+  menu. When the focused row goes, the focus moves to the row that is left; when the strip goes, or Esc or F6, the
+  page gets the keyboard back (only while the tab is on screen).
+- Shell, #477 review. The presenter keeps, per tab, the infobars that have been on screen: a strip made again for them
+  (tab or Space switch, minimize, HTML fullscreen) shows at once and announces nothing; only an infobar new to the
+  screen fades in and is announced, once. `InfobarMetrics.rowHeight` is checked against the header's
+  `ArktInfobarRowHeight` (read from the ShellKit copy: ShellUI may not import the facade module,
+  `EngineABIIsolationTests`).
+- Separate commit (carry-over from the #927 review): on the posted answer in `ConfirmBrowserCloseWithPendingDownloads`,
+  `ProcessPendingTabs` invalidates the weak-pointer factory the answer is bound to; and with the private window as the
+  app's last window the type is `kBrowserShutdown` and the count includes regular downloads.
+
+### Smoke (`out/Arkt/Arkt.app`, `--no-startup-window --arkt-facade-selftest --arkt-engine-test-api --remote-debugging-port --auto-accept-this-tab-capture`, fresh profiles under `profiles/478-20261113/`, `--use-mock-keychain --mute-audio`, `--host-resolver-rules="MAP * ~NOTFOUND, EXCLUDE 127.0.0.1"`, a loopback fixture server, commands through page titles over DevTools)
+
+| Step | Result |
+|---|---|
+| `tab-share` on tab A, tab B open (run 1) | page title `tab-share sharing browser`; A: `Sharing this tab to http://127.0.0.1:18478`, OK `Stop sharing`, no Cancel, no close, icon; B: `Sharing 127.0.0.1:18478 to http://127.0.0.1:18478`, OK `Stop sharing`, Cancel `Share this tab instead`; no Screen Recording prompt |
+| `infobar-act 0 cancel` on B | both rows replaced (new ids): A `Sharing 127.0.0.1:18478 to this tab` with both buttons, B `Sharing this tab to ...` |
+| `infobar-act 0 ok` on B | both lists empty; A's page title `tab-share ended` |
+| `geometry` while sharing | `rows=1 rows hidden (shell draws them)=yes rows frame 120,710 900x40 page 120,150 900x560` |
+| `nonconfirm-infobar`, then `infobars 1`, then both removed | `infobar 137 not drawn (not a confirm infobar)`; the list holds only the test infobar; removal leaves 0; the tab answers |
+| `f6` (run 4) | `unhandledKeyDown key=97 ... inPage=yes`; `esc` still `key=53`; a page whose keydown listener takes F6 keeps it (title `page took F6`, no `unhandledKeyDown`) |
+| `FATAL`, `Check failed`, `DCHECK` (runs 1 and 4) | 0 |
+
+`quit` ends the windows and logs `keep-alive released`, but the process stays (runs 1 and 2; run 2 started no
+capture), as in earlier lanes with `--remote-debugging-port`; every run was stopped by its PID: #934.
+
+### Deliberate breaks
+
+- Engine: `const bool tab_sharing = (false) && IsTabSharing(delegate);` in `ArktInfobarPresenter::Add`, rebuilt (71 s,
+  `FAILED:` 0), run 3: the capture starts (`tab-share sharing browser`) and the log says `infobar 93 not drawn (not a
+  confirm infobar)`, no `InfobarsChanged`. Restored and rebuilt (72 s, `FAILED:` 0); run 4 above.
+- Shell: the strip's `fadeIn: allNew` set to `true`, and F6 taken out of the strip's exit keys: 4 failures
+  (`testATabSwitchBringsTheStripBackWithoutAFadeAndAnnouncesNothingAgain`,
+  `testASpaceOrMinimizeRoundTripShowsTheStripAtOnceAndSilently`,
+  `testLeavingHTMLFullscreenAnnouncesNoRowAgainAndOnlyANewRowFades`, `testF6AgainGivesTheKeyboardBackToThePage`).
+  `InfobarMetrics.rowHeight` 41: `Expectation failed: InfobarMetrics.rowHeight == CGFloat(engine)`. Restored: passing.
+
+| Step | Result |
+|---|---|
+| Builds | 121, 90, 71 (break), 72 (restore), 67 (f6 command) s; `FAILED:` 0 each (one break build first failed on `-Wunreachable-code`, fixed by the parentheses) |
+| `gn check out/Arkt "//arkt/*"` | `Header dependency check OK` |
+
+### Tests
+
+- ShellKit `swift test --skip ShellKitGUITests`: every bundle passes (Swift Testing runs of 1567, 44, 60, 29, 289, 49,
+  343, 226 and 39 tests), including the font and radius lints and `EngineABIIsolationTests`; 1 new test
+  (`InfobarMetricsTests` reads the header constant, plus its reader check).
+- GUI, `AAWindowLeakGuardTests`, `InfobarKeyboardTests` (16, new), `InfobarPresenterTests` (36, 6 new),
+  `InfobarWindowTests`, `ZzzWindowLeakGuardEndTests`: 72 run, 0 failures. Also run: `JavaScriptDialogPresenterTests`,
+  `LittleArktDialogTests`, `PermissionPresenterTests`, `ConformanceTests`, `ChromiumInfobarTests`: 0 failures.
+- 20 runs of `InfobarKeyboardTests` and `InfobarPresenterTests` (52 tests each) under the machine's own load (load
+  average 4.9 to 6.7, no load added): 20 passed, 0 failed.
+- Review of #933: while the strip holds the keyboard it is the key window, so the window commands `NSWindow` implements
+  (Close Window, Minimize, Zoom, Enter Full Screen) resolved to the strip's panel. `InfobarWindow` now forwards them and
+  their menu validation to the browser window. F6 is one check (`InfobarPanel.isStripShortcut`) for both windows.
+  `InfobarKeyboardTests` 20 (4 new: the window commands reach the parent, other items stay the panel's, another window
+  taking the keyboard drops the ring, the shortcut). Break: the validation forwarding off, 4 failures (`performClose:
+  is enabled as the browser window says`, and the same for the other three); restored, 20 passed. GUI with both leak
+  guards and `LittleArktDialogTests`: 94 run, 0 failures. 20 runs of the keyboard and presenter suites (56 tests each,
+  load average 5.0 to 6.7): 20 passed.
+
+### Patch budget
+
+Unchanged: 16 patch files, 8 seam and hook patch files, 22 upstream files outside 0001-0004. `.patches` 16 lines, 16
+`arkt` commits: in sync. Facade header copies `cmp` identical.
+
+### Left open
+
+- Tab from the page into the strip: #930 (`WebContentsViewMac::TakeFocus` ends in the shell window's key view loop).
+- The captured-surface-control indicator and the switch-to-tab buttons of the tab-sharing message: #931.
+- The sign-in QR infobar: a known gap, not drawn; checked with a stand-in under its identifier, not the real infobar.
+- Real keys, VoiceOver and the shell app on an Engine build with its own bundle id: #932 (needs the user). The keyboard
+  was checked with key events delivered in the process (ShellKit) and on the self-test window (F6 reaching the host).
+- A tab moved to another window comes back as new to that window's presenter: its rows fade in and are announced
+  there again.
+
+### Cleanup
+
+Runs 1 to 4 stopped by exact PID. No crash reports from these runs. Throwaway profiles under `profiles/478-20261113/`
+deleted after the runs; the fixture server stopped. Nothing touched the Keychain (mock keychain only), the clipboard,
+Screen Recording or `/Applications/Arkt.app`.
+
+## #517: import a fake profile end to end (seam, no patch)
+
+Date 2026-11-14. Branch `engine/517-import-smoke` from `main` at `c11ef1f0`. `$CR` branch `arkt` unchanged (0001-0016);
+no overlay or facade change.
+
+### Gate
+
+- Seam only: every write path exists (#511, #512, #513, #565, #566). What was missing is test-only: the existing
+  `--arkt-import-check` phases call `engine.importX` directly, so nothing ran the coordinator (#515) or the sheet (#552)
+  on the real engine. `AppSession.importFromArc()` is not usable for this: it reads the real Keychain item.
+- Facade header unchanged; `.patches` unchanged (16 lines, 16 `arkt` commits: in sync).
+- `nice -n 20 autoninja -C out/Arkt chrome -n`: `ninja: no work to do.`, so no Chromium build. SSD 1.9 TB free; swap
+  16.3-16.4 of 17.4 GB used throughout, about 1 GB free, memory free 43-51 %.
+
+### What landed
+
+- Fixture (`CoreTestSupport`, additive): `FakeChromiumProfile.Options.extraHistory` and `extraExtensions`, next to
+  `extraCookies` and `extraLogins`, and public `init`s on `FixtureManifest.HistoryEntry`, `Visit` and `ExtensionEntry`.
+  The fixed visits are from 2024, past the 90 days an import keeps, and the fixed extensions hold one Web Store id.
+  Tests first: `extraHistoryIsWrittenAfterTheFixedEntries`, `extraExtensionsAreListedInBothPreferencesFiles`.
+- `arkt-make-import-fixture` (ArktCore executable): writes the fixture to `<new folder>/User Data/Default` with two
+  history entries visited 3, 24 and 48 hours ago, two `127.0.0.1` cookies that expire in 2100 (one HttpOnly) and a second
+  Web Store id, and prints the counts. It refuses a folder that exists.
+- Runner phase `--arkt-import-check=sheet` (Engine configuration, `ARKT_TEST_SWITCHES` only): `ProfileImportCoordinator`
+  over `$ARKT_ARC_DIR/User Data` with the fixture's invented key (never `KeychainSafeStorageKeyProvider`), the import
+  record in `ARKT_DATA_DIR`'s own `Arkt.sqlite` (`SettingsStore`), the snapshot copy under `ARKT_DATA_DIR`; behind
+  `BrowserDataImportModel` and the real `BrowserDataImportSheet` on a runner window. The process ticks every type and
+  presses Import through the model's actions (no synthetic input), prints every coordinator event, the consent counts,
+  each row and the sheet's text, then `document.cookie` on a loopback page, the password store count (an empty
+  `importPasswords` batch), and what chrome://history and chrome://bookmarks list (read from the pages:
+  `history-list`'s entries, `chrome.bookmarks.getTree`). It refuses to run without `ARKT_ARC_DIR` and `ARKT_DATA_DIR`.
+
+### Build and tests
+
+| Step | Result | Numbers |
+|---|---|---|
+| `nice -n 20 swift test -j 2 --scratch-path <artifacts>/build/engine-517 --filter FakeChromiumProfileTests` (`app/ArktCore`), before the change | the two new tests do not compile (`initializer is inaccessible`, `extra argument 'extraHistory'`) | 13 passed before the tests were added |
+| Same filter plus `ExtensionListReaderTests`, after | passed | 27 tests in 2 suites |
+| `nice -n 20 swift test -j 2 --scratch-path <artifacts>/build/engine-517` (`app/ArktCore`, full) | passed | 581 tests (145, 123, 70, 8, 235), 0 failures |
+| `xcodegen generate`, then `nice -n 20 xcodebuild -project ArktShell.xcodeproj -scheme ArktShell -configuration Engine -jobs 2 -derivedDataPath <artifacts>/517/dd-engine CONFIGURATION_BUILD_DIR=<artifacts>/517/embed PRODUCT_BUNDLE_IDENTIFIER=dev.arkt.Arkt.try517 ARKT_ENGINE_APP=$CR/out/Arkt/Arkt.app build` | `BUILD SUCCEEDED`, `Engine framework copied: Arkt Framework.framework 156.0.8078.48` | the first try failed on the untracked, stale `ArktShell.xcodeproj` (`cannot find type 'RecoveryPages'`); after `xcodegen generate` 18 s. `out/Arkt` is not a component build: no dylib clones |
+| Deliberate break: `FakeChromiumProfile.make` without `+ options.extraHistory` | `extraHistoryIsWrittenAfterTheFixedEntries` failed with 5 issues; restored, 15 passed | |
+| `nice -n 20 swift test -j 2 --filter 'LintTests\|IsolationTests'` (`app/ArktShell/ShellKit`) | passed | 13 tests in 4 suites, 60 tests in 7 suites |
+| ShellKit tests, full | not run | ShellKit is untouched; only `App/Engine/ImportCheckRunner.swift` changed in the app |
+
+### Fixture
+
+`nice -n 20 swift run -j 2 --scratch-path <artifacts>/build/engine-517 arkt-make-import-fixture <artifacts>/517/fixture-20261114`:
+
+```
+history urls 5 visits 8 within 90 days 3
+bookmarks 5
+cookies 5 unexpired 2
+logins 3
+extensions webStore 2 unpacked 1 builtIn 1
+```
+
+### Real engine (`dev.arkt.Arkt.try517`, Engine app on `out/Arkt`)
+
+Command (run A on a fresh profile, run B the same again on the same profile and data folder):
+
+```zsh
+ARKT_DATA_DIR=<artifacts>/517/data-runA ARKT_DEFAULTS_SUITE=dev.arkt.try517.runA ARKT_ARC_DIR=<artifacts>/517/fixture-20261114 \
+  <artifacts>/517/embed/ArktShell.app/Contents/MacOS/ArktShell \
+  --user-data-dir=$CHROMIUM_ROOT/profiles/517-20261114/runA --use-mock-keychain --mute-audio --no-first-run \
+  --no-default-browser-check --enable-logging=stderr '--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1' \
+  --arkt-engine-test-api --arkt-import-check=sheet & PID=$!
+```
+
+Counts per type (run A):
+
+| Type | Fixture | Consent count | Coordinator (written / skipped / failed) | Row on the sheet | In the profile |
+|---|---|---|---|---|---|
+| History | 5 URLs, 8 visits, 3 within 90 days | 8 | 3 / 5 / 0 (the 5 from 2024 are past the retention) | Imported 8 | `visits` 3 imported + 1 loopback page; `visit_source` 3 rows with source 7; chrome://history lists `Recent Two`, `Recent One` twice and the loopback page |
+| Bookmarks | 5 | 5 | 5 / 0 / 0 | Imported 5 | `Bookmarks` 5 URL nodes under Other bookmarks > Imported (`Reading` kept as a folder); chrome://bookmarks lists `Example`, `Docs`, `Article`, `Other item`, `Synced item` |
+| Cookies | 5 rows, 2 unexpired (127.0.0.1) | 2 | 2 / 0 / 0 | Imported 2 | `Cookies` 2 rows, `value` empty, `encrypted_value` with the `v10` prefix; the page on `127.0.0.1` sees `document.cookie` = `imported=from-fixture` (the HttpOnly one is not visible to script) |
+| Passwords | 3 | 3 | 3 / 0 / 0 | Imported 3 | engine log `import passwords: the store holds 3 logins` (after the import and again for the empty batch); `Login Data` 3 rows, all `v10` |
+| Extensions | 2 Web Store, 1 unpacked, 1 built-in | 2 | 0 / 0 / 2 | Imported 0, "2 couldn't be imported" | engine log `installExtensions 2`, then `extension install failed result=6` twice (`WEBSTORE_REQUEST_ERROR`, the listing fetch refused by the resolver rules) at once; no batch sheet, no download, no `Extensions` folder in the profile |
+
+| Check | Result | Evidence |
+|---|---|---|
+| Fresh profile, mock keychain, no real data | PASS | `--user-data-dir` under `profiles/517-20261114/`, `--use-mock-keychain`; the key is the fixture's invented password; `ARKT_ARC_DIR` and `ARKT_DATA_DIR` on the artifacts SSD; no Keychain query, no real profile path read |
+| Consent sheet | PASS | text read from the live sheet: `Import browser data \| ... \| History \| 8 \| Bookmarks \| 5 \| Extensions \| 2 \| Needs your Mac password \| Cookies \| 2 \| Passwords \| 3 \| ...` |
+| Counts reported by the coordinator equal the fixture | PASS | table above: every importable item written, everything else accounted for as skipped (past the retention) or failed (offline) |
+| Chromium shows the data | PASS | chrome://history, chrome://bookmarks, the loopback cookie and the password store count, table above |
+| Plaintext at rest | PASS | 0 hits of `from-fixture`, `hidden-from-script`, `correct-horse-1`, `no-username-3` in the profile's `Cookies`, `Login Data` and `History` |
+| Re-import (run B) | PASS | every type `written 0`: history skipped 8, bookmarks 5, cookies 2, passwords 3; extensions failed 2 again (not recorded as handled, so a later run offers them again); profile counts unchanged |
+| Snapshot copy removed | PASS | `ImportScratch` empty after both runs |
+| Imported visits not uploaded by sync | PASS (sync off) | `history_sync_metadata` 0 rows, 0 visits with `is_known_to_sync`; the 3 imported visits carry source 7, which patch 0011 (#566) keeps out of `HistorySyncBridge::MaybeCommit` (`HistorySyncBridgeTest.ImportedVisitsNotSynced`, #566 results). An upload with history sync on needs a signed-in account: not run |
+| Extensions through the batch confirmation | partly; real install needs the user | the coordinator passed only the 2 Web Store ids (not the unpacked or built-in one) and both failed cleanly in milliseconds, under the sheet's Imported list. The batch sheet only shows after the Web Store answers the listing fetch, so it cannot appear offline; the sheet and a real install from an import batch are step 2 of #918 (needs the user) |
+| Stderr | PASS | 0 hits of `FATAL`, `Check failed`, `NOTREACHED` in runs A and B; both exit 0 by themselves in about 5 s |
+
+### Findings
+
+- The result sheet says "Everything you chose came over." with both extensions failed: a type whose items all failed
+  is listed under Imported and offers no Retry (`ProfileImportSummary.retryTypes` takes only `.failed` outcomes). The
+  History row says 8 while 3 visits came over (the 5 older than 90 days count as skipped, like visits already there).
+  #935, needs the maintainer's call on the copy.
+- Closing a runner window's last tab closes the window, so the runner keeps a blank tab open while it reads the two
+  pages (first try lost the chrome://bookmarks tab to that).
+- Crashpad: the run updated `settings.dat` in the default engine folder (`~/Library/Application Support/Arkt Dev
+  Engine/Crashpad`), not in `--user-data-dir`, as earlier engine runs did. No report was written.
+
+### Review follow-up (PR #936)
+
+- `=sheet` also refuses an empty `ARKT_ARC_DIR` or `ARKT_DATA_DIR` (an empty value resolved to the current folder) and
+  a launch without `--use-mock-keychain`.
+- `DistributionConfigurationTests.contractRunnerAndProbeFilesAreEngineAndTestSwitchesOnly` now checks
+  `ImportCheckRunner.swift` starts with `#if ARKT_CHROMIUM_ENGINE && ARKT_TEST_SWITCHES`.
+- `nice -n 20 swift test -j 2 --filter 'DistributionConfigurationTests|LintTests'` (`app/ArktShell/ShellKit`): 13 tests
+  in 4 suites and 15 in 2 passed. Break: the runner's first line as `#if ARKT_CHROMIUM_ENGINE` failed
+  `contractRunnerAndProbeFilesAreEngineAndTestSwitchesOnly` and `overridesAndTestSwitchesAreCompiledOutOfDistribution`;
+  restored, both pass. The runner change was checked with `swiftc -parse`; the app was not rebuilt and the `=sheet`
+  run was not repeated.
+
+### Patch budget
+
+Unchanged: 16 patch files. `.patches` 16 lines, 16 `arkt` commits: in sync. Facade header copies `cmp` identical.
+
+### Left open
+
+- #935: the result sheet's wording for failed types and history skipped by age.
+- #918, step 2 (needs the user): the batch sheet and a real Web Store install from an import batch.
+- History sync on with a signed-in account: not run (no account in test runs); the bridge test in #566 covers it.
+
+### Cleanup
+
+Every run (three debugging runs of the page checks on one throwaway profile, then runs A and B) exited by itself
+(`ps -p`). `lsregister -u` on the app and its helpers: 0 records for `dev.arkt.Arkt.try517` and 0 paths under the build
+folder after. Deleted: the throwaway profiles under `profiles/517-20261114/`, the data folders, the fixture, the built
+app and derived data, the SwiftPM build folder and the bundle's preferences file (`dev.arkt.Arkt.try517.plist`); the
+defaults suites had never been written. Nothing touched a real browser profile, the Keychain (mock keychain, invented
+key), the clipboard, the network (resolver rules), `/Applications/Arkt.app` or `~/Applications/ArktTest`.
+
+## Import result counts (#935)
+
+Follow-up to the #517 import smoke findings, with the maintainer's decisions on #935.
+
+- A type with nothing in Arkt and at least one refused item (`ImportItemCounts.nothingCameOver`) is now a Not imported
+  row with "N couldn't be imported" and Retry (`.notImported(.refused(failed:))`, `ProfileImportSummary.retryTypes`).
+  The notice reads "Some of it couldn't be imported. Retry tries again." unless a type was also unreadable. A cancelled
+  extensions install with nothing in Arkt stays "cancelled", with no Retry.
+- Visits older than the 90-day window are counted apart (`ImportItemCounts.tooOld`) in `ProfileImportRead.history`,
+  before the watermark check, so a re-import reports them the same way. They are left out of the History count and
+  the consent count, and the row adds "N older than 90 days not imported". The engine is unchanged.
+- In the smoke's terms: History now reads 3 with "5 older than 90 days not imported", and Extensions sits under Not
+  imported with Retry; the subtitle reads "Most of it came over.".
+- Not changed: the engine still counts visits with a scheme its history refuses as skipped. The coordinator does not
+  filter schemes, so such visits would still count as in Arkt. Fixture profiles have none.
+- The `=sheet` engine smoke was not run again for this change; the model, coordinator and state tests cover it.
+
+## #930: Tab from the page into the infobar strip (seam, no patch)
+
+Date 2026-11-15. Branch `engine/930-tab-into-strip` from `main` at `63ec2155`. `$CR` branch `arkt` unchanged
+(0001-0016).
+
+### Gate
+
+- Seam, no patch. On an Arkt window `Browser`'s `TakeFocus` (`BrowserWebContentsDelegate`) returns false and the view
+  delegate has no Views focus manager, so `WebContentsViewMac::TakeFocus` ends in `selectNextKeyView:` /
+  `selectPreviousKeyView:` on the host window with the page's `WebContentsViewCocoa` as the sender. Checked on
+  `out/Arkt` before any shell change (smoke below). The shell windows ask the infobar presenter there first.
+- Facade header (both copies, additive, `cmp` identical, recorded on #930): `ArktTabHandle` gains
+  `-focusThroughTabTraversal:(BOOL)reverse`. `WebContents::FocusThroughTabTraversal` alone only moves the page's own
+  focus (`WebContentsViewMac::FocusThroughTabTraversal` is `SetInitialFocus`), so the facade calls `Focus()` first: the
+  contents become the first responder as a direct selection, which `OnBecameFirstResponder` does not traverse again.
+- `.patches` unchanged (16 lines, 16 `arkt` commits: in sync).
+- Builds: `nice -n 15 autoninja -j 4 -C out/Arkt chrome`; Chromium disk 1.9 TB free; internal disk 12 GB free; swap
+  19.2 of 20.5 GB used.
+
+### Decision recorded on #930
+
+Tab past the strip's last control enters the page at its first element, Shift-Tab before the strip's first control at
+its last, so page and strip are one ring both ways. This replaces #478's wrap-around inside the strip. Esc and F6 are
+unchanged (the page gets its own last focus back). While a tab shows a strip, Tab no longer goes on from the page to
+the rest of the window's key view loop; without a strip nothing changes.
+
+### What landed
+
+- Engine. `-[ArktFacadeTab focusThroughTabTraversal:]`: nothing for a parked tab, as `-focus`.
+- Self-test: the window host's window is an `ArktSelfTestWindow` that logs each `selectNextKeyView:` /
+  `selectPreviousKeyView:` with the sender's class and whether it is inside the card; `tab-key [shift]` focuses the
+  page and sends it a Tab or Shift-Tab; `traverse first|last` calls the new member and logs whether the page holds the
+  first responder.
+- Swift. `EngineAPI.PageFocusEdge` (`first`, `last`) and `EngineClient.focusPage(of:at:)`, with a default that gives the
+  page the keyboard as `focusPage(of:)` does; `ChromiumEngine` maps it onto the new facade member. `ShellWindow` and
+  `LittleArktWindow` gain `keyViewHandoff`, asked first in both key view selectors with the sender view; false (no
+  page, no strip, no control to reach) lets the window's own loop run. `InfobarPresenter.focusStrip(leaving:reverse:)`
+  finds the tab whose page holds the view and puts the keyboard on its strip's first or last control;
+  `focusPageAtEdge` takes the keyboard back to the page at an end. `InfobarPanel.focusKeyboard(at:)`, and Tab or
+  Shift-Tab off an end of the strip ends the keyboard with that edge.
+
+### Smoke (`out/Arkt/Arkt.app`, `--no-startup-window --arkt-facade-selftest --arkt-engine-test-api --remote-debugging-port`, fresh profiles under `profiles/930-20261115/`, `--use-mock-keychain --mute-audio`, `--host-resolver-rules="MAP * ~NOTFOUND, EXCLUDE 127.0.0.1"`, a loopback page with an input, a button and an input, commands through page titles over DevTools)
+
+| Step | Result |
+|---|---|
+| Focus the last input, `tab-key` | `selectKeyView next sender=WebContentsViewCocoa inCard=yes`; the page's focus leaves to `BODY` |
+| Focus the first input, `tab-key shift` | `selectKeyView previous sender=WebContentsViewCocoa inCard=yes`; `BODY` |
+| Run 3: focus the last input, `tab-key` (focus leaves to `BODY`), then `traverse first` | `inPage=yes`; `document.activeElement` the first input |
+| Run 3: focus the first input, `tab-key shift` (`BODY`), then `traverse last` | `inPage=yes`; the last input |
+| `FATAL`, `Check failed`, `DCHECK` (runs 1 to 3) | 0 |
+
+Run 3 starts each traversal from the state a strip exit leaves: the page has let its focus go through `TakeFocus`.
+`contentView(for:)` in `ChromiumEngine` is the tab's `containerView`; the self-test card holds only that container, so
+`inCard=yes` puts the sender inside it. Run 1 sent the Tab without focusing the page first: the window itself was the first responder and logged the selection
+with itself as the sender; `tab-key` focuses the page since. The self-test window is not a shell window, so the strip
+itself was not driven on the engine; the shell side is covered by `InfobarKeyboardTests` with key events delivered in
+the process.
+
+### Deliberate breaks
+
+- `ShellWindow.selectNextKeyView(_:)` without the handler: `testAShellWindowHandsTabOutOfThePageToItsHandlerFirst`
+  fails on all three of its checks (the loop ran, the handler was asked only for Shift-Tab, the declined case).
+- The controllers' `keyViewHandoff =` lines taken out (the `ShellWindowController` one sits in the presenter's lazy
+  factory): `InfobarWindowTests.testTabOutOfThePageReachesTheStripThroughTheWindow` 3 failures,
+  `LittleArktDialogTests.testTabOutOfThePageReachesTheStripThroughTheWindow` 2.
+- #478's wrap-around back in the strip's Tab handling: 9 failures in `testADisabledControlIsSkipped`,
+  `testShiftTabBeforeTheStripsFirstControlEntersThePageAtItsLastElement`,
+  `testTabPastTheStripsLastControlEntersThePageAtItsFirstElement` and
+  `testWithoutAnEdgeHandlerTheStripFallsBackToThePagesLastFocus`. Restored: passing.
+
+### Tests
+
+- ShellKit `swift test --skip ShellKitGUITests`: every bundle passes (Swift Testing runs of 1567, 44, 60, 29, 289, 49,
+  343, 227 and 39 tests), including `EngineABIIsolationTests`; 1 new
+  (`focusPageAtAnEdgeAsksTheTabHandleToTraverse`).
+- GUI, `AAWindowLeakGuardTests`, `InfobarKeyboardTests` (29, 9 new), `InfobarPresenterTests`, `InfobarWindowTests`
+  (1 new), `LittleArktDialogTests` (1 new), `ZzzWindowLeakGuardEndTests`: 105 run, 0 failures (after the breaks were
+  restored).
+- Whole `ShellKitGUITests` bundle (`ShellWindow` is shared), before merging `main`: 2265 run, 51 skipped, 0 failures
+  (load average 14 to 15, so the pacing gates only reported).
+- After merging `main` (`805e9ff9`): ShellKit `swift test --skip ShellKitGUITests` passes (1573, 44, 60, 29, 289, 49,
+  350, 227, 39); `--filter 'LintTests|IsolationTests'` 13 + 60; ArktCore 235.
+- ArktCore `swift test`: 235 tests passed.
+- 20 runs of `AAWindowLeakGuardTests`, `InfobarKeyboardTests`, `InfobarWindowTests`, `LittleArktDialogTests`, `ZzzWindowLeakGuardEndTests` (69 tests each), under the machine's own load (1-minute load average 6.6 to 9.1, no load added): 20 passed, 0 failed.
+
+### Patch budget
+
+Unchanged: 16 patch files, 8 seam and hook patch files, 22 upstream files outside 0001-0004. `.patches` 16 lines, 16
+`arkt` commits: in sync. Facade header copies `cmp` identical. `gn check out/Arkt "//arkt/*"`: `Header dependency check
+OK`.
+
+### Left open
+
+- Real keys and VoiceOver in the shell app on an Engine build: #932 (needs the user).
+- Whether Tab should also reach the sidebar while a strip is up (the ring above keeps it in page and strip).
+
+### Cleanup
+
+Both engine runs and the fixture server stopped by exact PID (`ps -p` prints nothing). No crash reports from these
+runs. Throwaway profiles under `profiles/930-20261115/` deleted. Nothing touched the Keychain (mock keychain only), the
+clipboard or `/Applications/Arkt.app`.
+
+## #913: the reload prompt after an extension's site access is revoked (results only, no change)
+
+Date 2026-11-15. Checked on `out/Arkt` at `63ec2155` (up to date, `Everything is up-to-date`). `$CR` branch `arkt`
+unchanged (0001-0016). No overlay, facade or Swift change.
+
+### Finding
+
+The #593 note "Arkt shows nothing yet" does not hold. Picking When You Click the Extension
+(`ExtensionContextMenuModel::ExecuteCommand(PAGE_ACCESS_RUN_ON_CLICK)`) runs `SitePermissionsHelper::UpdateSiteAccess`,
+which calls `ShowReloadBubbleForAllExtensions`: every tab of the profile on the same origin is marked
+(`TabHelper::SetReloadRequired`), and each marked tab shows `ReloadPageDialogController` when it is visible, or later
+when it becomes visible (`OnVisibilityChanged`). That dialog goes through `ShowDialog(gfx::NativeWindow, ...)`; an Arkt
+window has no Views extensions container, so the 0007 hook shows it as a `ModelSheet` (`ArktDialogSheet`).
+`ON_CLICK` from `chrome://extensions` (`developerPrivate`) only changes the permissions
+(`ScriptingPermissionsModifier`) and marks no tab, as in Chrome.
+
+### Smoke (`out/Arkt/Arkt.app`, `--no-startup-window --arkt-facade-selftest --arkt-engine-test-api --remote-debugging-port`, fresh profiles under `profiles/913-20261115/`, `--use-mock-keychain --mute-audio`, `--host-resolver-rules="MAP * ~NOTFOUND, EXCLUDE 127.0.0.1"`, a loopback fixture server, `site-probe` unpacked, commands through page titles over DevTools)
+
+| Step | Result |
+|---|---|
+| 1. One window on the fixture page, visible; `ext-menu`, then `ext-pick <site probe> 5` | `ARKT: dialog sheet shown` 15 ms after the command; `siteAccess=1`. The sheet: "Reload this page to apply your updated settings for "Arkt site probe" on this site", Cancel and Reload (default) |
+| 2. Two windows and a background tab on the same origin, all covered by other windows (`document.visibilityState` hidden in all three); the same pick | access revoked (`siteAccess=1`), no sheet yet: the tabs are marked, and each shows its own sheet once it becomes visible |
+| `FATAL`, `Check failed`, `DCHECK` (runs 1 and 2) | 0 |
+
+### Maintainer decision (2026-11-15, on #913)
+
+Keep Chromium's reload sheet as it is for now (option 1): no facade value or event, no shell surface. Revisit it when
+the extension request-access button (connector design, E4 item 4) is designed, since both would live in the same place.
+What ships until then: Chromium's wording in the generic Arkt sheet, one sheet per marked tab as it is shown.
+
+### Cleanup
+
+Both runs and the fixture server stopped by exact PID (`ps -p` prints nothing). No crash reports from these runs.
+Throwaway profiles under `profiles/913-20261115/` deleted. Nothing touched the Keychain (mock keychain only), the
+clipboard or `/Applications/Arkt.app`.
+
+## #941: VoiceOver in the infobar strip, and the #940 review follow-ups (seam, no patch)
+
+Date 2026-11-15. Branch `engine/941-strip-voiceover` from `main` at `ad453ddd`. `$CR` branch `arkt` unchanged
+(0001-0016). Facade header unchanged.
+
+### Gate
+
+- Seam, no patch; no header change (`-focusThroughTabTraversal:` only changes inside the overlay). `.patches` 16 lines,
+  in sync. `nice -n 15 autoninja -j 4 -C out/Arkt chrome`: `The build has finished successfully.`; internal disk 21 GB
+  free.
+
+### What landed
+
+- VoiceOver. While the strip holds the keyboard its stack is the first responder; it now reports the focused control
+  as its `accessibilityFocusedUIElement`, and the strip posts `focusedUIElementChanged` for that control whenever it
+  changes: F6 or Tab into the strip, Tab, Shift-Tab and the arrows inside it, a row going under it. Nothing is posted
+  when the keyboard leaves, or when a key moves nothing (Down on the last row). The post is one place,
+  `InfobarPanel.showKeyboardFocus()`, which every move already goes through.
+- `ShellWindow.keyViewHandoff` is set where `ShellWindowController` configures its window, as Little Arkt does, not in
+  the infobar presenter's lazy factory.
+- `-focusThroughTabTraversal:` calls `-focus`, then `FocusThroughTabTraversal`.
+
+### Focus and blur (the question from the #940 review)
+
+`Focus()` before `FocusThroughTabTraversal` fires no focus or blur on the element the page had focused. Self-test,
+fresh profiles under `profiles/941-20261115/`, a loopback page that logs `focusin`, `focusout` and the window's
+`focus` and `blur`, before and after the change to `-focus` (same results):
+
+| Step | Log |
+|---|---|
+| Focus the last input, `tab-key` (the page lets focus go, as before a strip takes it) | `focus`, `in:last`, `out:last`, `blur`; active `BODY` |
+| then `traverse first` (the state a strip exit starts from) | `focus`, `in:first` |
+| Focus the first input, `tab-key shift`, then `traverse last` | `out:first`, `blur`; then `focus`, `in:last` |
+| The middle button focused in the page, `traverse first` | `out:middle`, `in:first` (no second `in:middle`) |
+| `FATAL`, `Check failed`, `DCHECK` (runs 1 and 2) | 0 |
+
+### Tests
+
+- `InfobarKeyboardTests` + 4 (VoiceOver: F6 in, Tab in from the page, every move and leaving, a row going under the
+  focus); `InfobarWindowTests` + 3 (the hand-off is set before anything made the presenter, Tab out of split pane B
+  reaches B's strip and not A's, `EngineClient.focusPage(of:at:)`'s default gives the page the keyboard at either
+  edge).
+- GUI, `AAWindowLeakGuardTests`, `InfobarKeyboardTests`, `InfobarPresenterTests`, `InfobarWindowTests`,
+  `LittleArktDialogTests`, `ZzzWindowLeakGuardEndTests`: 112 run, 0 failures (baseline 105 + 7).
+- ShellKit `swift test --skip ShellKitGUITests`: every run passes (1573, 44, 60, 29, 289, 49, 352, 227, 39); lints
+  `--filter 'LintTests|IsolationTests'` 13 + 60; ArktCore 235.
+- 20 runs of `AAWindowLeakGuardTests`, `InfobarKeyboardTests`, `InfobarWindowTests`, `ZzzWindowLeakGuardEndTests` (57 tests each) under the machine's own load (1-minute load average 7.6 to 9.3, no load added): 20 passed, 0 failed.
+
+### Deliberate breaks
+
+- The post and the stack's `accessibilityFocusedUIElement` taken out: 9 failures in the four VoiceOver tests
+  (`("[]") is not equal to ("[Optional("OK")]")`, `("nil") is not equal to ("Optional("OK")") - the stack reports the
+  control, not itself`).
+- The window's `keyViewHandoff` line taken out of `ShellWindowController`'s init: 5 failures
+  (`testTheWindowHandsTabToTheStripsFromTheStart`, `testTabOutOfASplitPaneReachesThatPanesStrip`,
+  `testTabOutOfThePageReachesTheStripThroughTheWindow`). Restored: passing.
+
+### Patch budget
+
+Unchanged: 16 patch files. `.patches` 16 lines, in sync. Facade header copies `cmp` identical. `gn check out/Arkt
+"//arkt/*"`: `Header dependency check OK`.
+
+### Left open
+
+- Real keys and VoiceOver in the shell app on an Engine build: #932 (needs the user). The announcement was checked
+  through the posted notification and the accessibility focus the stack reports, not with VoiceOver running.
+
+### Cleanup
+
+Both engine runs and the fixture server stopped by exact PID (`ps -p` prints nothing). No crash reports. Throwaway
+profiles under `profiles/941-20261115/` deleted. Nothing touched the Keychain (mock keychain only), the clipboard or
+`/Applications/Arkt.app`.
+
+### Review of #943
+
+- The first version told VoiceOver again whenever the focused control's button object changed. A new list refreshes
+  rows with new buttons, so the same control was announced again after another infobar arrived or a row's values
+  changed. Found by a test the review asked for (`testAListChangeThatKeepsTheFocusedControlTellsVoiceOverNothingAgain`,
+  `[OK, OK]`). The strip now remembers what it announced by infobar, index and label, and posts only when one of them
+  changes. `testLeftAndRightOnAOneControlRowTellVoiceOverNothingAgain` covers a key that goes around to the same
+  control.
+- `focusKeyboard(at:)` sets the stack's focused control before the stack becomes first responder, so AppKit's own
+  focus change already finds the control. Not covered by a test (it needs the moment AppKit posts).
+- The VoiceOver tests also check the strip's window: `panel.accessibilityFocusedUIElement` resolves to the button.
+- The facade comment now says that `Focus()` adds no focus or blur (the traversal itself blurs the old element, as Tab
+  would).
+- Breaks: the announced check removed: both new tests fail (`[OK, OK, OK]`, `[Close, Close, Close]`). The window
+  hand-off picking the strip of the current tab instead of the view's page (`focusStrip(of: currentTab, ...)`):
+  `testTabOutOfASplitPaneReachesThatPanesStrip` fails (`("nil") is not equal to ("Optional("OK")")`, and A's strip
+  holds the keyboard). A no-op `EngineClient.focusPage(of:at:)` default: `testTheDefaultEdgeFocusGivesThePageTheKeyboard`
+  fails at both edges (`XCTAssertTrue failed - first`, `- last`). Restored: passing.
+- After the review: the infobar GUI set 114 run, 0 failures (112 + 2); 20 runs of `AAWindowLeakGuardTests`,
+  `InfobarKeyboardTests`, `InfobarWindowTests`, `ZzzWindowLeakGuardEndTests` (59 tests each, 1-minute load average 5.0
+  to 7.1): 20 passed, 0 failed; ShellKit `--skip ShellKitGUITests` passes (1573, 44, 60, 29, 289, 49, 352, 227, 39); lints 13 + 60; engine rebuilt
+  (`The build has finished successfully.`).

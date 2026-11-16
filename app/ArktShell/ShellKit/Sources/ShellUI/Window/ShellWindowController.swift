@@ -104,6 +104,8 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// A sidebar mutation failed (for example `addTab` into a location the model refuses). Default: a toast whose
   /// text names the failed mutation (`errorText(for:error:)`).
   public var onError: (@MainActor (SidebarMutation, any Error) -> Void)?
+  /// Test seam for answering a node emoji prompt without opening the Character Viewer. Nil uses the real sheet.
+  var nodeEmojiPromptForTesting: (@MainActor (String?, @escaping @MainActor (String?) -> Void) -> Void)?
   /// Asks the other windows of the set for a row's live page (Tab Handoff, #300); set by `ShellWindowSet`. Nil: a
   /// window on its own, which always loads the page.
   var onTakeOverLiveTab: (@MainActor (NodeID) -> LiveTabHandoff)?
@@ -285,6 +287,11 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     }
     engineHost.controller = self
     window.commandHost = engineHost
+    // Tab out of a page reaches its infobar strip (#930); set with the window, as Little Arkt does, not in the
+    // presenter's lazy factory (#941).
+    window.keyViewHandoff = { [weak self] view, reverse in
+      self?.infobarStrips.focusStrip(leaving: view, reverse: reverse) ?? false
+    }
     let toastView = ToastView(frame: .zero)
     toastView.presenter = toasts
     root.card.toastView = toastView

@@ -160,7 +160,7 @@ struct InMemoryEngineExtensionTests {
     engine.setExtensionActions([action("a", "Alpha", siteAccess: .onClick, options: true)], in: window)
 
     let menu = engine.extensionContextMenu(forAction: "a", in: window)
-    #expect(menu.map(\.title) == ["Alpha", "Options...", "Pin to Sidebar", "This Can Read and Change Site Data", "",
+    #expect(menu.map(\.title) == ["Alpha", "Options...", "Pin", "This Can Read and Change Site Data", "",
                                   "Manage Extension...", "Remove from Arkt..."])
     #expect(menu[0].isEnabled == false && menu[0].command == ExtensionContextCommand.header)
     #expect(menu[1].isEnabled && menu[1].command == ExtensionContextCommand.options)
@@ -179,13 +179,13 @@ struct InMemoryEngineExtensionTests {
     for id in ["a", "b", "c"] { engine.setExtensionPinned(id, pinned: true) }
     func moves(_ id: String) -> [Bool] {
       engine.extensionContextMenu(forAction: id, in: window)
-        .filter { $0.title == "Move Left" || $0.title == "Move Right" }.map(\.isEnabled)
+        .filter { $0.title == "Move Up" || $0.title == "Move Down" }.map(\.isEnabled)
     }
     #expect(moves("a") == [false, true])
     #expect(moves("b") == [true, true])
     #expect(moves("c") == [true, false])
     let menu = engine.extensionContextMenu(forAction: "a", in: window)
-    #expect(menu.contains { $0.title == "Unpin from Sidebar" })
+    #expect(menu.contains { $0.title == "Unpin" })
     #expect(menu.first { $0.title == "Options..." }?.isEnabled == false)
     #expect(!menu.contains { $0.title == "This Can Read and Change Site Data" })
     #expect(engine.extensionContextMenu(forAction: "missing", in: window).isEmpty)
@@ -202,9 +202,9 @@ struct InMemoryEngineExtensionTests {
     run(C.togglePin, "a")
     run(C.togglePin, "b")
     #expect(engine.pinnedExtensionIDs == ["a", "b"])
-    run(C.moveLeft, "b")
+    run(C.moveUp, "b")
     #expect(engine.pinnedExtensionIDs == ["b", "a"])
-    run(C.moveRight, "b")
+    run(C.moveDown, "b")
     #expect(engine.pinnedExtensionIDs == ["a", "b"])
     run(C.togglePin, "a")
     #expect(engine.pinnedExtensionIDs == ["b"])
@@ -220,6 +220,51 @@ struct InMemoryEngineExtensionTests {
     run(C.options, "missing")
     #expect(engine.performedExtensionContextCommands.map(\.command).suffix(3) == [C.options, C.manage, C.remove])
     #expect(engine.performedExtensionContextCommands.allSatisfy { $0.actionID != "missing" })
+  }
+
+  // MARK: - The extension's own items (#915)
+
+  @Test func customCommandsAreTheRangeAboveTheFixedTen() {
+    typealias C = ExtensionContextCommand
+    #expect(C.customRange == 1000...2000)
+    #expect(C.custom(0) == EngineMenuCommand(rawValue: 1000))
+    #expect(C.custom(7) == EngineMenuCommand(rawValue: 1007))
+    #expect(C.isCustom(C.custom(0)) && C.isCustom(EngineMenuCommand(rawValue: 2000)))
+    #expect(!C.isCustom(C.remove) && !C.isCustom(EngineMenuCommand(rawValue: 2001)))
+    #expect(!C.isCustom(EngineMenuCommand(rawValue: -1)))
+  }
+
+  @Test func extensionsOwnItemsFollowTheHeaderBetweenSeparators() {
+    let (engine, window) = engineWithActions(["a"])
+    typealias C = ExtensionContextCommand
+    let own: [EngineMenuItem] = [
+      EngineMenuItem(title: "Run Probe", command: C.custom(0)),
+      EngineMenuItem(title: "Follow This Site", command: C.custom(1), isChecked: true),
+      .submenu("More", [EngineMenuItem(title: "Child One", command: C.custom(3))]),
+    ]
+    engine.setExtensionContextItems(own, forExtension: "a")
+    let menu = engine.extensionContextMenu(forAction: "a", in: window)
+    #expect(Array(menu.prefix(6)) == [
+      EngineMenuItem(title: "A", command: C.header, isEnabled: false), .separator,
+    ] + own + [.separator])
+    #expect(menu[6] == EngineMenuItem(title: "Options...", command: C.options, isEnabled: false))
+
+    engine.setExtensionContextItems([], forExtension: "a")
+    #expect(engine.extensionContextMenu(forAction: "a", in: window)[1].title == "Options...")
+  }
+
+  @Test func onlyOfferedEnabledCustomItemsRun() {
+    let (engine, window) = engineWithActions(["a"])
+    typealias C = ExtensionContextCommand
+    engine.setExtensionContextItems([
+      EngineMenuItem(title: "Run Probe", command: C.custom(0)),
+      .submenu("More", [EngineMenuItem(title: "Child One", command: C.custom(2)),
+                        EngineMenuItem(title: "Child Off", command: C.custom(3), isEnabled: false)]),
+    ], forExtension: "a")
+    for command in [C.custom(0), C.custom(2), C.custom(3), C.custom(9)] {
+      engine.performExtensionContextCommand(command, forAction: "a", in: window)
+    }
+    #expect(engine.performedExtensionContextCommands.map(\.command) == [C.custom(0), C.custom(2)])
   }
 
   // MARK: - Commands

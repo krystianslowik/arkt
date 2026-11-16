@@ -55,15 +55,18 @@ extension InMemoryEngine {
 
   public func extensionContextMenu(forAction id: String, in window: EngineWindowID) -> [EngineMenuItem] {
     guard let action = extensionActions(in: window).first(where: { $0.id == id }) else { return [] }
-    var menu = [
-      EngineMenuItem(title: action.name, command: ExtensionContextCommand.header, isEnabled: false),
+    var menu = [EngineMenuItem(title: action.name, command: ExtensionContextCommand.header, isEnabled: false)]
+    if let own = extensionContextItems[action.extensionID], !own.isEmpty {
+      menu += [.separator] + own + [.separator]
+    }
+    menu += [
       EngineMenuItem(title: "Options...", command: ExtensionContextCommand.options, isEnabled: action.hasOptionsPage),
-      EngineMenuItem(title: action.isPinned ? "Unpin from Sidebar" : "Pin to Sidebar",
+      EngineMenuItem(title: action.isPinned ? "Unpin" : "Pin",
                      command: ExtensionContextCommand.togglePin),
     ]
     if let place = pinnedExtensionIDs.firstIndex(of: action.extensionID) {
-      menu.append(EngineMenuItem(title: "Move Left", command: ExtensionContextCommand.moveLeft, isEnabled: place > 0))
-      menu.append(EngineMenuItem(title: "Move Right", command: ExtensionContextCommand.moveRight,
+      menu.append(EngineMenuItem(title: "Move Up", command: ExtensionContextCommand.moveUp, isEnabled: place > 0))
+      menu.append(EngineMenuItem(title: "Move Down", command: ExtensionContextCommand.moveDown,
                                  isEnabled: place < pinnedExtensionIDs.count - 1))
     }
     if action.siteAccess != .noSiteAccess {
@@ -92,16 +95,38 @@ extension InMemoryEngine {
     switch command {
     case ExtensionContextCommand.togglePin:
       setExtensionPinned(extensionID, pinned: !action.isPinned)
-    case ExtensionContextCommand.moveLeft, ExtensionContextCommand.moveRight:
+    case ExtensionContextCommand.moveUp, ExtensionContextCommand.moveDown:
       guard let place = pinnedExtensionIDs.firstIndex(of: extensionID) else { return }
-      movePinnedExtension(extensionID, to: place + (command == ExtensionContextCommand.moveLeft ? -1 : 1))
+      movePinnedExtension(extensionID, to: place + (command == ExtensionContextCommand.moveUp ? -1 : 1))
     case ExtensionContextCommand.siteAccessOnClick: setSiteAccess(.onClick, of: extensionID)
     case ExtensionContextCommand.siteAccessOnThisSite: setSiteAccess(.onThisSite, of: extensionID)
     case ExtensionContextCommand.siteAccessOnAllSites: setSiteAccess(.onAllSites, of: extensionID)
     case ExtensionContextCommand.options, ExtensionContextCommand.manage, ExtensionContextCommand.remove: break
+    case _ where ExtensionContextCommand.isCustom(command):
+      guard Self.offers(command, in: extensionContextItems[extensionID] ?? []) else { return }
     default: return
     }
     performedExtensionContextCommands.append((command, id, window))
+  }
+
+  /// Sets the extension's own action context items (#915), listed after the header of its menu in every window, as
+  /// a driver stands in for `chrome.contextMenus`. Use `ExtensionContextCommand.custom(_:)` commands; an empty list
+  /// removes them. Running one records it, when the list offers it enabled.
+  public func setExtensionContextItems(_ items: [EngineMenuItem], forExtension extensionID: String) {
+    extensionContextItems[extensionID] = items.isEmpty ? nil : items
+  }
+
+  /// Whether `items` (submenus included) hold an enabled command item for `command`. The children of a disabled
+  /// submenu holder count too, as in the engine and in Chrome's model: the shell's menu disables the holder, so they
+  /// cannot be reached from it.
+  private static func offers(_ command: EngineMenuCommand, in items: [EngineMenuItem]) -> Bool {
+    items.contains { item in
+      switch item.kind {
+      case .command(let own): own == command && item.isEnabled
+      case .submenu(let children): offers(command, in: children)
+      case .separator: false
+      }
+    }
   }
 
   private func setSiteAccess(_ access: ExtensionSiteAccess, of extensionID: String) {

@@ -74,27 +74,27 @@ struct PageInfoModel: Equatable {
     var symbol: String
     var setting: PermissionSetting
     var options: [Option]
-    /// "Turned off in macOS" while macOS denies Arkt the permission; nil otherwise, including while macOS has not
-    /// decided (it still asks on first use).
-    var systemNote: String?
+    /// Why macOS keeps the permission from every site: Arkt's own access denied (#786) or Location Services off for
+    /// the whole Mac (#856). Nil otherwise, including while macOS has not decided (it still asks on first use).
+    var systemBlock: SystemPermissionBlock?
+    /// "Turned off in macOS" or "Location Services off", under the title; nil without a block.
+    var systemNote: String? { systemBlock?.note }
     /// VoiceOver reads the pop-up as "Location, turned off in macOS, Allow, pop-up button".
     var accessibilityLabel: String {
-      guard let systemNote else { return title }
-      return "\(title), \(systemNote.prefix(1).lowercased())\(systemNote.dropFirst())"
+      guard let systemBlock else { return title }
+      return "\(title), \(systemBlock.spokenNote)"
     }
     var height: CGFloat { systemNote == nil ? PageInfoMetrics.rowHeight : PageInfoMetrics.notedRowHeight }
 
-    init(_ permission: SitePermission, deniedInMacOS: Bool = false) {
+    init(_ permission: SitePermission, deniedInMacOS: SystemPermissionBlock? = nil) {
       kind = permission.kind
       title = permission.title
       symbol = PageInfoModel.symbol(for: permission.kind)
       setting = permission.setting
       options = permission.options.map { Option(setting: $0, title: PageInfoModel.title(of: $0)) }
-      systemNote = deniedInMacOS ? PageInfoModel.turnedOffInMacOS : nil
+      systemBlock = deniedInMacOS
     }
   }
-
-  static let turnedOffInMacOS = "Turned off in macOS"
 
   var tab: TabID
   var origin: String
@@ -120,10 +120,10 @@ struct PageInfoModel: Equatable {
   var accessibilityLabel: String { "Site controls for \(host)" }
   var readOnlyNote: String? { isReadOnly ? "Site settings can't be changed in this window." : nil }
 
-  /// `deniedInMacOS`: the permissions macOS denies Arkt itself (`SystemPermissions.deniedKinds()`); their rows get the
-  /// note. Empty by default, so the address pill's reads never ask macOS.
+  /// `deniedInMacOS`: the permissions macOS keeps from every site, and why (`SystemPermissions.blockedKinds()`); their
+  /// rows get the note. Empty by default, so the address pill's reads never ask macOS.
   init?(_ info: PageInfo, locale: Locale = .current, isReadOnly: Bool = false, favicon: Data? = nil,
-        deniedInMacOS: Set<SitePermissionKind> = []) {
+        deniedInMacOS: [SitePermissionKind: SystemPermissionBlock] = [:]) {
     tab = info.tab
     origin = info.origin
     // The engine's host in either form, written as the address bar writes it (#697); a local file's name as it is.
@@ -167,7 +167,7 @@ struct PageInfoModel: Equatable {
     }
     state = .site
     siteDataText = info.siteData.map { Self.siteDataText($0, locale: locale) } ?? ""
-    rows = info.permissions.map { Row($0, deniedInMacOS: deniedInMacOS.contains($0.kind)) }
+    rows = info.permissions.map { Row($0, deniedInMacOS: deniedInMacOS[$0.kind]) }
     canResetPermissions = !isReadOnly && info.permissions.contains { !$0.isDefault }
   }
 

@@ -19,10 +19,30 @@ final class TestExtensionAction: NSObject, ArktExtensionAction {
   let isEnabled: Bool
   let canUninstall: Bool
   let canReportAbuse: Bool
+  let isPinned: Bool
+  let hasOptionsPage: Bool
+  let siteAccess: ArktExtensionSiteAccess
   init(actionId: String, name: String, iconPNG: Data? = nil, isEnabled: Bool = true, canUninstall: Bool = true,
-       canReportAbuse: Bool = false) {
+       canReportAbuse: Bool = false, isPinned: Bool = false, hasOptionsPage: Bool = false,
+       siteAccess: ArktExtensionSiteAccess = .none) {
     self.actionId = actionId; self.name = name; self.iconPNG = iconPNG; self.isEnabled = isEnabled
     self.canUninstall = canUninstall; self.canReportAbuse = canReportAbuse
+    self.isPinned = isPinned; self.hasOptionsPage = hasOptionsPage; self.siteAccess = siteAccess
+  }
+}
+
+/// A menu item as the engine returns one (#593).
+final class TestMenuItem: NSObject, ArktMenuItem {
+  let kind: ArktMenuItemKind
+  let title: String
+  let command: Int
+  let isEnabled: Bool
+  let isChecked: Bool
+  let children: [any ArktMenuItem]
+  init(kind: ArktMenuItemKind = .command, title: String, command: Int = 0, isEnabled: Bool = true,
+       isChecked: Bool = false, children: [any ArktMenuItem] = []) {
+    self.kind = kind; self.title = title; self.command = command; self.isEnabled = isEnabled
+    self.isChecked = isChecked; self.children = children
   }
 }
 
@@ -108,6 +128,8 @@ final class TestEvent: NSObject, ArktEngineEvent {
   var zoomIsDefault = false
   var zoomIsUserInitiated = false
   var isTabFullscreen = false
+  var extensionID: String?
+  var extensionName: String?
   init(_ kind: ArktEngineEventKind, tab: (any ArktTabHandle)?, browser: (any ArktBrowserHandle)?) {
     self.kind = kind; self.tab = tab; self.browser = browser
   }
@@ -182,6 +204,7 @@ final class TestTab: NSObject, ArktTabHandle {
     return .closed
   }
   func focus() {}
+  func focusThroughTabTraversal(reverse: Bool) {}
   private(set) var movedTo: [any ArktBrowserHandle] = []
   func move(to browser: any ArktBrowserHandle) { movedTo.append(browser) }
   func setMuted(_ muted: Bool) {
@@ -379,6 +402,27 @@ final class TestImportBookmark: NSObject, ArktImportBookmark {
   let folderPath = ["Reading", "Later"]
 }
 
+final class TestExtensionCommand: NSObject, ArktExtensionCommand {
+  let extensionID = "commands-probe"
+  let commandName: String
+  let extensionName = "Commands Probe"
+  let commandDescription = "Run it"
+  let shortcut: String?
+  let isGlobal: Bool
+  init(commandName: String, shortcut: String?, isGlobal: Bool) {
+    self.commandName = commandName; self.shortcut = shortcut; self.isGlobal = isGlobal
+  }
+}
+
+final class TestShortcutChange: NSObject, ArktExtensionShortcutChange {
+  let result: ArktExtensionShortcutResult
+  let conflictExtensionID: String?
+  let conflictCommandName: String?
+  init(result: ArktExtensionShortcutResult, conflictExtensionID: String?, conflictCommandName: String?) {
+    self.result = result; self.conflictExtensionID = conflictExtensionID; self.conflictCommandName = conflictCommandName
+  }
+}
+
 /// A facade that records events and delivers them as one batch on `flush()`, as the real facade does from a posted
 /// task.
 final class TestEngine: NSObject, ArktEngine {
@@ -427,6 +471,33 @@ final class TestEngine: NSObject, ArktEngine {
 
   func runExtensionAction(_ actionId: String, in browser: any ArktBrowserHandle, anchor: NSView) {
     ranActions.append(actionId)
+  }
+
+  private(set) var pinnedExtensionIDs: [String] = []
+  private(set) var performedContextCommands: [(Int, String, Int32)] = []
+
+  func setExtensionPinned(_ extensionID: String, pinned: Bool) {
+    pinnedExtensionIDs.removeAll { $0 == extensionID }
+    if pinned { pinnedExtensionIDs.append(extensionID) }
+  }
+
+  func movePinnedExtension(_ extensionID: String, to index: Int) {
+    guard let from = pinnedExtensionIDs.firstIndex(of: extensionID) else { return }
+    pinnedExtensionIDs.remove(at: from)
+    pinnedExtensionIDs.insert(extensionID, at: min(max(index, 0), pinnedExtensionIDs.count))
+  }
+
+  func extensionContextMenu(forAction actionId: String, in browser: any ArktBrowserHandle) -> [any ArktMenuItem] {
+    [TestMenuItem(title: "Action Probe", command: ArktExtensionContextCommand.header.rawValue, isEnabled: false),
+     TestMenuItem(kind: .separator, title: "", isEnabled: false),
+     TestMenuItem(kind: .submenu, title: "Site", children: [
+       TestMenuItem(title: "On All Sites", command: ArktExtensionContextCommand.siteAccessOnAllSites.rawValue,
+                    isChecked: true),
+     ])]
+  }
+
+  func performExtensionContextCommand(_ command: Int, forAction actionId: String, in browser: any ArktBrowserHandle) {
+    performedContextCommands.append((command, actionId, browser.windowId))
   }
 
   func addEventSink(_ sink: @escaping ([any ArktEngineEvent]) -> Void) -> any NSObjectProtocol {
@@ -484,6 +555,22 @@ final class TestEngine: NSObject, ArktEngine {
   }
 
   func cancelExtensionInstalls() {}
+
+  /// One command with a shortcut, one without (#598).
+  var extensionCommands: [any ArktExtensionCommand] {
+    [TestExtensionCommand(commandName: "_execute_action", shortcut: "Ctrl+Shift+U", isGlobal: false),
+     TestExtensionCommand(commandName: "run-probe", shortcut: nil, isGlobal: false)]
+  }
+
+  private(set) var shortcutCalls: [(String?, String, String, Bool, Bool)] = []
+  /// Answers Conflict for "Command+T", Applied otherwise.
+  func setExtensionCommandShortcut(_ shortcut: String?, forCommand commandName: String, ofExtension extensionID: String,
+                                   global: Bool, replacingConflict: Bool) -> any ArktExtensionShortcutChange {
+    shortcutCalls.append((shortcut, commandName, extensionID, global, replacingConflict))
+    return shortcut == "Command+T" && !replacingConflict
+      ? TestShortcutChange(result: .conflict, conflictExtensionID: "other", conflictCommandName: "open")
+      : TestShortcutChange(result: .applied, conflictExtensionID: nil, conflictCommandName: nil)
+  }
 
   private(set) var uninstalledExtensions: [(String, Bool, Int32?)] = []
   /// As the header asks: the completion runs on a later main-thread turn, never inside the call.
@@ -797,6 +884,63 @@ struct ConformanceTests {
     engine.evaluateScript("1 + 1", in: tab, userGesture: true) { value, _ in result = value }
     #expect(result as? Int == 5)
     #expect(engine.testAPIEnabled && !engine.answerDialog(in: tab, accept: true))
+  }
+
+  @Test func pinsOrderAndTheContextMenuGoThroughTheProtocol() throws {
+    let facade = TestEngine()
+    let engine: any ArktEngine = facade
+    let browser = engine.createBrowser(host: TestWindowHost())
+    engine.setExtensionPinned("a", pinned: true)
+    engine.setExtensionPinned("b", pinned: true)
+    engine.movePinnedExtension("b", to: 0)
+    #expect(engine.pinnedExtensionIDs == ["b", "a"])
+    let action: any ArktExtensionAction = TestExtensionAction(actionId: "a", name: "A", isPinned: true,
+                                                                hasOptionsPage: true, siteAccess: .onThisSite)
+    #expect(action.isPinned && action.hasOptionsPage && action.siteAccess == .onThisSite)
+    let menu = engine.extensionContextMenu(forAction: "action-probe", in: browser)
+    #expect(menu.map(\.kind) == [.command, .separator, .submenu])
+    let child = try #require(menu.last?.children.first)
+    #expect(child.command == ArktExtensionContextCommand.siteAccessOnAllSites.rawValue && child.isChecked)
+    engine.performExtensionContextCommand(ArktExtensionContextCommand.togglePin.rawValue, forAction: "action-probe",
+                                          in: browser)
+    #expect(facade.performedContextCommands.map(\.0) == [ArktExtensionContextCommand.togglePin.rawValue])
+  }
+
+  @Test func anExtensionsOwnItemGoesThroughTheProtocolInItsRange() {
+    let facade = TestEngine()
+    let engine: any ArktEngine = facade
+    let browser = engine.createBrowser(host: TestWindowHost())
+    #expect(ArktExtensionContextCommand.customFirst.rawValue == 1000)
+    #expect(ArktExtensionContextCommand.customLast.rawValue == 2000)
+    let own = ArktExtensionContextCommand.customFirst.rawValue + 3
+    engine.performExtensionContextCommand(own, forAction: "action-probe", in: browser)
+    #expect(facade.performedContextCommands.map(\.0) == [own])
+  }
+
+  @Test func extensionCommandsGoThroughTheProtocol() {
+    let facade = TestEngine()
+    let engine: any ArktEngine = facade
+    #expect(engine.extensionCommands.map(\.commandName) == ["_execute_action", "run-probe"])
+    #expect(engine.extensionCommands.map(\.shortcut) == ["Ctrl+Shift+U", nil])
+    let conflict = engine.setExtensionCommandShortcut("Command+T", forCommand: "run-probe",
+                                                      ofExtension: "commands-probe", global: false,
+                                                      replacingConflict: false)
+    #expect(conflict.result == .conflict)
+    #expect(conflict.conflictExtensionID == "other" && conflict.conflictCommandName == "open")
+    let cleared = engine.setExtensionCommandShortcut(nil, forCommand: "run-probe", ofExtension: "commands-probe",
+                                                     global: true, replacingConflict: false)
+    #expect(cleared.result == .applied && cleared.conflictCommandName == nil)
+    #expect(facade.shortcutCalls.map(\.0) == ["Command+T", nil])
+    #expect(facade.shortcutCalls.map(\.3) == [false, true])
+  }
+
+  @Test func theCommandsEventAndShortcutAnswersHaveFixedValues() {
+    #expect(ArktEngineEventKind.extensionCommandsChanged.rawValue == 32)
+    #expect(ArktExtensionShortcutResult.applied.rawValue == 0)
+    #expect(ArktExtensionShortcutResult.conflict.rawValue == 1)
+    #expect(ArktExtensionShortcutResult.notAllowed.rawValue == 2)
+    #expect(ArktExtensionShortcutResult.unknownCommand.rawValue == 3)
+    #expect(ArktExtensionShortcutResult.globalShortcutTaken.rawValue == 4)
   }
 
   @Test func uninstallReachesTheFacadeWithItsFlagAndWindowAndAnswersLater() async throws {
@@ -1273,5 +1417,20 @@ struct InfobarABITests {
     #expect(engine.importedBookmarkPaths == [["Reading", "Later"]])
     #expect(historyResult?.lastVisitTime == Date(timeIntervalSince1970: 20))
     #expect(bookmarkResult?.lastVisitTime == nil && bookmarkResult?.written == 1)
+  }
+}
+
+/// The install event (#592): a profile-wide kind with its own number and two plain values, nil on every other kind.
+@MainActor
+struct ExtensionInstalledABITests {
+  @Test func theKindKeepsItsHeaderNumberAndItsValuesAreNilElsewhere() {
+    #expect(ArktEngineEventKind.extensionInstalled.rawValue == 31)
+    let other = TestEvent(.extensionActionsChanged, tab: nil, browser: nil)
+    #expect(other.extensionID == nil && other.extensionName == nil)
+    let installed = TestEvent(.extensionInstalled, tab: nil, browser: nil)
+    installed.extensionID = String(repeating: "a", count: 32)
+    installed.extensionName = "Clips"
+    #expect(installed.tab == nil && installed.browser == nil)
+    #expect(installed.extensionID?.count == 32 && installed.extensionName == "Clips")
   }
 }

@@ -7,6 +7,7 @@ public final class StubSidebar: SidebarSource {
   private struct Node {
     var info: SidebarNodeInfo
     var parent: SidebarLocation
+    var icon: SpaceIconInfo? = nil
   }
 
   public private(set) var spaceOrder: [SpaceID] = []
@@ -15,6 +16,8 @@ public final class StubSidebar: SidebarSource {
   private var childOrder: [SidebarLocation: [NodeID]] = [:]
   /// Custom titles (BH-026) by tab: `node(_:)` shows them over the page title that `updateTab` writes.
   private var customTitles: [NodeID: String] = [:]
+  /// Split names (#787) by split.
+  private var splitTitles: [NodeID: String] = [:]
   private let hub = SidebarChangeHub()
 
   public init() {}
@@ -26,7 +29,18 @@ public final class StubSidebar: SidebarSource {
     if case .tab(_, let url, _) = info, let custom = customTitles[id] { return .tab(id: id, url: url, title: custom) }
     return info
   }
+  public func nodeIcon(_ id: NodeID) -> SpaceIconInfo? { nodes[id]?.icon }
+
+  public func setNodeIcon(_ id: NodeID, to icon: SpaceIconInfo?) {
+    guard let node = nodes[id], node.icon != icon else { return }
+    nodes[id]?.icon = icon
+    hub.emit(.node(id))
+  }
+
   public func parent(of id: NodeID) -> SidebarLocation? { nodes[id]?.parent }
+  public func splitTitle(_ id: NodeID) -> String? {
+    if case .split? = nodes[id]?.info { splitTitles[id] } else { nil }
+  }
 
   public func observe(_ handler: @escaping @MainActor (SidebarChange) -> Void) -> SidebarObservation {
     hub.observe(handler)
@@ -188,17 +202,19 @@ public final class StubSidebar: SidebarSource {
 
   public func renameNode(_ id: NodeID, to title: String?) {
     let trimmed = title?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-    let before = node(id)
+    let before = (node(id), splitTitle(id))
     switch nodes[id]?.info {
     case .tab?:
       customTitles[id] = trimmed.isEmpty ? nil : trimmed
     case .folder?:
       guard !trimmed.isEmpty else { return }
       nodes[id]?.info = .folder(id: id, title: trimmed)
-    case .split?, nil:
+    case .split?:
+      splitTitles[id] = trimmed.isEmpty ? nil : trimmed
+    case nil:
       return
     }
-    if node(id) != before { hub.emit(.node(id)) }
+    if (node(id), splitTitle(id)) != before { hub.emit(.node(id)) }
   }
 
   /// A copy of `id`'s subtree with new ids right after it; custom titles come along. Throws `SidebarMoveError.invalid`
@@ -224,8 +240,9 @@ public final class StubSidebar: SidebarSource {
     case .folder(_, let title): .folder(id: copy, title: title)
     case .split(_, let layout): .split(id: copy, layout: layout)
     }
-    nodes[copy] = Node(info: info, parent: location)
+    nodes[copy] = Node(info: info, parent: location, icon: original.icon)
     customTitles[copy] = customTitles[id]
+    splitTitles[copy] = splitTitles[id]
     childOrder[location, default: []].append(copy)
     if let inner = original.info.childLocation, let copyInner = info.childLocation {
       for child in children(of: inner) { _ = copySubtree(child, into: copyInner) }
@@ -341,13 +358,14 @@ extension StubSidebar {
       let layout = try layout(of: split)
       guard let parent = nodes[split]?.parent else { throw SplitEditError.invalid }
       let copy = NodeID()
-      nodes[copy] = Node(info: .split(id: copy, layout: layout), parent: parent)
+      nodes[copy] = Node(info: .split(id: copy, layout: layout), parent: parent, icon: nodes[split]?.icon)
+      splitTitles[copy] = splitTitles[split]
       let position = children(of: parent).firstIndex(of: split) ?? 0
       childOrder[parent, default: []].insert(copy, at: position + 1)
       for pane in children(of: .split(split)) {
         guard case .tab(_, let url, let title)? = nodes[pane]?.info else { continue }
         let id = NodeID()
-        nodes[id] = Node(info: .tab(id: id, url: url, title: title), parent: .split(copy))
+        nodes[id] = Node(info: .tab(id: id, url: url, title: title), parent: .split(copy), icon: nodes[pane]?.icon)
         childOrder[.split(copy), default: []].append(id)
       }
       return copy

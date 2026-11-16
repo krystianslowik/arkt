@@ -219,6 +219,114 @@ final class TabActionsTests: XCTestCase {
     harness.controller.close()
   }
 
+  // MARK: Rename a split (#787)
+
+  /// The split row's title and accessibility label.
+  private func shownTitle(_ harness: Harness, _ node: UUID) throws -> (row: String, label: String?) {
+    let row = try harness.row(node)
+    return (try harness.cell(node).titleField.stringValue,
+            try harness.outline().outlineView.axProxyRows.content?(row)?.label)
+  }
+
+  /// Rename from the split row's menu: the inline field opens on the joined pane titles, all selected; Return stores
+  /// the name in the model, and the row and its accessibility label show it from then on, whatever the panes load.
+  func testRenamingASplitFromItsMenuShowsAndStoresTheName() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
+    harness.controller.activate(node: world.panes[0])
+    XCTAssertEqual(try shownTitle(harness, world.split).row, "S0 | S1")
+
+    try harness.choose("Rename", on: world.split)
+
+    let cell = try harness.cell(world.split)
+    let field = try XCTUnwrap(cell.renameField, "the rename field opens on the split row")
+    XCTAssertEqual(field.stringValue, "S0 | S1")
+    let editor = try XCTUnwrap(field.currentEditor() as? NSTextView)
+    XCTAssertEqual(editor.selectedRange(), NSRange(location: 0, length: 7), "the whole title is selected")
+    editor.insertText("Research", replacementRange: editor.selectedRange())
+    editor.insertNewline(nil)
+
+    XCTAssertNil(cell.renameField, "Return closes the field")
+    guard case .split(let item)? = harness.source.sidebar.nodes[world.split]?.kind else {
+      return XCTFail("not a split")
+    }
+    XCTAssertEqual(item.title, "Research", "the name is in the stored model")
+    XCTAssertEqual(try shownTitle(harness, world.split).row, "Research")
+    XCTAssertEqual(try shownTitle(harness, world.split).label, "Research")
+    harness.engine.setDocumentTitle(try XCTUnwrap(harness.tab(world.panes[0])), "Page title")
+    XCTAssertEqual(try shownTitle(harness, world.split).row, "Research", "a pane's page title never replaces it")
+  }
+
+  /// A pane's page title arriving while the split's field is open leaves the field open and stores nothing; the row
+  /// shows the new pane title once the field closes.
+  func testAPaneTitleDuringASplitRenameDoesNotCloseTheField() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
+    harness.controller.activate(node: world.panes[0])
+    try harness.choose("Rename", on: world.split)
+    let field = try XCTUnwrap(try harness.cell(world.split).renameField)
+    XCTAssertEqual(field.accessibilityLabel(), "Split View name")
+    let editor = try XCTUnwrap(field.currentEditor() as? NSTextView)
+    editor.insertText("Res", replacementRange: editor.selectedRange())
+
+    harness.engine.setDocumentTitle(try XCTUnwrap(harness.tab(world.panes[0])), "Changed")
+
+    XCTAssertNotNil(try harness.cell(world.split).renameField, "the field stays open")
+    XCTAssertEqual(try harness.outline().renamingNode, world.split)
+    XCTAssertNil(harness.source.splitTitle(world.split), "half-typed text is not stored")
+    try harness.cell(world.split).endRename(commit: false)
+    XCTAssertNil(harness.source.splitTitle(world.split))
+    XCTAssertEqual(try shownTitle(harness, world.split).row, "Changed | S1", "the held reload runs on close")
+  }
+
+  /// Clearing the name shows the pane titles again; committing the pane titles unchanged stores no name.
+  func testClearingASplitNameShowsThePaneTitlesAgain() throws {
+    var world = try Self.makeWorld()
+    try world.sidebar.rename(world.split, to: "Research")
+    let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
+    XCTAssertEqual(try shownTitle(harness, world.split).row, "Research")
+
+    XCTAssertTrue(try harness.outline().beginRename(world.split))
+    let field = try XCTUnwrap(try harness.cell(world.split).renameField)
+    XCTAssertEqual(field.stringValue, "Research")
+    let editor = try XCTUnwrap(field.currentEditor() as? NSTextView)
+    editor.selectAll(nil)
+    editor.deleteBackward(nil)
+    editor.insertNewline(nil)
+
+    guard case .split(let cleared)? = harness.source.sidebar.nodes[world.split]?.kind else {
+      return XCTFail("not a split")
+    }
+    XCTAssertNil(cleared.title)
+    XCTAssertEqual(try shownTitle(harness, world.split).row, "S0 | S1")
+    XCTAssertEqual(try shownTitle(harness, world.split).label, "S0 | S1")
+
+    XCTAssertTrue(try harness.outline().beginRename(world.split))
+    try XCTUnwrap(try harness.cell(world.split).renameField?.currentEditor() as? NSTextView).insertNewline(nil)
+    guard case .split(let unchanged)? = harness.source.sidebar.nodes[world.split]?.kind else {
+      return XCTFail("not a split")
+    }
+    XCTAssertNil(unchanged.title, "committing the pane titles unchanged is not a rename")
+  }
+
+  /// Escape keeps the split's name as it was.
+  func testEscapeKeepsTheSplitName() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
+    XCTAssertTrue(try harness.outline().beginRename(world.split))
+    let editor = try XCTUnwrap(try harness.cell(world.split).renameField?.currentEditor() as? NSTextView)
+    editor.insertText("Other", replacementRange: editor.selectedRange())
+    editor.doCommand(by: #selector(NSResponder.cancelOperation(_:)))
+
+    XCTAssertNil(try harness.cell(world.split).renameField)
+    XCTAssertNil(harness.source.splitTitle(world.split))
+    XCTAssertEqual(try shownTitle(harness, world.split).row, "S0 | S1")
+  }
+
   /// A page title arriving while the field is open leaves the field open (the row reload waits for it).
   func testAPageTitleDuringRenameDoesNotCloseTheField() throws {
     let world = try Self.makeWorld()
@@ -982,7 +1090,7 @@ final class TabActionsTests: XCTestCase {
                                                  context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
     let menu = try XCTUnwrap(grid.collectionView.menu(for: event), "the tile has a menu")
     XCTAssertEqual(menu.items.filter { !$0.isAlternate }.map(\.title),
-                   ["Rename\u{2026}", "Change Icon", "", "Back to Pinned URL", "Edit Pinned URL\u{2026}", "",
+                   ["Rename\u{2026}", "Change Icon", "Reset Icon", "", "Back to Pinned URL", "Edit Pinned URL\u{2026}", "",
                     "Copy Link", "", "Remove from Favorites", "Close and Keep Favorite"])
 
     menu.performActionForItem(at: menu.indexOfItem(withTitle: "Remove from Favorites"))
@@ -990,6 +1098,121 @@ final class TabActionsTests: XCTestCase {
     XCTAssertEqual(harness.children(.favorites(profile: "default")), [])
     XCTAssertEqual(harness.children(.today(world.work)).first, favorite)
     harness.controller.close()
+  }
+
+  func testFavoriteIconMenuSelectionAndReset() throws {
+    var world = try Self.makeWorld()
+    let favorite = try world.sidebar.addTab(url: Self.url("fav"), title: "Fav", in: .favorites(profile: "default"))
+    let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
+    let grid = harness.controller.sidebarController.view.favorites
+    grid.layoutSubtreeIfNeeded()
+    let tile = try XCTUnwrap(grid.tile(for: favorite))
+    let center = tile.convert(NSPoint(x: tile.bounds.midX, y: tile.bounds.midY), to: nil)
+    let event = try XCTUnwrap(NSEvent.mouseEvent(with: .rightMouseDown, location: center, modifierFlags: [],
+                                                 timestamp: 0, windowNumber: grid.window?.windowNumber ?? 0,
+                                                 context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+    let menu = try XCTUnwrap(grid.collectionView.menu(for: event))
+    let picker = try XCTUnwrap(menu.item(withTitle: "Change Icon")?.submenu)
+    XCTAssertNil(harness.source.sidebar.nodes[favorite]?.customIcon, "opening the picker changes nothing")
+    XCTAssertEqual(picker.item(withTitle: "None")?.state, .on)
+    XCTAssertEqual(picker.item(withTitle: "Star")?.state, .off)
+    let star = picker.indexOfItem(withTitle: "Star")
+    XCTAssertGreaterThanOrEqual(star, 0)
+    if star >= 0 { picker.performActionForItem(at: star) }
+    XCTAssertEqual(harness.source.sidebar.nodes[favorite]?.customIcon, .symbol("star"))
+    let resetMenu = try XCTUnwrap(grid.collectionView.menu(for: event))
+    let selectedPicker = try XCTUnwrap(resetMenu.item(withTitle: "Change Icon")?.submenu)
+    XCTAssertEqual(selectedPicker.item(withTitle: "Star")?.state, .on)
+    XCTAssertEqual(selectedPicker.item(withTitle: "None")?.state, .off)
+    let reset = resetMenu.indexOfItem(withTitle: "Reset Icon")
+    XCTAssertGreaterThanOrEqual(reset, 0)
+    if reset >= 0 { resetMenu.performActionForItem(at: reset) }
+    XCTAssertNil(harness.source.sidebar.nodes[favorite]?.customIcon)
+    let clearedMenu = try XCTUnwrap(grid.collectionView.menu(for: event))
+    XCTAssertEqual(clearedMenu.item(withTitle: "Change Icon")?.submenu?.item(withTitle: "None")?.state, .on)
+  }
+
+  func testFolderIconMenuSelectionAndReset() throws {
+    var world = try Self.makeWorld()
+    let folder = try world.sidebar.addFolder(title: "Folder", in: .pinned(world.work))
+    let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
+    let picker = try XCTUnwrap(try harness.menu(folder).item(withTitle: "Change Icon")?.submenu)
+    XCTAssertNil(harness.source.sidebar.nodes[folder]?.customIcon, "opening the picker changes nothing")
+    XCTAssertEqual(picker.item(withTitle: "None")?.state, .on)
+    XCTAssertEqual(picker.item(withTitle: "Star")?.state, .off)
+
+    try harness.choose("Change Icon", "Star", on: folder)
+    XCTAssertEqual(harness.source.sidebar.nodes[folder]?.customIcon, .symbol("star"))
+    let selected = try XCTUnwrap(try harness.menu(folder).item(withTitle: "Change Icon")?.submenu)
+    XCTAssertEqual(selected.item(withTitle: "Star")?.state, .on)
+    XCTAssertEqual(selected.item(withTitle: "None")?.state, .off)
+
+    try harness.choose("Reset Icon", on: folder)
+    XCTAssertNil(harness.source.sidebar.nodes[folder]?.customIcon)
+    let cleared = try XCTUnwrap(try harness.menu(folder).item(withTitle: "Change Icon")?.submenu)
+    XCTAssertEqual(cleared.item(withTitle: "None")?.state, .on)
+    XCTAssertEqual(cleared.item(withTitle: "Star")?.state, .off)
+  }
+
+  func testNodeEmojiCancelPreservesIconsAndConfirmationWritesOnce() throws {
+    var world = try Self.makeWorld()
+    let favorite = try world.sidebar.addTab(url: Self.url("emoji"), title: "Emoji", in: .favorites(profile: "default"))
+    let folder = try world.sidebar.addFolder(title: "Folder", in: .today(world.work))
+    let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
+    for node in [favorite, folder] {
+      harness.source.setNodeIcon(node, to: .emoji("\u{1F680}"))
+      var changes: [SidebarChange] = []
+      var saves = 0
+      let observation = harness.source.observe { changes.append($0) }
+      harness.source.onDidChange = { _ in saves += 1 }
+      var reply: (@MainActor (String?) -> Void)?
+      var initial: String?
+      harness.controller.nodeEmojiPromptForTesting = { current, answer in initial = current; reply = answer }
+
+      harness.controller.perform(.chooseNodeEmoji(node))
+      XCTAssertEqual(initial, "\u{1F680}")
+      let cancel = try XCTUnwrap(reply)
+      cancel(nil)
+      XCTAssertEqual(harness.source.nodeIcon(node), .emoji("\u{1F680}"))
+      XCTAssertEqual(saves, 0)
+      XCTAssertTrue(changes.isEmpty)
+
+      reply = nil
+      harness.controller.perform(.chooseNodeEmoji(node))
+      let confirm = try XCTUnwrap(reply)
+      confirm("\u{1F338}")
+      XCTAssertEqual(harness.source.nodeIcon(node), .emoji("\u{1F338}"))
+      XCTAssertEqual(saves, 1)
+      XCTAssertEqual(changes, [.node(node)])
+      withExtendedLifetime(observation) {}
+    }
+  }
+
+  func testNodeEmojiCompletionIgnoresFavoriteMovedToTodayWhilePromptIsOpen() throws {
+    var world = try Self.makeWorld()
+    let favorite = try world.sidebar.addTab(url: Self.url("moving-emoji"), title: "Moving",
+                                           in: .favorites(profile: "default"))
+    let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
+    harness.source.setNodeIcon(favorite, to: .symbol("star"))
+    var reply: (@MainActor (String?) -> Void)?
+    harness.controller.nodeEmojiPromptForTesting = { _, answer in reply = answer }
+    harness.controller.perform(.chooseNodeEmoji(favorite))
+    let complete = try XCTUnwrap(reply)
+    // A shared source may change through another window while this window's sheet is outstanding.
+    try harness.source.moveNode(favorite, to: .today(world.work), at: 0)
+    var changes: [SidebarChange] = []
+    var saves = 0
+    let observation = harness.source.observe { changes.append($0) }
+    harness.source.onDidChange = { _ in saves += 1 }
+    complete("\u{1F680}")
+    XCTAssertEqual(harness.source.nodeIcon(favorite), .symbol("star"))
+    XCTAssertEqual(saves, 0)
+    XCTAssertTrue(changes.isEmpty)
+    withExtendedLifetime(observation) {}
   }
 
   // MARK: Empty area (BH-021, BH-023) and dimming (BH-025)

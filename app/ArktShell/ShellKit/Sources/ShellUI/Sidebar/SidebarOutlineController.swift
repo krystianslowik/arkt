@@ -48,6 +48,11 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
   private lazy var hoverResync = HoverResyncScheduler(view: self) { [unowned self] pointer in
     enumerateAvailableRowViews { rowView, _ in (rowView as? SidebarRowView)?.syncHover(pointerInWindow: pointer) }
   }
+  public override func viewWillMove(toWindow newWindow: NSWindow?) {
+    if window !== newWindow { hoverResync.cancel() }
+    super.viewWillMove(toWindow: newWindow)
+  }
+
   /// Where hover resyncs read the pointer; tests replace it.
   var hoverPointerLookup: HoverPointerLookup {
     get { hoverResync.lookup }
@@ -177,10 +182,21 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
     axProxyRows.invalidate()
   }
 
-  /// Shows the context menu of a Ctrl-click, when `menu(for:)` gave one; tests replace it to record the request
-  /// instead of tracking the menu.
+  /// Shows the context menu of a right-click or Ctrl-click, when `menu(for:)` gave one, for the view given; tests
+  /// replace it to record the request instead of tracking the menu.
   var presentContextMenu: @MainActor (NSMenu?, NSEvent, NSView) -> Void = { menu, event, view in
     if let menu { NSMenu.popUpContextMenu(menu, with: event, for: view) }
+  }
+
+  /// The view a row's context menu is shown for: the page that lists the proxy outline (#860). AppKit makes that
+  /// view the open menu's accessibility parent, and clients reach the menu's items only through it. This outline is
+  /// not in the accessibility tree (the proxy stands for it), so a menu shown for it was on screen but could not be
+  /// found by XCUITest or walked to by VoiceOver.
+  var contextMenuAnchor: NSView { axProxyRows.parentView ?? self }
+
+  /// A right-click or Ctrl-click: `menu(for:)` sets `clickedRow`, which the menu's delegate reads to fill it.
+  private func showContextMenu(for event: NSEvent) {
+    presentContextMenu(menu(for: event), event, contextMenuAnchor)
   }
 
   public override func mouseDown(with event: NSEvent) {
@@ -190,7 +206,7 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
     // A Ctrl-click is a secondary click: the row's context menu, as a right-click shows, never the click action.
     // Left to the table, it sends the row action with Control set, which activates the row (#277).
     if modifiers.contains(.control) {
-      presentContextMenu(menu(for: event), event, self)
+      showContextMenu(for: event)
       return
     }
     clickModifiers = modifiers
@@ -228,10 +244,11 @@ public final class SidebarOutlineView: NSOutlineView, HoverResyncHost {
     }
   }
 
-  /// A right-click ends a rename in progress first too, as a left click does.
+  /// A right-click ends a rename in progress first too, as a left click does. The menu is shown here rather than by
+  /// `super`, which would show it for this outline, out of the accessibility tree (#860).
   public override func rightMouseDown(with event: NSEvent) {
     commitRenameInProgress()
-    super.rightMouseDown(with: event)
+    showContextMenu(for: event)
   }
 
   /// A click anywhere in the outline ends a rename in progress first, keeping the typed name (design 4.1): the
@@ -768,7 +785,9 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
       return (HostDisplay.title(title, for: url), image)
     case .folder?:
       let symbol = display.collapsed.contains(id) ? "folder" : "folder.fill"
-      return (title(of: id), SidebarGlyphs.symbol(symbol, flavor: flavor, scale: scale))
+      let image = source.nodeIcon(id).map { SidebarGlyphs.customIcon($0, flavor: flavor,
+        size: SidebarMetrics.faviconSize, scale: scale) } ?? SidebarGlyphs.symbol(symbol, flavor: flavor, scale: scale)
+      return (title(of: id), image)
     case .split?:
       return (title(of: id), SidebarGlyphs.symbol("rectangle.split.2x1", flavor: flavor, scale: scale))
     case nil:
@@ -776,8 +795,8 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     }
   }
 
-  /// A row's title: the tab or folder title, or a split's pane titles joined. No image is made, so accessibility
-  /// queries can read it cheaply.
+  /// A row's title: the tab or folder title, or a split's name (#787), else its pane titles joined. No image is made,
+  /// so accessibility queries can read it cheaply.
   private func title(of id: NodeID) -> String {
     switch source.node(id) {
     case .tab(_, let url, let title)?:
@@ -785,6 +804,7 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     case .folder(_, let title)?:
       return title
     case .split?:
+      if let name = source.splitTitle(id) { return name }
       let titles = children(of: id).compactMap { child -> String? in
         if case .tab(_, let url, let title)? = source.node(child) { return HostDisplay.title(title, for: url) }
         return nil
@@ -840,11 +860,19 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
       if let present = self.presentAccessibilityMenu {
         present(menu, row)
       } else {
-        let rect = self.outlineView.rect(ofRow: row)
-        menu.popUp(positioning: nil, at: NSPoint(x: rect.minX, y: rect.maxY), in: self.outlineView)
+        let placement = self.accessibilityMenuPlacement(forRow: row)
+        menu.popUp(positioning: nil, at: placement.point, in: placement.view)
       }
       return true
     }
+  }
+
+  /// Where a VoiceOver show-menu pops `row`'s menu up: under the row's bottom-left corner, in the outline's context
+  /// menu anchor, so the open menu hangs off a view clients reach (#860).
+  func accessibilityMenuPlacement(forRow row: Int) -> (view: NSView, point: NSPoint) {
+    let anchor = outlineView.contextMenuAnchor
+    let rect = outlineView.rect(ofRow: row)
+    return (anchor, anchor.convert(NSPoint(x: rect.minX, y: rect.maxY), from: outlineView))
   }
 
   /// Shows the menu of a VoiceOver show-menu on `row`; nil pops it up under the row. Tests replace it to record the
@@ -1031,6 +1059,8 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     outlineView.axProxyRows.post(.valueChanged, forRow: row)
     if let container = source.parent(of: id)?.containerNode, case .split? = source.node(container),
        let splitItem = items[container] {
+      // The split being renamed waits like any renamed row: a reload would replace its cell and commit the field.
+      guard container != renamingNode else { renameReloadPending = true; return }
       outlineView.reloadItem(splitItem, reloadChildren: false)   // split titles derive from their panes
       outlineView.axProxyRows.post(.titleChanged, forRow: outlineView.row(forItem: splitItem))
     }
@@ -1082,7 +1112,13 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
       } else {
         syncDisplay(id)
       }
-      if case .split = location { outlineView.reloadItem(parent, reloadChildren: false) }  // title from panes
+      if case .split(let split) = location {                 // title from panes
+        if split == renamingNode {
+          renameReloadPending = true
+        } else {
+          outlineView.reloadItem(parent, reloadChildren: false)
+        }
+      }
     default:
       return
     }
@@ -1759,7 +1795,7 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
   private var renameOriginalTitle: String?
 
   /// Double-click on a tab row opens its rename field (BH-026, GS-004). Folders open and close on the first click
-  /// and are renamed from their menu; splits have no stored title.
+  /// and are renamed from their menu, as splits are (#787).
   @objc private func rowDoubleClicked(_ sender: Any?) {
     handleDoubleClick(row: outlineView.clickedRow, modifiers: outlineView.clickModifiers)
   }
@@ -1770,14 +1806,14 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     beginRename(id)
   }
 
-  /// Opens the inline rename field on `id`'s row (tabs and folders). The typed name goes to the source on Return or
-  /// a click elsewhere; Escape keeps the title. False when the row is not shown or the field could not open.
+  /// Opens the inline rename field on `id`'s row (tabs, folders and splits). The typed name goes to the source on
+  /// Return or a click elsewhere; Escape keeps the title. False when the row is not shown or the field could not open.
   @discardableResult
   public func beginRename(_ id: NodeID) -> Bool {
     guard renamingNode == nil else { return false }
     switch source.node(id) {
-    case .tab?, .folder?: break
-    case .split?, nil: return false
+    case .tab?, .folder?, .split?: break
+    case nil: return false
     }
     let row = row(for: id)
     guard row >= 0 else { return false }
@@ -1786,8 +1822,17 @@ public final class SidebarOutlineController: NSObject, NSOutlineViewDataSource, 
     else { return false }
     renamingNode = id
     renameReloadPending = false
-    renameOriginalTitle = Self.renameText(of: source.node(id))
-    let opened = cell.beginRename(flavor: flavor) { [weak self] typed in self?.finishRename(id, typed: typed) }
+    // A split's field opens on its row title: its name, else its pane titles (#787).
+    renameOriginalTitle = if case .split? = source.node(id) { title(of: id) }
+      else { Self.renameText(of: source.node(id)) }
+    let label = switch source.node(id) {
+    case .split?: "Split View name"
+    case .folder?: "Folder name"
+    default: "Tab name"
+    }
+    let opened = cell.beginRename(flavor: flavor, accessibilityLabel: label) { [weak self] typed in
+      self?.finishRename(id, typed: typed)
+    }
     if !opened { renamingNode = nil }
     return opened
   }

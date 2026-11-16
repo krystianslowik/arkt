@@ -592,6 +592,19 @@ struct BrowserDataImportModelTests {
     _ = await answer.value
   }
 
+  // MARK: Outcomes to rows (#935)
+
+  @Test func aTypeWithNothingInArktAndFailuresIsNotImported() {
+    #expect(BrowserDataImportModel.status(.done(ImportItemCounts(failed: 2))) == .notImported(.refused(failed: 2)))
+    #expect(BrowserDataImportModel.status(.done(ImportItemCounts(skipped: 1, failed: 2))) == .imported(count: 1, failed: 2))
+    #expect(BrowserDataImportModel.status(.done(ImportItemCounts())) == .imported(count: 0, failed: 0))
+  }
+
+  @Test func visitsPastTheWindowAreCarriedApartFromTheCount() {
+    #expect(BrowserDataImportModel.status(.done(ImportItemCounts(written: 3, skipped: 1, tooOld: 5)))
+      == .imported(count: 4, failed: 0, tooOld: 5))
+  }
+
   // MARK: The real coordinator
 
   @Test func aFullImportThroughTheRealCoordinatorShowsEveryTypeAndEndsInAResult() async throws {

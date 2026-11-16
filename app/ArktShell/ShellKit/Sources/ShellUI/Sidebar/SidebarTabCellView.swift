@@ -141,7 +141,8 @@ public final class SidebarTabCellView: NSTableCellView, NSTextFieldDelegate {
   /// Opens the field over the title with the title selected. False when the cell has no window or the field could
   /// not take focus (nothing changes then).
   @discardableResult
-  public func beginRename(flavor: ThemeFlavor, onEnd: @escaping @MainActor (String?) -> Void) -> Bool {
+  public func beginRename(flavor: ThemeFlavor, accessibilityLabel: String = "Tab name",
+                          onEnd: @escaping @MainActor (String?) -> Void) -> Bool {
     guard !isRenaming, let window else { return false }
     let field = NSTextField(string: titleField.stringValue)
     field.font = .systemFont(ofSize: Self.renameFontSize)
@@ -154,7 +155,7 @@ public final class SidebarTabCellView: NSTableCellView, NSTextFieldDelegate {
     field.lineBreakMode = .byClipping
     field.appearance = NSAppearance(named: flavor == .dark ? .darkAqua : .aqua)
     field.delegate = self
-    field.setAccessibilityLabel("Tab name")
+    field.setAccessibilityLabel(accessibilityLabel)
     renameField = field
     onRenameEnd = onEnd
     renameCancelled = false
@@ -554,6 +555,20 @@ enum SidebarGlyphs {
   static func close(flavor: ThemeFlavor, scale: CGFloat, cache: SymbolImageCache = .shared) -> NSImage {
     cache.symbol("xmark", box: SidebarMetrics.closeButtonGlyphSize, weight: .semibold,
                  color: ShellTokens.sidebarForeground.resolve(flavor), scale: scale)
+  }
+
+  static func customIcon(_ icon: SpaceIconInfo, flavor: ThemeFlavor, size: CGFloat, scale: CGFloat,
+                         cache: SymbolImageCache = .shared) -> NSImage {
+    switch icon {
+    case .symbol(let name):
+      return cache.symbol(name, box: size, color: ShellTokens.primaryText.resolve(flavor), scale: scale)
+    case .emoji(let emoji):
+      return cache.bitmap(key: "node-emoji-\(emoji)", size: size, scale: scale) { rect in
+        let text = NSAttributedString(string: emoji, attributes: [.font: NSFont.systemFont(ofSize: rect.height * 0.8)])
+        let measured = text.size()
+        text.draw(at: NSPoint(x: rect.midX - measured.width / 2, y: rect.midY - measured.height / 2))
+      }
+    }
   }
 
   /// Row symbol in the row's text color for `flavor`.

@@ -56,6 +56,78 @@ final class InfobarWindowTests: XCTestCase {
     XCTAssertNil(controller.infobarStrips.strip(for: tab), "the engine removed it")
   }
 
+  /// Tab past the page's last element and Shift-Tab before its first reach the window's key view loop with the page's
+  /// view (#930): the window hands them to the tab's strip, at its first or last control.
+  func testTabOutOfThePageReachesTheStripThroughTheWindow() throws {
+    controller.activate(node: first)
+    let tab = try XCTUnwrap(controller.currentTab)
+    engine.raiseInfobar(in: tab, message: "One")
+    let window = try XCTUnwrap(controller.window)
+    let page = try XCTUnwrap(engine.contentView(for: tab))
+    let strip = try XCTUnwrap(controller.infobarStrips.strip(for: tab))
+
+    window.selectNextKeyView(page)
+    XCTAssertEqual(strip.keyboardFocusedControl?.accessibilityLabel(), "OK", "the strip's first control")
+    strip.endKeyboard(returningToPage: true, at: .first)
+    window.selectPreviousKeyView(page)
+    XCTAssertEqual(strip.keyboardFocusedControl?.accessibilityLabel(), "Close", "the strip's last control")
+    strip.endKeyboard(returningToPage: true, at: .last)
+    XCTAssertTrue(window.firstResponder === page, "the page has the keyboard again")
+  }
+
+  /// The window's Tab hand-off is set with the window (#941), before anything made the infobar presenter.
+  func testTheWindowHandsTabToTheStripsFromTheStart() throws {
+    let fresh = ShellWindowController(engine: InMemoryEngine(),
+                                      sidebar: ModelSidebarSource(sidebar: SidebarModel.Sidebar(), now: { .now }))
+    defer { fresh.close() }
+    XCTAssertNotNil((fresh.window as? ShellWindow)?.keyViewHandoff)
+  }
+
+  /// A split view shows two pages, each with its own strip (#941): Tab out of pane B's page reaches B's strip, and
+  /// A's strip keeps no keyboard.
+  func testTabOutOfASplitPaneReachesThatPanesStrip() throws {
+    var sidebar = SidebarModel.Sidebar()
+    let space = sidebar.addSpace(title: "Work")
+    let split = try sidebar.addSplit(orientation: .horizontal, widthFactors: [0.5, 0.5], in: .today(space))
+    let panes = try ["a", "b"].map {
+      try sidebar.addTab(url: URL(string: "https://example.com/\($0)")!, title: $0, in: .split(split))
+    }
+    let engine = InMemoryEngine()
+    let split2 = ShellWindowController(engine: engine, sidebar: ModelSidebarSource(sidebar: sidebar, now: { .now }))
+    defer { split2.close() }
+    split2.window?.setFrame(NSRect(x: 100, y: 100, width: 1200, height: 800), display: false)
+    split2.showWindow(nil)
+    split2.infobarStrips.reduceMotion = { true }
+    split2.activate(node: panes[0])
+    let a = try XCTUnwrap(split2.engineTab(of: panes[0]))
+    let b = try XCTUnwrap(split2.engineTab(of: panes[1]))
+    split2.window?.contentView?.layoutSubtreeIfNeeded()               // both panes laid out side by side
+    engine.raiseInfobar(in: a, message: "For A")
+    engine.raiseInfobar(in: b, message: "For B")
+    let stripA = try XCTUnwrap(split2.infobarStrips.strip(for: a), "both panes are on screen")
+    let stripB = try XCTUnwrap(split2.infobarStrips.strip(for: b))
+    let pageB = try XCTUnwrap(engine.contentView(for: b))
+
+    try XCTUnwrap(split2.window).selectNextKeyView(pageB)
+
+    XCTAssertEqual(stripB.keyboardFocusedControl?.accessibilityLabel(), "OK")
+    XCTAssertNil(stripA.keyboardFocus)
+  }
+
+  /// `EngineClient.focusPage(of:at:)`'s default, for an engine whose content view is the page: the page gets the
+  /// keyboard as `focusPage(of:)` gives it, at either edge (#941).
+  func testTheDefaultEdgeFocusGivesThePageTheKeyboard() throws {
+    controller.activate(node: first)
+    let tab = try XCTUnwrap(controller.currentTab)
+    let window = try XCTUnwrap(controller.window)
+    let page = try XCTUnwrap(engine.contentView(for: tab))
+    for edge in [PageFocusEdge.first, .last] {
+      window.makeFirstResponder(nil)
+      engine.focusPage(of: tab, at: edge)
+      XCTAssertTrue(window.firstResponder === page, "\(edge)")
+    }
+  }
+
   func testEachTabKeepsItsOwnListAcrossSwitches() throws {
     controller.activate(node: first)
     let firstTab = try XCTUnwrap(controller.currentTab)

@@ -162,11 +162,11 @@ final class SidebarViewTests: XCTestCase {
     grid.layoutSubtreeIfNeeded()
     let frames = (0..<6).compactMap { grid.item(at: IndexPath(item: $0, section: 0))?.view.frame }
     XCTAssertEqual(frames.count, 6)
-    XCTAssertEqual(frames[0].size, CGSize(width: 52, height: 46))
+    XCTAssertEqual(frames[0].size, CGSize(width: 53, height: 47))
     XCTAssertEqual(Set(frames.prefix(3).map(\.minY)).count, 1, "first three favorites share a row")
-    XCTAssertEqual(frames[1].minX - frames[0].maxX, 9, accuracy: 0.01)
-    XCTAssertEqual(frames[3].minY - frames[0].maxY, 9, accuracy: 0.01)
-    XCTAssertEqual(controller.view.favorites.frame.height, 46 * 2 + 9)
+    XCTAssertEqual(frames[1].minX - frames[0].maxX, 8, accuracy: 0.01)
+    XCTAssertEqual(frames[3].minY - frames[0].maxY, 8, accuracy: 0.01)
+    XCTAssertEqual(controller.view.favorites.frame.height, 47 * 2 + 8)
   }
 
   /// An empty Favorites grid is 0 pt tall, so the first Favorites (an Arc import into an empty profile) arrive while
@@ -189,11 +189,11 @@ final class SidebarViewTests: XCTestCase {
     }
     controller.view.layoutSubtreeIfNeeded()
 
-    XCTAssertEqual(grid.frame.height, 46 * 2 + 9)
+    XCTAssertEqual(grid.frame.height, 47 * 2 + 8)
     XCTAssertFalse(grid.collectionView.bounds.isEmpty)
     XCTAssertEqual(grid.collectionView.numberOfSections, 1)
     XCTAssertEqual(grid.collectionView.numberOfItems(inSection: 0), titles.count)
-    XCTAssertEqual(grid.collectionView.collectionViewLayout?.collectionViewContentSize.height, 46 * 2 + 9,
+    XCTAssertEqual(grid.collectionView.collectionViewLayout?.collectionViewContentSize.height, 47 * 2 + 8,
                    "the layout is prepared for every Favorite")
     XCTAssertEqual(grid.collectionView.visibleItems().count, titles.count)
     for (id, title) in zip(ids, titles) {
@@ -416,6 +416,67 @@ final class SidebarViewTests: XCTestCase {
     XCTAssertTrue(try cell(controller, tab).faviconView.image === placeholder, "nil restores the cached placeholder")
   }
 
+  /// Compare the pixels drawn in the same icon slot, independent of image/cache object identity.
+  private func iconPixels(_ image: NSImage?) throws -> Data {
+    let image = try XCTUnwrap(image)
+    let bitmap = try XCTUnwrap(NSBitmapImageRep(
+      bitmapDataPlanes: nil, pixelsWide: 32, pixelsHigh: 32, bitsPerSample: 8, samplesPerPixel: 4,
+      hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 128, bitsPerPixel: 32))
+    bitmap.size = NSSize(width: 16, height: 16)
+    let context = try XCTUnwrap(NSGraphicsContext(bitmapImageRep: bitmap))
+    NSGraphicsContext.saveGraphicsState()
+    defer { NSGraphicsContext.restoreGraphicsState() }
+    NSGraphicsContext.current = context
+    let rect = NSRect(x: 0, y: 0, width: 16, height: 16)
+    context.cgContext.clear(rect)
+    image.draw(in: rect, from: .zero, operation: .copy, fraction: 1)
+    return Data(bytes: try XCTUnwrap(bitmap.bitmapData), count: 32 * 128)
+  }
+
+  func testFavoriteOverrideKeepsLatestFaviconForReset() async throws {
+    let sidebar = StubSidebar.sample()
+    let controller = makeSidebar(sidebar)
+    let favorite = try XCTUnwrap(sidebar.children(of: .favorites(profile: "default")).first)
+    let tile = try XCTUnwrap(controller.view.favorites.tile(for: favorite))
+    func data(_ size: CGFloat) throws -> Data {
+      let image = NSImage(size: NSSize(width: size, height: size), flipped: false) { rect in
+        NSColor.red.setFill(); rect.fill(); return true
+      }
+      return try XCTUnwrap(image.tiffRepresentation)
+    }
+    controller.setFavicon(try data(8), for: favorite)
+    await controller.settleFaviconDecodes()
+    let first = try XCTUnwrap(tile.faviconView.image)
+    sidebar.setNodeIcon(favorite, to: .symbol("star"))
+    let custom = try XCTUnwrap(tile.faviconView.image)
+    XCTAssertNotEqual(try iconPixels(custom), try iconPixels(first))
+    controller.setFavicon(try data(16), for: favorite)
+    await controller.settleFaviconDecodes()
+    XCTAssertEqual(try iconPixels(tile.faviconView.image), try iconPixels(custom))
+    XCTAssertEqual(controller.favicons[favorite]?.size, NSSize(width: 16, height: 16))
+    sidebar.setNodeIcon(favorite, to: nil)
+    XCTAssertEqual(try iconPixels(tile.faviconView.image), try iconPixels(controller.favicons[favorite]))
+  }
+
+  func testFolderOverrideSurvivesExpansionAndResetRestoresBothFallbacks() throws {
+    let sidebar = StubSidebar.sample()
+    let controller = makeSidebar(sidebar)
+    let space = sidebar.spaceOrder[0]
+    let folder = try XCTUnwrap(sidebar.children(of: .pinned(space)).first { !isTab(sidebar, $0) })
+    let outline = try XCTUnwrap(controller.currentPage?.outlineController)
+    let expanded = SidebarGlyphs.symbol("folder.fill", flavor: .light, scale: outline.outlineView.shellBackingScale)
+    let collapsed = SidebarGlyphs.symbol("folder", flavor: .light, scale: outline.outlineView.shellBackingScale)
+    sidebar.setNodeIcon(folder, to: .symbol("star"))
+    let custom = try XCTUnwrap(try cell(controller, folder).faviconView.image)
+    XCTAssertNotEqual(try iconPixels(custom), try iconPixels(expanded))
+    outline.handleClick(row: outline.row(for: folder), modifiers: [])
+    XCTAssertEqual(try iconPixels(try cell(controller, folder).faviconView.image), try iconPixels(custom))
+    sidebar.setNodeIcon(folder, to: nil)
+    XCTAssertEqual(try iconPixels(try cell(controller, folder).faviconView.image), try iconPixels(collapsed))
+    outline.handleClick(row: outline.row(for: folder), modifiers: [])
+    XCTAssertEqual(try iconPixels(try cell(controller, folder).faviconView.image), try iconPixels(expanded))
+  }
+
   func testDeactivateClearsStates() throws {
     let sidebar = StubSidebar.sample()
     let controller = makeSidebar(sidebar)
@@ -514,7 +575,7 @@ final class MountedSidebarTests: XCTestCase {
     grid.layoutSubtreeIfNeeded()
     let frames = (0..<3).compactMap { grid.item(at: IndexPath(item: $0, section: 0))?.view.frame }
     XCTAssertEqual(frames.count, 3)
-    XCTAssertEqual(frames[0].size, CGSize(width: 52, height: 46))
+    XCTAssertEqual(frames[0].size, CGSize(width: 53, height: 47))
     XCTAssertEqual(Set(frames.map(\.minY)).count, 1, "first three favorites share a row")
   }
 

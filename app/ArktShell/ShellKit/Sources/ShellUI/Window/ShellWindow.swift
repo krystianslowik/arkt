@@ -22,12 +22,16 @@ public final class ShellWindow: NSWindow {
     setAccessibilityIdentifier(AXID.Shell.window)
   }
 
-  /// Where the traffic lights sit (#102): in the docked sidebar's top strip, in the hover-revealed overlay's (at its
-  /// origin, faded with the reveal), or nowhere while the sidebar is hidden, so no buttons float over the page.
+  /// Where the traffic lights sit (#102): in the docked sidebar's top strip, in the hover-revealed overlay's, or nowhere
+  /// while the sidebar is hidden, so no buttons float over the page.
   /// PARITY(NEEDS-RUNTIME-CHECK RT-10): that Arc hides them with the sidebar.
+  ///
+  /// The overlay case carries what the overlay presents on its current frame (#807): `origin` is its resting place,
+  /// `slide` its layer translation along x and `alpha` its opacity, so the buttons are drawn on the overlay as it moves
+  /// or fades.
   public enum TrafficLightPlacement: Equatable, Sendable {
     case sidebar
-    case overlay(origin: CGPoint, alpha: CGFloat)
+    case overlay(origin: CGPoint, slide: CGFloat, alpha: CGFloat)
     case hidden
   }
 
@@ -38,19 +42,33 @@ public final class ShellWindow: NSWindow {
   /// of the sidebar (window coordinates; the overlay's origin when it is revealed). AppKit resets these frames on
   /// several events; ShellRootView.layout() and the window controller call this again each time.
   ///
-  /// The titlebar container is narrowed to the sidebar so it never sits over (and steals clicks from) the
-  /// content card; it is never narrower than the three buttons, so they stay hit-testable. With the sidebar hidden
-  /// and no overlay out it is zero wide and the buttons are hidden.
+  /// The buttons' host (`NSTitlebarView`) is narrowed to the sidebar so it never sits over (and steals clicks from)
+  /// the content card; it is never narrower than the three buttons, so they stay hit-testable. With the sidebar hidden
+  /// and no overlay out it is zero wide and the buttons are hidden. Its container keeps the window's width. While the
+  /// overlay slides, the host keeps the overlay's resting extent and only the buttons move with it.
+  ///
+  /// Showing, hiding or fading a standard button makes AppKit lay its titlebar out again at once: the host goes back
+  /// to the window's full width and the buttons to AppKit's own places (#807). So visibility and opacity are set
+  /// first and the geometry last, every call.
   public func layoutTrafficLights(sidebarWidth: CGFloat) {
     guard !styleMask.contains(.fullScreen) else { return }
     let kinds: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
     guard let close = standardWindowButton(.closeButton),
           let titlebar = close.superview,                    // NSTitlebarView
           let container = titlebar.superview else { return } // NSTitlebarContainerView
-    let (offset, shown, alpha): (CGPoint, Bool, CGFloat) = switch trafficLightPlacement {
-    case .sidebar: (.zero, true, 1)
-    case .overlay(let origin, let alpha): (origin, true, alpha)
-    case .hidden: (.zero, false, 0)
+    let (offset, slide, shown, alpha): (CGPoint, CGFloat, Bool, CGFloat) = switch trafficLightPlacement {
+    case .sidebar: (.zero, 0, true, 1)
+    case .overlay(let origin, let slide, let alpha): (origin, slide, true, alpha)
+    case .hidden: (.zero, 0, false, 0)
+    }
+    let buttons = kinds.compactMap { standardWindowButton($0) }
+    var unhid = false
+    for button in buttons {
+      if button.isHidden == shown {
+        button.isHidden = !shown
+        unhid = unhid || shown
+      }
+      if button.alphaValue != alpha, shown { button.alphaValue = alpha }
     }
     let origin = metrics.trafficLightOrigin
     // As tall as the sidebar's traffic-light strip, so the sidebar URL bar below it keeps its clicks, and never
@@ -58,17 +76,15 @@ public final class ShellWindow: NSWindow {
     let height = max(metrics.sidebarTopBarHeight, origin.y + close.frame.height) + offset.y
     let buttonsExtent = origin.x * 2 + CGFloat(kinds.count - 1) * metrics.trafficLightSpacing + close.frame.width
     let width = shown ? min(frame.width, offset.x + max(sidebarWidth, buttonsExtent)) : 0
-    let containerFrame = NSRect(x: 0, y: frame.height - height, width: width, height: height)
+    // The container spans the window, as in a stock window: it also hosts AppKit's titlebar decoration, which draws the
+    // window's top rim (a bright edge with rounded corners). Narrowed, that rim ended in a corner at the sidebar's edge
+    // and the docked sidebar looked like a separate card (#808). Only the buttons' host is narrowed.
+    let containerFrame = NSRect(x: 0, y: frame.height - height, width: frame.width, height: height)
     if container.frame != containerFrame { container.frame = containerFrame }
-    var unhid = false
-    for (index, kind) in kinds.enumerated() {
-      guard let button = standardWindowButton(kind) else { continue }
-      if button.isHidden == shown {
-        button.isHidden = !shown
-        unhid = unhid || shown
-      }
-      if button.alphaValue != alpha, shown { button.alphaValue = alpha }
-      let x = offset.x + origin.x + CGFloat(index) * metrics.trafficLightSpacing
+    let titlebarFrame = NSRect(x: 0, y: 0, width: width, height: height)
+    if titlebar.frame != titlebarFrame { titlebar.frame = titlebarFrame }
+    for (index, button) in buttons.enumerated() {
+      let x = offset.x + slide + origin.x + CGFloat(index) * metrics.trafficLightSpacing
       let y = titlebar.bounds.height - offset.y - origin.y - button.frame.height   // titlebar view is not flipped
       let target = NSPoint(x: x, y: y)
       if button.frame.origin != target { button.setFrameOrigin(target) }
@@ -83,6 +99,21 @@ public final class ShellWindow: NSWindow {
   /// Sees key-down, flags-changed and mouse-down events before anything else in the window and returns true for the
   /// ones that must go no further: the Ctrl-Tab switcher (#103), which a page must never take.
   public var eventInterceptor: (@MainActor (NSEvent) -> Bool)?
+
+  /// Asked first when the key view loop moves on from `view` (#930): Tab past a page's last element or Shift-Tab before
+  /// its first ends here (Chromium's `TakeFocus` on this window, with the page's view as the sender). True when the
+  /// handler took the keyboard (into the page's infobar strip); false lets the window's key view loop run as usual.
+  public var keyViewHandoff: (@MainActor (_ view: NSView, _ reverse: Bool) -> Bool)?
+
+  public override func selectNextKeyView(_ sender: Any?) {
+    if let view = sender as? NSView, keyViewHandoff?(view, false) == true { return }
+    super.selectNextKeyView(sender)
+  }
+
+  public override func selectPreviousKeyView(_ sender: Any?) {
+    if let view = sender as? NSView, keyViewHandoff?(view, true) == true { return }
+    super.selectPreviousKeyView(sender)
+  }
 
   /// Mouse buttons 3 and 4 switch to the previous / next Space anywhere in the window (GS-002, BH-035, #98).
   public override func sendEvent(_ event: NSEvent) {

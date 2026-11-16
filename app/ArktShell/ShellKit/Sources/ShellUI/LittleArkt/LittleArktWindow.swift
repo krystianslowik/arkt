@@ -11,6 +11,10 @@ final class LittleArktWindow: NSWindow {
   /// The window's own key equivalents, asked first; true when taken.
   var onKeyEquivalent: (@MainActor (NSEvent) -> Bool)?
   var reservedKeys = ReservedKeys.arkt
+  /// Asked first when the key view loop moves on from `view` (#930): Tab past a page's last element or Shift-Tab before
+  /// its first ends here (Chromium's `TakeFocus` on this window, with the page's view as the sender). True when the
+  /// handler took the keyboard (into the page's infobar strip); false lets the window's key view loop run as usual.
+  var keyViewHandoff: (@MainActor (_ view: NSView, _ reverse: Bool) -> Bool)?
 
   init(contentRect: NSRect) {
     super.init(contentRect: contentRect,
@@ -30,24 +34,22 @@ final class LittleArktWindow: NSWindow {
     setAccessibilityLabel(LittleArktCopy.windowDescription)
   }
 
-  /// Close, minimize and zoom at x 12, 35 and 58, centered in the 40 pt top bar. The titlebar container is narrowed
-  /// to the buttons, so it never takes clicks from the host label or the controls.
+  /// Close, minimize and zoom at x 12, 35 and 58, centered in the 40 pt top bar. Only the buttons' host is narrowed to
+  /// the buttons, so it never takes clicks from the host label or the controls; the window's top rim spans the window.
   func layoutTrafficLights() {
-    guard !styleMask.contains(.fullScreen), let close = standardWindowButton(.closeButton),
-          let titlebar = close.superview, let container = titlebar.superview else { return }
     let metrics = ShellMetrics.standard
-    let height = LittleArktLayout.topBarHeight
-    let width = metrics.trafficLightOrigin.x * 2 + metrics.trafficLightSpacing * 2 + close.frame.width
-    let containerFrame = NSRect(x: 0, y: frame.height - height, width: width, height: height)
-    if container.frame != containerFrame { container.frame = containerFrame }
-    let kinds: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
-    for (index, kind) in kinds.enumerated() {
-      guard let button = standardWindowButton(kind) else { continue }
-      let x = metrics.trafficLightOrigin.x + CGFloat(index) * metrics.trafficLightSpacing
-      let y = ((titlebar.bounds.height - button.frame.height) / 2).rounded()
-      let origin = NSPoint(x: x, y: y)
-      if button.frame.origin != origin { button.setFrameOrigin(origin) }
-    }
+    placeTrafficLights(barHeight: LittleArktLayout.topBarHeight, firstX: metrics.trafficLightOrigin.x,
+                       spacing: metrics.trafficLightSpacing)
+  }
+
+  override func selectNextKeyView(_ sender: Any?) {
+    if let view = sender as? NSView, keyViewHandoff?(view, false) == true { return }
+    super.selectNextKeyView(sender)
+  }
+
+  override func selectPreviousKeyView(_ sender: Any?) {
+    if let view = sender as? NSView, keyViewHandoff?(view, true) == true { return }
+    super.selectPreviousKeyView(sender)
   }
 
   override func performKeyEquivalent(with event: NSEvent) -> Bool {
@@ -173,9 +175,10 @@ public final class LittleArktEngineHost: EngineWindowHosting {
   }
 
   /// An Esc the page did not use stops the page while it loads, unless another Esc owner of the window is open
-  /// (KB-055, #757).
+  /// (KB-055, #757). An F6 the page did not use puts the keyboard in the page's infobar strip (#478).
   public func handleUnhandledKeyDown(_ event: NSEvent, in tab: TabID?) -> Bool {
-    controller?.stopLoadingOnEscape(event, in: tab) ?? false
+    guard let controller else { return false }
+    return controller.focusInfobarStrip(event, in: tab) || controller.stopLoadingOnEscape(event, in: tab)
   }
 
   func dispatch(_ command: EngineCommand, disposition: EngineDisposition) {

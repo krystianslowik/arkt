@@ -121,17 +121,22 @@ public enum ExtensionSiteAccess: Equatable, Sendable {
 /// only to this menu, which the Chromium engine maps to `ExtensionContextMenuModel` entries. A chosen item goes back
 /// through `performExtensionContextCommand`. The shell runs `manage` (Settings, Extensions) and `remove` (the remove
 /// sheet) itself; the engine runs the rest.
+///
+/// The extension's own `chrome.contextMenus` items for its action (#915) use the commands in `customRange`: the engine
+/// lists them right after the header, between separators, with their submenus, check marks and enabled state, and
+/// runs them itself (Chromium fires `chrome.contextMenus.onClicked` for the tab that was active when the menu was
+/// built). Their commands are meaningful only to the menu they came in; the shell passes them back unchanged.
 public enum ExtensionContextCommand {
   /// The extension's name, the menu's disabled header; running it does nothing.
   public static let header = EngineMenuCommand(rawValue: 0)
   /// Options...: opens the extension's options page in a tab.
   public static let options = EngineMenuCommand(rawValue: 1)
-  /// Pin to Sidebar or Unpin from Sidebar, by the current state.
+  /// Pin or Unpin, by the current state.
   public static let togglePin = EngineMenuCommand(rawValue: 2)
-  /// Move Left: one place earlier in the pinned order.
-  public static let moveLeft = EngineMenuCommand(rawValue: 3)
-  /// Move Right: one place later in the pinned order.
-  public static let moveRight = EngineMenuCommand(rawValue: 4)
+  /// Move Up: one place earlier in the pinned order.
+  public static let moveUp = EngineMenuCommand(rawValue: 3)
+  /// Move Down: one place later in the pinned order.
+  public static let moveDown = EngineMenuCommand(rawValue: 4)
   public static let siteAccessOnClick = EngineMenuCommand(rawValue: 5)
   public static let siteAccessOnThisSite = EngineMenuCommand(rawValue: 6)
   public static let siteAccessOnAllSites = EngineMenuCommand(rawValue: 7)
@@ -139,6 +144,19 @@ public enum ExtensionContextCommand {
   public static let manage = EngineMenuCommand(rawValue: 8)
   /// Remove from Arkt...: the shell's remove sheet.
   public static let remove = EngineMenuCommand(rawValue: 9)
+
+  /// The commands of the extension's own items (#915), the facade's `ArktExtensionContextCommandCustomFirst` to
+  /// `CustomLast`: item `n` of the extension's list is `custom(n)`. Above the fixed ten. Chromium assigns at most 1000
+  /// ids per menu (49000 to 49999, so up to 1999 here); 2000 is accepted, as Chromium accepts 50000, but never assigned.
+  public static let customRange: ClosedRange<Int> = 1000...2000
+  /// The command of the extension's own item `index`, which must be in `0...1000`.
+  public static func custom(_ index: Int) -> EngineMenuCommand {
+    precondition((0...(customRange.upperBound - customRange.lowerBound)).contains(index),
+                 "custom item \(index) is outside the custom range")
+    return EngineMenuCommand(rawValue: customRange.lowerBound + index)
+  }
+  /// Whether `command` is one of the extension's own items.
+  public static func isCustom(_ command: EngineMenuCommand) -> Bool { customRange.contains(command.rawValue) }
 }
 
 // MARK: - Keyboard commands (#591)
@@ -324,7 +342,9 @@ public enum EngineExtensionEvent: Equatable, Sendable {
   /// An extension was installed, in place of Chromium's post-install text. Its order against the
   /// `.extensionActionsChanged` that lists its action (and its pin, when it pins on install) is not guaranteed: in
   /// Chromium `OnExtensionLoaded` adds the action before `OnExtensionInstalled` fires. `OnExtensionInstalled` also
-  /// fires for an update (`is_update`); the engine filters those out and reports only first installs.
+  /// fires for an update (`is_update`); the engine filters those out and reports only first installs. ChromiumEngine
+  /// reports first installs from the Web Store, a user's .crx and an import's batch (#592), not themes or apps;
+  /// unpacked, external, policy and component extensions report nothing.
   case installed(InstalledExtension)
   /// `extensionCommands` changed: a shortcut or scope set, an extension with commands added or removed.
   case commandsChanged

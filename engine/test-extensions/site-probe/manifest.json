@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Arkt site probe",
+  "version": "1.0",
+  "description": "Asks for all sites, has an options page and counts tab updates on its badge (pin, order, site access and badge checks, #593).",
+  "host_permissions": ["<all_urls>"],
+  "action": { "default_title": "Arkt site probe" },
+  "options_page": "options.html",
+  "background": { "service_worker": "sw.js" },
+  "content_scripts": [
+    { "matches": ["<all_urls>"], "js": ["content.js"], "run_at": "document_end" }
+  ]
+}

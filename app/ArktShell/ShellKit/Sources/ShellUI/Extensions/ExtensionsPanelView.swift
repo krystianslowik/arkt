@@ -7,7 +7,7 @@ import EngineAPI
 /// are set directly; a reload lays the list out at once.
 ///
 /// Ordering: drag a pinned row by its grip (the row lifts, follows the pointer by its transform alone and a 2 pt line
-/// marks the drop place), Cmd-Option-arrow on a focused pinned row, or the row's Move Left and Move Right
+/// marks the drop place), Cmd-Option-arrow on a focused pinned row, or the row's Move Up and Move Down
 /// accessibility actions and context menu items.
 @MainActor
 final class ExtensionsPanelView: NSView {
@@ -207,7 +207,7 @@ final class ExtensionsPanelView: NSView {
     return row
   }
 
-  /// Move Left (-1) or Move Right (1) of a pinned row; false at the end it moves towards.
+  /// Move Up (-1) or Move Down (1) of a pinned row; false at the end it moves towards.
   @discardableResult
   func move(_ row: ExtensionsPanelRow, by step: Int) -> Bool {
     guard let target = model.moveTarget(of: row.action.extensionID, by: step) else { return false }
@@ -217,7 +217,7 @@ final class ExtensionsPanelView: NSView {
 
   // MARK: Keyboard
 
-  /// Cmd-Option-Up or Left: Move Left; Cmd-Option-Down or Right: Move Right, for the pinned row holding the focus.
+  /// Cmd-Option-Up or Left: Move Up; Cmd-Option-Down or Right: Move Down, for the pinned row holding the focus.
   override func performKeyEquivalent(with event: NSEvent) -> Bool {
     let flags = event.modifierFlags.intersection([.command, .option, .control, .shift])
     guard flags == [.command, .option], let step = Self.moveStep(keyCode: event.keyCode),

@@ -280,6 +280,7 @@ private final class FailingSpaceSidebar: SidebarSource {
   func children(of location: SidebarLocation) -> [NodeID] { base.children(of: location) }
   func node(_ id: NodeID) -> SidebarNodeInfo? { base.node(id) }
   func parent(of id: NodeID) -> SidebarLocation? { base.parent(of: id) }
+  func splitTitle(_ id: NodeID) -> String? { base.splitTitle(id) }
   func addTab(url: URL, title: String, in location: SidebarLocation, at index: Int?) throws -> NodeID {
     base.addTab(url: url, title: title, in: location, at: index)
   }

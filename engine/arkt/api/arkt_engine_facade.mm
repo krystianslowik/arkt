@@ -3,6 +3,7 @@
 #import <AppKit/AppKit.h>
 
 #include <algorithm>
+#include <limits>
 #include <map>
 #include <memory>
 #include <optional>
@@ -15,20 +16,24 @@
 #include "arkt/api/arkt_import_writer.h"
 #include "arkt/api/arkt_page_info.h"
 #include "arkt/browser/arkt_browser_window.h"
+#include "arkt/browser/arkt_dialog_probe.h"
 #include "arkt/browser/arkt_extension_batch_install.h"
 #include "arkt/browser/arkt_extension_calls.h"
+#include "arkt/browser/arkt_extension_commands.h"
+#include "arkt/browser/arkt_extension_installs.h"
 #include "arkt/browser/arkt_extension_uninstall.h"
 #include "arkt/browser/arkt_extensions_container.h"
 #include "arkt/browser/arkt_extensions_menu.h"
-#include "arkt/browser/arkt_javascript_dialog.h"
 #import "arkt/browser/arkt_infobar_view.h"
 #include "arkt/browser/arkt_infobars.h"
+#include "arkt/browser/arkt_javascript_dialog.h"
 #include "arkt/browser/arkt_link_activation.h"
 #include "arkt/browser/arkt_permission_prompt.h"
+#include "arkt/browser/arkt_stub_probe.h"
 #import "arkt/browser/arkt_tab_container_view.h"
 #include "base/check.h"
-#include "base/command_line.h"
 #include "base/check_op.h"
+#include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/functional/bind.h"
@@ -38,8 +43,8 @@
 #include "base/no_destructor.h"
 #include "base/process/kill.h"
 #include "base/scoped_observation.h"
-#include "base/strings/sys_string_conversions.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/bind_post_task.h"
 #include "base/task/sequenced_task_runner.h"
@@ -57,6 +62,7 @@
 #include "chrome/browser/ui/browser_tabstrip.h"  // nogncheck
 #include "chrome/browser/ui/browser_window/public/browser_collection_observer.h"
 #include "chrome/browser/ui/browser_window/public/browser_window_interface.h"
+#include "chrome/browser/lifetime/browser_shutdown.h"
 #include "chrome/browser/ui/browser_window/public/global_browser_collection.h"
 #include "chrome/browser/ui/tabs/tab_close_types_data.h"
 #include "chrome/browser/ui/tabs/tab_enums.h"
@@ -409,6 +415,10 @@ const char* KindName(ArktEngineEventKind kind) {
       return "TabFullscreenChanged";
     case ArktEngineEventKindPageInfoChanged:
       return "PageInfoChanged";
+    case ArktEngineEventKindExtensionInstalled:
+      return "ExtensionInstalled";
+    case ArktEngineEventKindExtensionCommandsChanged:
+      return "ExtensionCommandsChanged";
   }
   return "unknown";
 }
@@ -478,6 +488,8 @@ ArktTerminationStatus CrashStatusOf(content::WebContents* contents) {
 @property(nonatomic) BOOL zoomIsDefault;
 @property(nonatomic) BOOL zoomIsUserInitiated;
 @property(nonatomic) BOOL isTabFullscreen;
+@property(nonatomic, nullable, copy) NSString* extensionID;
+@property(nonatomic, nullable, copy) NSString* extensionName;
 @end
 
 @implementation ArktFacadeEvent
@@ -510,6 +522,8 @@ ArktTerminationStatus CrashStatusOf(content::WebContents* contents) {
 @synthesize zoomIsDefault = _zoomIsDefault;
 @synthesize zoomIsUserInitiated = _zoomIsUserInitiated;
 @synthesize isTabFullscreen = _isTabFullscreen;
+@synthesize extensionID = _extensionID;
+@synthesize extensionName = _extensionName;
 @end
 
 // One download as plain values (#132), read from a snapshot when the change
@@ -578,19 +592,19 @@ ArktTerminationStatus CrashStatusOf(content::WebContents* contents) {
 }
 @end
 
-// A page's alert, confirm or prompt (#400): plain values read once when the
-// request arrives, and the shell's one answer. The request is the overlay's
-// self-owned ArktJavaScriptDialog, reached through a weak pointer that
-// Chromium's manager invalidates when it ends the dialog.
+// A page's alert, confirm or prompt (#400), or its leave-site dialog (#585):
+// plain values read once when the request arrives, and the shell's one
+// answer. The request is the overlay's self-owned ArktPageDialog, reached
+// through a weak pointer that dies when Chromium ends the dialog.
 @interface ArktFacadeJavaScriptDialog : NSObject <ArktJavaScriptDialog>
-- (instancetype)initWithRequest:(base::WeakPtr<arkt::ArktJavaScriptDialog>)request
+- (instancetype)initWithRequest:(base::WeakPtr<arkt::ArktPageDialog>)request
                             tab:(id<ArktTabHandle>)tab;
 // The request is over (answered or ended by the engine).
 - (void)markEnded;
 @end
 
 @implementation ArktFacadeJavaScriptDialog {
-  base::WeakPtr<arkt::ArktJavaScriptDialog> _request;
+  base::WeakPtr<arkt::ArktPageDialog> _request;
   BOOL _ended;
 }
 
@@ -602,20 +616,23 @@ ArktTerminationStatus CrashStatusOf(content::WebContents* contents) {
 @synthesize acceptTitle = _acceptTitle;
 @synthesize cancelTitle = _cancelTitle;
 
-- (instancetype)initWithRequest:(base::WeakPtr<arkt::ArktJavaScriptDialog>)request
+- (instancetype)initWithRequest:(base::WeakPtr<arkt::ArktPageDialog>)request
                             tab:(id<ArktTabHandle>)tab {
   if ((self = [super init])) {
     _request = request;
     _tab = tab;
-    switch (request->type()) {
-      case content::JAVASCRIPT_DIALOG_TYPE_ALERT:
+    switch (request->kind()) {
+      case arkt::ArktPageDialog::Kind::kAlert:
         _kind = ArktDialogKindAlert;
         break;
-      case content::JAVASCRIPT_DIALOG_TYPE_CONFIRM:
+      case arkt::ArktPageDialog::Kind::kConfirm:
         _kind = ArktDialogKindConfirm;
         break;
-      case content::JAVASCRIPT_DIALOG_TYPE_PROMPT:
+      case arkt::ArktPageDialog::Kind::kPrompt:
         _kind = ArktDialogKindPrompt;
+        break;
+      case arkt::ArktPageDialog::Kind::kBeforeUnload:
+        _kind = ArktDialogKindBeforeUnload;
         break;
     }
     _title = base::SysUTF16ToNSString(request->title());
@@ -624,12 +641,11 @@ ArktTerminationStatus CrashStatusOf(content::WebContents* contents) {
       _defaultPromptText =
           base::SysUTF16ToNSString(request->default_prompt_text());
     }
-    // The strings the Views dialog's buttons use (DialogDelegate): an alert
-    // only has OK.
-    _acceptTitle = base::SysUTF16ToNSString(l10n_util::GetStringUTF16(IDS_APP_OK));
-    if (_kind != ArktDialogKindAlert) {
-      _cancelTitle =
-          base::SysUTF16ToNSString(l10n_util::GetStringUTF16(IDS_APP_CANCEL));
+    // Chromium's button strings: OK (Leave or Reload for a leave-site
+    // dialog), and Cancel, which an alert and a leave-site dialog have not.
+    _acceptTitle = base::SysUTF16ToNSString(request->accept_title());
+    if (std::optional<std::u16string> cancel = request->cancel_title()) {
+      _cancelTitle = base::SysUTF16ToNSString(*cancel);
     }
   }
   return self;
@@ -1144,6 +1160,9 @@ NSArray<id<ArktSitePermission>>* SitePermissionObjects(
 @property(nonatomic) BOOL isEnabled;
 @property(nonatomic) BOOL canUninstall;
 @property(nonatomic) BOOL canReportAbuse;
+@property(nonatomic) BOOL isPinned;
+@property(nonatomic) BOOL hasOptionsPage;
+@property(nonatomic) ArktExtensionSiteAccess siteAccess;
 @end
 
 @implementation ArktFacadeExtensionAction
@@ -1153,6 +1172,60 @@ NSArray<id<ArktSitePermission>>* SitePermissionObjects(
 @synthesize isEnabled = _isEnabled;
 @synthesize canUninstall = _canUninstall;
 @synthesize canReportAbuse = _canReportAbuse;
+@synthesize isPinned = _isPinned;
+@synthesize hasOptionsPage = _hasOptionsPage;
+@synthesize siteAccess = _siteAccess;
+@end
+
+// One extension command (#598).
+@interface ArktFacadeExtensionCommand : NSObject <ArktExtensionCommand>
+@property(nonatomic, copy) NSString* extensionID;
+@property(nonatomic, copy) NSString* commandName;
+@property(nonatomic, copy) NSString* extensionName;
+@property(nonatomic, copy) NSString* commandDescription;
+@property(nonatomic, nullable, copy) NSString* shortcut;
+@property(nonatomic) BOOL isGlobal;
+@end
+
+@implementation ArktFacadeExtensionCommand
+@synthesize extensionID = _extensionID;
+@synthesize commandName = _commandName;
+@synthesize extensionName = _extensionName;
+@synthesize commandDescription = _commandDescription;
+@synthesize shortcut = _shortcut;
+@synthesize isGlobal = _isGlobal;
+@end
+
+// The answer to setExtensionCommandShortcut (#598).
+@interface ArktFacadeShortcutChange : NSObject <ArktExtensionShortcutChange>
+@property(nonatomic) ArktExtensionShortcutResult result;
+@property(nonatomic, nullable, copy) NSString* conflictExtensionID;
+@property(nonatomic, nullable, copy) NSString* conflictCommandName;
+@end
+
+@implementation ArktFacadeShortcutChange
+@synthesize result = _result;
+@synthesize conflictExtensionID = _conflictExtensionID;
+@synthesize conflictCommandName = _conflictCommandName;
+@end
+
+// One item of an extension action's context menu (#593).
+@interface ArktFacadeMenuItem : NSObject <ArktMenuItem>
+@property(nonatomic) ArktMenuItemKind kind;
+@property(nonatomic, copy) NSString* title;
+@property(nonatomic) NSInteger command;
+@property(nonatomic) BOOL isEnabled;
+@property(nonatomic) BOOL isChecked;
+@property(nonatomic, copy) NSArray<id<ArktMenuItem>>* children;
+@end
+
+@implementation ArktFacadeMenuItem
+@synthesize kind = _kind;
+@synthesize title = _title;
+@synthesize command = _command;
+@synthesize isEnabled = _isEnabled;
+@synthesize isChecked = _isChecked;
+@synthesize children = _children;
 @end
 
 // -----------------------------------------------------------------------------
@@ -1179,6 +1252,10 @@ NSArray<id<ArktSitePermission>>* SitePermissionObjects(
 - (void)insertFinished:(BOOL)inserted;
 // The contents' beforeunload outcome (WebContentsObserver::BeforeUnloadFired).
 - (void)beforeUnloadFired:(BOOL)proceed;
+// Another tab's leave-site dialog cancelled the window close or quit that
+// showed this tab closing (#585): CloseCancelled, unless a close of the tab's
+// own is still held.
+- (void)windowCloseCancelled;
 // WebContentsDelegate::UpdateTargetURL for the tab's contents (#114).
 - (void)reportTargetURL:(const GURL&)url;
 // A duplicate the shell parks (#380) lives as bare contents outside every tab
@@ -1252,6 +1329,15 @@ class Facade : public BrowserCollectionObserver,
         });
     if (Profile* profile = EmbedderProfile()) {
       downloads_ = std::make_unique<DownloadWatcher>(profile, this);
+      // First installs the shell reports in place of Chromium's post-install
+      // dialog (#592).
+      extension_installs_ = std::make_unique<ExtensionInstallWatcher>(
+          profile, base::BindRepeating(&Facade::ExtensionInstalled,
+                                       base::Unretained(this)));
+      // Keyboard command changes (#598).
+      extension_commands_ = std::make_unique<ExtensionCommandsWatcher>(
+          profile, base::BindRepeating(&Facade::ExtensionCommandsChanged,
+                                       base::Unretained(this)));
       // The previous run's exit type is fixed when the profile's service is
       // made (#577); Chromium's own acknowledgement (the first tab of a window
       // made outside the startup flow, which every shell window is) does not
@@ -1375,13 +1461,14 @@ class Facade : public BrowserCollectionObserver,
 
   // A page's alert, confirm or prompt in an Arkt window with an embedder host
   // (#400), called by Chromium's TabModalDialogManager from inside
-  // RunJavaScriptDialog (or when a pending alert's tab comes forward). True
-  // takes the dialog: DialogRequested goes to the shell, which answers with
-  // -respondAccepted:userInput: or lets the engine end it. False leaves it to
-  // Chromium's Views dialog: the tab has no handle, or its window's host is
-  // the placeholder (nobody would show the dialog).
+  // RunJavaScriptDialog (or when a pending alert's tab comes forward), or its
+  // leave-site dialog (#585), called by the app-modal dialog queue when the
+  // dialog comes up. True takes the dialog: DialogRequested goes to the
+  // shell, which answers with -respondAccepted:userInput: or lets the engine
+  // end it. False leaves it to Chromium's own dialog: the tab has no handle,
+  // or its window's host is the placeholder (nobody would show the dialog).
   bool PresentJavaScriptDialog(content::WebContents* contents,
-                               base::WeakPtr<ArktJavaScriptDialog> request) {
+                               base::WeakPtr<ArktPageDialog> request) {
     tabs::TabInterface* tab =
         contents ? tabs::TabInterface::MaybeGetFromContents(contents)
                  : nullptr;
@@ -1612,6 +1699,25 @@ class Facade : public BrowserCollectionObserver,
     }
   }
 
+  // The profile installed an extension (#592), from inside the registry's
+  // OnExtensionInstalled: one profile-wide ExtensionInstalled.
+  void ExtensionInstalled(const std::string& extension_id,
+                          const std::u16string& name) {
+    ArktFacadeEvent* event = [[ArktFacadeEvent alloc] init];
+    event.kind = ArktEngineEventKindExtensionInstalled;
+    event.extensionID = base::SysUTF8ToNSString(extension_id);
+    event.extensionName = base::SysUTF16ToNSString(name);
+    RecordFromNotification(event);
+  }
+
+  // The profile's extension commands changed (#598), on a task of the
+  // watcher's own: one profile-wide ExtensionCommandsChanged.
+  void ExtensionCommandsChanged() {
+    ArktFacadeEvent* event = [[ArktFacadeEvent alloc] init];
+    event.kind = ArktEngineEventKindExtensionCommandsChanged;
+    Record(event);
+  }
+
   // A tab's page info changed (#583): a settings change matched its site
   // (inside the map's notification, or after a facade call), or its site data
   // count arrived.
@@ -1684,6 +1790,41 @@ class Facade : public BrowserCollectionObserver,
     ++in_notification_;
     Record(event);
     --in_notification_;
+  }
+
+  // A leave-site dialog cancelled a window close or a quit (#585): `prompted`
+  // reported its CloseCancelled. Chromium cancels the whole close without
+  // telling the other tabs (UnloadController::CancelWindowClose,
+  // BrowserCloseManager::CancelBrowserClose), and they reported closing while
+  // their window was attempting to close (-isClosing), so each reports
+  // CloseCancelled too: every tab of `browser`, and for a quit every tab of a
+  // window the quit had reached. Called from the prompted tab's
+  // BeforeUnloadFired, before Chromium resets those windows.
+  void RecordWindowCloseCancelled(ArktFacadeTab* prompted,
+                                  BrowserWindowInterface* browser) {
+    // A quit is told by the facade's own flag, set when Chromium starts
+    // closing all browsers (OnClosingAllBrowsers) and cleared only by the
+    // cancel notification that follows this call.
+    // browser_shutdown::IsTryingToQuit() is not enough: it was observed false
+    // when a Stay in the second window of a quit was answered (#911 review),
+    // cause not confirmed, and the dialog's CancelTerminate resets it anyway.
+    const bool quitting = terminating_ || browser_shutdown::IsTryingToQuit();
+    GlobalBrowserCollection::GetInstance()->ForEach(
+        [&](BrowserWindowInterface* each) {
+          if (each != browser &&
+              !(quitting &&
+                UnloadController::From(each)->is_attempting_to_close_browser())) {
+            return true;
+          }
+          TabStripModel* model = each->GetTabStripModel();
+          for (int i = 0; i < model->count(); ++i) {
+            ArktFacadeTab* tab = HandleForTab(model->GetTabAtIndex(i));
+            if (tab && tab != prompted) {
+              [tab windowCloseCancelled];
+            }
+          }
+          return true;
+        });
   }
 
   // A held close (of the tab, or of its window or the application) was
@@ -2093,6 +2234,8 @@ class Facade : public BrowserCollectionObserver,
 
   const raw_ptr<FacadeDelegate> delegate_;
   std::unique_ptr<DownloadWatcher> downloads_;
+  std::unique_ptr<ExtensionInstallWatcher> extension_installs_;
+  std::unique_ptr<ExtensionCommandsWatcher> extension_commands_;
   std::unique_ptr<PageInfoHub> page_info_;
   bool last_session_crashed_ = false;
   base::FilePath unanswered_marker_;
@@ -2849,6 +2992,51 @@ void ParkDuplicate(ArktFacadeBrowser* browser_handle,
 // popups, and is the window's ExtensionsContainer menu, so
 // chrome.action.openPopup works there too. The placeholder host gets its
 // sidebar menu from the hook; the facade lists and runs that one.
+static_assert(static_cast<int>(ExtensionSiteAccess::kOnAllSites) ==
+              ArktExtensionSiteAccessOnAllSites);
+static_assert(static_cast<int>(ExtensionSiteAccess::kOnThisSite) ==
+              ArktExtensionSiteAccessOnThisSite);
+static_assert(static_cast<int>(ExtensionSiteAccess::kOnClick) ==
+              ArktExtensionSiteAccessOnClick);
+static_assert(static_cast<int>(ExtensionContextCommand::kRemove) ==
+              ArktExtensionContextCommandRemove);
+static_assert(static_cast<int>(ExtensionContextCommand::kSiteAccessOnAllSites) ==
+              ArktExtensionContextCommandSiteAccessOnAllSites);
+static_assert(kExtensionContextCustomFirst ==
+              ArktExtensionContextCommandCustomFirst);
+static_assert(kExtensionContextCustomLast ==
+              ArktExtensionContextCommandCustomLast);
+
+// An extension context menu's items as facade values (#593).
+NSArray<id<ArktMenuItem>>* FacadeMenuItems(
+    const std::vector<ExtensionMenuItem>& items) {
+  NSMutableArray<id<ArktMenuItem>>* result = [NSMutableArray array];
+  for (const auto& item : items) {
+    ArktFacadeMenuItem* entry = [[ArktFacadeMenuItem alloc] init];
+    entry.title = base::SysUTF16ToNSString(item.title);
+    entry.isEnabled = item.enabled;
+    entry.children = @[];
+    switch (item.kind) {
+      case ExtensionMenuItem::Kind::kCommand:
+        entry.kind = ArktMenuItemKindCommand;
+        entry.command = static_cast<NSInteger>(item.command);
+        entry.isChecked = item.checked;
+        break;
+      case ExtensionMenuItem::Kind::kSeparator:
+        entry.kind = ArktMenuItemKindSeparator;
+        entry.title = @"";
+        entry.isEnabled = NO;
+        break;
+      case ExtensionMenuItem::Kind::kSubmenu:
+        entry.kind = ArktMenuItemKindSubmenu;
+        entry.children = FacadeMenuItems(item.children);
+        break;
+    }
+    [result addObject:entry];
+  }
+  return result;
+}
+
 ArktExtensionsMenu* EnsureActionsMenu(ArktBrowserWindow* window) {
   if (!window) {
     return nullptr;
@@ -3052,9 +3240,25 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
     // its stale close types, and isClosing would stay true.
     contents->RemoveUserData(TabCloseTypesData::UserDataKey());
   }
+  const bool window_close = window && window->IsAttemptingToClose();
   _closing = NO;
   _closingByClient = NO;
   LOG(WARNING) << "ARKT: facade close cancelled session id " << _sessionId;
+  arkt::g_facade->RecordCloseCancelled(self);
+  if (window_close) {
+    arkt::g_facade->RecordWindowCloseCancelled(self,
+                                               _browser.browserInterface);
+  }
+}
+
+- (void)windowCloseCancelled {
+  content::WebContents* contents = self.contents;
+  if (!_tab || !contents || _closing ||
+      TabCloseTypesData::FromWebContents(contents)) {
+    return;
+  }
+  LOG(WARNING) << "ARKT: facade close cancelled with its window, session id "
+               << _sessionId;
   arkt::g_facade->RecordCloseCancelled(self);
 }
 
@@ -3672,6 +3876,22 @@ void Facade::AttachActionsAfterAdopt(base::WeakPtr<ArktBrowserWindow> window) {
   }
 }
 
+- (void)focusThroughTabTraversal:(BOOL)reverse {
+  // FocusThroughTabTraversal only moves the page's own focus
+  // (SetInitialFocus); -focus makes the contents the first responder first,
+  // as a direct selection, so WebContentsViewMac does not traverse a second
+  // time. Focus() adds no focus or blur on the element the page had focused
+  // (#941: checked with focusin and focusout on the self-test; the
+  // traversal itself blurs it, as Tab would).
+  [self focus];
+  if (_parked) {
+    return;
+  }
+  if (content::WebContents* contents = self.contents) {
+    contents->FocusThroughTabTraversal(reverse);
+  }
+}
+
 - (void)moveToBrowser:(id<ArktBrowserHandle>)target {
   ArktFacadeBrowser* destination =
       [(NSObject*)target isKindOfClass:[ArktFacadeBrowser class]]
@@ -3999,6 +4219,9 @@ void DeliverImportResult(void (^completion)(id<ArktImportResult>),
         interface ? interface->GetProfile() : nullptr, info.id);
     action.canUninstall = ability.can_uninstall;
     action.canReportAbuse = ability.can_report_abuse;
+    action.isPinned = info.pinned;
+    action.hasOptionsPage = info.has_options_page;
+    action.siteAccess = static_cast<ArktExtensionSiteAccess>(info.site_access);
     [actions addObject:action];
   }
   return actions;
@@ -4338,6 +4561,162 @@ void DeliverImportResult(void (^completion)(id<ArktImportResult>),
   arkt::CancelWebstoreExtensionInstalls();
 }
 
+- (NSArray<NSString*>*)pinnedExtensionIDs {
+  arkt::CheckFacadeEntry();
+  NSMutableArray<NSString*>* ids = [NSMutableArray array];
+  for (const auto& id : arkt::PinnedExtensionIds(arkt::EmbedderProfile())) {
+    [ids addObject:base::SysUTF8ToNSString(id)];
+  }
+  return ids;
+}
+
+- (void)setExtensionPinned:(NSString*)extensionID pinned:(BOOL)pinned {
+  arkt::CheckFacadeEntry();
+  arkt::RunOrDefer(
+      "setExtensionPinned",
+      base::BindOnce(
+          [](std::string extension_id, bool pinned) {
+            const bool changed = arkt::SetExtensionPinned(
+                arkt::EmbedderProfile(), extension_id, pinned);
+            LOG(WARNING) << "ARKT: facade setExtensionPinned " << extension_id
+                         << " pinned=" << pinned
+                         << (changed ? " changed" : " unchanged");
+          },
+          base::SysNSStringToUTF8(extensionID), static_cast<bool>(pinned)));
+}
+
+- (void)movePinnedExtension:(NSString*)extensionID toIndex:(NSInteger)index {
+  arkt::CheckFacadeEntry();
+  const int clamped = static_cast<int>(
+      std::clamp<NSInteger>(index, 0, std::numeric_limits<int>::max()));
+  arkt::RunOrDefer(
+      "movePinnedExtension",
+      base::BindOnce(
+          [](std::string extension_id, int index) {
+            const bool moved = arkt::MovePinnedExtension(
+                arkt::EmbedderProfile(), extension_id, index);
+            LOG(WARNING) << "ARKT: facade movePinnedExtension " << extension_id
+                         << " to " << index << (moved ? " moved" : " unchanged");
+          },
+          base::SysNSStringToUTF8(extensionID), clamped));
+}
+
+- (NSArray<id<ArktMenuItem>>*)extensionContextMenuForAction:(NSString*)actionId
+                                                  inBrowser:
+                                                      (id<ArktBrowserHandle>)
+                                                          browser {
+  arkt::CheckFacadeEntry();
+  if (![browser isKindOfClass:[ArktFacadeBrowser class]]) {
+    return @[];
+  }
+  BrowserWindowInterface* interface =
+      static_cast<ArktFacadeBrowser*>(browser).browserInterface;
+  arkt::ArktExtensionsMenu* menu = arkt::EnsureActionsMenu(
+      interface ? arkt::ArktBrowserWindow::FromBrowser(interface) : nullptr);
+  if (!menu) {
+    return @[];
+  }
+  return arkt::FacadeMenuItems(
+      menu->BuildContextMenu(base::SysNSStringToUTF8(actionId)));
+}
+
+- (void)performExtensionContextCommand:(NSInteger)command
+                             forAction:(NSString*)actionId
+                             inBrowser:(id<ArktBrowserHandle>)browser {
+  arkt::CheckFacadeEntry();
+  if (![browser isKindOfClass:[ArktFacadeBrowser class]]) {
+    return;
+  }
+  arkt::RunOrDefer(
+      "performExtensionContextCommand",
+      base::BindOnce(
+          [](ArktFacadeBrowser* browser, std::string action_id, int command) {
+            BrowserWindowInterface* interface = browser.browserInterface;
+            arkt::ArktExtensionsMenu* menu = arkt::EnsureActionsMenu(
+                interface ? arkt::ArktBrowserWindow::FromBrowser(interface)
+                          : nullptr);
+            const bool ran =
+                menu && menu->ExecuteContextCommand(action_id, command);
+            LOG(WARNING) << "ARKT: facade performExtensionContextCommand "
+                         << command << " " << action_id
+                         << (ran ? " ran" : " ignored");
+          },
+          static_cast<ArktFacadeBrowser*>(browser),
+          base::SysNSStringToUTF8(actionId),
+          // Out of range is no command: a clamp would land on a real item.
+          command < 0 || command > ArktExtensionContextCommandCustomLast
+              ? -1
+              : static_cast<int>(command)));
+}
+
+- (NSArray<id<ArktExtensionCommand>>*)extensionCommands {
+  arkt::CheckFacadeEntry();
+  NSMutableArray<id<ArktExtensionCommand>>* result = [NSMutableArray array];
+  for (const arkt::ExtensionCommandInfo& info :
+       arkt::ListExtensionCommands(arkt::EmbedderProfile())) {
+    ArktFacadeExtensionCommand* command =
+        [[ArktFacadeExtensionCommand alloc] init];
+    command.extensionID = base::SysUTF8ToNSString(info.extension_id);
+    command.commandName = base::SysUTF8ToNSString(info.name);
+    command.extensionName = base::SysUTF16ToNSString(info.extension_name);
+    command.commandDescription = base::SysUTF16ToNSString(info.description);
+    command.shortcut =
+        info.shortcut.empty() ? nil : base::SysUTF8ToNSString(info.shortcut);
+    command.isGlobal = info.global;
+    [result addObject:command];
+  }
+  return result;
+}
+
+- (id<ArktExtensionShortcutChange>)
+    setExtensionCommandShortcut:(nullable NSString*)shortcut
+                     forCommand:(NSString*)commandName
+                    ofExtension:(NSString*)extensionID
+                         global:(BOOL)global
+              replacingConflict:(BOOL)replacingConflict {
+  arkt::CheckFacadeEntry();
+  std::string conflict_extension;
+  std::string conflict_command;
+  const arkt::ExtensionShortcutResult result =
+      arkt::SetExtensionCommandShortcut(
+          arkt::EmbedderProfile(), base::SysNSStringToUTF8(extensionID),
+          base::SysNSStringToUTF8(commandName),
+          shortcut ? base::SysNSStringToUTF8(shortcut) : std::string(), global,
+          replacingConflict, &conflict_extension, &conflict_command);
+  ArktFacadeShortcutChange* change = [[ArktFacadeShortcutChange alloc] init];
+  switch (result) {
+    case arkt::ExtensionShortcutResult::kApplied:
+      change.result = ArktExtensionShortcutResultApplied;
+      break;
+    case arkt::ExtensionShortcutResult::kConflict:
+      change.result = ArktExtensionShortcutResultConflict;
+      change.conflictExtensionID = base::SysUTF8ToNSString(conflict_extension);
+      change.conflictCommandName = base::SysUTF8ToNSString(conflict_command);
+      break;
+    case arkt::ExtensionShortcutResult::kNotAllowed:
+      change.result = ArktExtensionShortcutResultNotAllowed;
+      break;
+    case arkt::ExtensionShortcutResult::kUnknownCommand:
+      change.result = ArktExtensionShortcutResultUnknownCommand;
+      break;
+    case arkt::ExtensionShortcutResult::kGlobalShortcutTaken:
+      change.result = ArktExtensionShortcutResultGlobalShortcutTaken;
+      break;
+  }
+  LOG(WARNING) << "ARKT: facade setExtensionCommandShortcut "
+               << base::SysNSStringToUTF8(extensionID) << " "
+               << base::SysNSStringToUTF8(commandName) << " \""
+               << (shortcut ? base::SysNSStringToUTF8(shortcut) : "")
+               << "\" global=" << (global ? 1 : 0)
+               << " replacing=" << (replacingConflict ? 1 : 0)
+               << " result=" << static_cast<int>(change.result)
+               << (conflict_command.empty()
+                       ? ""
+                       : " conflict=" + conflict_extension + " " +
+                             conflict_command);
+  return change;
+}
+
 - (void)uninstallExtension:(NSString*)extensionID
                reportAbuse:(BOOL)reportAbuse
                  inBrowser:(nullable id<ArktBrowserHandle>)browser
@@ -4549,6 +4928,62 @@ id<ArktBrowserHandle> BrowserHandleFor(BrowserWindowInterface* browser) {
 void AdoptHeldBrowser(BrowserWindowInterface* browser) {
   if (g_facade) {
     g_facade->AdoptHeld(browser);
+  }
+}
+
+void InstallCrxForSelfTest(id<ArktTabHandle> tab,
+                           const base::FilePath& crx_path,
+                           bool prompt_updates,
+                           base::OnceCallback<void(const std::string&)> done) {
+  content::WebContents* contents =
+      [tab isKindOfClass:[ArktFacadeTab class]]
+          ? static_cast<ArktFacadeTab*>(tab).contents
+          : nullptr;
+  InstallCrxForSelfTest(
+      contents ? Profile::FromBrowserContext(contents->GetBrowserContext())
+               : nullptr,
+      contents, crx_path, prompt_updates, std::move(done));
+}
+
+void RunDialogProbeForSelfTest(id<ArktTabHandle> tab,
+                               const std::vector<std::string>& words) {
+  content::WebContents* contents =
+      [tab isKindOfClass:[ArktFacadeTab class]]
+          ? static_cast<ArktFacadeTab*>(tab).contents
+          : nullptr;
+  if (!contents || words.empty()) {
+    return;
+  }
+  const std::string& probe = words[0];
+  const std::string argument = words.size() > 1 ? words[1] : std::string();
+  if (probe == "infobars") {
+    int count = 0;
+    if (base::StringToInt(argument, &count) && count >= 0) {
+      SetTestInfobarsForSelfTest(contents, count);
+    }
+  } else if (probe == "nonconfirm-infobar") {
+    SetNonConfirmInfobarForSelfTest(contents, argument != "remove");
+  } else if (probe == "tab-modal") {
+    ShowTabModalForSelfTest(contents);
+  } else if (probe == "geometry") {
+    LogDialogGeometryForSelfTest(contents);
+  } else if (probe == "file-folder") {
+    SetFileChooserFolderForSelfTest(contents, base::FilePath(argument));
+  } else if (probe == "file-panel") {
+    CheckFilePanelsForSelfTest(contents);
+  } else if (probe == "stubs") {
+    CallStubsForSelfTest(contents);
+  } else if (probe == "stub-command") {
+    RunStubCommandForSelfTest(contents, argument);
+  } else if (probe == "incognito") {
+    OpenIncognitoForSelfTest(contents, GURL(argument));
+  } else if (probe == "incognito-download") {
+    StartIncognitoDownloadForSelfTest(contents, GURL(argument),
+                                      words.size() > 2 ? words[2] : "");
+  } else if (probe == "incognito-close") {
+    CloseIncognitoForSelfTest(contents);
+  } else if (probe == "incognito-state") {
+    LogIncognitoForSelfTest(contents);
   }
 }
 

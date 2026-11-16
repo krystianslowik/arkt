@@ -103,7 +103,7 @@ Without write access (fork contributors): post the same comment and ask a mainta
 - Check open pull requests for the files you need (`gh pr list --state open`, `gh pr diff <PR> --name-only`).
   If another open pull request touches them, decide the merge order yourself (see "Decide or ask") and note it on
   both pull requests.
-- Announce any repo hot file you will touch (section 3) in the issue.
+- Announce any repo hot file you will touch (`CONTRIBUTING.md`, section 3) in the issue.
 
 ## 3. Worktree and branch
 
@@ -113,7 +113,7 @@ git worktree add ../arkt-wt/<N>-<slug> -b <type>/<N>-<slug> origin/main
 ```
 
 - Base: the latest upstream `main` (`origin/main` in a clone, `upstream/main` in a fork).
-- Type: `feat`, `fix`, `docs`, `engine`, `chore` or `spike` (section 4).
+- Type: `feat`, `fix`, `docs`, `engine`, `chore` or `spike` (`CONTRIBUTING.md`, section 4).
 - Never open, edit or delete another person's or another issue's worktree or branch.
 
 ## 4. Gate: write it down before editing
@@ -142,23 +142,46 @@ the actual output. If a command was not run, write "not run" and why.
 
 ## 6. Pull request
 
+The first review pass should be the last. Open the pull request only when every item of the checklist below is in
+it; each one missing costs a review round and a CI run.
+
+### First-pass-ready checklist
+
+Put each item in the pull request body (the template has a place for each):
+
+- [ ] **Deliberate break.** You broke the behavior the new test guards, named the line, and pasted the failing
+      output. Then you restored it.
+- [ ] **Counts.** Baseline + N for each suite, with the exact commands, copied from the output of the last run.
+- [ ] **20 runs under load** for every GUI or timing test you added or changed, with passes and `uptime`
+      (`arkt-flaky-tests`, step 4).
+- [ ] **Current with `main`.** You merged `origin/main` into the branch right before opening, and ran the lints:
+      `cd app/ArktShell/ShellKit && swift test --filter 'LintTests|IsolationTests'`.
+- [ ] **Needs the maintainer.** Every product decision you made without the maintainer is listed there. Write "None"
+      only if you made none.
+- [ ] **Overlap.** Open pull requests that touch your files, with the `git merge-tree --write-tree` result against
+      each (`arkt-pr-review`, "Keeping a branch current"), or "no overlap".
+- [ ] **Hot files** you touched were announced on the issue (`CONTRIBUTING.md`, section 3).
+
+### Steps
+
 1. Stage by pathspec only (never `git add -A` or `git add .`). Check `git diff --cached --stat` lists only your files.
 2. Check the diff for banned content: no emojis, personal paths, usernames, emails, secrets, signing identities or
    real browsing data; no mention of tools or assistants in files, commits or pull requests.
-3. Commit with a plain message and no trailers (section 5).
+3. Commit with a plain message and no trailers (`CONTRIBUTING.md`, section 5).
 4. Push to the branch's own name: `git push -u origin <type>/<N>-<slug>` (your fork when you work from one).
 5. Open a ready pull request with the template filled in and `Closes #N` (`Refs #N` when a maintainer step remains):
    `gh pr create --title "<plain title>" --body-file <filled template>`.
 6. Move the issue to review (with write access; otherwise ask in the issue):
    `gh issue edit <N> --add-label status:in-review --remove-label status:in-progress`.
-7. Address review on the same branch. Update it by merging `origin/main`; never force-push (see `arkt-pr-review`).
+7. Address review on the same branch, all comments in one push. Update from `main` only for the reasons in
+   `arkt-pr-review`, "Keeping a branch current", by merging `origin/main`; never force-push.
 
 Never bypass a failing hook, a denied permission or a protected branch (`--no-verify`, force-push, admin merge). If
 one blocks you, **STOP** and say so in the issue.
 
 ## 7. After the merge
 
-A maintainer squash-merges after the separate review step. Then clean up your own things only:
+A maintainer squash-merges after the review (`arkt-pr-review`, "Merge"). Then clean up your own things only:
 
 ```zsh
 git -C <repo> worktree remove ../arkt-wt/<N>-<slug>
@@ -178,3 +201,5 @@ process you started, by its PID, and clear test attachments (see `arkt-local-app
 - Fixing a flaky test by raising its timeout (the 60 s deadline before #396). It only moved the race.
 - Two status labels on one issue, or `status:in-progress` with no assignee.
 - Staging build leftovers or local tool folders with `git add .`.
+- Opening a pull request without the deliberate break or the 20 runs, or with "None" under "Needs the maintainer"
+  after deciding a product question. Each cost a review round and a CI run.

@@ -35,6 +35,11 @@ enum BridgeMapping {
     }
   }
 
+  /// A split's name (#787); nil for a split without one and for tabs and folders.
+  static func splitTitle(_ node: SidebarModel.Node) -> String? {
+    if case .split(let split) = node.kind { split.title } else { nil }
+  }
+
   /// Factors pass through as stored, drift included; the split layout repairs them (decision 2).
   static func layout(_ split: SplitItem) -> SplitLayoutInfo {
     SplitLayoutInfo(orientation: orientation(split.orientation), widthFactors: split.widthFactors)

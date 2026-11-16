@@ -6,20 +6,47 @@ public struct NodeSnapshot: Hashable, Sendable, Codable, Identifiable {
   public var kind: NodeKind
   public var createdAt: Date
   public var children: [NodeSnapshot]
+  public var customIcon: SpaceIcon?
 
-  public init(id: NodeID = NodeID(), kind: NodeKind, createdAt: Date, children: [NodeSnapshot] = []) {
+  public init(id: NodeID = NodeID(), kind: NodeKind, createdAt: Date, children: [NodeSnapshot] = [],
+              customIcon: SpaceIcon? = nil) {
     self.id = id
     self.kind = kind
     self.createdAt = createdAt
     self.children = children
+    self.customIcon = customIcon
   }
 
   /// Every id in the subtree, root first, depth first.
   public var allIDs: [NodeID] { [id] + children.flatMap(\.allIDs) }
 
+  /// Whether a split anywhere in the subtree has a title (#787): the field that needs archive snapshot format 3.
+  public var containsSplitTitle: Bool {
+    if case .split(let split) = kind, split.title != nil { return true }
+    return children.contains { $0.containsSplitTitle }
+  }
+
+  /// Whether a node anywhere in the subtree has a custom icon (#339): the field that needs archive snapshot format 2.
+  public var containsCustomIcon: Bool {
+    customIcon != nil || children.contains { $0.containsCustomIcon }
+  }
+
+  /// The subtree as a format that predates split titles reads it (sidebar format 4, archive snapshot format 2): every
+  /// split in it unnamed, every other field, the node icons included, kept. A `title` key in such a document was never
+  /// part of its format, so it is not read.
+  public func withoutSplitTitles() -> NodeSnapshot {
+    var copy = self
+    if case .split(var split) = kind {
+      split.title = nil
+      copy.kind = .split(split)
+    }
+    copy.children = children.map { $0.withoutSplitTitles() }
+    return copy
+  }
+
   /// The same subtree with new ids, used when restoring over an id that is already taken.
   public func withFreshIDs() -> NodeSnapshot {
-    NodeSnapshot(kind: kind, createdAt: createdAt, children: children.map { $0.withFreshIDs() })
+    NodeSnapshot(kind: kind, createdAt: createdAt, children: children.map { $0.withFreshIDs() }, customIcon: customIcon)
   }
 }
 
