@@ -8054,12 +8054,21 @@ no engine build run. Follows "#586", "Left open".
 
 - `ShellWindowController` is the shell window's delegate (set in its init) and had no
   `window(_:willPositionSheet:using:)`; it now answers it in `ShellWindowController+Sheets.swift`. The rect has no
-  height, keeps the x and width AppKit passed in, and its top is the current tab's page top less the strip's height
-  (`InfobarPresenter.height(of:)`: 40 pt per row, 0 in HTML fullscreen), so the page's top without rows or in HTML
-  fullscreen. With no page of the current tab on screen in the window (no Space, the welcome card) it is the card's top;
-  with the card hidden too, AppKit's own rect. Every sheet begun on the shell window goes through it: the overlay's
-  `-[ArktDialogSheet beginOnWindow:]` sheets, the file chooser, and the shell's own (Delete Space, the import sheet,
-  the save panel, the Space emoji prompt, the onboarding skip alert).
+  height and keeps the x and width AppKit passed in. Its top, the cap, is worked out from the pages at the top of the
+  content: every shown page whose top is the highest (the card's page; each pane side by side; the top pane stacked).
+  The cap is that top less the tallest of their strips (`InfobarPresenter.height(of:)`: 40 pt per row, 0 in HTML
+  fullscreen). With no page laid out in the window (no Space, the welcome card, a page with no height yet) it is the
+  card's top; with the card hidden too, AppKit's own rect.
+- The cap is never above AppKit's rect (`rect.maxY`), and never so low that the sheet would pass the window's bottom
+  edge: the top is `min(rect.maxY, max(cap, sheet.frame.height))`. A sheet too tall to fit below the rows starts as low
+  as it can while it stays inside the window, and covers part of the rows.
+- Every sheet begun on the shell window goes through it: the overlay's `-[ArktDialogSheet beginOnWindow:]` sheets, the
+  file chooser, and the shell's own (Delete Space, the import sheet, the save panel, the Space emoji prompt, the
+  onboarding skip alert).
+- Review of #947: the first version capped at the focused tab's page. In a stacked split with the lower pane focused
+  that put the cap mid-window, so a tall sheet (the file chooser, the save panel, the import sheet) hung past the
+  window's bottom. Side by side, a focused pane without rows let a tall sheet cover the other pane's rows. Both fixed by
+  the rule above.
 
 ### How AppKit uses the rect (macOS 27.0, checked with a stub delegate on a plain window)
 
@@ -8070,40 +8079,59 @@ no engine build run. Follows "#586", "Left open".
   above its centered top; a 600 pt sheet's top followed the rect's top. So a short sheet (an `NSAlert`) does not move;
   a tall one (the file chooser, as in the "#586" run: top at 690 inside the rows' 630 to 750) starts below the rows.
 - The frame is final as soon as `beginSheet` returns; there is no slide to wait for.
+- On macOS 15 AppKit is said to hang every sheet from the rect's top, without centering, so there the cap would apply
+  to short alerts too. Not verified: no macOS 15 machine was used. CI's GUI job on `macos-26` passed every test here.
 
 ### A sheet that is up when the rows change
 
 It stays where it began: the rows' change does not make AppKit ask again, so a tall sheet begun without rows covers
 rows that arrive while it is up. The next window resize places it below them. Checked with a real sheet in
 `ShellWindowSheetTests.testASheetUpWhenRowsArriveStaysUntilTheWindowResizes` (deterministic: the frame is final at
-once and the resize is synchronous). Moving an up sheet when the rows change is not done; it would mean moving the
-sheet window by hand, outside AppKit's placement.
+once and the resize is synchronous). Kept by the maintainer's decision on #924; moving it is #951.
+
+### Maintainer decisions (2026-11-16, review of #947)
+
+Keep every default asked on #924: every sheet on the shell window is capped, AppKit's centering is kept, an up sheet is
+not moved until a resize. Follow-ups: Little Arkt windows #950, moving an up sheet #951.
 
 ### Tests
 
-New `ShellKitGUITests.ShellWindowSheetTests` (7), InMemoryEngine emitting infobars, the rect asked through
+`ShellKitGUITests.ShellWindowSheetTests` (11), InMemoryEngine emitting infobars, the rect asked through
 `window.delegate`: 0, 1 and 3 rows (the rect's top on the strip's bottom, the horizontal place unchanged); HTML
-fullscreen with 2 rows (the card's top, then back below the rows); no page (the card's top); a 700 pt sheet begun under
-3 rows (its top on the rows' bottom, overlapping none); the up sheet above. Before the change: all 7 failed (the
-delegate answered nil; the real sheet's top at 850, centered, over the rows' 770 to 890).
+fullscreen with 2 rows (the card's top, then back below the rows); no page (the card's top); the rect AppKit passes,
+recorded from a real `beginSheet` (the cap is not above it); a stacked split with the lower pane focused (the top
+pane's page top; a 600 pt sheet inside the window); side by side with the unfocused pane holding 3 rows (the cap below
+them, a 600 pt sheet covering none). Real sheets: a 600 pt sheet under 3 rows (its top on the rows' bottom); a 780 pt
+sheet under 3 rows (inside the window); the up sheet above. Before the change: the first 7 failed (the delegate
+answered nil); before the review fix: the stacked, side-by-side and too-tall tests failed (cap at 395 instead of 790,
+790 instead of 670, the sheet's bottom 110 pt below the window's).
 
-- `swift test --filter ShellWindowSheetTests`: 7 tests, 0 failures.
-- `swift test --filter 'Infobar|ShellWindow|Sheet'`: 154 tests, 3 skipped, 0 failures (147 + 7).
-- 20 runs of `AAWindowLeakGuardTests|ShellWindowSheetTests|ZzzWindowLeakGuardEndTests` (18 tests each), 1-minute load
-  average 6.6 to 8.8 on 10 cores: 20 passed, 0 failed.
+- `swift test --filter ShellWindowSheetTests`: 11 tests, 0 failures.
+- `swift test --filter 'Infobar|ShellWindow|Sheet|Split'`: 406 tests, 5 skipped, 0 failures (402 on the first
+  version of the branch, 395 on `main`; the skipped count follows the load, as the pacing gates skip).
+- 20 runs of `AAWindowLeakGuardTests|ShellWindowSheetTests|ZzzWindowLeakGuardEndTests` (22 tests each), 1-minute load
+  average 9.1 to 25.0 on 10 cores: 20 passed, 0 failed.
 - `swift test --skip ShellKitGUITests`: 1573, 44, 60, 29, 289, 49, 352, 227, 39, unchanged. Lints 13 + 60.
 
-### Deliberate break
+### Deliberate breaks
 
-`return page.convert(page.bounds, to: nil).maxY - infobarStrips.height(of: tab)` without the strip's height: 5 of the 7
-tests fail, for example `XCTAssertEqualWithAccuracy failed: ("790.0") is not equal to ("670.0") +/- ("0.5") - three
-rows` and `("850.0") is not equal to ("770.0") ... - the sheet's top at the rows' bottom`. Restored: passing.
+- The band rule replaced by the focused pane (`pages.first(where: { $0.tab == currentTab })?.top` and only its strip):
+  `testInAStackedSplitASheetStartsAtTheTopPaneNotTheFocusedLowerOne` fails (`("395.0") is not equal to ("790.0")`) and
+  `testSideBySideTheCapIsBelowTheTallestStripOfThePanes` fails (`("790.0") is not equal to ("670.0")`, and the sheet
+  covers the other pane's rows).
+- The bottom clamp dropped (`let top = min(rect.maxY, cap)`): `testASheetTooTallForTheCapStaysInsideTheWindow` fails
+  (`("58.0") is less than ("167.5") - the sheet's bottom inside the window`).
+- First version: the strip's height dropped from the cap: 5 of 7 failed, for example `("790.0") is not equal to
+  ("670.0") +/- ("0.5") - three rows`.
+
+Restored: passing.
 
 ### Left open
 
 - The file chooser and the overlay's extension sheets were not run on an Engine build; the rect they get is the one the
-  tests check, and AppKit's placement is the same for any sheet window. A live check of the file chooser under 3 rows
-  needs the engine build.
-- Little Arkt windows also show infobars; their sheets still hang where AppKit puts them.
+  tests check, and AppKit's placement is the same for any sheet window. A live check needs the engine build.
+- Little Arkt windows: #950. Moving an up sheet when rows change: #951.
+- While a Peek is up, its page sits in the Peek overlay, inset below the card's top, and its tab is not one of the
+  shown pages the cap is worked out from. A tall sheet can cover the Peek's strip. Not handled: it needs the Peek's
+  tab and geometry in the cap, and its own test.
 - A short sheet stays centered in the window, as AppKit places it; only its top is capped.
-- A tall sheet below 3 rows can reach past the window's bottom edge; AppKit does not clamp it.
