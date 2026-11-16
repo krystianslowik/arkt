@@ -3004,7 +3004,8 @@ Audited `MainMenu`, `SpacesMenu`, `TabsMenu`, `SplitMenu`, and copy-link selecto
 Copy URL / Markdown / Quote and Paste URL as New Tab selector identities to the existing New Tab and Sidebar
 catalog. Their original responder-chain targets and menu defaults are unchanged; binding only changes key equivalents.
 Tagged dispatch, numbered Space/sidebar/split rows, differently keyed hidden tab aliases, and unaudited selectors
-remain read-only as detailed in `docs/shortcut-wiring-test-notes.md`. No recorder or app composition was added.
+remain read-only as detailed in `docs/shortcut-wiring-test-notes.md` (folded into this file and deleted in the
+#828 review round). No recorder or app composition was added.
 
 Test first: the focused actual catalog/model source package with synthetic menu items ran
 `swift test --package-path <isolated-package> --filter CopyLinkCatalogTests`: 1 test failed with 3 issues because
@@ -3418,9 +3419,12 @@ After the merge, changed Swift source parsing, workflow import-layer and UI-sour
 
 Every row of spec section 1, as bound on `feat/119-shortcut-editor-tests` after merging main `1f28a6a`. "Menu"
 names the item in `app/ArktShell/App/MainMenu.swift` (App menus) or the ShellUI menu that builds it; "Editable" marks
-the six commands Settings > Shortcuts records, clears and resets (`ShortcutCatalog.actionID`). Every other bound key
-is listed read-only and protected: recording it opens the conflict notice with Use Shortcut disabled. Widening the
-editable set is #946 (needs the maintainer). Out-of-scope rows follow the maintainer's decision in #124 (no Arc
+the six commands Settings > Shortcuts records, clears and resets (`ShortcutCatalog.actionID`). Every other menu key,
+the keys Arkt owns outside the menu (Cmd-O and Opt-Cmd-O in Peek and Little Arkt, the tab switcher's Ctrl-` and
+Ctrl-W, the command bar's Opt-Cmd-Delete) and Ctrl-1 ... 9 are read-only and protected
+(`ShortcutCatalog.ownersOutsideTheMenu`): recording one opens the conflict notice with Use Shortcut disabled. Keys
+the recorder refuses outright (Return, Tab, Escape, text-editing keys, keys without Cmd or Ctrl) are in the review
+section below. Widening the editable set is #946 (decided: after the preview). Out-of-scope rows follow the maintainer's decision in #124 (no Arc
 extras in v1; spec section 5).
 
 | Row | Default | Status | Where, or why not |
@@ -3446,7 +3450,7 @@ extras in v1; spec section 5).
 | KB-026, KB-027 | Ctrl-Cmd-Right / Left | bound | Tabs > Cycle Tab Forward / Backward (`TabsMenu.swift:23-25`) |
 | KB-028, KB-029 | Opt-Cmd-Down / Up | bound | Tabs > Next / Previous Tab (`TabsMenu.swift:17-18`) |
 | KB-030 | Cmd-} / Cmd-{ | bound | hidden aliases in the Tabs menu; RT-02 in #78 |
-| KB-031, KB-032 | Cmd-[ / Cmd-]; Cmd-Left / Cmd-Right | bound | History > Back / Forward (`MainMenu.swift:203-204`); Cmd-Left / Right are not menu keys on purpose (a menu item would take them from text fields, `MainMenu.swift:199`); they are left to the engine and were not checked in this pass |
+| KB-031, KB-032 | Cmd-[ / Cmd-]; Cmd-Left / Cmd-Right | Cmd-[ / Cmd-] bound; Cmd-Left / Cmd-Right deferred to #948 | History > Back / Forward (`MainMenu.swift:203-204`); Cmd-Left / Right are not menu keys on purpose (a menu item would take them from text fields, `MainMenu.swift:199`) and no handler exists in the shell or the engine overlay |
 | KB-033, KB-034 | Opt-Cmd-Right / Left | bound | Spaces > Next / Previous Space (`MainMenu.swift:226-227`) |
 | KB-035 | Ctrl-1 ... Ctrl-9 | bound | Spaces menu entries (`SpacesMenu.swift`); also a macOS system shortcut, see spec section 1 and below |
 | KB-036 | Ctrl-Space | bound | Tabs > Reveal Current Tab (`TabsMenu.swift:28`); also a macOS system shortcut |
@@ -3520,3 +3524,44 @@ Tests, written first and each watched failing:
   missing `duplicateSelectedTabs(_:)` and `togglePinnedSection(_:)`.
 - Changed expectations: `MainMenuInventoryTests.testPageCommandsDispatchTheirEngineCommandWithANilTarget` (the two
   hidden aliases) and `SpacesMenuTests.testNoSpaceListsNoItemAndKeepsTheOtherItems` (the new Spaces item).
+
+### #828 review round: recorder key rules, protected owners and Reset All confirmation (#119)
+
+Maintainer decisions on #828 (2026-11-16): ship with the six rebindable commands (#946 widens it after the preview);
+Reveal Tab in Sidebar reveals without moving focus, no default key (#945); Duplicate and Collapse / Expand Pinned
+Section stay as built; F12 stays reserved; the recorder rules and the Reset All confirmation below.
+
+- Recorder key rules (`ShortcutEditorModel.rejection(keyCode:key:flags:)`). An edited binding reaches the menu before
+  the focused view (`ShortcutCatalog.reserves`), so a key that types or edits text would be taken from every field
+  and page. Refused, with a notice that says why ("K can't be a shortcut: shortcuts need Command or Control ..."),
+  while the recorder keeps listening: any key without Cmd or Ctrl except bare F1 ... F20 (bare letters, Shift or
+  Option letters, which would break accented input); Return, keypad Enter, Tab and Escape with any modifier; Cmd or
+  Opt (with or without Shift) plus an arrow, Delete or Forward Delete; Ctrl (with or without Shift) plus the Cocoa
+  editing letters A B D E F H K L N O P T V Y. Delete and Escape clear and cancel only when pressed alone.
+- Protected owners no longer depend on the live menu: `ownersOutsideTheMenu` adds Cmd-O (Peek's Open as Tab, Little
+  Arkt's Open In), Opt-Cmd-O (Little Arkt's chooser), Ctrl-` and Ctrl-W (tab switcher), Opt-Cmd-Delete (command
+  bar), and Ctrl-1 ... 9 (Space 1 ... 9), used when no menu item owns the key. The Spaces menu lists Space items only
+  for the main shell window, so while Settings was main Ctrl-1 recorded without a conflict and later shadowed Space 1.
+  A listed Space item still names its Space. No observer of `SpacesMenu.listDidChangeNotification` is needed: the
+  Ctrl-digits are owned whatever the list holds, so a saved Ctrl-digit stays Unavailable.
+- Reserved matching (#497 class): `reserves` compares the modifiers as `ReservedKeys` does and the key by
+  `characters(byApplyingModifiers: [])` or `charactersIgnoringModifiers`, lowercased, falling back to the binding
+  character's US key code when the typed character is not ASCII; Caps Lock changes nothing.
+- While the conflict notice is open, Cmd and Ctrl keys are swallowed (they used to reach the panes and the main
+  menu); Return and Escape keep the existing binding; Tab and Space still work inside it.
+- Reset All Shortcuts... asks first on the shared dialog sheet: "Reset all shortcuts to their defaults?", Reset All
+  (destructive, no Return key) and Cancel (default; Escape answers it).
+- Storage: entries for action ids this build does not list are kept and written back (a #946 build's overrides
+  survive this build's saves); Reset All removes them too. Use Shortcut clears a conflicting action through
+  `setBinding(nil)`, so an action whose default is no shortcut stores nothing.
+- Duplicate with a multi-selection: a pane row is never selectable (`SidebarOutlineController.isSelectable`), so a
+  selection reaches Duplicate with the split row, which duplicates the split whole (#374); a test pins it, no code
+  change.
+- Behavior change worth noting (decision 2026-10-26): the six editable defaults are reserved before a focused page
+  even without an override, so a page no longer gets Cmd-S or Opt-Cmd-V first.
+- Hidden aliases of an editable selector take the same binding as their visible item and are cleared with it (from
+  the deleted test notes).
+- `SettingsWindowTests.testConflictReturnDefaultAndFocusedUseSpaceActivation` skips with a reason when the Settings
+  window is not key (macOS 27 cooperative activation, local only); its assertions are unchanged when it is (#953).
+- Deleted: `docs/shortcut-wiring-test-notes.md` (stale) and `ShellKit/Probes/ProtectedShortcutProbe.swift` (never
+  compiled; `ShortcutMenuBindingTests` covers its checks).
