@@ -174,6 +174,7 @@ extension SettingsWindowController {
     shortcutWarningView = nil
     dismissShortcutConflict()
     refreshShortcutControls()
+    syncExtensionShortcutSuspension()
   }
 
   func dismissShortcutConflict() {
@@ -222,7 +223,10 @@ extension SettingsWindowController {
     dismissShortcutConflict()
     let panel = NSView(frame: NSRect(x: 40, y: 105, width: max(300, root.bounds.width - 80), height: 130))
     panel.wantsLayer = true
-    panel.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+    // Resolved in the window's appearance, not the process's (a light Settings window on a dark system).
+    root.effectiveAppearance.performAsCurrentDrawingAppearance {
+      panel.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+    }
     panel.layer?.cornerRadius = ShellRadius.popover
     panel.autoresizingMask = [.width]
     let message = settingsLabel(text, size: 13)

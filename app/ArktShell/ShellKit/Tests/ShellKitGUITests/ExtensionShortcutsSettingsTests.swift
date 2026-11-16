@@ -215,6 +215,48 @@ final class ExtensionShortcutsSettingsTests: XCTestCase {
     XCTAssertNil(Self.view("settings.shortcuts.extension.group.clips", in: try XCTUnwrap(controller.window?.contentView)))
   }
 
+  /// The pane outlives a closed window; reopening Settings shows the commands the engine has now.
+  func testReopeningSettingsShowsCommandsChangedWhileItWasClosed() throws {
+    let engine = designEngine()
+    let (controller, _) = make(engine: engine)
+    controller.show(pane: .shortcuts)
+    controller.window?.close()
+    engine.setExtensionCommands(engine.extensionCommands.filter { $0.id.extensionID == "clips" } + [
+      ExtensionCommand(id: ExtensionCommandID(extensionID: "notes", name: "jot"), extensionName: "Margin Notes",
+                       description: "Jot a note"),
+    ])
+    controller.show(pane: .shortcuts)
+    let root = try XCTUnwrap(controller.window?.contentView)
+    XCTAssertNil(Self.view("settings.shortcuts.extension.group.reader", in: root), "a removed extension's group goes")
+    XCTAssertNotNil(Self.view("settings.shortcuts.extension.group.notes", in: root), "a new extension's group shows")
+    XCTAssertNotNil(Self.view("settings.shortcuts.extension.set.notes.jot", in: root))
+  }
+
+  /// Without the app shortcut editor (no menu binding), every exit still resumes the engine's shortcuts.
+  func testSuspensionEndsWithoutTheAppShortcutEditor() throws {
+    let engine = designEngine()
+    var services = SettingsServices()
+    let menu = MainMenu.make(commands: AppCommands()).menu
+    services.shortcutsMenu = { menu }
+    services.isSystemShortcut = { _ in false }
+    services.extensions = engine
+    let controller = SettingsWindowController(settings: AppSettings(defaults: defaults), services: services)
+    controllers.append(controller)
+    controller.show(pane: .shortcuts)
+    let window = try XCTUnwrap(controller.window)
+    try recorder(read, in: controller).performClick(nil)
+    XCTAssertTrue(engine.isExtensionShortcutHandlingSuspended)
+    controller.windowDidResignKey(Notification(name: NSWindow.didResignKeyNotification, object: window))
+    XCTAssertFalse(engine.isExtensionShortcutHandlingSuspended)
+    try recorder(read, in: controller).performClick(nil)
+    controller.select(.general, animated: false)
+    XCTAssertFalse(engine.isExtensionShortcutHandlingSuspended)
+    controller.select(.shortcuts, animated: false)
+    try recorder(read, in: controller).performClick(nil)
+    window.close()
+    XCTAssertFalse(engine.isExtensionShortcutHandlingSuspended)
+  }
+
   // MARK: - Conflicts
 
   func testAnAppShortcutConflictKeepsOnReturnAndUseMovesIt() throws {
@@ -321,7 +363,7 @@ final class ExtensionShortcutsSettingsTests: XCTestCase {
     try find("settings.shortcuts.extension.scope.reader.toggle-reading", in: controller,
              as: SettingsPopUpButton.self).select("All Apps")
     XCTAssertEqual(try find("settings.shortcuts.extension.notice", in: controller, as: NSTextField.self).stringValue,
-                   "macOS or another app already uses this shortcut, so it can\u{2019}t work in All Apps.")
+                   "This shortcut couldn\u{2019}t be set to work in All Apps.")
     XCTAssertEqual(command(engine, read)?.scope, .inApp)
     XCTAssertEqual(try find("settings.shortcuts.extension.scope.reader.toggle-reading", in: controller,
                             as: SettingsPopUpButton.self).selectedTitle, "In Arkt", "a refused scope goes back")
@@ -348,17 +390,7 @@ final class ExtensionShortcutsSettingsTests: XCTestCase {
   /// 20 extensions with 4 commands each, long descriptions and unset commands: every row is there and no title runs
   /// under its controls.
   func testTwentyExtensionsWithFourCommandsLongDescriptionsAndUnsetCommands() throws {
-    let engine = InMemoryEngine()
-    let long = String(repeating: "Switches the page to a calm layout that keeps going ", count: 4)
-    engine.setExtensionCommands((0..<20).flatMap { ext in
-      (0..<4).map { index in
-        ExtensionCommand(id: ExtensionCommandID(extensionID: "ext\(ext)", name: "cmd\(index)"),
-                         extensionName: "Synthetic Extension With A Long Name Number \(ext)",
-                         description: index == 1 ? long : "Command \(index)",
-                         shortcut: index == 0 ? shortcut(.digit(ExtensionShortcut.Digit(rawValue: ext % 10)!),
-                                                         ext < 10 ? [.control, .shift] : [.control, .option]) : nil)
-      }
-    })
+    let engine = worstCaseEngine()
     let (controller, _) = make(engine: engine)
     controller.show(pane: .shortcuts)
     XCTAssertEqual(controller.visibleExtensionShortcutTitles.count, 80)
@@ -379,6 +411,22 @@ final class ExtensionShortcutsSettingsTests: XCTestCase {
     }
   }
 
+  /// 20 extensions with long names and 4 commands each: a set shortcut, a long description, and two unset commands.
+  private func worstCaseEngine() -> InMemoryEngine {
+    let engine = InMemoryEngine()
+    let long = String(repeating: "Switches the page to a calm layout that keeps going ", count: 4)
+    engine.setExtensionCommands((0..<20).flatMap { ext in
+      (0..<4).map { index in
+        ExtensionCommand(id: ExtensionCommandID(extensionID: "ext\(ext)", name: "cmd\(index)"),
+                         extensionName: "Synthetic Extension With A Long Name Number \(ext)",
+                         description: index == 1 ? long : "Command \(index)",
+                         shortcut: index == 0 ? shortcut(.digit(ExtensionShortcut.Digit(rawValue: ext % 10)!),
+                                                         ext < 10 ? [.control, .shift] : [.control, .option]) : nil)
+      }
+    })
+    return engine
+  }
+
   // MARK: - Screenshots
 
   /// Opt-in: the new section in light and dark, with the conflict notice, for the pull request.
@@ -389,19 +437,20 @@ final class ExtensionShortcutsSettingsTests: XCTestCase {
     let folder = URL(fileURLWithPath: path, isDirectory: true)
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
     for dark in [false, true] {
-      for conflict in [false, true] {
-        let (controller, _) = make(engine: designEngine(), appearance: dark ? .darkAqua : .aqua)
+      for state in ["", "-recording", "-conflict", "-worst-case"] {
+        let engine = state == "-worst-case" ? worstCaseEngine() : designEngine()
+        let (controller, _) = make(engine: engine, appearance: dark ? .darkAqua : .aqua)
         controller.show(pane: .shortcuts)
         let window = try XCTUnwrap(controller.window)
         let section = try find("settings.shortcuts.extension.cycle", in: controller)
-        section.scrollToVisible(section.bounds)
         if let scroll = section.enclosingScrollView, let pane = scroll.documentView {
           // The pane container is flipped; the clip view starts at -chromeHeight (the content inset).
           let top = section.convert(section.bounds, to: pane).minY - SettingsMetrics.chromeHeight - 60
           scroll.contentView.scroll(to: NSPoint(x: 0, y: top))
           scroll.reflectScrolledClipView(scroll.contentView)
         }
-        if conflict {
+        if state == "-recording" { try recorder(read, in: controller).performClick(nil) }
+        if state == "-conflict" {
           try recorder(read, in: controller).performClick(nil)
           window.sendEvent(try key("t", .command, code: 17, in: window))
         }
@@ -409,7 +458,7 @@ final class ExtensionShortcutsSettingsTests: XCTestCase {
         let view = try XCTUnwrap(window.contentView)
         let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
         view.cacheDisplay(in: view.bounds, to: bitmap)
-        let name = "extension-shortcuts\(conflict ? "-conflict" : "")-\(dark ? "dark" : "light").png"
+        let name = "extension-shortcuts\(state)-\(dark ? "dark" : "light").png"
         try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: folder.appendingPathComponent(name))
         XCTAssertGreaterThan(bitmap.pixelsWide, 0)
         window.close()

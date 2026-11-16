@@ -29,13 +29,15 @@ extension SettingsWindowController {
 
   // MARK: Model and engine
 
-  /// Creates the model on first use and follows the engine's command changes while the window is open.
+  /// Creates the model on first use and follows the engine's command changes while the window is open. A pane built
+  /// before the window closed shows what the engine has now.
   func observeExtensionShortcuts() {
     guard let model = ensureExtensionShortcuts(), extensionCommandsObservation == nil else { return }
     extensionCommandsObservation = model.engine.observeExtensions { [weak self] event in
       guard event == .commandsChanged else { return }
       self?.extensionCommandsDidChange()
     }
+    extensionCommandsDidChange()
   }
 
   @discardableResult
@@ -179,6 +181,7 @@ extension SettingsWindowController {
     controls.scope.show(model.scope(of: id) == .global ? Self.allApps : Self.inArkt)
     let first: NSView = recording || command.shortcut != nil ? controls.recorder : controls.setShortcut
     if let row = controls.row, row.trailing.first !== first { row.setTrailing([first, controls.scope]) }
+    controls.row?.needsLayout = true                   // the recorder's width follows its title
   }
 
   // MARK: Recording
@@ -298,8 +301,7 @@ extension SettingsWindowController {
     shortcutWarningView?.removeFromSuperview()
     guard let root = window?.contentView else { return }
     let text = switch notice {
-    case .engine(.globalShortcutTaken):
-      "macOS or another app already uses this shortcut, so it can\u{2019}t work in All Apps."
+    case .engine(.globalShortcutTaken): "This shortcut couldn\u{2019}t be set to work in All Apps."
     case .engine(.notAllowed), .engine(.noKeyCode):
       "This shortcut can\u{2019}t be used for this command here."
     case .commandGone: "This extension is no longer installed."
