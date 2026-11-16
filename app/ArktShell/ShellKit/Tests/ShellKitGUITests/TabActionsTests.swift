@@ -508,6 +508,31 @@ final class TabActionsTests: XCTestCase {
     harness.controller.close()
   }
 
+  /// #374 class (#828 review): a pane row never joins a multi-selection (`SidebarOutlineController.isSelectable`), so
+  /// Duplicate on a selection gets the split row; it duplicates the split whole once and never adds a pane to it.
+  func testDuplicatingASelectionWithASplitKeepsTheSplitIntact() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    harness.controller.activate(node: world.today[0])
+    try harness.click(world.panes[0], .command)
+    XCTAssertFalse(try harness.outline().selectedNodes.contains(world.panes[0]), "a pane is not selectable")
+    harness.controller.activate(node: world.today[0])
+    try harness.click(world.split, .command)
+    XCTAssertEqual(Set(try harness.outline().selectedNodes), [world.today[0], world.split])
+    let before = harness.children(.today(world.work))
+
+    harness.controller.duplicateSelectedTabs(nil)
+
+    let today = harness.children(.today(world.work))
+    XCTAssertEqual(today.count, before.count + 2, "one copy of T0 and one of the split")
+    XCTAssertEqual(harness.children(.split(world.split)), world.panes, "the split keeps its two panes")
+    let splitIndex = try XCTUnwrap(today.firstIndex(of: world.split))
+    let copy = today[splitIndex + 1]
+    guard case .split? = harness.source.node(copy) else { return XCTFail("the split is duplicated whole") }
+    XCTAssertEqual(harness.children(.split(copy)).count, world.panes.count)
+    harness.controller.close()
+  }
+
   private static func title(_ node: SidebarNodeInfo) -> String? {
     if case .tab(_, _, let title) = node { title } else { nil }
   }
