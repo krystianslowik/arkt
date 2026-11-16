@@ -58,15 +58,21 @@ public enum ShortcutCatalog {
   static func reserves(_ event: NSEvent, in menu: NSMenu?) -> Bool {
     guard let menu, let bound = objc_getAssociatedObject(menu, &bindingKey) as? MenuBinding,
           event.type == .keyDown else { return false }
-    let flags = ReservedKeys.significant(event.modifierFlags)
-    let typed = [event.characters(byApplyingModifiers: []), event.charactersIgnoringModifiers]
-      .compactMap { $0?.lowercased() }.filter { !$0.isEmpty }
-    let ascii = typed.first.map { $0.unicodeScalars.count == 1 && $0.unicodeScalars.allSatisfy(\.isASCII) } ?? false
+    let typed = [event.characters(byApplyingModifiers: []), event.charactersIgnoringModifiers].compactMap { $0 }
     return bound.model.catalog.contains { definition in
-      guard let binding = bound.model.binding(for: definition.id), binding.modifiers == flags else { return false }
-      if typed.contains(binding.key) { return true }
-      return !ascii && usKeyCodes[binding.key] == Int(event.keyCode)
+      guard let binding = bound.model.binding(for: definition.id) else { return false }
+      return matches(binding, typed: typed, keyCode: Int(event.keyCode), modifiers: event.modifierFlags)
     }
+  }
+
+  /// Whether a key press that types `typed` (without modifiers) on `keyCode` is `binding`.
+  static func matches(_ binding: ShortcutBinding, typed: [String], keyCode: Int,
+                      modifiers: NSEvent.ModifierFlags) -> Bool {
+    guard binding.modifiers == ReservedKeys.significant(modifiers) else { return false }
+    let typed = typed.map { $0.lowercased() }.filter { !$0.isEmpty }
+    if typed.contains(binding.key) { return true }
+    let ascii = typed.first.map { $0.unicodeScalars.count == 1 && $0.unicodeScalars.allSatisfy(\.isASCII) } ?? false
+    return !ascii && usKeyCodes[binding.key] == keyCode
   }
 
   /// The US key code of each ASCII character a binding can hold.

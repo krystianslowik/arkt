@@ -208,7 +208,11 @@ struct CopyLinkCatalogTests {
       #expect(items[index].target == nil)
     }
   }
+}
 
+/// #828 review: protected owners that are not menu items, and how edited bindings are reserved before the page.
+@MainActor
+struct ShortcutOwnersAndReservedKeysTests {
   /// A menu holding New Tab only, bound to a model on a throwaway defaults suite.
   private func boundNewTab() throws -> (ShortcutEditorModel, NSMenu, UserDefaults, String) {
     let menu = NSMenu()
@@ -271,5 +275,17 @@ struct CopyLinkCatalogTests {
     #expect(!ShortcutCatalog.reserves(try key("k", [.command, .option, .shift]), in: menu), "Shift is another key")
     #expect(!ShortcutCatalog.reserves(try key("\u{43B}", [.command], code: 40), in: menu))
     #expect(!ShortcutCatalog.reserves(try key("j", [.command, .option], code: 38), in: menu))
+  }
+
+  /// The matching rule alone, with what a Cyrillic layout types: the K key's US code stands in for "k", while a
+  /// Latin character on another key never matches by code.
+  @Test func aNonLatinKeyMatchesByItsUSKeyCode() {
+    let binding = ShortcutBinding(key: "k", modifiers: [.command, .option])
+    #expect(ShortcutCatalog.matches(binding, typed: ["\u{43B}"], keyCode: 40, modifiers: [.command, .option]))
+    #expect(ShortcutCatalog.matches(binding, typed: ["K"], keyCode: 40, modifiers: [.command, .option, .capsLock]))
+    #expect(!ShortcutCatalog.matches(binding, typed: ["\u{43B}"], keyCode: 38, modifiers: [.command, .option]))
+    #expect(!ShortcutCatalog.matches(binding, typed: ["j"], keyCode: 40, modifiers: [.command, .option]),
+            "a layout typing ASCII matches by character only (AZERTY, Dvorak)")
+    #expect(!ShortcutCatalog.matches(binding, typed: ["\u{43B}"], keyCode: 40, modifiers: .command))
   }
 }
