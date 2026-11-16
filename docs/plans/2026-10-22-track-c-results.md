@@ -3413,3 +3413,110 @@ manual performance remain unverified.
 Merged main `1188868` into the hover-query deferral branch. The sole conflict was this append-only history; both histories are retained. The pager keeps main's changed-hidden-page preparation and visible-page parking fixes alongside the deferred-hover queue, frozen-to-idle flush, and detach cancellation. The queued callback still rechecks paging and reads the current pointer and geometry when allowed to run. No new polling or per-frame pointer query is introduced.
 
 After the merge, changed Swift source parsing, workflow import-layer and UI-source checks, actionlint and engine-header parity were checked. No local full build, GUI run or app launch was performed. Merged-head CI, including the overlapping pager GUI coverage, remains pending; earlier passes apply to the previous head only.
+
+### Shortcut catalog audit and the remaining defaults (#119)
+
+Every row of spec section 1, as bound on `feat/119-shortcut-editor-tests` after merging main `1f28a6a`. "Menu"
+names the item in `app/ArktShell/App/MainMenu.swift` (App menus) or the ShellUI menu that builds it; "Editable" marks
+the six commands Settings > Shortcuts records, clears and resets (`ShortcutCatalog.actionID`). Every other bound key
+is listed read-only and protected: recording it opens the conflict notice with Use Shortcut disabled. Widening the
+editable set is #946 (needs the maintainer). Out-of-scope rows follow the maintainer's decision in #124 (no Arc
+extras in v1; spec section 5).
+
+| Row | Default | Status | Where, or why not |
+|---|---|---|---|
+| KB-001 | Cmd-T | bound, editable | File > New Tab (`MainMenu.swift:104`) |
+| KB-002 | Cmd-L | bound | File > Open Command Bar (`MainMenu.swift:113`) |
+| KB-003, KB-004 | Cmd-T / Cmd-L while open; Cmd-L, Enter | bound | `CommandBarController.swift` (command bar keys) |
+| KB-005 | Cmd-N | bound | File > New Window (`MainMenu.swift:105`) |
+| KB-006 | Ctrl-Cmd-N | bound | File > New Blank Window (`MainMenu.swift:108`) |
+| KB-007 | Shift-Cmd-N | bound | File > New Incognito Window (`MainMenu.swift:106`) |
+| KB-008 | Cmd-W | bound | File > Archive Tab (`MainMenu.swift:115`) |
+| KB-009 | Shift-Cmd-W | bound | File > Close Window (`MainMenu.swift:121`) |
+| KB-010 | Shift-Cmd-T | bound | File > Reopen Closed Tab (`MainMenu.swift:117`) |
+| KB-011 | Cmd-Z | bound | Edit > Undo through `ReopenUndoRouter` (`MainMenu.swift:145`) |
+| KB-012 | Cmd-D | bound | File > Pin Tab (`MainMenu.swift:123`) |
+| KB-013 to KB-016 | Shift-Cmd-C, Opt-Shift-Cmd-C, Ctrl-Shift-Cmd-C, Opt-Cmd-V | bound, editable | Edit > Copy URL ... Paste URL as New Tab (`MainMenu.swift:155-160`) |
+| KB-017 | Cmd-S | bound, editable | View > Hide / Show Sidebar (`MainMenu.swift:179`) |
+| KB-018 | Shift-Cmd-D | bound | View > Show / Hide Toolbar (`MainMenu.swift:180`) |
+| KB-019 | Shift-Cmd-K | bound | File > Clear Today Tabs (`MainMenu.swift:120`) |
+| KB-020, KB-021 | Cmd-1 ... Cmd-9 | bound | Tabs > Go to Sidebar Item N (`TabsMenu.swift:34-39`) |
+| KB-022, KB-023 | Ctrl-Tab, Ctrl-Shift-Tab | bound | Tab switcher, raw key events (`TabSwitcherKeys.swift`; no menu item, it follows Ctrl's release) |
+| KB-024, KB-025 | Ctrl-`, W in the switcher | bound | `TabSwitcherKeys.swift` |
+| KB-026, KB-027 | Ctrl-Cmd-Right / Left | bound | Tabs > Cycle Tab Forward / Backward (`TabsMenu.swift:23-25`) |
+| KB-028, KB-029 | Opt-Cmd-Down / Up | bound | Tabs > Next / Previous Tab (`TabsMenu.swift:17-18`) |
+| KB-030 | Cmd-} / Cmd-{ | bound | hidden aliases in the Tabs menu; RT-02 in #78 |
+| KB-031, KB-032 | Cmd-[ / Cmd-]; Cmd-Left / Cmd-Right | bound | History > Back / Forward (`MainMenu.swift:203-204`); Cmd-Left / Right are not menu keys on purpose (a menu item would take them from text fields, `MainMenu.swift:199`); they are left to the engine and were not checked in this pass |
+| KB-033, KB-034 | Opt-Cmd-Right / Left | bound | Spaces > Next / Previous Space (`MainMenu.swift:226-227`) |
+| KB-035 | Ctrl-1 ... Ctrl-9 | bound | Spaces menu entries (`SpacesMenu.swift`); also a macOS system shortcut, see spec section 1 and below |
+| KB-036 | Ctrl-Space | bound | Tabs > Reveal Current Tab (`TabsMenu.swift:28`); also a macOS system shortcut |
+| KB-037 | unbound | deferred, needs the maintainer | Reveal Tab in Sidebar: no behavior in the spec that differs from KB-036; question and default in #945 |
+| KB-038 | unknown | owned | Type Travel, #561 |
+| KB-039 | Esc | bound / owned | closes a Peek (`PeekController.handleEscape`); full screen exit is #613 |
+| KB-040 | unknown (CF-02) | bound unbound | Tabs > New Folder, no key until RT-04 (`TabsMenu.swift:46`) |
+| KB-041 | unbound | bound unbound | File > Back to Pinned URL (`MainMenu.swift:125`) |
+| KB-042 | unbound | bound unbound (new) | Tabs > Duplicate (`TabsMenu.swift:30`): the current tab, a pane's split, or the selection |
+| KB-043 | unbound | per action | Show Archive and Clear Archive (`MainMenu.swift:246-248`), Rename (row menus and Rename Space), Collapse / Expand All Folders (`TabsMenu.swift:47-48`), Collapse / Expand Pinned Section (new, `MainMenu.swift:224`), New Space and Reset Space (`MainMenu.swift:217`, `222`): bound without a key. Cast: #653. Capture Full Page and Pretty Screenshot: #646. Space Manager: #635. Clear Cookies and Refresh, Clear Cache and Refresh, Network Inspector: #630. Share: no Share command for a tab yet (#362 covers the sidebar menus); nothing to bind until it exists |
+| KB-044, KB-045 | Opt-Cmd-N | bound | File > New Little Arkt Window (`MainMenu.swift:111`) and the system-wide hotkey (`AppSession.swift`) |
+| KB-046 | Ctrl-Cmd-J | out of scope | Live Calendars / Join Meeting (OS-06, #124) |
+| KB-047 | Cmd-E | owned | #599 |
+| KB-048 | Ctrl-D | owned | #633 |
+| KB-049 | Opt-Cmd-I and F12 | bound (F12 new) | View > Developer > Developer Tools (`MainMenu.swift:173`); F12 a hidden alias (`MainMenu.swift:174`), reserved before a focused page (`ReservedKeys.swift`) |
+| KB-050 | Opt-Cmd-C / J / U | bound | View > Developer (`MainMenu.swift:172-176`) |
+| KB-051 | Ctrl-Cmd-F | bound | View > Enter Full Screen (`MainMenu.swift:193`) |
+| KB-052, KB-053 | Fn-F; hold Esc / Esc twice | owned | #613 |
+| KB-054 | Cmd-. | bound | View > Stop (`MainMenu.swift:184`) |
+| KB-055 | Esc while loading | bound | #614 (closed), `ShellWindowController+EscapeStop.swift` |
+| KB-056 | Cmd-R / Shift-Cmd-R | bound | View > Reload / Force Reload (`MainMenu.swift:185-186`) |
+| KB-057 | Cmd-0 / Cmd-+ / Cmd-- | bound (Cmd-= new) | View > Actual Size, Zoom In, Zoom Out (`MainMenu.swift:188-191`); Cmd-= a hidden alias of Zoom In (`MainMenu.swift:190`) |
+| KB-058 | Cmd-F / Opt-Cmd-F / Shift-Cmd-G / Cmd-J | bound except Find and Replace | Edit > Find (`MainMenu.swift:138-142`). Find and Replace deferred: web pages have no replace (Chromium's find bar only finds; its own Opt-Cmd-F item is Search the Web, IDC_FOCUS_SEARCH), and Arkt's own text fields have no find bar. The key would do nothing, so it stays unbound until an editable surface offers replace |
+| KB-059 | Cmd-G | bound | Edit > Find > Find Next (`MainMenu.swift:139`); RT-05 in #78 |
+| KB-060 | Shift-Cmd-S / Cmd-P | bound | File > Save Page As, Print (`MainMenu.swift:127-128`) |
+| KB-061 | Shift-Cmd-2 | owned | #646 |
+| KB-062 to KB-064 | Ctrl-Shift-E, Ctrl-Shift-N, Ctrl-Opt-N | out of scope | Easels and Notes (OS-03, OS-04, #124, #644 closed as not planned) |
+| KB-065 | Shift-Cmd-L / Shift-Cmd-J / Cmd-Y | bound | Window > Show Library, Downloads (`MainMenu.swift:243-244`); History > Show All History (`MainMenu.swift:206`) |
+| KB-066 | Cmd-, | bound | Arkt > Settings (`MainMenu.swift:87`) |
+| KB-067 | Opt-Cmd-G | out of scope | Arc Max (OS-02, #124) |
+| KB-068 | Shift-Cmd-E | owned | #634 |
+| KB-069 | Cmd-M / Opt-Cmd-M / Cmd-H / Opt-Cmd-H / Cmd-Q | bound (Minimize All new) | Window > Minimize, Minimize All as its Option alternate to `NSApp` (`MainMenu.swift:237-238`); Arkt > Hide, Hide Others, Quit (`MainMenu.swift:81-92`) |
+| KB-070 to KB-073 | Ctrl-Shift-=, -, 1 ... 4, ] and [ | bound | View > Split View items (`SplitMenu.swift`) |
+| KB-074 | Cmd-L in a split | bound | `ShellWindowController+Split.swift` |
+| KB-075 | unbound | bound unbound | View > Expand Current Split, Separate Page from Split View (`SplitMenu.swift:34-35`) |
+| KB-076, KB-077 | Cmd-O; Opt-Cmd-O | bound | Peek and Little Arkt (`PeekController.swift`, `LittleArktWindowController.swift`); KB-077's key is RT in #78 (CF-13) |
+| KB-078 to KB-080 | Cmd-W or Esc in Peek; Shift-Cmd-T or Cmd-Z; Cmd-W in Little Arkt | bound | `ShellWindowController.closeTab`, `ReopenStack`, `LittleArktWindowController` |
+| KB-081 to KB-085 | command bar keys | bound | `CommandBarController.swift` (Tab, site search alias, Opt-Cmd-Delete, Esc, Cmd-Return / Opt-Return) |
+| KB-086 | Shift-Enter | out of scope | Instant Links, Arc Max (OS-02, #124) |
+| KB-087, KB-088 | PiP keys | owned | #117 |
+| KB-089 | Esc in the print dialog | not a shell key | the print dialog's own Cancel key; Arkt adds no binding |
+
+System shortcuts (P10 row): `SystemShortcuts` holds the macOS defaults that take a key first (input sources
+Ctrl-Space and Ctrl-Opt-Space, Mission Control's Ctrl-1 ... 9 and Ctrl-arrows, Spotlight's Cmd-Space and
+Cmd-Opt-Space, Cmd-Tab and Shift-Cmd-Tab, the Shift-Cmd-3 / 4 / 5 screenshots, Ctrl-Cmd-Q) and is the default
+`SettingsServices.isSystemShortcut`. A free key on the list shows the warning line as before; a key an Arkt item owns
+(Ctrl-Space, Ctrl-1 ... 9) now carries "System shortcuts may take priority over this shortcut." at the end of the
+conflict notice, which the warning line used to skip. A static list rather than a live read: Carbon's
+`CopySymbolicHotKeys` reports key codes from the user's preferences, which would need translating through the active
+layout into the characters the recorder stores, and would make the tests depend on the machine's settings. Recorded
+in spec section 1.
+
+Moved: BH-195 ("Edit the shortcut" toast) to #441, since a page cannot consume an Arkt key until #441 adds the
+website-first modes; extension commands as conflict owners (the #922 review note) to #597.
+
+Tests, written first and each watched failing:
+
+- `SystemShortcutsTests` (Swift Testing, 5): the list and the Settings default. Red: `settingsServicesCheckTheListByDefault`
+  failed while the default was `{ _ in false }`.
+- `SettingsWindowTests.testConflictNoticeNamesSystemShortcutsForArktOwnedKeys`: Ctrl-Space and Ctrl-1 notices end with
+  the system sentence and fit their frame; Ctrl-Opt-Space shows the warning line; Cmd-T's notice has no system
+  sentence. Red: both notices lacked the sentence and Ctrl-Opt-Space showed no warning.
+- `MainMenuKeyEquivalentTests`: Cmd-= reaches only the hidden Zoom In; F12 reaches only the hidden Developer Tools and
+  is reserved; Minimize All is Minimize's Option alternate to `NSApp`; Duplicate and Collapse Pinned Section are
+  unbound nil-target items no `NSWindow` answers. Red: Cmd-= and F12 reached no item (AppKit does not fold Cmd-= into
+  Cmd-+), the Window menu had Zoom after Minimize, the two items were missing.
+- `ShellWindowKeyTests.testF12ReachesTheMenuBeforeAFocusedViewThatSwallowsKeyEquivalents`. Red: the focused view took
+  F12.
+- `TabActionsTests.testTheDuplicateMenuItemDuplicatesTheCurrentTabAPanesSplitOrTheSelection` and
+  `PinnedTabTests.testThePinnedSectionMenuItemTogglesTheCurrentSpacesPinnedSection`. Red: compile errors for the
+  missing `duplicateSelectedTabs(_:)` and `togglePinnedSection(_:)`.
+- Changed expectations: `MainMenuInventoryTests.testPageCommandsDispatchTheirEngineCommandWithANilTarget` (the two
+  hidden aliases) and `SpacesMenuTests.testNoSpaceListsNoItemAndKeepsTheOtherItems` (the new Spaces item).
