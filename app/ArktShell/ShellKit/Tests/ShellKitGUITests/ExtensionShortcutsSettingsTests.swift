@@ -442,11 +442,17 @@ final class ExtensionShortcutsSettingsTests: XCTestCase {
         let (controller, _) = make(engine: engine, appearance: dark ? .darkAqua : .aqua)
         controller.show(pane: .shortcuts)
         let window = try XCTUnwrap(controller.window)
+        // One size on every screen, so the local and CI shots match.
+        window.setContentSize(NSSize(width: SettingsMetrics.windowWidth, height: 640))
+        window.contentView?.layoutSubtreeIfNeeded()
         let section = try find("settings.shortcuts.extension.cycle", in: controller)
         if let scroll = section.enclosingScrollView, let pane = scroll.documentView {
           // The pane container is flipped; the clip view starts at -chromeHeight (the content inset).
           let top = section.convert(section.bounds, to: pane).minY - SettingsMetrics.chromeHeight - 60
-          scroll.contentView.scroll(to: NSPoint(x: 0, y: top))
+          // Clamped to the document, so a short window (a CI screen) does not scroll past the pane's end.
+          let clip = scroll.contentView
+          let target = clip.constrainBoundsRect(NSRect(origin: NSPoint(x: 0, y: top), size: clip.bounds.size))
+          clip.scroll(to: target.origin)
           scroll.reflectScrolledClipView(scroll.contentView)
         }
         if state == "-recording" { try recorder(read, in: controller).performClick(nil) }
