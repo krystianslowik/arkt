@@ -257,6 +257,24 @@ struct ShortcutEditorModelTests {
 
   // MARK: Storage
 
+  /// A saved key the recorder now refuses (a Ctrl-A or a Cmd-Left from an earlier build) loads Unavailable instead of
+  /// taking text editing from fields; another saved key still applies.
+  @Test func savedKeysTheRecorderRefusesLoadUnavailable() throws {
+    let suite = try Suite()
+    let saved = #"{"newTab":{"key":"a","modifiers":262144},"showSidebar":{"key":"j","modifiers":262144}}"#
+    suite.defaults.set(Data(saved.utf8), forKey: "shortcutOverrides")
+    let store = ShortcutEditorModel(catalog: catalog(), defaults: suite.defaults)
+    #expect(store.binding(for: newTab) == nil)
+    #expect(store.blockedOverrides[newTab]?.first?.title == "text editing")
+    #expect(store.overrides[newTab] == .binding(ShortcutBinding(key: "a", modifiers: .control)), "kept for repair")
+    #expect(store.binding(for: sidebar) == ShortcutBinding(key: "j", modifiers: .control))
+    let left = String(UnicodeScalar(NSLeftArrowFunctionKey)!)
+    store.setBinding(ShortcutBinding(key: left, modifiers: .command), for: sidebar)
+    #expect(store.binding(for: sidebar) == nil && store.blockedOverrides[sidebar] != nil)
+    store.reset(newTab)
+    #expect(store.binding(for: newTab) == commandT && store.blockedOverrides[newTab] == nil)
+  }
+
   /// Entries for actions this build does not list (a newer build's #946 catalog) survive this build's saves.
   @Test func overridesForUnknownActionsSurviveASave() throws {
     let suite = try Suite()

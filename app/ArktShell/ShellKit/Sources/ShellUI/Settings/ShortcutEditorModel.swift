@@ -103,6 +103,7 @@ public final class ShortcutEditorModel {
         overrides[definition.id] = .cleared
       }
     }
+    refreshBlockedOverrides()
   }
 
   public func binding(for id: ShortcutActionID) -> ShortcutBinding? {
@@ -228,6 +229,18 @@ public final class ShortcutEditorModel {
     return .needsCommandOrControl
   }
 
+  /// The recorder's rules applied to a stored binding, its key mapped back to the key code the rules check.
+  static func rejection(for binding: ShortcutBinding) -> Rejection? {
+    func scalar(_ value: Int) -> String { String(UnicodeScalar(UInt32(value))!) }
+    let codes: [String: Int] = [
+      "\r": kVK_Return, "\u{3}": kVK_ANSI_KeypadEnter, "\t": kVK_Tab, "\u{1b}": kVK_Escape, "\u{7f}": kVK_Delete,
+      "\u{8}": kVK_Delete, scalar(NSDeleteFunctionKey): kVK_ForwardDelete, scalar(NSLeftArrowFunctionKey): kVK_LeftArrow,
+      scalar(NSRightArrowFunctionKey): kVK_RightArrow, scalar(NSUpArrowFunctionKey): kVK_UpArrow,
+      scalar(NSDownArrowFunctionKey): kVK_DownArrow,
+    ]
+    return rejection(keyCode: codes[binding.key] ?? -1, key: binding.key, flags: binding.modifiers)
+  }
+
   private func persist() {
     refreshBlockedOverrides()
     var stored = foreignOverrides
@@ -248,7 +261,9 @@ public final class ShortcutEditorModel {
     var blocked: [ShortcutActionID: [ProtectedConflict]] = [:]
     for (id, value) in overrides {
       guard case .binding(let binding) = value else { continue }
-      let owners = protectedOwners?(binding) ?? []
+      // A key saved before the recorder's rules (or by hand) that the rules refuse stays stored but never applies.
+      let owners = Self.rejection(for: binding) != nil
+        ? [ProtectedConflict(title: "text editing", binding: binding)] : protectedOwners?(binding) ?? []
       if !owners.isEmpty { blocked[id] = owners }
     }
     blockedOverrides = blocked

@@ -3557,8 +3557,10 @@ Section stay as built; F12 stays reserved; the recorder rules and the Reset All 
 - Duplicate with a multi-selection: a pane row is never selectable (`SidebarOutlineController.isSelectable`), so a
   selection reaches Duplicate with the split row, which duplicates the split whole (#374); a test pins it, no code
   change.
-- Behavior change worth noting (decision 2026-10-26): the six editable defaults are reserved before a focused page
-  even without an override, so a page no longer gets Cmd-S or Opt-Cmd-V first.
+- Routing before the page: only a real override is reserved (`ShortcutCatalog.reserves`); a default keeps main's
+  routing, so Cmd-S stays the focused page's first (an editor's Save), and a cleared action reserves nothing.
+- A saved key the rules refuse (a Ctrl-A or a Cmd-Left saved by an earlier build) loads Unavailable ("used by text
+  editing") and stays stored for repair; Reset or a new recording fixes it.
 - Hidden aliases of an editable selector take the same binding as their visible item and are cleared with it (from
   the deleted test notes).
 - `SettingsWindowTests.testConflictReturnDefaultAndFocusedUseSpaceActivation` skips with a reason when the Settings

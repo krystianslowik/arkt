@@ -130,6 +130,47 @@ final class ShellWindowKeyTests: XCTestCase {
     XCTAssertTrue(probe.hits.isEmpty)
   }
 
+  /// #828 re-review: only real overrides are reserved. With a bound editor and no override, Cmd-S (Hide Sidebar's
+  /// default) still reaches a focused page first, as on main, so an editor page keeps its Save; an override (Ctrl-J)
+  /// beats the page, and clearing it reserves nothing.
+  func testDefaultBindingsKeepTheirRoutingAndOnlyOverridesBeatThePageInBothWindows() throws {
+    let menu = NSMenu()
+    let probe = MenuProbe()
+    let item = NSMenuItem(title: "Hide Sidebar", action: #selector(MenuProbe.toggleSidebarVisibility(_:)),
+                          keyEquivalent: "s")
+    item.target = probe
+    let view = NSMenu()
+    view.addItem(item)
+    let holder = NSMenuItem(title: "View", action: nil, keyEquivalent: "")
+    holder.submenu = view
+    menu.addItem(holder)
+    NSApp.mainMenu = menu
+    let suite = "dev.arkt.tests.defaults.\(UUID().uuidString)"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite); ShortcutCatalog.unbind(from: menu) }
+    let model = ShortcutEditorModel(catalog: ShortcutCatalog.definitions(from: menu), defaults: defaults)
+    ShortcutCatalog.bind(model: model, to: menu)
+    let id = ShortcutActionID("toggleSidebarVisibility")
+    XCTAssertTrue(model.overrides.isEmpty)
+    let windows: [NSWindow] = [ShellWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 600)),
+                               LittleArktWindow(contentRect: NSRect(x: 0, y: 0, width: 800, height: 600))]
+    for window in windows {
+      model.reset(id)
+      let page = SwallowingView(frame: .zero)
+      window.contentView?.addSubview(page)
+      XCTAssertTrue(window.makeFirstResponder(page))
+      XCTAssertTrue(window.performKeyEquivalent(with: try key(kVK_ANSI_S, .maskCommand)))
+      XCTAssertEqual(page.keyEquivalents, 1, "the page keeps Cmd-S, the default")
+      model.setBinding(ShortcutBinding(key: "j", modifiers: .control), for: id)
+      XCTAssertTrue(window.performKeyEquivalent(with: try key(kVK_ANSI_J, .maskControl)))
+      XCTAssertEqual(page.keyEquivalents, 1, "the override beats the page")
+      model.setBinding(nil, for: id)
+      XCTAssertTrue(window.performKeyEquivalent(with: try key(kVK_ANSI_S, .maskCommand)))
+      XCTAssertEqual(page.keyEquivalents, 2, "a cleared action reserves nothing")
+    }
+    XCTAssertEqual(probe.hits, ["Hide Sidebar", "Hide Sidebar"])
+  }
+
   func testEditedBindingsReachMenuBeforePageInBothWindows() throws {
     let menu = NSMenu()
     let item = NSMenuItem(title: "New Tab", action: #selector(MenuProbe.newTab(_:)), keyEquivalent: "t")
@@ -153,21 +194,21 @@ final class ShellWindowKeyTests: XCTestCase {
       let view = SwallowingView(frame: .zero)
       window.contentView?.addSubview(view)
       XCTAssertTrue(window.makeFirstResponder(view))
-      first.setBinding(ShortcutBinding(key: "y", modifiers: .control), for: id)
-      XCTAssertTrue(window.performKeyEquivalent(with: try key(kVK_ANSI_Y, .maskControl)))
+      first.setBinding(ShortcutBinding(key: "j", modifiers: .control), for: id)
+      XCTAssertTrue(window.performKeyEquivalent(with: try key(kVK_ANSI_J, .maskControl)))
       XCTAssertEqual(view.keyEquivalents, 0)
       first.setBinding(nil, for: id)
-      XCTAssertTrue(window.performKeyEquivalent(with: try key(kVK_ANSI_Y, .maskControl)))
+      XCTAssertTrue(window.performKeyEquivalent(with: try key(kVK_ANSI_J, .maskControl)))
       XCTAssertEqual(view.keyEquivalents, 1)
       first.reset(id)
-      XCTAssertTrue(window.performKeyEquivalent(with: try key(kVK_ANSI_Y, .maskControl)))
+      XCTAssertTrue(window.performKeyEquivalent(with: try key(kVK_ANSI_J, .maskControl)))
       XCTAssertEqual(view.keyEquivalents, 2)
     }
     let second = ShortcutEditorModel(catalog: first.catalog, defaults: defaults)
     ShortcutCatalog.bind(model: second, to: menu)
-    second.setBinding(ShortcutBinding(key: "y", modifiers: .control), for: id)
+    second.setBinding(ShortcutBinding(key: "j", modifiers: .control), for: id)
     first.setBinding(nil, for: id)
-    XCTAssertTrue(windows[0].performKeyEquivalent(with: try key(kVK_ANSI_Y, .maskControl)))
+    XCTAssertTrue(windows[0].performKeyEquivalent(with: try key(kVK_ANSI_J, .maskControl)))
     XCTAssertEqual(probe.hits.count, 3)
   }
 
@@ -217,5 +258,6 @@ private final class SwallowingView: NSView {
 private final class MenuProbe: NSObject {
   var hits: [String] = []
   @objc func newTab(_ sender: Any?) { hit(sender) }
+  @objc func toggleSidebarVisibility(_ sender: Any?) { hit(sender) }
   @objc func hit(_ sender: Any?) { hits.append((sender as? NSMenuItem)?.title ?? "") }
 }

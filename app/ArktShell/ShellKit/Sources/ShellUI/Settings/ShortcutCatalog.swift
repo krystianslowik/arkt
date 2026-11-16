@@ -52,7 +52,9 @@ public enum ShortcutCatalog {
     }
   }
 
-  /// The bound model is the source of the equivalents routed before a focused page. A binding matches as
+  /// The bound model's overrides are routed before a focused page; a default keeps the routing it has without the
+  /// editor (`ReservedKeys`; Cmd-S stays the page's first, so an editor page keeps its Save), and a cleared action
+  /// reserves nothing. A binding matches as
   /// `ReservedKeys` matches (#497): by the character the key types without modifiers, or, when that is not ASCII (a
   /// Cyrillic layout), by the US key code for the binding's character; Caps Lock changes nothing.
   static func reserves(_ event: NSEvent, in menu: NSMenu?) -> Bool {
@@ -60,7 +62,8 @@ public enum ShortcutCatalog {
           event.type == .keyDown else { return false }
     let typed = [event.characters(byApplyingModifiers: []), event.charactersIgnoringModifiers].compactMap { $0 }
     return bound.model.catalog.contains { definition in
-      guard let binding = bound.model.binding(for: definition.id) else { return false }
+      guard case .binding? = bound.model.overrides[definition.id],
+            let binding = bound.model.binding(for: definition.id) else { return false }
       return matches(binding, typed: typed, keyCode: Int(event.keyCode), modifiers: event.modifierFlags)
     }
   }
