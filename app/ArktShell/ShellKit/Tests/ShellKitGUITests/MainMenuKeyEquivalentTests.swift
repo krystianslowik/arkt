@@ -1,5 +1,6 @@
 import AppKit
 import Carbon.HIToolbox
+import EngineAPI
 import EngineAPITestSupport
 import XCTest
 @testable import ShellUI
@@ -205,6 +206,84 @@ final class MainMenuKeyEquivalentTests: XCTestCase {
     XCTAssertEqual(item.action, #selector(ShellWindowController.deleteSpace(_:)))
     XCTAssertEqual(item.keyEquivalent, "")
     XCTAssertTrue(spaces.items.dropLast().last?.isSeparatorItem ?? false)
+  }
+
+  // MARK: Remaining defaults (#119, P10 gap review)
+
+  /// The items a key press reaches, each probed alone.
+  private func items(reachedBy event: NSEvent) -> [NSMenuItem] {
+    allItems().filter { !$0.keyEquivalent.isEmpty && Self.matches($0, event) }
+  }
+
+  private func key(_ keyCode: Int, _ flags: CGEventFlags) throws -> NSEvent {
+    let source = CGEventSource(stateID: .privateState)
+    let event = try XCTUnwrap(CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(keyCode), keyDown: true))
+    event.flags = flags
+    return try XCTUnwrap(NSEvent(cgEvent: event))
+  }
+
+  /// KB-057: Cmd-= zooms in as well as Cmd-+ (Shift-Cmd-=), through a hidden alias of View > Zoom In.
+  func testCommandEqualsIsAHiddenAliasOfZoomIn() throws {
+    let equals = items(reachedBy: try key(kVK_ANSI_Equal, .maskCommand))
+    XCTAssertEqual(equals.map(\.title), ["Zoom In"])
+    let alias = try XCTUnwrap(equals.first)
+    XCTAssertEqual(alias.tag, EngineCommand.zoomIn.rawValue)
+    XCTAssertEqual(alias.action, #selector(ShellWindow.commandDispatch(_:)))
+    XCTAssertTrue(alias.isHidden, "one Zoom In in the View menu")
+    XCTAssertTrue(alias.allowsKeyEquivalentWhenHidden)
+    let plus = items(reachedBy: try key(kVK_ANSI_Equal, [.maskCommand, .maskShift]))
+    XCTAssertEqual(plus.map(\.title), ["Zoom In"])
+    XCTAssertEqual(plus.first?.isHidden, false, "Cmd-+ is the visible item")
+  }
+
+  /// KB-049: F12 opens Developer Tools, a hidden alias of View > Developer > Developer Tools (Opt-Cmd-I). It has no
+  /// Cmd, so it is reserved: a focused page would otherwise keep it.
+  func testF12IsAHiddenAliasOfDeveloperToolsAndReserved() throws {
+    let event = try key(kVK_F12, [])
+    let hits = items(reachedBy: event)
+    XCTAssertEqual(hits.map(\.title), ["Developer Tools"])
+    let alias = try XCTUnwrap(hits.first)
+    XCTAssertEqual(alias.tag, EngineCommand.devTools.rawValue)
+    XCTAssertTrue(alias.isHidden)
+    XCTAssertTrue(alias.allowsKeyEquivalentWhenHidden)
+    XCTAssertTrue(ReservedKeys.arkt.matches(event))
+    XCTAssertEqual(items(reachedBy: try key(kVK_ANSI_I, [.maskCommand, .maskAlternate])).first?.isHidden, false)
+  }
+
+  /// KB-069: Window > Minimize All on Opt-Cmd-M, the Option alternate of Minimize, sent to `NSApp` like the other
+  /// app-level items.
+  func testMinimizeAllIsTheOptionAlternateOfMinimize() throws {
+    let window = try XCTUnwrap(MainMenu.make(commands: AppCommands()).windows)
+    let index = window.indexOfItem(withTitle: "Minimize")
+    XCTAssertGreaterThanOrEqual(index, 0)
+    let all = try XCTUnwrap(window.item(at: index + 1))
+    XCTAssertEqual(all.title, "Minimize All")
+    XCTAssertEqual(all.action, #selector(NSApplication.miniaturizeAll(_:)))
+    XCTAssertTrue(all.target === NSApp)
+    XCTAssertTrue(all.isAlternate)
+    XCTAssertEqual(all.keyEquivalent, "m")
+    XCTAssertEqual(all.keyEquivalentModifierMask, [.command, .option])
+    XCTAssertEqual(items(reachedBy: try key(kVK_ANSI_M, [.maskCommand, .maskAlternate])).map(\.title), ["Minimize All"])
+    XCTAssertEqual(items(reachedBy: try key(kVK_ANSI_M, .maskCommand)).map(\.title), ["Minimize"])
+  }
+
+  /// KB-042 and KB-043: Tabs > Duplicate and Spaces > Collapse Pinned Section, both unbound, reach the main window's
+  /// controller through the responder chain. `NSWindow` answers neither selector, so the window cannot take them.
+  func testDuplicateAndCollapsePinnedSectionAreUnboundControllerItems() throws {
+    let expected: [(String, String, Selector)] = [
+      (TabsMenu.title, "Duplicate", #selector(ShellWindowController.duplicateSelectedTabs(_:))),
+      (SpacesMenu.menuTitle, "Collapse Pinned Section", #selector(ShellWindowController.togglePinnedSection(_:))),
+    ]
+    let menu = MainMenu.make(commands: AppCommands()).menu
+    for (menuTitle, title, action) in expected {
+      let submenu = try XCTUnwrap(menu.items.first { $0.title == menuTitle }?.submenu, menuTitle)
+      let item = try XCTUnwrap(submenu.items.first { $0.title == title }, title)
+      XCTAssertEqual(item.action, action, title)
+      XCTAssertEqual(item.keyEquivalent, "", "\(title) is unbound by default")
+      XCTAssertNil(item.target, title)
+      XCTAssertFalse(NSWindow.instancesRespond(to: action), title)
+      XCTAssertTrue(ShellWindowController.instancesRespond(to: action), title)
+    }
   }
 
   /// No two items share a key equivalent.
@@ -438,7 +517,9 @@ final class MainMenuInventoryTests: XCTestCase {
       XCTAssertEqual(item.keyEquivalentModifierMask, modifiers, title)
     }
     let dispatching = allItems().filter { $0.action == #selector(ShellWindow.commandDispatch(_:)) }
-    XCTAssertEqual(dispatching.count, expected.count, "no other commandDispatch: item")
+    XCTAssertEqual(dispatching.filter { !$0.isHidden }.count, expected.count, "no other commandDispatch: item")
+    // KB-057 and KB-049 (#119): Cmd-= and F12, hidden second keys of listed commands.
+    XCTAssertEqual(dispatching.filter(\.isHidden).map(\.tag), [38001, 40004])
   }
 
   /// `IDC_NEW_WINDOW`, the one id the menu and host use that has no `EngineCommand` constant, matches
