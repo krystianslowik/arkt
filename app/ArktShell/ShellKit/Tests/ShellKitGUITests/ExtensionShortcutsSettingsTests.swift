@@ -442,33 +442,42 @@ final class ExtensionShortcutsSettingsTests: XCTestCase {
         let (controller, _) = make(engine: engine, appearance: dark ? .darkAqua : .aqua)
         controller.show(pane: .shortcuts)
         let window = try XCTUnwrap(controller.window)
-        // One size on every screen, so the local and CI shots match.
-        window.setContentSize(NSSize(width: SettingsMetrics.windowWidth, height: 640))
-        window.contentView?.layoutSubtreeIfNeeded()
-        let section = try find("settings.shortcuts.extension.cycle", in: controller)
-        if let scroll = section.enclosingScrollView, let pane = scroll.documentView {
-          // The pane container is flipped; the clip view starts at -chromeHeight (the content inset).
-          let top = section.convert(section.bounds, to: pane).minY - SettingsMetrics.chromeHeight - 60
-          // Clamped to the document, so a short window (a CI screen) does not scroll past the pane's end.
-          let clip = scroll.contentView
-          let target = clip.constrainBoundsRect(NSRect(origin: NSPoint(x: 0, y: top), size: clip.bounds.size))
-          clip.scroll(to: target.origin)
-          scroll.reflectScrolledClipView(scroll.contentView)
-        }
         if state == "-recording" { try recorder(read, in: controller).performClick(nil) }
         if state == "-conflict" {
           try recorder(read, in: controller).performClick(nil)
           window.sendEvent(try key("t", .command, code: 17, in: window))
         }
-        window.displayIfNeeded()
-        let view = try XCTUnwrap(window.contentView)
-        let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
-        view.cacheDisplay(in: view.bounds, to: bitmap)
+        window.contentView?.layoutSubtreeIfNeeded()
+        // The pane itself from the Pinned extensions section down (at most 900 pt), not the window: the window's
+        // height and scroll position depend on the screen.
+        let cycle = try find("settings.shortcuts.extension.cycle", in: controller)
+        let pane = try XCTUnwrap(controller.paneContainer.subviews.first)
+        let top = cycle.convert(cycle.bounds, to: pane).minY - 60
+        let rect = NSRect(x: 0, y: top, width: pane.bounds.width, height: min(900, pane.bounds.height - top))
         let name = "extension-shortcuts\(state)-\(dark ? "dark" : "light").png"
-        try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: folder.appendingPathComponent(name))
-        XCTAssertGreaterThan(bitmap.pixelsWide, 0)
+        try write(pane, rect: rect, background: window.backgroundColor, to: folder.appendingPathComponent(name))
+        if state == "-conflict" {
+          let notice = try XCTUnwrap(find("settings.shortcuts.conflict.message", in: controller).superview)
+          try write(notice, rect: notice.bounds, background: window.backgroundColor,
+                    to: folder.appendingPathComponent("extension-shortcuts-conflict-notice-\(dark ? "dark" : "light").png"))
+        }
         window.close()
       }
     }
+  }
+
+  /// Draws `view`'s `rect` over the window background into a PNG.
+  private func write(_ view: NSView, rect: NSRect, background: NSColor, to url: URL) throws {
+    let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: rect))
+    view.effectiveAppearance.performAsCurrentDrawingAppearance {
+      NSGraphicsContext.saveGraphicsState()
+      NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
+      background.setFill()
+      NSRect(x: 0, y: 0, width: bitmap.size.width, height: bitmap.size.height).fill()
+      NSGraphicsContext.restoreGraphicsState()
+    }
+    view.cacheDisplay(in: rect, to: bitmap)
+    try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: url)
+    XCTAssertGreaterThan(bitmap.pixelsWide, 0)
   }
 }
