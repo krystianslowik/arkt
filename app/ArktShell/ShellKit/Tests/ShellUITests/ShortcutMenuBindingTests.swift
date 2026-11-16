@@ -208,4 +208,68 @@ struct CopyLinkCatalogTests {
       #expect(items[index].target == nil)
     }
   }
+
+  /// A menu holding New Tab only, bound to a model on a throwaway defaults suite.
+  private func boundNewTab() throws -> (ShortcutEditorModel, NSMenu, UserDefaults, String) {
+    let menu = NSMenu()
+    menu.addItem(NSMenuItem(title: "New Tab", action: NSSelectorFromString("newTab:"), keyEquivalent: "t"))
+    let suite = "dev.arkt.tests.nonMenu.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    let model = ShortcutEditorModel(catalog: ShortcutCatalog.definitions(from: menu), defaults: defaults)
+    ShortcutCatalog.bind(model: model, to: menu)
+    return (model, menu, defaults, suite)
+  }
+
+  /// #828 review: keys owned outside the menu are protected too (Peek's and Little Arkt's Cmd-O, Little Arkt's
+  /// Opt-Cmd-O, the tab switcher's Ctrl-` and Ctrl-W, the command bar's Opt-Cmd-Delete), and so are Ctrl-1 ... 9
+  /// whatever the Spaces menu lists at that moment: while Settings is the main window it lists none.
+  @Test func keysOwnedOutsideTheMenuAndSpaceKeysAreProtected() throws {
+    let (model, menu, defaults, suite) = try boundNewTab()
+    defer { ShortcutCatalog.unbind(from: menu); defaults.removePersistentDomain(forName: suite) }
+    let id = ShortcutActionID("newTab")
+    let owned: [(String, NSEvent.ModifierFlags, String)] = [
+      ("o", .command, "Open in Space (Peek, Little Arkt)"), ("o", [.command, .option], "Open In (Little Arkt)"),
+      ("`", .control, "Tab Switcher"), ("w", .control, "Close Tab in the Tab Switcher"),
+      ("\u{7f}", [.command, .option], "Remove Suggestion (command bar)"), ("1", .control, "Space 1"),
+      ("9", .control, "Space 9"),
+    ]
+    for (key, flags, title) in owned {
+      let binding = ShortcutBinding(key: key, modifiers: flags)
+      #expect(model.protectedOwners?(binding).map(\.title) == [title], "\(title)")
+      model.setBinding(binding, for: id)
+      #expect(model.blockedOverrides[id]?.first?.title == title, "a saved \(title) key is Unavailable")
+    }
+    #expect(model.protectedOwners?(ShortcutBinding(key: "0", modifiers: .control)) == [])
+  }
+
+  /// A Space item in the menu names the Space; the fixed owner is not listed twice.
+  @Test func aListedSpaceItemNamesTheSpaceOnce() throws {
+    let (model, menu, defaults, suite) = try boundNewTab()
+    defer { ShortcutCatalog.unbind(from: menu); defaults.removePersistentDomain(forName: suite) }
+    let space = NSMenuItem(title: "Work", action: NSSelectorFromString("selectSpace:"), keyEquivalent: "1")
+    space.keyEquivalentModifierMask = .control
+    space.tag = 1
+    menu.addItem(space)
+    #expect(model.protectedOwners?(ShortcutBinding(key: "1", modifiers: .control)).map(\.title) == ["Work"])
+  }
+
+  /// #828 review, the #497 class: an edited binding is reserved before the focused page by the key the layout types
+  /// without modifiers, or by its US key code when that is not ASCII, as `ReservedKeys` matches, and Caps Lock
+  /// changes nothing.
+  @Test func editedBindingsAreReservedOnNonLatinLayoutsAndWithCapsLock() throws {
+    let (model, menu, defaults, suite) = try boundNewTab()
+    defer { ShortcutCatalog.unbind(from: menu); defaults.removePersistentDomain(forName: suite) }
+    model.setBinding(ShortcutBinding(key: "k", modifiers: [.command, .option]), for: ShortcutActionID("newTab"))
+    func key(_ characters: String, _ flags: NSEvent.ModifierFlags, code: UInt16 = 40) throws -> NSEvent {
+      try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0,
+                                    windowNumber: 0, context: nil, characters: characters,
+                                    charactersIgnoringModifiers: characters, isARepeat: false, keyCode: code))
+    }
+    #expect(ShortcutCatalog.reserves(try key("k", [.command, .option]), in: menu))
+    #expect(ShortcutCatalog.reserves(try key("\u{43B}", [.command, .option]), in: menu), "Cyrillic el on the K key")
+    #expect(ShortcutCatalog.reserves(try key("K", [.command, .option, .capsLock]), in: menu), "Caps Lock")
+    #expect(!ShortcutCatalog.reserves(try key("k", [.command, .option, .shift]), in: menu), "Shift is another key")
+    #expect(!ShortcutCatalog.reserves(try key("\u{43B}", [.command], code: 40), in: menu))
+    #expect(!ShortcutCatalog.reserves(try key("j", [.command, .option], code: 38), in: menu))
+  }
 }

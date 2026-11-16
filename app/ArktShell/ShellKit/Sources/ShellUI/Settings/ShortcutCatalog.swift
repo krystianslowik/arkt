@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import ObjectiveC
 
 /// Settings > Shortcuts: the main menu's key equivalents by top-level menu (read-only until the shortcut editor,
@@ -51,13 +52,56 @@ public enum ShortcutCatalog {
     }
   }
 
-  /// The bound model is the source of the equivalents routed before a focused page.
+  /// The bound model is the source of the equivalents routed before a focused page. A binding matches as
+  /// `ReservedKeys` matches (#497): by the character the key types without modifiers, or, when that is not ASCII (a
+  /// Cyrillic layout), by the US key code for the binding's character; Caps Lock changes nothing.
   static func reserves(_ event: NSEvent, in menu: NSMenu?) -> Bool {
-    guard let menu, let binding = objc_getAssociatedObject(menu, &bindingKey) as? MenuBinding,
-          event.type == .keyDown, let key = event.charactersIgnoringModifiers, !key.isEmpty else { return false }
-    let candidate = ShortcutBinding(key: key, modifiers: event.modifierFlags)
-    return binding.model.catalog.contains { binding.model.binding(for: $0.id) == candidate }
+    guard let menu, let bound = objc_getAssociatedObject(menu, &bindingKey) as? MenuBinding,
+          event.type == .keyDown else { return false }
+    let flags = ReservedKeys.significant(event.modifierFlags)
+    let typed = [event.characters(byApplyingModifiers: []), event.charactersIgnoringModifiers]
+      .compactMap { $0?.lowercased() }.filter { !$0.isEmpty }
+    let ascii = typed.first.map { $0.unicodeScalars.count == 1 && $0.unicodeScalars.allSatisfy(\.isASCII) } ?? false
+    return bound.model.catalog.contains { definition in
+      guard let binding = bound.model.binding(for: definition.id), binding.modifiers == flags else { return false }
+      if typed.contains(binding.key) { return true }
+      return !ascii && usKeyCodes[binding.key] == Int(event.keyCode)
+    }
   }
+
+  /// The US key code of each ASCII character a binding can hold.
+  private static let usKeyCodes: [String: Int] = {
+    let keys: [(String, Int)] = [
+      ("a", kVK_ANSI_A), ("b", kVK_ANSI_B), ("c", kVK_ANSI_C), ("d", kVK_ANSI_D), ("e", kVK_ANSI_E), ("f", kVK_ANSI_F),
+      ("g", kVK_ANSI_G), ("h", kVK_ANSI_H), ("i", kVK_ANSI_I), ("j", kVK_ANSI_J), ("k", kVK_ANSI_K), ("l", kVK_ANSI_L),
+      ("m", kVK_ANSI_M), ("n", kVK_ANSI_N), ("o", kVK_ANSI_O), ("p", kVK_ANSI_P), ("q", kVK_ANSI_Q), ("r", kVK_ANSI_R),
+      ("s", kVK_ANSI_S), ("t", kVK_ANSI_T), ("u", kVK_ANSI_U), ("v", kVK_ANSI_V), ("w", kVK_ANSI_W), ("x", kVK_ANSI_X),
+      ("y", kVK_ANSI_Y), ("z", kVK_ANSI_Z), ("0", kVK_ANSI_0), ("1", kVK_ANSI_1), ("2", kVK_ANSI_2), ("3", kVK_ANSI_3),
+      ("4", kVK_ANSI_4), ("5", kVK_ANSI_5), ("6", kVK_ANSI_6), ("7", kVK_ANSI_7), ("8", kVK_ANSI_8), ("9", kVK_ANSI_9),
+      ("-", kVK_ANSI_Minus), ("=", kVK_ANSI_Equal), ("[", kVK_ANSI_LeftBracket), ("]", kVK_ANSI_RightBracket),
+      (";", kVK_ANSI_Semicolon), ("'", kVK_ANSI_Quote), (",", kVK_ANSI_Comma), (".", kVK_ANSI_Period),
+      ("/", kVK_ANSI_Slash), ("\\", kVK_ANSI_Backslash), ("`", kVK_ANSI_Grave),
+    ]
+    return Dictionary(uniqueKeysWithValues: keys)
+  }()
+
+  /// Keys Arkt owns outside the main menu, and Space 1 ... 9's Ctrl-digits, which the Spaces menu lists only for the
+  /// main shell window (none while Settings is main). Recording one opens the protected conflict notice; a saved one
+  /// is Unavailable. Return and Tab keys (the command bar's Cmd-Return, Ctrl-Tab) are refused by the recorder first.
+  static let ownersOutsideTheMenu: [ShortcutEditorModel.ProtectedConflict] = {
+    var owners: [ShortcutEditorModel.ProtectedConflict] = [
+      .init(title: "Open in Space (Peek, Little Arkt)", binding: ShortcutBinding(key: "o", modifiers: .command)),
+      .init(title: "Open In (Little Arkt)", binding: ShortcutBinding(key: "o", modifiers: [.command, .option])),
+      .init(title: "Tab Switcher", binding: ShortcutBinding(key: "`", modifiers: .control)),
+      .init(title: "Close Tab in the Tab Switcher", binding: ShortcutBinding(key: "w", modifiers: .control)),
+      .init(title: "Remove Suggestion (command bar)",
+            binding: ShortcutBinding(key: "\u{7f}", modifiers: [.command, .option])),
+    ]
+    owners += (1...SpacesMenu.keyedCount).map {
+      .init(title: "Space \($0)", binding: ShortcutBinding(key: "\($0)", modifiers: .control))
+    }
+    return owners
+  }()
 
   private static var bindingKey: UInt8 = 0
   private static var originalBindingKey: UInt8 = 0
@@ -86,7 +130,7 @@ public enum ShortcutCatalog {
       model.protectedOwners = { [weak self, weak menu] candidate in
         guard let self, let menu else { return [] }
         let editable = Set(self.model.catalog.map(\.id))
-        return ShortcutCatalog.items(in: menu).compactMap { item in
+        let inMenu = ShortcutCatalog.items(in: menu).compactMap { item -> ShortcutEditorModel.ProtectedConflict? in
           guard item.submenu == nil, !item.isSeparatorItem,
                 !item.keyEquivalent.isEmpty else { return nil }
           if let id = ShortcutCatalog.actionID(item), editable.contains(id) { return nil }
@@ -94,6 +138,7 @@ public enum ShortcutCatalog {
           guard binding == candidate else { return nil }
           return ShortcutEditorModel.ProtectedConflict(title: item.title, binding: binding)
         }
+        return inMenu.isEmpty ? ShortcutCatalog.ownersOutsideTheMenu.filter { $0.binding == candidate } : inMenu
       }
       observer = model.observe { [weak self] in self?.apply() }
       apply()
