@@ -142,7 +142,7 @@ final class ShellWindowSheetTests: XCTestCase {
     let tab = try shownTab(rows: 3)
     let window = try XCTUnwrap(controller.window)
     let strip = try XCTUnwrap(controller.infobarStrips.strip(for: tab))
-    let sheet = makeSheet(height: 700)
+    let sheet = makeSheet(height: 600)                                  // centered, its top would be over the rows
 
     window.beginSheet(sheet)
     defer { end(sheet, on: window) }
@@ -156,12 +156,13 @@ final class ShellWindowSheetTests: XCTestCase {
   func testASheetUpWhenRowsArriveStaysUntilTheWindowResizes() throws {
     let tab = try shownTab(rows: 0)
     let window = try XCTUnwrap(controller.window)
-    let sheet = makeSheet(height: 790)                                  // centered, its top would be above the page
+    let sheet = makeSheet(height: 600)
     window.beginSheet(sheet)
     defer { end(sheet, on: window) }
     let begun = sheet.frame
-    XCTAssertEqual(begun.maxY, window.convertToScreen(NSRect(x: 0, y: try pageTop(of: tab), width: 0, height: 0)).minY,
-                   accuracy: 0.5, "fixture: the sheet starts at the page's top")
+    XCTAssertLessThanOrEqual(begun.maxY, window.convertToScreen(NSRect(x: 0, y: try pageTop(of: tab), width: 0,
+                                                                      height: 0)).minY + 0.5,
+                             "fixture: the sheet starts below the page's top")
 
     for index in 0..<3 { engine.raiseInfobar(in: tab, message: "Row \(index + 1)") }
     let strip = try XCTUnwrap(controller.infobarStrips.strip(for: tab))
@@ -176,10 +177,126 @@ final class ShellWindowSheetTests: XCTestCase {
     XCTAssertEqual(sheet.frame.maxY, strip.panel.frame.minY, accuracy: 0.5, "a resize places it below the rows")
   }
 
+  // MARK: Every page at the top of the content, and the window's bottom (#947 review)
+
+  /// A sheet the cap would push past the window's bottom starts higher, as low as it can while it fits.
+  func testASheetTooTallForTheCapStaysInsideTheWindow() throws {
+    let tab = try shownTab(rows: 3)
+    let window = try XCTUnwrap(controller.window)
+    let sheet = makeSheet(height: 780)
+
+    window.beginSheet(sheet)
+    defer { end(sheet, on: window) }
+
+    XCTAssertLessThan(try pageTop(of: tab) - 3 * InfobarMetrics.rowHeight, sheet.frame.height,
+                      "fixture: below the rows it would not fit")
+    XCTAssertGreaterThanOrEqual(sheet.frame.minY, window.frame.minY - 0.5, "the sheet's bottom inside the window")
+    XCTAssertLessThanOrEqual(sheet.frame.maxY, window.frame.maxY + 0.5)
+  }
+
+  /// The rect AppKit itself passes (recorded from a real `beginSheet`): the cap is never above it.
+  func testTheCapIsNeverAboveTheRectAppKitPasses() throws {
+    let tab = try shownTab(rows: 1)
+    let window = try XCTUnwrap(controller.window)
+    let recorder = RecordingSheetDelegate(forwardingTo: controller)
+    window.delegate = recorder
+    defer { window.delegate = controller }
+    let sheet = makeSheet(height: 100)
+    window.beginSheet(sheet)
+    defer { end(sheet, on: window) }
+    let appKitRect = try XCTUnwrap(recorder.passed.first, "AppKit asked the delegate")
+    let returned = try XCTUnwrap(recorder.returned.first)
+
+    XCTAssertLessThanOrEqual(returned.maxY, appKitRect.maxY)
+    XCTAssertEqual(returned.maxY, try pageTop(of: tab) - InfobarMetrics.rowHeight, accuracy: 0.5)
+    XCTAssertEqual(returned.minX, appKitRect.minX)
+    XCTAssertEqual(returned.width, appKitRect.width)
+  }
+
+  private func makeSplitWindow(orientation: SidebarModel.Orientation, focus: Int) throws -> (ShellWindowController,
+                                                                                      InMemoryEngine, [TabID]) {
+    var sidebar = SidebarModel.Sidebar()
+    let space = sidebar.addSpace(title: "Work")
+    let split = try sidebar.addSplit(orientation: orientation, widthFactors: [0.5, 0.5], in: .today(space))
+    let panes = try ["a", "b"].map {
+      try sidebar.addTab(url: URL(string: "https://example.com/\($0)")!, title: $0, in: .split(split))
+    }
+    let engine = InMemoryEngine()
+    let shell = ShellWindowController(engine: engine, sidebar: ModelSidebarSource(sidebar: sidebar, now: { .now }))
+    shell.window?.setFrame(NSRect(x: 100, y: 100, width: 1200, height: 800), display: false)
+    shell.showWindow(nil)
+    shell.infobarStrips.reduceMotion = { true }
+    shell.activate(node: panes[focus])
+    shell.window?.contentView?.layoutSubtreeIfNeeded()
+    let tabs = try panes.map { try XCTUnwrap(shell.engineTab(of: $0)) }
+    XCTAssertEqual(shell.currentTab, tabs[focus], "fixture: the focused pane")
+    return (shell, engine, tabs)
+  }
+
+  /// Stacked panes with the lower one focused: the sheet starts at the top pane's page, not mid-window, and stays
+  /// inside the window.
+  func testInAStackedSplitASheetStartsAtTheTopPaneNotTheFocusedLowerOne() throws {
+    let (shell, engine, tabs) = try makeSplitWindow(orientation: .vertical, focus: 1)
+    defer { shell.close() }
+    let window = try XCTUnwrap(shell.window)
+    let top = try XCTUnwrap(engine.contentView(for: tabs[0])).convert(
+      try XCTUnwrap(engine.contentView(for: tabs[0])).bounds, to: nil).maxY
+    let lower = try XCTUnwrap(engine.contentView(for: tabs[1])).convert(
+      try XCTUnwrap(engine.contentView(for: tabs[1])).bounds, to: nil).maxY
+    XCTAssertLessThan(lower, top - 100, "fixture: the panes are stacked")
+
+    let probe = makeSheet(height: 100)
+    defer { probe.close() }
+    let rect = try XCTUnwrap(window.delegate?.window?(window, willPositionSheet: probe, using: defaultRect))
+    XCTAssertEqual(rect.maxY, top, accuracy: 0.5, "the top pane's page top")
+
+    let sheet = makeSheet(height: 600)
+    window.beginSheet(sheet)
+    defer { end(sheet, on: window) }
+    XCTAssertGreaterThanOrEqual(sheet.frame.minY, window.frame.minY - 0.5, "the sheet's bottom inside the window")
+  }
+
+  /// Side by side, the focused pane without rows and the other with 3: the cap is below the other pane's rows.
+  func testSideBySideTheCapIsBelowTheTallestStripOfThePanes() throws {
+    let (shell, engine, tabs) = try makeSplitWindow(orientation: .horizontal, focus: 0)
+    defer { shell.close() }
+    let window = try XCTUnwrap(shell.window)
+    for index in 0..<3 { engine.raiseInfobar(in: tabs[1], message: "Row \(index + 1)") }
+    let strip = try XCTUnwrap(shell.infobarStrips.strip(for: tabs[1]))
+
+    let probe = makeSheet(height: 100)
+    defer { probe.close() }
+    let rect = try XCTUnwrap(window.delegate?.window?(window, willPositionSheet: probe, using: defaultRect))
+    XCTAssertEqual(rect.maxY, window.convertFromScreen(strip.panel.frame).minY, accuracy: 0.5,
+                   "below the unfocused pane's rows")
+
+    let sheet = makeSheet(height: 600)
+    window.beginSheet(sheet)
+    defer { end(sheet, on: window) }
+    XCTAssertFalse(sheet.frame.intersects(strip.panel.frame), "the sheet covers none of the other pane's rows")
+  }
+
   /// Ends the sheet and waits until the window has let it go, so no window outlives the class (#805).
   private func end(_ sheet: NSWindow, on window: NSWindow) {
     window.endSheet(sheet)
     waitUntil("the sheet ended") { window.sheets.isEmpty }
     sheet.close()
+  }
+}
+
+/// Stands in as the window's delegate to record the rect AppKit passes and what the shell window's controller returns.
+@MainActor
+private final class RecordingSheetDelegate: NSObject, NSWindowDelegate {
+  let target: ShellWindowController
+  var passed: [NSRect] = []
+  var returned: [NSRect] = []
+
+  init(forwardingTo target: ShellWindowController) { self.target = target }
+
+  func window(_ window: NSWindow, willPositionSheet sheet: NSWindow, using rect: NSRect) -> NSRect {
+    passed.append(rect)
+    let result = target.window(window, willPositionSheet: sheet, using: rect)
+    returned.append(result)
+    return result
   }
 }

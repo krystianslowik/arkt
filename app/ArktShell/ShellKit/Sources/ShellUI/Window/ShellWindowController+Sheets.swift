@@ -1,22 +1,31 @@
 import AppKit
+import EngineAPI
 
 extension ShellWindowController {
   /// A window-modal sheet on this window (an extension dialog, the file chooser, the shell's own sheets) starts below
-  /// the current tab's infobar rows (#924), as a page dialog does (#581): at the top of the tab's page less the strip's
-  /// height, which is the page's top when the tab has no rows or is in HTML fullscreen; at the card's top while no page
-  /// is on screen. The horizontal place stays the one AppKit passed in. AppKit (macOS 27) centers a sheet in the window
-  /// and takes this rect only as the highest its top may sit, so a short sheet stays centered; it asks when a sheet
-  /// begins and when the window resizes, not when the rows change.
+  /// the infobar rows of the pages at the top of the content (#924), as a page dialog does (#581). Those are every page
+  /// whose top is the highest: the card's page, each pane side by side, the top pane stacked. The cap is that top less
+  /// the tallest of their strips (no height in HTML fullscreen); the card's top while no page is laid out. It is never
+  /// above AppKit's own rect, and never so low that the sheet would pass the window's bottom edge. The horizontal place
+  /// stays the one AppKit passed in. AppKit (macOS 27) centers a sheet in the window and takes this rect only as the
+  /// highest its top may sit, so a short sheet stays centered; it asks when a sheet begins and when the window resizes,
+  /// not when the rows change.
   public func window(_ window: NSWindow, willPositionSheet sheet: NSWindow, using rect: NSRect) -> NSRect {
-    guard let top = sheetTop(in: window) else { return rect }
+    guard let cap = sheetTop(in: window) else { return rect }
+    let top = min(rect.maxY, max(cap, sheet.frame.height))
     return NSRect(x: rect.minX, y: top, width: rect.width, height: 0)
   }
 
   /// The highest a sheet's top may sit, in `window`'s coordinates; nil while neither a page nor the card is on screen.
   private func sheetTop(in window: NSWindow) -> CGFloat? {
-    if let tab = currentTab, let page = engine.contentView(for: tab), page.window === window,
-       !page.isHiddenOrHasHiddenAncestor {
-      return page.convert(page.bounds, to: nil).maxY - infobarStrips.height(of: tab)
+    let pages: [(tab: TabID, top: CGFloat)] = shownNodes.compactMap { node in
+      guard let tab = engineTab(of: node), let page = engine.contentView(for: tab), page.window === window,
+            !page.isHiddenOrHasHiddenAncestor, page.bounds.height > 0 else { return nil }
+      return (tab, page.convert(page.bounds, to: nil).maxY)
+    }
+    if let highest = pages.map(\.top).max() {
+      let strips = pages.filter { $0.top >= highest - 0.5 }.map { infobarStrips.height(of: $0.tab) }
+      return highest - (strips.max() ?? 0)
     }
     let card = rootView.card
     guard card.window === window, !card.isHiddenOrHasHiddenAncestor else { return nil }
