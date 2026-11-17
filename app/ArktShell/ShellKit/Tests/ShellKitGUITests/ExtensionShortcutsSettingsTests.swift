@@ -310,7 +310,10 @@ final class ExtensionShortcutsSettingsTests: XCTestCase {
       ExtensionCommand(id: ExtensionCommandID(extensionID: "notes", name: "jot"), extensionName: "Margin Notes",
                        description: "Jot a note"),
     ])
-    window.sendEvent(try key("\u{1B}", [], code: 53, in: window))
+    XCTAssertNil(Self.view("settings.shortcuts.extension.group.notes", in: try XCTUnwrap(window.contentView)),
+                 "the rows wait while the recorder listens")
+    // The recorder stops without a key (Settings loses focus): the change shows then.
+    controller.windowDidResignKey(Notification(name: NSWindow.didResignKeyNotification, object: window))
     XCTAssertNotNil(Self.view("settings.shortcuts.extension.group.notes", in: try XCTUnwrap(window.contentView)))
   }
 
