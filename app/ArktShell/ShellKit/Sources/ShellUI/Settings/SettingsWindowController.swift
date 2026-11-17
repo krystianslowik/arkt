@@ -77,6 +77,10 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
   var extensionCommandsObservation: EngineObservation?
   /// The last value sent to `setExtensionShortcutHandlingSuspended`.
   var isExtensionShortcutHandlingSuspended = false
+  /// Command changes arrived while a recorder listened; the rows rebuild when it stops.
+  var extensionRowsNeedRefresh = false
+  /// Keep Existing of the extension conflict notice while it shows (focus moves to it).
+  weak var extensionConflictKeep: NSButton?
   /// Settings > General > Downloads (#132): the mode, the folder row and the Library row.
   var downloadModeControl: SettingsSegmentedControl?
   var downloadModeRow: SettingsRowView?

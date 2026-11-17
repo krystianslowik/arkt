@@ -7,20 +7,138 @@ import EngineAPI
 /// the scope pop-up.
 @MainActor
 final class ExtensionShortcutControls {
-  let recorder: ShortcutRecorderButton
+  let recorder: ExtensionShortcutRecorder
   let setShortcut: ArchivePillButton
   let scope: SettingsPopUpButton
   weak var row: SettingsRowView?
 
-  init(recorder: ShortcutRecorderButton, setShortcut: ArchivePillButton, scope: SettingsPopUpButton) {
+  init(recorder: ExtensionShortcutRecorder, setShortcut: ArchivePillButton, scope: SettingsPopUpButton) {
     self.recorder = recorder; self.setShortcut = setShortcut; self.scope = scope
   }
 }
 
-/// Settings > Shortcuts > Pinned extensions and Extension Shortcuts (#597; design/extensions `shortcuts`,
-/// `shortcuts-conflict`, `shortcuts-record`). Shown while the engine runs extensions. The recorder is the app
-/// recorder's (#119): the same window key route, key rules and conflict notice. While either recorder listens, the
-/// engine's extension shortcuts are suspended, so a key an extension holds reaches the recorder (#954).
+/// An extension command's recorder: the shortcut as separate keycaps, as the design and the Cmd-E row draw them; a
+/// click records, and while it records it is a field that reads "Press new shortcut".
+@MainActor
+final class ExtensionShortcutRecorder: ShortcutRecorderButton {
+  private var keycaps: SettingsKeycapsView?
+
+  /// Shows `keys` as keycaps, or the recording field when nil.
+  func show(keys: [String]?, spoken: String) {
+    keycaps?.removeFromSuperview()
+    keycaps = nil
+    if let keys {
+      let caps = SettingsKeycapsView(keys: keys, spoken: spoken)
+      caps.setAccessibilityElement(false)
+      addSubview(caps)
+      keycaps = caps
+      title = ""
+      isBordered = false
+    } else {
+      title = SettingsWindowController.pressNewShortcut
+      isBordered = true
+      bezelStyle = .rounded
+    }
+    invalidateIntrinsicContentSize()
+    needsLayout = true
+  }
+
+  override var intrinsicContentSize: NSSize { keycaps?.intrinsicContentSize ?? super.intrinsicContentSize }
+
+  override func layout() {
+    super.layout()
+    keycaps?.frame = bounds
+  }
+
+  /// A click on a keycap is a click on the recorder.
+  override func hitTest(_ point: NSPoint) -> NSView? {
+    super.hitTest(point) == nil ? nil : self
+  }
+}
+
+/// The conflict notice of the extension recorder, as the row under the command (design/extensions
+/// `shortcuts-conflict`): the alert symbol, "X is already used by "Y".", why, Keep Existing (the one mustard pill, the
+/// default, #590) and a quiet Use.
+@MainActor
+final class ExtensionConflictRowView: SettingsBlockView {
+  private let icon = NSImageView()
+  private let message: NSTextField
+  private let detail: NSTextField
+  let keep: ArchivePillButton
+  let use: ArchiveLinkButton
+
+  init(message text: String, detail detailText: String, keep: ArchivePillButton, use: ArchiveLinkButton) {
+    message = settingsLabel(text, size: 13)
+    detail = settingsLabel(detailText, size: 12)
+    self.keep = keep
+    self.use = use
+    super.init(frame: .zero)
+    wantsLayer = true
+    layer?.cornerRadius = SettingsMetrics.rowRadius
+    layer?.cornerCurve = .continuous
+    icon.image = NSImage(systemSymbolName: "exclamationmark.circle", accessibilityDescription: nil)
+    icon.symbolConfiguration = .init(pointSize: 15, weight: .regular)
+    message.setAccessibilityIdentifier("settings.shortcuts.conflict.message")
+    message.setAccessibilityLabel(text)
+    detail.setAccessibilityIdentifier("settings.shortcuts.conflict.detail")
+    detail.setAccessibilityLabel(detailText)
+    setAccessibilityIdentifier("settings.shortcuts.extension.conflict")
+    [icon, message, detail, keep, use].forEach(addSubview)
+    restyle()
+  }
+
+  @available(*, unavailable)
+  required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+  override var isFlipped: Bool { true }
+
+  private static let top: CGFloat = 12
+  private static let textX: CGFloat = SettingsMetrics.rowPaddingLeading + 26
+
+  private func textWidth(_ width: CGFloat) -> CGFloat { max(40, width - Self.textX - SettingsMetrics.rowPaddingTrailing) }
+
+  override func fittingHeight(width: CGFloat) -> CGFloat {
+    let text = textWidth(width)
+    return Self.top + settingsTextHeight(message, width: text) + 2 + settingsTextHeight(detail, width: text) + 10
+      + keep.intrinsicContentSize.height + 12
+  }
+
+  override func layout() {
+    super.layout()
+    let width = textWidth(bounds.width)
+    icon.frame = NSRect(x: SettingsMetrics.rowPaddingLeading, y: Self.top, width: 18, height: 18)
+    var y = Self.top
+    let messageHeight = settingsTextHeight(message, width: width)
+    message.frame = NSRect(x: Self.textX, y: y, width: width, height: messageHeight)
+    y += messageHeight + 2
+    let detailHeight = settingsTextHeight(detail, width: width)
+    detail.frame = NSRect(x: Self.textX, y: y, width: width, height: detailHeight)
+    y += detailHeight + 10
+    let keepSize = keep.intrinsicContentSize
+    keep.frame = NSRect(x: Self.textX, y: y, width: keepSize.width, height: keepSize.height)
+    let useSize = use.intrinsicContentSize
+    use.frame = NSRect(x: keep.frame.maxX + 16, y: y + ((keepSize.height - useSize.height) / 2).rounded(),
+                       width: useSize.width, height: useSize.height)
+  }
+
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    restyle()
+  }
+
+  private func restyle() {
+    let flavor = archiveFlavor
+    layer?.backgroundColor = ShellTokens.sidebarItemBackground.resolve(flavor).cgColor
+    icon.contentTintColor = ShellTokens.primaryText.resolve(flavor).nsColor()
+    message.textColor = ShellTokens.primaryText.resolve(flavor).nsColor()
+    detail.textColor = ShellTokens.secondaryText.resolve(flavor).nsColor()
+  }
+}
+
+/// Settings > Shortcuts > Extension Shortcuts (#597; design/extensions `shortcuts`, `shortcuts-conflict`,
+/// `shortcuts-record`): the Cmd-E row first, then one group per extension. Shown while the engine runs extensions.
+/// The recorder is the app recorder's (#119): the same window key route and key rules. While either recorder
+/// listens, the engine's extension shortcuts are suspended, so a key an extension holds reaches the recorder (#954).
 extension SettingsWindowController {
   static let inArkt = "In Arkt"
   static let allApps = "All Apps"
@@ -45,26 +163,41 @@ extension SettingsWindowController {
     if let model = extensionShortcuts { return model }
     guard let engine = services.extensions else { return nil }
     let editor = services.shortcutEditor
-    let model = ExtensionShortcutsModel(engine: engine, editor: editor) { [weak self] binding in
-      guard let self else { return [] }
-      return ShortcutCatalog.keptOwners(of: binding, in: self.services.shortcutsMenu(),
-                                        editable: Set(editor?.catalog.map(\.id) ?? []))
+    let model = ExtensionShortcutsModel(engine: engine, editor: editor) { [weak self] in
+      guard let self else { return [:] }
+      return ShortcutCatalog.keptOwnerIndex(in: self.services.shortcutsMenu(),
+                                            editable: Set(editor?.catalog.map(\.id) ?? []))
     }
     if let editor { model.connect(editor) }
     extensionShortcuts = model
     return model
   }
 
-  /// A command set, cleared or removed elsewhere. The rows wait while a recorder listens, unless its command went
-  /// away.
+  /// A command set, cleared or removed elsewhere. While a recorder listens the rows wait (unless its command went
+  /// away), and the change shows when it stops (`cancelShortcutRecording`, `finishExtensionShortcutRecording`).
   private func extensionCommandsDidChange() {
     guard let model = extensionShortcuts else { return }
     if let id = model.recordingCommand {
-      guard model.command(id) == nil else { return }
+      guard model.command(id) == nil else {
+        extensionRowsNeedRefresh = true
+        return
+      }
       cancelShortcutRecording()
     }
-    extensionShortcutControls = extensionShortcutControls.filter { model.command($0.key) != nil }
-    if services.shortcutEditor?.recordingAction == nil { applyShortcutSearch() }
+    refreshExtensionRows()
+  }
+
+  /// Rebuilds the rows from the engine's commands now, unless the app recorder listens (then it waits too).
+  func refreshExtensionRows() {
+    guard let model = extensionShortcuts else { return }
+    guard services.shortcutEditor?.recordingAction == nil else {
+      extensionRowsNeedRefresh = true
+      return
+    }
+    extensionRowsNeedRefresh = false
+    let present = Set(model.engine.extensionCommands.map(\.id))
+    extensionShortcutControls = extensionShortcutControls.filter { present.contains($0.key) }
+    applyShortcutSearch()
   }
 
   /// Suspends the engine's extension shortcuts exactly while a recorder listens. Derived from both recorders' state
@@ -78,11 +211,13 @@ extension SettingsWindowController {
 
   // MARK: Blocks
 
-  /// The two sections, filtered by the Shortcuts search: the Cmd-E row, then one group per extension.
+  /// The Extension Shortcuts section, filtered by the Shortcuts search: the Cmd-E row, then one group per extension,
+  /// and the conflict notice under the command it is about. The engine's commands and the owners are read once.
   func extensionShortcutBlocks() -> [SettingsBlockView] {
     guard let model = ensureExtensionShortcuts() else { return [] }
     let query = shortcutsSearch.stringValue
-    var blocks: [SettingsBlockView] = []
+    let index = model.ownerIndex()
+    var rows: [SettingsBlockView] = []
     let cycle = ShortcutCatalog.Entry(title: Self.cycleTitle, keys: ["\u{2318}", "E"], spoken: "Command E")
     if !ShortcutCatalog.filter([ShortcutCatalog.Section(title: "", entries: [cycle])], query: query).isEmpty {
       let keys = SettingsKeycapsView(keys: cycle.keys, spoken: cycle.spoken)
@@ -93,20 +228,22 @@ extension SettingsWindowController {
       row.setAccessibilityRole(.staticText)
       row.setAccessibilityLabel("\(Self.cycleTitle), \(cycle.spoken)")
       row.setAccessibilityIdentifier("settings.shortcuts.extension.cycle")
-      blocks.append(SettingsSectionView(title: "Pinned extensions", body: SettingsGroupView([row])))
+      rows.append(row)
     }
-    let groups = ExtensionShortcutsModel.filter(model.groups, query: query)
-    guard !groups.isEmpty else { return blocks }
-    var rows: [SettingsBlockView] = []
-    for group in groups {
+    for group in ExtensionShortcutsModel.filter(ExtensionShortcutsModel.groups(of: index.commands), query: query) {
       let header = SettingsRowView(label: group.name, leading: ExtensionLetterTile(name: group.name),
                                    hoverable: false)
       header.setAccessibilityIdentifier("settings.shortcuts.extension.group.\(group.extensionID)")
       rows.append(header)
-      for command in group.commands { rows.append(extensionRow(command, model: model)) }
+      for command in group.commands {
+        rows.append(extensionRow(command, model: model, index: index))
+        if case .conflict(let id, let shortcut, let owners) = model.phase, id == command.id {
+          rows.append(extensionConflictRow(shortcut: shortcut, owners: owners, model: model))
+        }
+      }
     }
-    blocks.append(SettingsSectionView(title: "Extension Shortcuts", body: SettingsGroupView(rows)))
-    return blocks
+    guard !rows.isEmpty else { return [] }
+    return [SettingsSectionView(title: "Extension Shortcuts", body: SettingsGroupView(rows))]
   }
 
   /// The titles of the extension command rows shown now.
@@ -116,23 +253,30 @@ extension SettingsWindowController {
       .flatMap(\.commands).map(ExtensionShortcutsModel.title(of:))
   }
 
-  private func extensionRow(_ command: ExtensionCommand, model: ExtensionShortcutsModel) -> SettingsRowView {
+  private func extensionRow(_ command: ExtensionCommand, model: ExtensionShortcutsModel,
+                            index: ExtensionShortcutsModel.OwnerIndex) -> SettingsRowView {
     let controls = extensionControls(for: command)
     let row = SettingsRowView(label: ExtensionShortcutsModel.title(of: command),
-                              caption: extensionCaption(command, model: model), trailing: [])
+                              caption: extensionCaption(command, model: model, index: index), trailing: [])
     controls.row = row
-    refreshExtensionControls(command.id)
+    refreshExtensionControls(command, model: model)
     return row
   }
 
-  /// "Not set" for an unset command; for a shortcut Arkt keeps, what holds it (#922 review: the engine gives the key
-  /// to the main menu, so the extension's shortcut does not run).
-  private func extensionCaption(_ command: ExtensionCommand, model: ExtensionShortcutsModel) -> String? {
-    guard let shortcut = command.shortcut else { return "Not set" }
-    let arkt = model.owners(of: shortcut, excluding: command.id).first {
-      if case .extensionCommand = $0 { false } else { true }
+  /// The description line ("The main action"), "Not set" for an unset command, and for a shortcut Arkt keeps what
+  /// holds it (#922 review: the engine gives the key to the main menu, so the extension's shortcut does not run).
+  private func extensionCaption(_ command: ExtensionCommand, model: ExtensionShortcutsModel,
+                                index: ExtensionShortcutsModel.OwnerIndex) -> String? {
+    var lines = [ExtensionShortcutsModel.detail(of: command)].compactMap { $0 }
+    if let shortcut = command.shortcut {
+      let arkt = model.owners(of: shortcut, excluding: command.id, in: index).first {
+        if case .extensionCommand = $0 { false } else { true }
+      }
+      if let arkt { lines.append("Arkt uses this shortcut for \u{201C}\(arkt.title)\u{201D}, so it does not run.") }
+    } else {
+      lines.append("Not set")
     }
-    return arkt.map { "Arkt uses this shortcut for \u{201C}\($0.title)\u{201D}, so it does not run." }
+    return lines.isEmpty ? nil : lines.joined(separator: "\n")
   }
 
   private func extensionControls(for command: ExtensionCommand) -> ExtensionShortcutControls {
@@ -140,7 +284,7 @@ extension SettingsWindowController {
     let id = command.id
     let key = "\(id.extensionID).\(id.name)"
     let title = ExtensionShortcutsModel.title(of: command)
-    let recorder = ShortcutRecorderButton(title: "", target: nil, action: nil)
+    let recorder = ExtensionShortcutRecorder(title: "", target: nil, action: nil)
     recorder.bezelStyle = .rounded
     recorder.setAccessibilityIdentifierWithCell("settings.shortcuts.extension.record.\(key)")
     recorder.setAccessibilityLabel("Shortcut for \(title)")
@@ -167,21 +311,64 @@ extension SettingsWindowController {
 
   /// Shows the command's state in its controls without rebuilding the pane.
   private func refreshExtensionControls(_ id: ExtensionCommandID) {
-    guard let model = extensionShortcuts, let controls = extensionShortcutControls[id],
-          let command = model.command(id) else { return }
-    let recording = model.recordingCommand == id
+    guard let model = extensionShortcuts, let command = model.command(id) else { return }
+    refreshExtensionControls(command, model: model)
+  }
+
+  private func refreshExtensionControls(_ command: ExtensionCommand, model: ExtensionShortcutsModel) {
+    guard let controls = extensionShortcutControls[command.id] else { return }
+    let recording = model.recordingCommand == command.id
     if recording {
-      controls.recorder.title = Self.pressNewShortcut
+      controls.recorder.show(keys: nil, spoken: "")
       controls.recorder.setAccessibilityValue("Recording, press the new shortcut")
     } else if let shortcut = command.shortcut {
       let shown = ExtensionShortcutsModel.display(shortcut)
-      controls.recorder.title = shown.keys.joined()
+      controls.recorder.show(keys: shown.keys, spoken: shown.spoken)
       controls.recorder.setAccessibilityValue(shown.spoken)
     }
-    controls.scope.show(model.scope(of: id) == .global ? Self.allApps : Self.inArkt)
+    controls.scope.show(model.scope(of: command) == .global ? Self.allApps : Self.inArkt)
     let first: NSView = recording || command.shortcut != nil ? controls.recorder : controls.setShortcut
     if let row = controls.row, row.trailing.first !== first { row.setTrailing([first, controls.scope]) }
-    controls.row?.needsLayout = true                   // the recorder's width follows its title
+    controls.row?.needsLayout = true                   // the recorder's width follows its state
+  }
+
+  /// The conflict notice under the command: Keep Existing (primary pill) and a quiet Use, unavailable while a key
+  /// Arkt keeps owns the shortcut.
+  private func extensionConflictRow(shortcut: ExtensionShortcut, owners: [ExtensionShortcutOwner],
+                                    model: ExtensionShortcutsModel) -> ExtensionConflictRowView {
+    let keys = ExtensionShortcutsModel.display(shortcut).keys.joined()
+    let title = owners.first?.title ?? ""
+    var detail = model.canUse
+      ? "Using it here removes it there."
+      : "This command cannot be changed here; keep the existing shortcut and try another."
+    if model.bindings(for: shortcut).contains(where: services.isSystemShortcut) {
+      detail += " \(Self.systemShortcutWarning)"
+    }
+    let keep = pill(.shortcuts, "conflict.keep", "Keep Existing", primary: true) { [weak self] in
+      guard let self, let model = self.extensionShortcuts, let id = model.recordingCommand else { return }
+      model.keepExisting()
+      self.finishExtensionShortcutRecording(id)
+    }
+    let use = ArchiveLinkButton(style: .secondary, title: "Use \(keys)", fontSize: 13)
+    use.setAccessibilityIdentifierWithCell("settings.shortcuts.conflict.use")
+    let useTarget = SettingsActionTarget { [weak self] in
+      guard let self, let model = self.extensionShortcuts, let id = model.recordingCommand else { return }
+      model.useRecorded()
+      if case .conflict = model.phase {
+        self.showExtensionShortcutConflict()
+      } else {
+        self.finishExtensionShortcutRecording(id)
+      }
+    }
+    actionTargets.append(useTarget)
+    use.target = useTarget
+    use.action = #selector(SettingsActionTarget.fire(_:))
+    use.isEnabled = model.canUse
+    if !model.canUse { use.toolTip = "This shortcut belongs to a command that cannot be changed here." }
+    let row = ExtensionConflictRowView(message: "\(keys) is already used by \u{201C}\(title)\u{201D}.",
+                                       detail: detail, keep: keep, use: use)
+    extensionConflictKeep = keep
+    return row
   }
 
   // MARK: Recording
@@ -197,11 +384,14 @@ extension SettingsWindowController {
     announce("Recording, press the new shortcut")
   }
 
-  /// Stops the extension recorder and dismisses what it showed; part of `cancelShortcutRecording`.
+  /// Stops the extension recorder and dismisses what it showed; part of `cancelShortcutRecording`, which also shows
+  /// the command changes that waited for it.
   func cancelExtensionShortcutRecording() {
     guard let model = extensionShortcuts, let id = model.recordingCommand else { return }
+    let hadNotice = model.phase != .listening(id)
     model.cancel()
     refreshExtensionControls(id)
+    if hadNotice { extensionRowsNeedRefresh = true }
   }
 
   /// A key while the extension recorder listens or its notice is open (`SettingsWindow.onShortcutKey`).
@@ -241,34 +431,16 @@ extension SettingsWindowController {
     return true
   }
 
+  /// Shows the notice as the row under the command and moves focus to Keep Existing.
   private func showExtensionShortcutConflict() {
-    guard let model = extensionShortcuts, case .conflict(let id, let shortcut, let owners) = model.phase,
+    guard let model = extensionShortcuts, case .conflict(_, let shortcut, let owners) = model.phase,
           let owner = owners.first else { return }
     shortcutWarningView?.removeFromSuperview()
     shortcutWarningView = nil
+    applyShortcutSearch()
+    if let keep = extensionConflictKeep { window?.makeFirstResponder(keep) }
     let keys = ExtensionShortcutsModel.display(shortcut).keys.joined()
-    let explanation = model.canUse
-      ? "Using it here removes it there."
-      : "This command cannot be changed here; keep the existing shortcut and try another."
-    let system = ExtensionShortcutsModel.bindings(for: shortcut).contains(where: services.isSystemShortcut)
-      ? " \(Self.systemShortcutWarning)" : ""
-    let text = "\(keys) is already used by \u{201C}\(owner.title)\u{201D}. \(explanation)\(system)"
-    presentShortcutConflict(message: text, useTitle: "Use \(keys)", canUse: model.canUse,
-                            keep: { [weak self] in
-                              guard let self else { return }
-                              model.keepExisting()
-                              self.finishExtensionShortcutRecording(id)
-                            },
-                            use: { [weak self] in
-                              guard let self else { return }
-                              model.useRecorded()
-                              if case .conflict = model.phase {
-                                self.showExtensionShortcutConflict()
-                              } else {
-                                self.finishExtensionShortcutRecording(id)
-                              }
-                            })
-    announce(text)
+    announce("\(keys) is already used by \u{201C}\(owner.title)\u{201D}.")
   }
 
   /// The recorder stopped: the notice goes, the rows show the engine's commands, and the engine's answer (a refused
@@ -277,22 +449,25 @@ extension SettingsWindowController {
     dismissShortcutConflict()
     shortcutWarningView?.removeFromSuperview()
     shortcutWarningView = nil
-    refreshExtensionControls(id)
+    extensionConflictKeep = nil
     syncExtensionShortcutSuspension()
-    applyShortcutSearch()
-    if let notice = extensionShortcuts?.notice {
+    refreshExtensionRows()
+    guard let model = extensionShortcuts else { return }
+    if let notice = model.notice {
       showExtensionNotice(notice)
-    } else if let shortcut = extensionShortcuts?.command(id)?.shortcut,
-              ExtensionShortcutsModel.bindings(for: shortcut).contains(where: services.isSystemShortcut) {
+    } else if let shortcut = model.command(id)?.shortcut,
+              model.bindings(for: shortcut).contains(where: services.isSystemShortcut) {
       showShortcutWarning()
     }
   }
 
+  /// The row's scope pop-up. It ends a recording in progress first (the pop-up takes no focus without Full
+  /// Keyboard Access, so the recorder's resign hook does not run), so the suspension lifts.
   private func chooseExtensionScope(_ title: String, for id: ExtensionCommandID) {
     guard let model = extensionShortcuts else { return }
-    shortcutWarningView?.removeFromSuperview()
-    shortcutWarningView = nil
+    cancelShortcutRecording()
     model.setScope(title == Self.allApps ? .global : .inApp, for: id)
+    syncExtensionShortcutSuspension()
     refreshExtensionControls(id)
     if let notice = model.notice { showExtensionNotice(notice) }
   }
@@ -305,6 +480,7 @@ extension SettingsWindowController {
     case .engine(.notAllowed), .engine(.noKeyCode):
       "This shortcut can\u{2019}t be used for this command here."
     case .commandGone: "This extension is no longer installed."
+    case .taken(let owner): "\u{201C}\(owner)\u{201D} already uses this shortcut."
     }
     let label = settingsLabel(text, size: 12)
     label.setAccessibilityIdentifier("settings.shortcuts.extension.notice")

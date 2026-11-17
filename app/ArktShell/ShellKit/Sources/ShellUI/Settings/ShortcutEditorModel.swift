@@ -8,7 +8,7 @@ public struct ShortcutActionID: Hashable, Codable, Sendable {
   public init(_ rawValue: String) { self.rawValue = rawValue }
 }
 
-public struct ShortcutBinding: Equatable, Sendable {
+public struct ShortcutBinding: Hashable, Sendable {
   public let key: String
   public let modifiers: NSEvent.ModifierFlags
 
@@ -17,6 +17,11 @@ public struct ShortcutBinding: Equatable, Sendable {
     var flags = modifiers.intersection([.command, .option, .control, .shift])
     if key.lowercased() != key { flags.insert(.shift) }
     self.modifiers = flags
+  }
+
+  public func hash(into hasher: inout Hasher) {
+    hasher.combine(key)
+    hasher.combine(modifiers.rawValue)
   }
 }
 
@@ -79,8 +84,9 @@ public final class ShortcutEditorModel {
   /// The extension commands that hold a binding (#597, `ExtensionShortcutsModel.connect`). Unlike a protected owner,
   /// Use takes the binding from them (`releaseExtensionOwners`).
   var extensionOwners: (@MainActor (ShortcutBinding) -> [ProtectedConflict])?
-  /// Clears the binding from every extension command that holds it.
-  var releaseExtensionOwners: (@MainActor (ShortcutBinding) -> Void)?
+  /// Clears the binding from every extension command that holds it; false when the engine kept it on any of them (and
+  /// nothing changed).
+  var releaseExtensionOwners: (@MainActor (ShortcutBinding) -> Bool)?
   /// The extension commands holding the recorded binding while the conflict notice is open.
   public private(set) var extensionConflicts: [ProtectedConflict] = []
   /// The recorded binding has an owner, so the conflict notice is open.
@@ -223,8 +229,13 @@ public final class ShortcutEditorModel {
     // A dynamic menu owner may have appeared while the notice was open.
     protectedConflicts = protectedOwners?(binding) ?? []
     guard protectedConflicts.isEmpty else { return }
-    // Extension commands holding it now (one may have taken it while the notice was open) lose it.
-    if !(extensionOwners?(binding) ?? []).isEmpty { releaseExtensionOwners?(binding) }
+    // Extension commands holding it now (one may have taken it while the notice was open) lose it; if the engine
+    // refuses, Use changes nothing and the notice stays.
+    let holders = extensionOwners?(binding) ?? []
+    if !holders.isEmpty, releaseExtensionOwners?(binding) != true {
+      extensionConflicts = holders
+      return
+    }
     // Recompute conflicts so changes made while the notice is open cannot create duplicates.
     for definition in catalog where definition.id != id && self.binding(for: definition.id) == binding {
       setBinding(nil, for: definition.id)

@@ -3,7 +3,7 @@ import Carbon.HIToolbox
 
 /// The recorder field of the app and the extension shortcut rows (#119, #597).
 @MainActor
-final class ShortcutRecorderButton: NSButton {
+class ShortcutRecorderButton: NSButton {
   override var acceptsFirstResponder: Bool { true }
   /// Focus left the recorder (a click on another control, the search field); the owner stops listening.
   var onResign: (@MainActor () -> Void)?
@@ -175,6 +175,7 @@ extension SettingsWindowController {
     dismissShortcutConflict()
     refreshShortcutControls()
     syncExtensionShortcutSuspension()
+    if extensionRowsNeedRefresh { refreshExtensionRows() }
   }
 
   func dismissShortcutConflict() {

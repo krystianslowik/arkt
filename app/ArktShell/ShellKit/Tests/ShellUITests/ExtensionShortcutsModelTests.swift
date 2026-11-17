@@ -50,9 +50,11 @@ struct ExtensionShortcutsModelTests {
   }
 
   /// Reopen Closed Tab stands in for a main-menu item the editor cannot change.
-  private func model(_ engine: InMemoryEngine, editor: ShortcutEditorModel? = nil) -> ExtensionShortcutsModel {
-    ExtensionShortcutsModel(engine: engine, editor: editor) { binding in
-      binding == ShortcutBinding(key: "t", modifiers: [.command, .shift]) ? ["Reopen Closed Tab"] : []
+  private func model(_ engine: any EngineExtensions, editor: ShortcutEditorModel? = nil,
+                     shifted: @escaping @MainActor (UInt16) -> String? = ExtensionShortcutsModel.usShifted)
+    -> ExtensionShortcutsModel {
+    ExtensionShortcutsModel(engine: engine, editor: editor, shifted: shifted) {
+      [ShortcutBinding(key: "t", modifiers: [.command, .shift]): ["Reopen Closed Tab"]]
     }
   }
 
@@ -68,6 +70,17 @@ struct ExtensionShortcutsModelTests {
   }
 
   // MARK: - Rows
+
+  /// The design's two lines: the action command reads "Open <extension>" over "The main action"; another command
+  /// shows its description, with no second line (`chrome.commands` has one string per command).
+  @Test func titlesAndDescriptionLines() {
+    let model = model(engine())
+    let reader = model.groups[0].commands
+    #expect(ExtensionShortcutsModel.title(of: reader[0]) == "Open Quiet Reader")
+    #expect(ExtensionShortcutsModel.detail(of: reader[0]) == "The main action")
+    #expect(ExtensionShortcutsModel.title(of: reader[1]) == "Toggle reading view")
+    #expect(ExtensionShortcutsModel.detail(of: reader[1]) == nil)
+  }
 
   @Test func groupsFollowTheEngineOrderOneGroupPerExtension() {
     let model = model(engine())
@@ -191,6 +204,17 @@ struct ExtensionShortcutsModelTests {
     #expect(ExtensionShortcutsModel.key(keyCode: 18, unmodified: "&") == .digit(.one))
     #expect(ExtensionShortcutsModel.key(keyCode: 0x7E, unmodified: nil) == .up)
     #expect(ExtensionShortcutsModel.key(keyCode: 27, unmodified: "-") == nil)
+    // Cyrillic: no ASCII character, so the letter goes by its key code, as the main menu does.
+    #expect(ExtensionShortcutsModel.key(keyCode: 14, unmodified: "\u{0443}") == .letter(.e))
+  }
+
+  /// Dvorak puts punctuation on letter keys: the key prints "," where QWERTY has W, and "'" where it has Q. The
+  /// recorder takes what the key prints, never the QWERTY letter under it.
+  @Test func punctuationOnALetterKeyIsNotThatLetter() {
+    #expect(ExtensionShortcutsModel.key(keyCode: 0x0D, unmodified: ",") == .comma)
+    #expect(ExtensionShortcutsModel.key(keyCode: 0x0E, unmodified: ".") == .period)
+    #expect(ExtensionShortcutsModel.key(keyCode: 0x0C, unmodified: "'") == nil)
+    #expect(ExtensionShortcutsModel.key(keyCode: 0x2B, unmodified: "w") == .letter(.w))
   }
 
   // MARK: - Conflicts
@@ -264,7 +288,8 @@ struct ExtensionShortcutsModelTests {
     let model = model(engine, editor: editor)
     #expect(model.owners(of: shortcut(.digit(.two), [.command, .shift]), excluding: list)
             == [.appAction(newTab, title: "New Tab")])
-    let candidates = ExtensionShortcutsModel.bindings(for: shortcut(.comma, [.command, .shift]))
+    let candidates = ExtensionShortcutsModel.bindings(for: shortcut(.comma, [.command, .shift]),
+                                                      shifted: ExtensionShortcutsModel.usShifted)
     #expect(candidates.contains(ShortcutBinding(key: ",", modifiers: [.command, .shift])))
     #expect(candidates.contains(ShortcutBinding(key: "<", modifiers: [.command, .shift])))
     #expect(candidates.contains(ShortcutBinding(key: "<", modifiers: .command)))
@@ -277,6 +302,39 @@ struct ExtensionShortcutsModelTests {
     model.connect(editor)
     let owners = editor.extensionOwners?(ShortcutBinding(key: "@", modifiers: [.command, .shift])) ?? []
     #expect(owners.map(\.title) == ["Open clip list (Tidy Clips)"])
+  }
+
+  /// The shifted character comes from the keyboard layout: on a German layout Shift-7 types "/", so the app recorder
+  /// stores Cmd-Shift-/ for the key an extension stores as Cmd-Shift-7.
+  @Test func theShiftedFormFollowsTheKeyboardLayout() throws {
+    let suite = try Suite()
+    let editor = ShortcutEditorModel(catalog: [
+      ShortcutDefinition(id: newTab, title: "New Tab", defaultBinding: ShortcutBinding(key: "/", modifiers: [.command, .shift])),
+    ], defaults: suite.defaults)
+    let german: @MainActor (UInt16) -> String? = { $0 == 0x1A ? "/" : nil }
+    let model = model(engine(), editor: editor, shifted: german)
+    #expect(model.owners(of: shortcut(.digit(.seven), [.command, .shift]), excluding: list)
+            == [.appAction(newTab, title: "New Tab")])
+    let us = self.model(engine(), editor: editor)
+    #expect(us.owners(of: shortcut(.digit(.seven), [.command, .shift]), excluding: list).isEmpty,
+            "a US layout types & there")
+  }
+
+  /// The app editor's Use takes the shortcut from the extension command only when the engine clears it; otherwise
+  /// nothing changes.
+  @Test func appUseKeepsEverythingWhenTheEngineDoesNotClearTheExtension() throws {
+    let suite = try Suite()
+    let editor = editor(suite)
+    let engine = RefusingEngine(commands: engine().extensionCommands)
+    let model = model(engine, editor: editor)
+    model.connect(editor)
+    editor.beginRecording(newTab)
+    editor.record(event: try event("E", keyCode: 14, modifiers: [.command, .shift]))
+    #expect(editor.hasConflict)
+    editor.useRecordedShortcut()
+    #expect(editor.binding(for: newTab) == ShortcutBinding(key: "t", modifiers: .command))
+    #expect(engine.extensionCommands.first { $0.id == read }?.shortcut == shortcut(.letter(.e), [.command, .shift]))
+    #expect(editor.hasConflict, "the notice stays")
   }
 
   /// Use clears the app binding before the engine sets the shortcut (the engine refuses All Apps on a key the main
@@ -357,6 +415,26 @@ struct ExtensionShortcutsModelTests {
     #expect(command(engine, list)?.shortcut == shortcut(.letter(.j), .control))
   }
 
+  /// A scope change ends a recording in progress, and a conflict answered to a scope change leaves no conflict phase
+  /// behind (the notice would be invisible and swallow keys).
+  @Test func aScopeChangeStopsTheRecorderAndNeverLeavesAConflict() {
+    let engine = engine()
+    let model = model(engine)
+    model.begin(read)
+    model.setScope(.global, for: open)
+    #expect(model.phase == .idle)
+    #expect(model.recordingCommand == nil)
+    // Two commands that already share a shortcut (as an engine may report them): the engine answers `.conflict`.
+    engine.setExtensionCommands(engine.extensionCommands.map {
+      var command = $0
+      if command.id == list { command.shortcut = shortcut(.letter(.k), [.control, .shift]) }
+      return command
+    })
+    model.setScope(.global, for: list)
+    #expect(model.phase == .idle)
+    #expect(model.notice == .taken(by: "Clip this page (Tidy Clips)"))
+  }
+
   // MARK: - Search
 
   @Test func searchByExtensionNameDescriptionOrShortcut() {
@@ -412,5 +490,18 @@ struct ExtensionShortcutsModelTests {
     editor.reset(newTab)
     #expect(editor.extensionConflicts.map(\.title) == ["Open clip list (Tidy Clips)"])
     #expect(editor.binding(for: newTab) == ShortcutBinding(key: "y", modifiers: .command))
+  }
+}
+
+/// An engine whose shortcut changes all fail (`.rejected(.notAllowed)`), for Use's error path.
+@MainActor
+private final class RefusingEngine: EngineExtensions {
+  let extensionCommands: [ExtensionCommand]
+  init(commands: [ExtensionCommand]) { extensionCommands = commands }
+  func extensionActions(in window: EngineWindowID) -> [ExtensionAction] { [] }
+  func runExtensionAction(_ id: String, in window: EngineWindowID, anchor: NSView) {}
+  func setExtensionCommandShortcut(_ id: ExtensionCommandID, to shortcut: ExtensionShortcut?,
+                                   scope: ExtensionCommandScope, replacingConflict: Bool) -> ExtensionShortcutResult {
+    .rejected(.notAllowed)
   }
 }

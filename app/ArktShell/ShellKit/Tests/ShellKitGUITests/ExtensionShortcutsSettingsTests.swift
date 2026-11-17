@@ -52,7 +52,7 @@ final class ExtensionShortcutsSettingsTests: XCTestCase {
   }
 
   /// The app menu with the editor bound to it, as the app runs them, and an engine with extensions.
-  private func make(engine: InMemoryEngine?, appearance: NSAppearance.Name? = nil)
+  private func make(engine: (any EngineExtensions)?, appearance: NSAppearance.Name? = nil)
     -> (SettingsWindowController, ShortcutEditorModel) {
     let menu = MainMenu.make(commands: AppCommands()).menu
     let editor = ShortcutEditorModel(catalog: ShortcutCatalog.definitions(from: menu), defaults: defaults)
@@ -87,6 +87,11 @@ final class ExtensionShortcutsSettingsTests: XCTestCase {
     try find("settings.shortcuts.extension.record.\(id.extensionID).\(id.name)", in: controller, as: NSButton.self)
   }
 
+  /// The keycaps a command's recorder shows.
+  private func caps(_ id: ExtensionCommandID, in controller: SettingsWindowController) throws -> [String] {
+    try XCTUnwrap(try recorder(id, in: controller).subviews.compactMap { $0 as? SettingsKeycapsView }.first).keys
+  }
+
   private func key(_ text: String, _ flags: NSEvent.ModifierFlags, code: UInt16, in window: NSWindow) throws -> NSEvent {
     try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0,
                                    windowNumber: window.windowNumber, context: nil, characters: text,
@@ -115,7 +120,7 @@ final class ExtensionShortcutsSettingsTests: XCTestCase {
                    ["Open Quiet Reader", "Toggle reading view", "Clip this page", "Open clip list"])
     _ = try find("settings.shortcuts.extension.group.reader", in: controller)
     _ = try find("settings.shortcuts.extension.group.clips", in: controller)
-    XCTAssertEqual(try recorder(open, in: controller).title, "\u{2325}\u{21E7}Q")
+    XCTAssertEqual(try caps(open, in: controller), ["\u{2325}", "\u{21E7}", "Q"])
     XCTAssertEqual(try recorder(read, in: controller).accessibilityValue() as? String, "Shift Command E")
     let unset = try find("settings.shortcuts.extension.set.clips.open-list", in: controller, as: ArchivePillButton.self)
     XCTAssertNotNil(unset.superview, "an unset command shows Set Shortcut")
@@ -149,7 +154,7 @@ final class ExtensionShortcutsSettingsTests: XCTestCase {
     window.sendEvent(try key("j", .control, code: 38, in: window))
     XCTAssertFalse(engine.isExtensionShortcutHandlingSuspended)
     XCTAssertEqual(command(engine, list)?.shortcut, shortcut(.letter(.j), .control))
-    XCTAssertEqual(try recorder(list, in: controller).title, "\u{2303}J")
+    XCTAssertEqual(try caps(list, in: controller), ["\u{2303}", "J"])
 
     // Delete clears.
     try recorder(list, in: controller).performClick(nil)
@@ -257,6 +262,68 @@ final class ExtensionShortcutsSettingsTests: XCTestCase {
     XCTAssertFalse(engine.isExtensionShortcutHandlingSuspended)
   }
 
+  /// The design: shortcuts as separate keycaps, a description line, and the Cmd-E row first inside Extension
+  /// Shortcuts.
+  func testKeycapsDescriptionLineAndTheCycleRowFirst() throws {
+    let (controller, _) = make(engine: designEngine())
+    controller.show(pane: .shortcuts)
+    let recorder = try recorder(read, in: controller)
+    let caps = try XCTUnwrap(recorder.subviews.compactMap { $0 as? SettingsKeycapsView }.first)
+    XCTAssertEqual(caps.keys, ["\u{21E7}", "\u{2318}", "E"])
+    let openRow = try XCTUnwrap(try self.recorder(open, in: controller).superview as? SettingsRowView)
+    XCTAssertEqual(openRow.labelText, "Open Quiet Reader")
+    XCTAssertEqual(openRow.captionText, "The main action")
+    let cycle = try find("settings.shortcuts.extension.cycle", in: controller)
+    let header = try find("settings.shortcuts.extension.group.reader", in: controller)
+    let group = try XCTUnwrap(cycle.superview)
+    XCTAssertTrue(header.superview === group, "one Extension Shortcuts group")
+    XCTAssertEqual(group.subviews.first, cycle, "the Cmd-E row comes first")
+    recorder.performClick(nil)
+    XCTAssertEqual(recorder.title, "Press new shortcut")
+    XCTAssertTrue(recorder.subviews.compactMap { $0 as? SettingsKeycapsView }.isEmpty, "the field while it records")
+  }
+
+  /// Review: a scope change while a recorder listens ends the recording and lifts the suspension.
+  func testChangingAScopeWhileRecordingStopsTheRecorder() throws {
+    let engine = designEngine()
+    let (controller, _) = make(engine: engine)
+    controller.show(pane: .shortcuts)
+    let recorder = try recorder(read, in: controller)
+    recorder.performClick(nil)
+    XCTAssertTrue(engine.isExtensionShortcutHandlingSuspended)
+    try find("settings.shortcuts.extension.scope.clips.clip-page", in: controller, as: SettingsPopUpButton.self)
+      .select("In Arkt")
+    XCTAssertFalse(engine.isExtensionShortcutHandlingSuspended)
+    XCTAssertNil(controller.extensionShortcuts?.recordingCommand)
+    XCTAssertNotEqual(recorder.title, "Press new shortcut")
+    XCTAssertEqual(command(engine, clip)?.scope, .inApp)
+  }
+
+  /// Review: command changes that arrive while a recorder listens show once it stops.
+  func testChangesWhileRecordingShowWhenTheRecorderStops() throws {
+    let engine = designEngine()
+    let (controller, _) = make(engine: engine)
+    controller.show(pane: .shortcuts)
+    let window = try XCTUnwrap(controller.window)
+    try recorder(read, in: controller).performClick(nil)
+    engine.setExtensionCommands(engine.extensionCommands + [
+      ExtensionCommand(id: ExtensionCommandID(extensionID: "notes", name: "jot"), extensionName: "Margin Notes",
+                       description: "Jot a note"),
+    ])
+    window.sendEvent(try key("\u{1B}", [], code: 53, in: window))
+    XCTAssertNotNil(Self.view("settings.shortcuts.extension.group.notes", in: try XCTUnwrap(window.contentView)))
+  }
+
+  /// Review: a rebuild reads the engine's commands a fixed number of times, not once per row.
+  func testARebuildReadsTheCommandsOnce() throws {
+    let counting = CountingExtensions(worstCaseEngine())
+    let (controller, _) = make(engine: counting)
+    controller.show(pane: .shortcuts)
+    counting.reads = 0
+    controller.setShortcutSearch("Command")
+    XCTAssertLessThanOrEqual(counting.reads, 2, "80 rows, \(counting.reads) reads")
+  }
+
   // MARK: - Conflicts
 
   func testAnAppShortcutConflictKeepsOnReturnAndUseMovesIt() throws {
@@ -268,13 +335,21 @@ final class ExtensionShortcutsSettingsTests: XCTestCase {
     try recorder(read, in: controller).performClick(nil)
     window.sendEvent(try key("t", .command, code: 17, in: window))
     let message = try find("settings.shortcuts.conflict.message", in: controller, as: NSTextField.self)
-    XCTAssertEqual(message.stringValue,
-                   "\u{2318}T is already used by \u{201C}New Tab\u{201D}. Using it here removes it there.")
-    let keep = try find("settings.shortcuts.conflict.keep", in: controller, as: NSButton.self)
-    let use = try find("settings.shortcuts.conflict.use", in: controller, as: NSButton.self)
+    XCTAssertEqual(message.stringValue, "\u{2318}T is already used by \u{201C}New Tab\u{201D}.")
+    XCTAssertEqual(try find("settings.shortcuts.conflict.detail", in: controller, as: NSTextField.self).stringValue,
+                   "Using it here removes it there.")
+    let keep = try find("settings.shortcuts.conflict.keep", in: controller, as: ArchivePillButton.self)
+    let use = try find("settings.shortcuts.conflict.use", in: controller, as: ArchiveLinkButton.self)
+    XCTAssertEqual(keep.style, .primary, "Keep Existing is the one mustard pill")
     XCTAssertEqual(use.title, "Use \u{2318}T")
     XCTAssertTrue(window.firstResponder === keep, "Keep Existing is the default (#590)")
-    XCTAssertTrue(window.defaultButtonCell === keep.cell)
+    XCTAssertEqual(controller.primaryActionCount(in: .shortcuts), 1)
+    // The notice is the row under the command, inside the group.
+    let notice = try find("settings.shortcuts.extension.conflict", in: controller)
+    let readRow = try XCTUnwrap(try recorder(read, in: controller).superview)
+    let group = try XCTUnwrap(notice.superview)
+    XCTAssertTrue(readRow.superview === group)
+    XCTAssertEqual(group.subviews.firstIndex(of: notice), group.subviews.firstIndex(of: readRow).map { $0 + 1 })
     XCTAssertTrue(engine.isExtensionShortcutHandlingSuspended, "still listening while the notice asks")
     window.sendEvent(try key("\r", [], code: 36, in: window))
     XCTAssertNil(Self.view("settings.shortcuts.conflict.keep", in: try XCTUnwrap(window.contentView)))
@@ -314,8 +389,8 @@ final class ExtensionShortcutsSettingsTests: XCTestCase {
     try find("settings.shortcuts.extension.set.clips.open-list", in: controller, as: NSButton.self).performClick(nil)
     window.sendEvent(try key("E", [.command, .shift], code: 14, in: window))
     let message = try find("settings.shortcuts.conflict.message", in: controller, as: NSTextField.self)
-    XCTAssertEqual(message.stringValue, "\u{21E7}\u{2318}E is already used by "
-                   + "\u{201C}Toggle reading view (Quiet Reader)\u{201D}. Using it here removes it there.")
+    XCTAssertEqual(message.stringValue,
+                   "\u{21E7}\u{2318}E is already used by \u{201C}Toggle reading view (Quiet Reader)\u{201D}.")
     try find("settings.shortcuts.conflict.use", in: controller, as: NSButton.self).performClick(nil)
     XCTAssertEqual(command(engine, list)?.shortcut, shortcut(.letter(.e), [.command, .shift]))
     XCTAssertNil(command(engine, read)?.shortcut)
@@ -456,11 +531,6 @@ final class ExtensionShortcutsSettingsTests: XCTestCase {
         let rect = NSRect(x: 0, y: top, width: pane.bounds.width, height: min(900, pane.bounds.height - top))
         let name = "extension-shortcuts\(state)-\(dark ? "dark" : "light").png"
         try write(pane, rect: rect, background: window.backgroundColor, to: folder.appendingPathComponent(name))
-        if state == "-conflict" {
-          let notice = try XCTUnwrap(find("settings.shortcuts.conflict.message", in: controller).superview)
-          try write(notice, rect: notice.bounds, background: window.backgroundColor,
-                    to: folder.appendingPathComponent("extension-shortcuts-conflict-notice-\(dark ? "dark" : "light").png"))
-        }
         window.close()
       }
     }
@@ -479,5 +549,24 @@ final class ExtensionShortcutsSettingsTests: XCTestCase {
     view.cacheDisplay(in: rect, to: bitmap)
     try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: url)
     XCTAssertGreaterThan(bitmap.pixelsWide, 0)
+  }
+}
+
+/// Counts reads of `extensionCommands`, forwarding everything to an InMemoryEngine.
+@MainActor
+private final class CountingExtensions: EngineExtensions {
+  let inner: InMemoryEngine
+  var reads = 0
+  init(_ inner: InMemoryEngine) { self.inner = inner }
+  var extensionCommands: [ExtensionCommand] { reads += 1; return inner.extensionCommands }
+  func extensionActions(in window: EngineWindowID) -> [ExtensionAction] { [] }
+  func runExtensionAction(_ id: String, in window: EngineWindowID, anchor: NSView) {}
+  func setExtensionCommandShortcut(_ id: ExtensionCommandID, to shortcut: ExtensionShortcut?,
+                                   scope: ExtensionCommandScope, replacingConflict: Bool) -> ExtensionShortcutResult {
+    inner.setExtensionCommandShortcut(id, to: shortcut, scope: scope, replacingConflict: replacingConflict)
+  }
+  func setExtensionShortcutHandlingSuspended(_ suspended: Bool) { inner.setExtensionShortcutHandlingSuspended(suspended) }
+  func observeExtensions(_ handler: @escaping @MainActor (EngineExtensionEvent) -> Void) -> EngineObservation {
+    inner.observeExtensions(handler)
   }
 }

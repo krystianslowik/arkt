@@ -47,13 +47,17 @@ public final class ExtensionShortcutsModel {
     case engine(ExtensionShortcutRejection)
     /// The command's extension went away.
     case commandGone
+    /// A scope change: another extension command already has the shortcut (as `ownerTitle` names it).
+    case taken(by: String)
   }
 
   let engine: any EngineExtensions
   private weak var editor: ShortcutEditorModel?
-  /// Titles of the keys Arkt keeps for a binding: main-menu items the editor cannot change and keys owned outside
-  /// the menu.
-  private let arktOwners: @MainActor (ShortcutBinding) -> [String]
+  /// The keys Arkt keeps, by binding, with their owners' titles: main-menu items the editor cannot change and keys
+  /// owned outside the menu (`ShortcutCatalog.keptOwnerIndex`). Read once per `ownerIndex()`.
+  private let keptOwners: @MainActor () -> [ShortcutBinding: [String]]
+  /// The character the keyboard layout types for a key code with Shift (`currentLayoutShifted`).
+  private let shifted: @MainActor (UInt16) -> String?
   public private(set) var phase: Phase = .idle
   /// Why the last key pressed while listening was refused; nil once a key is accepted or the recorder stops.
   public private(set) var rejection: ShortcutEditorModel.Rejection?
@@ -63,18 +67,22 @@ public final class ExtensionShortcutsModel {
   private var pendingScopes: [ExtensionCommandID: ExtensionCommandScope] = [:]
 
   public init(engine: any EngineExtensions, editor: ShortcutEditorModel?,
-              arktOwners: @escaping @MainActor (ShortcutBinding) -> [String]) {
+              shifted: @escaping @MainActor (UInt16) -> String? = ExtensionShortcutsModel.currentLayoutShifted,
+              keptOwners: @escaping @MainActor () -> [ShortcutBinding: [String]]) {
     self.engine = engine
     self.editor = editor
-    self.arktOwners = arktOwners
+    self.shifted = shifted
+    self.keptOwners = keptOwners
   }
 
   // MARK: Rows
 
   /// The engine's commands, one group per extension, in the engine's order.
-  public var groups: [Group] {
+  public var groups: [Group] { Self.groups(of: engine.extensionCommands) }
+
+  static func groups(of commands: [ExtensionCommand]) -> [Group] {
     var groups: [Group] = []
-    for command in engine.extensionCommands {
+    for command in commands {
       if let index = groups.firstIndex(where: { $0.extensionID == command.id.extensionID }) {
         groups[index].commands.append(command)
       } else {
@@ -88,21 +96,35 @@ public final class ExtensionShortcutsModel {
     engine.extensionCommands.first { $0.id == id }
   }
 
-  /// The row's title: the manifest's description, or the command's name when it has none.
+  /// The commands that run the extension's action.
+  static let actionCommandNames: Set<String> = ["_execute_action", "_execute_browser_action", "_execute_page_action"]
+
+  /// The row's title: "Open <extension>" for the action command (design/extensions `shortcuts`), otherwise the
+  /// manifest's description, or the command's name when it has none.
   public static func title(of command: ExtensionCommand) -> String {
-    command.description.isEmpty ? command.id.name : command.description
+    if actionCommandNames.contains(command.id.name) { return "Open \(command.extensionName)" }
+    return command.description.isEmpty ? command.id.name : command.description
+  }
+
+  /// The row's description line: "The main action" for the action command. `chrome.commands` gives a command one
+  /// string, which is its title, so other commands have none.
+  public static func detail(of command: ExtensionCommand) -> String? {
+    actionCommandNames.contains(command.id.name) ? "The main action" : nil
   }
 
   /// The scope the row shows: the engine's for a command with a shortcut, the chosen one otherwise.
   public func scope(of id: ExtensionCommandID) -> ExtensionCommandScope {
-    guard let command = command(id) else { return .inApp }
-    return command.shortcut == nil ? pendingScopes[id] ?? command.scope : command.scope
+    command(id).map(scope(of:)) ?? .inApp
+  }
+
+  public func scope(of command: ExtensionCommand) -> ExtensionCommandScope {
+    command.shortcut == nil ? pendingScopes[command.id] ?? command.scope : command.scope
   }
 
   /// Keycaps in AppKit's order (Control, Option, Shift, Command, then the key) and the words VoiceOver reads.
   public static func display(_ shortcut: ExtensionShortcut) -> (keys: [String], spoken: String) {
     if let media = mediaName(shortcut.key) { return ([media], media) }
-    let binding = bindings(for: shortcut)[0]
+    let binding = bindings(for: shortcut, shifted: { _ in nil })[0]
     let item = NSMenuItem(title: "", action: nil, keyEquivalent: binding.key)
     item.keyEquivalentModifierMask = binding.modifiers
     let entry = ShortcutCatalog.entry(for: item)
@@ -122,23 +144,62 @@ public final class ExtensionShortcutsModel {
   // MARK: Two forms of one shortcut
 
   /// The forms an app binding of `shortcut` can take: the unshifted key the engine stores, and, with Shift on a
-  /// digit, comma or period, the character a US layout types (the app recorder stores "@" for Shift-2, and a menu
-  /// item may hold "@" without Shift). The first is the canonical form. Empty for a media key.
-  public static func bindings(for shortcut: ExtensionShortcut) -> [ShortcutBinding] {
+  /// digit, comma or period, the character the keyboard layout types with Shift on that key (`shifted`, by key
+  /// code): the app recorder stores "@" for Shift-2 on a US layout and "/" for Shift-7 on a German one, and a menu
+  /// item may hold that character without Shift. The first is the canonical form. Empty for a media key.
+  public static func bindings(for shortcut: ExtensionShortcut,
+                              shifted: (UInt16) -> String?) -> [ShortcutBinding] {
     guard let key = keyString(shortcut.key) else { return [] }
     let flags = modifierFlags(shortcut.modifiers)
     var forms = [ShortcutBinding(key: key, modifiers: flags)]
-    if flags.contains(.shift), let shifted = usShifted[key] {
-      forms.append(ShortcutBinding(key: shifted, modifiers: flags))
-      forms.append(ShortcutBinding(key: shifted, modifiers: flags.subtracting(.shift)))
+    if flags.contains(.shift), let code = shiftableKeyCodes[key], let character = shifted(code), !character.isEmpty,
+       character != key {
+      forms.append(ShortcutBinding(key: character, modifiers: flags))
+      forms.append(ShortcutBinding(key: character, modifiers: flags.subtracting(.shift)))
     }
     return forms
   }
 
-  private static let usShifted: [String: String] = [
-    "1": "!", "2": "@", "3": "#", "4": "$", "5": "%", "6": "^", "7": "&", "8": "*", "9": "(", "0": ")",
-    ",": "<", ".": ">",
+  /// `bindings(for:shifted:)` with this model's keyboard layout.
+  public func bindings(for shortcut: ExtensionShortcut) -> [ShortcutBinding] {
+    Self.bindings(for: shortcut, shifted: shifted)
+  }
+
+  /// The key codes of the keys whose Shift character differs by layout: the digit row, comma and period.
+  private static let shiftableKeyCodes: [String: UInt16] = [
+    "1": 0x12, "2": 0x13, "3": 0x14, "4": 0x15, "5": 0x17, "6": 0x16, "7": 0x1A, "8": 0x1C, "9": 0x19, "0": 0x1D,
+    ",": 0x2B, ".": 0x2F,
   ]
+
+  /// What a US layout types with Shift on those keys.
+  public static func usShifted(_ keyCode: UInt16) -> String? {
+    let table: [UInt16: String] = [
+      0x12: "!", 0x13: "@", 0x14: "#", 0x15: "$", 0x17: "%", 0x16: "^", 0x1A: "&", 0x1C: "*", 0x19: "(",
+      0x1D: ")", 0x2B: "<", 0x2F: ">",
+    ]
+    return table[keyCode]
+  }
+
+  /// What the current keyboard layout types with Shift on `keyCode` (`UCKeyTranslate`), or the US character when the
+  /// layout has no Unicode data.
+  public static func currentLayoutShifted(_ keyCode: UInt16) -> String? {
+    guard let source = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue(),
+          let raw = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) else {
+      return usShifted(keyCode)
+    }
+    let data = Unmanaged<CFData>.fromOpaque(raw).takeUnretainedValue() as Data
+    var deadKeys: UInt32 = 0
+    var length = 0
+    var characters = [UniChar](repeating: 0, count: 4)
+    let status = data.withUnsafeBytes { buffer -> OSStatus in
+      guard let layout = buffer.bindMemory(to: UCKeyboardLayout.self).baseAddress else { return OSStatus(paramErr) }
+      return UCKeyTranslate(layout, keyCode, UInt16(kUCKeyActionDown), UInt32((shiftKey >> 8) & 0xFF),
+                            UInt32(LMGetKbdType()), OptionBits(kUCKeyTranslateNoDeadKeysBit), &deadKeys,
+                            characters.count, &length, &characters)
+    }
+    guard status == noErr, length > 0 else { return usShifted(keyCode) }
+    return String(utf16CodeUnits: characters, count: length)
+  }
 
   static func modifierFlags(_ modifiers: ExtensionShortcut.Modifiers) -> NSEvent.ModifierFlags {
     var flags: NSEvent.ModifierFlags = []
@@ -182,14 +243,21 @@ public final class ExtensionShortcutsModel {
     }
   }
 
-  /// The key pressed: a letter by the character the layout prints on the key, anything else by key code (an AZERTY
-  /// digit row types "&" on the 1 key). Nil for a key `chrome.commands` cannot name.
+  /// The key pressed, as the layout prints it: a letter, comma, period, space or digit by its character (Dvorak's
+  /// "," on the QWERTY W key is Comma, not W), except that the digit row goes by key code (AZERTY types "&" on the 1
+  /// key). A key that types no ASCII character goes by key code: the arrows and named keys, and the letters of a
+  /// non-Latin layout, as the main menu matches them. Other ASCII punctuation ("'" on Dvorak's Q key) is no key
+  /// `chrome.commands` can name: nil.
   static func key(keyCode: UInt16, unmodified: String?) -> ExtensionShortcut.Key? {
-    if let text = unmodified, text.count == 1, let character = text.first,
-       case .letter(let letter)? = ExtensionShortcut.Key(character: character) {
-      return .letter(letter)
+    if let byCode = ExtensionShortcut.Key(keyCode: keyCode), case .digit = byCode { return byCode }
+    guard let text = unmodified, text.count == 1, let character = text.first, character.isASCII else {
+      return ExtensionShortcut.Key(keyCode: keyCode)
     }
-    return ExtensionShortcut.Key(keyCode: keyCode)
+    if character.isLetter || character.isNumber || [",", ".", " "].contains(character) {
+      return ExtensionShortcut.Key(character: character)
+    }
+    // Tab and other control characters have names by key code; printable punctuation does not.
+    return character.asciiValue.map { $0 < 0x20 || $0 == 0x7F } == true ? ExtensionShortcut.Key(keyCode: keyCode) : nil
   }
 
   // MARK: Owners
@@ -201,22 +269,45 @@ public final class ExtensionShortcutsModel {
     (ExtensionShortcut(key: .tab, modifiers: [.control, .shift]), "Tab Switcher (previous tab)"),
   ]
 
+  /// Who holds what, read once: the engine's commands, the editor's bindings and the keys Arkt keeps. A pane rebuild
+  /// makes one and asks it for every row.
+  public struct OwnerIndex {
+    public let commands: [ExtensionCommand]
+    let app: [ShortcutBinding: [(ShortcutActionID, String)]]
+    let kept: [ShortcutBinding: [String]]
+  }
+
+  public func ownerIndex() -> OwnerIndex {
+    var app: [ShortcutBinding: [(ShortcutActionID, String)]] = [:]
+    if let editor {
+      for definition in editor.catalog {
+        guard let binding = editor.binding(for: definition.id) else { continue }
+        app[binding, default: []].append((definition.id, definition.title))
+      }
+    }
+    return OwnerIndex(commands: engine.extensionCommands, app: app, kept: keptOwners())
+  }
+
   /// Everyone else who holds `shortcut`: Arkt's editable shortcuts, the keys Arkt keeps, then the other extension
   /// commands.
   public func owners(of shortcut: ExtensionShortcut, excluding id: ExtensionCommandID) -> [ExtensionShortcutOwner] {
+    owners(of: shortcut, excluding: id, in: ownerIndex())
+  }
+
+  public func owners(of shortcut: ExtensionShortcut, excluding id: ExtensionCommandID,
+                     in index: OwnerIndex) -> [ExtensionShortcutOwner] {
     var owners: [ExtensionShortcutOwner] = []
-    let forms = Self.bindings(for: shortcut)
-    if let editor {
-      for definition in editor.catalog {
-        guard let binding = editor.binding(for: definition.id), forms.contains(binding) else { continue }
-        owners.append(.appAction(definition.id, title: Self.menuTitle(definition.title)))
+    let forms = bindings(for: shortcut)
+    for form in forms {
+      for (action, title) in index.app[form] ?? [] where !owners.contains(.appAction(action, title: Self.menuTitle(title))) {
+        owners.append(.appAction(action, title: Self.menuTitle(title)))
       }
     }
     var kept: [String] = []
-    for form in forms { kept += arktOwners(form).filter { !kept.contains($0) } }
+    for form in forms { kept += (index.kept[form] ?? []).filter { !kept.contains($0) } }
     kept += Self.windowKeys.filter { $0.0 == shortcut }.map(\.1)
     owners += kept.map { .arkt(title: Self.menuTitle($0)) }
-    for command in engine.extensionCommands where command.id != id && command.shortcut == shortcut {
+    for command in index.commands where command.id != id && command.shortcut == shortcut {
       owners.append(.extensionCommand(command.id, title: Self.ownerTitle(command)))
     }
     return owners
@@ -242,17 +333,28 @@ public final class ExtensionShortcutsModel {
     editor.extensionOwners = { [weak self] binding in
       guard let self else { return [] }
       return self.engine.extensionCommands.compactMap { command in
-        guard let shortcut = command.shortcut, Self.bindings(for: shortcut).contains(binding) else { return nil }
+        guard let shortcut = command.shortcut, self.bindings(for: shortcut).contains(binding) else { return nil }
         return ShortcutEditorModel.ProtectedConflict(title: Self.ownerTitle(command), binding: binding)
       }
     }
+    // True when every holder lost it; otherwise the ones already cleared get it back and nothing changed.
     editor.releaseExtensionOwners = { [weak self] binding in
-      guard let self else { return }
+      guard let self else { return false }
+      var cleared: [ExtensionCommand] = []
       for command in self.engine.extensionCommands {
-        guard let shortcut = command.shortcut, Self.bindings(for: shortcut).contains(binding) else { continue }
-        _ = self.engine.setExtensionCommandShortcut(command.id, to: nil, scope: command.scope,
-                                                    replacingConflict: false)
+        guard let shortcut = command.shortcut, self.bindings(for: shortcut).contains(binding) else { continue }
+        let result = self.engine.setExtensionCommandShortcut(command.id, to: nil, scope: command.scope,
+                                                             replacingConflict: false)
+        guard result == .applied else {
+          for done in cleared {
+            _ = self.engine.setExtensionCommandShortcut(done.id, to: done.shortcut, scope: done.scope,
+                                                        replacingConflict: false)
+          }
+          return false
+        }
+        cleared.append(command)
       }
+      return true
     }
   }
 
@@ -342,14 +444,22 @@ public final class ExtensionShortcutsModel {
     apply(result, for: id, shortcut: shortcut)
   }
 
-  /// The row's scope pop-up: kept in the row for a command without a shortcut, sent to the engine otherwise.
+  /// The row's scope pop-up: kept in the row for a command without a shortcut, sent to the engine otherwise. It ends
+  /// a recording in progress, and a conflict the engine reports for it is a notice, never a conflict phase (the
+  /// notice belongs to a recorder).
   public func setScope(_ scope: ExtensionCommandScope, for id: ExtensionCommandID) {
+    cancel()
     guard let command = command(id) else { return }
     guard let shortcut = command.shortcut else {
       pendingScopes[id] = scope
       return
     }
     let result = engine.setExtensionCommandShortcut(id, to: shortcut, scope: scope, replacingConflict: false)
+    if case .conflict(let holder) = result {
+      cancel()
+      notice = .taken(by: self.command(holder).map(Self.ownerTitle) ?? "another extension")
+      return
+    }
     if result == .applied { pendingScopes[id] = nil }
     apply(result, for: id, shortcut: shortcut)
   }
@@ -384,7 +494,7 @@ public final class ExtensionShortcutsModel {
     return groups.compactMap { group in
       if group.name.localizedCaseInsensitiveContains(trimmed) { return group }
       let entries = group.commands.enumerated().map { index, command in
-        let shown = command.shortcut.map(display) ?? (keys: [], spoken: "None")
+        let shown = command.shortcut.map { display($0) } ?? (keys: [], spoken: "None")
         return ShortcutCatalog.Entry(title: title(of: command), actionID: ShortcutActionID(String(index)),
                                      keys: shown.keys, spoken: shown.spoken)
       }

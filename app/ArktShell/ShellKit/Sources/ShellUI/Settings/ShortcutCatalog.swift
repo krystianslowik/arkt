@@ -112,19 +112,20 @@ public enum ShortcutCatalog {
     return owners
   }()
 
-  /// The titles of what Arkt keeps on `binding` (#597): main-menu items whose action is not in `editable` (the
-  /// editor's own actions are checked through the editor), and the keys owned outside the menu.
-  static func keptOwners(of binding: ShortcutBinding, in menu: NSMenu?, editable: Set<ShortcutActionID>) -> [String] {
-    var titles: [String] = []
+  /// What Arkt keeps, by binding (#597), in one walk of the menu: main-menu items whose action is not in `editable`
+  /// (the editor's own actions are checked through the editor), and the keys owned outside the menu.
+  static func keptOwnerIndex(in menu: NSMenu?, editable: Set<ShortcutActionID>) -> [ShortcutBinding: [String]] {
+    var index: [ShortcutBinding: [String]] = [:]
+    func add(_ title: String, _ binding: ShortcutBinding) {
+      if !(index[binding] ?? []).contains(title) { index[binding, default: []].append(title) }
+    }
     for item in menu.map(items(in:)) ?? [] where item.submenu == nil && !item.isSeparatorItem
       && !item.keyEquivalent.isEmpty {
       if let id = actionID(item), editable.contains(id) { continue }
-      guard ShortcutBinding(key: item.keyEquivalent, modifiers: item.keyEquivalentModifierMask) == binding,
-            !titles.contains(item.title) else { continue }
-      titles.append(item.title)
+      add(item.title, ShortcutBinding(key: item.keyEquivalent, modifiers: item.keyEquivalentModifierMask))
     }
-    titles += ownersOutsideTheMenu.filter { $0.binding == binding && !titles.contains($0.title) }.map(\.title)
-    return titles
+    for owner in ownersOutsideTheMenu { add(owner.title, owner.binding) }
+    return index
   }
 
   private static var bindingKey: UInt8 = 0
