@@ -377,6 +377,10 @@ void InstalledExtensionsWatcher::OnExtensionInstalled(
     content::BrowserContext* browser_context,
     const extensions::Extension* extension,
     bool is_update) {
+  // A reload of an unpacked folder keeps its version but may change its icon.
+  if (extension) {
+    icons_.erase(extension->id());
+  }
   NotifyChanged(is_update ? "updated" : "installed");
 }
 

@@ -180,7 +180,8 @@ class InstalledExtensionsWatcher
 
  private:
   struct CachedIcon {
-    // The version the icon was loaded for: an update reloads it.
+    // The version the icon was loaded for: an update reloads it (and every
+    // install or reload drops the entry, since a reload keeps the version).
     std::string version;
     bool loaded = false;
     gfx::Image image;

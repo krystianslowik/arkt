@@ -1404,11 +1404,11 @@ class Facade : public BrowserCollectionObserver,
 
   // Delivers the events recorded so far at once, ahead of the posted delivery
   // (#964): Load unpacked's answer then follows the InstalledExtensionsChanged
-  // of its load, which the watcher recorded on an earlier task. Never inside a
-  // notification.
+  // of its load, which the watcher recorded on an earlier task. Inside a
+  // notification (a nested run loop started from one) it leaves them to the
+  // posted delivery; only the order against the answer is lost then.
   void DeliverPending() {
-    CheckNotInNotification("DeliverPending");
-    if (posted_) {
+    if (posted_ && !InNotification()) {
       Deliver();
     }
   }

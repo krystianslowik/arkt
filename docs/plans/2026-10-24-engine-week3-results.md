@@ -8364,7 +8364,8 @@ Date 2026-11-24. Branch `engine/964-extensions-management` from `main` at `f8ebd
   - `InstalledExtensionsWatcher`: `OnExtensionLoaded`, `Unloaded` (disable, terminate, uninstall, update),
     `Installed` (install, update, Load unpacked, reload) and `Uninstalled`, the developer mode pref, and icon loads,
     merged into one callback per task. Icons: 32 pt at every scale factor through `ImageLoader`, cached per id and
-    version (an update reloads), so a first listing has none and the event follows the load.
+    version and dropped on every install or reload (a reload of an unpacked folder keeps its version), so a first
+    listing has none and the event follows the load.
 - Facade (additive): `ArktInstalledExtension` (`extensionID`, `name`, `version`, `shortDescription`, `iconPNG` 32 pt at
   2x, `isEnabled`, `mayChangeEnabled`, `source`, `hasOptionsPage`, `canUninstall`, `canReportAbuse`, the last two the
   #721 gate's), `ArktExtensionSource` (WebStore 0, Unpacked 1, Policy 2, Other 3), `ArktExtensionEnableResult`
@@ -8375,7 +8376,7 @@ Date 2026-11-24. Branch `engine/964-extensions-management` from `main` at `f8ebd
   `-openExtensionOptionsPage:inBrowser:`, and event kind 33 `InstalledExtensionsChanged`. Load unpacked's completion
   first delivers the events already recorded, so the list change of the load reaches the sinks before the answer
   (Chromium notifies the registry observers before it calls the installer's callback, so the watcher's task always
-  runs first).
+  runs first). Inside a notification it leaves them to the posted delivery and only that order is lost.
 - Self-test: `ext-list`, `ext-enable <id>`, `ext-disable <id>`, `ext-devmode on|off`, `ext-load <folder>`,
   `ext-options <id> [nowin]`; each `InstalledExtensionsChanged` logs the list again.
 - Swift: the `EngineExtensions` members, `InstalledExtensionInfo`, `ExtensionOrigin`, `ExtensionEnableResult`,
@@ -8412,12 +8413,19 @@ engine's `--pack-extension`: `store-probe` (the Web Store's `update_url`) and `p
 | `ext-devmode on` again | one event; icon probe `enabled=yes mayChange=yes` |
 | `ext-disable` plain probe, then `uninstall` it (disabled) | one event each; `count=4` after the uninstall; `uninstall answered uninstalled` |
 | Update: icon probe's folder changed to 2.4.0 (`version_name` 2.4), `ext-load` again | `extension installed ... update=1`; same id, `v=2.4`; one event, a second for the new version's icon |
-| Run 4 (committed code), events per step | startup 1; install 1; disable 1; enable 1; developer mode on 1; load 2 (list, then icon), the list one before the answer; developer mode off 1; on 1; uninstall 1 |
-| `FATAL`, `Check failed`, `DCHECK` | 0 in runs 1 to 4; no crash reports |
+| Run 4, events per step | startup 1; install 1; disable 1; enable 1; developer mode on 1; load 2 (list, then icon), the list one before the answer; developer mode off 1; on 1; uninstall 1 |
+| Run 5 (the committed code: guarded flush, icon dropped on reload), events per step | disable 1, enable 1, developer mode on 1, load 2 (list before the answer); the icon file replaced and the folder loaded again with the same version: 2 events, icon 168 -> 0 -> 196 bytes (the new icon); developer mode off 1, icon probe `enabled=no mayChange=no` |
+| `FATAL`, `Check failed`, `DCHECK` | 0 in runs 1 to 5; no crash report |
 
 Not run: a policy refusal (no policy on this machine; the gate reads the same `ManagementPolicy` calls the #721
 uninstall gate does), an extension disabled for a permissions increase (NeedsPermissionApproval), a managed
-developer mode pref, and a terminated extension's listing.
+developer mode pref, a terminated extension's listing, and an embedded options page (`options_ui`), which
+`ExtensionTabUtil::OpenOptionsPage` opens as Chromium's extensions page showing the extension.
+
+Seen, not caused by this change: runs 1 and 4 each left a macOS `ExcUserFault_Arkt` report (an `os_log` fault inside
+`NSWorkspace setIcon:forFile:`, the process went on). The caller is Chromium's web-app code rewriting the folder icon
+of `~/Applications/Chromium Apps.localized` (`apps_folder_support.mm`), a folder earlier engine runs created on
+2026-10-24; each launch rewrites its `Icon` file. Not a crash and not in this change's code.
 
 ### Deliberate breaks
 
@@ -8432,15 +8440,18 @@ developer mode pref, and a terminated extension's listing.
 
 | Step | Result |
 |---|---|
-| Builds | first 82 s (a first attempt failed on a header edited during the build), break 95 s, restore 90 s, final (format pass, delivery order) 96 s; `FAILED:` 0 each |
+| Builds | first 82 s (a first attempt failed on a header edited during the build), break 95 s, restore 90 s, format pass and delivery order 96 s, final (guarded flush, icon dropped on reload) 109 s; `FAILED:` 0 each |
 | `gn check out/Arkt "//arkt/*"` | `Header dependency check OK` |
 
 ### Tests
 
-- ShellKit `nice -n 20 swift test -j 2 --skip ShellKitGUITests`: see the pull request for the counts on the final
-  tree. `ChromiumEngineKitTests` + 12 (`ChromiumInstalledExtensionTests`, every call through
-  `any EngineExtensions`), `ArktEngineABITests` + 2 (`theInstalledListAndItsAnswersHaveFixedValues`,
-  `installedExtensionsGoThroughTheProtocol`); the diff removes none.
+- ShellKit `nice -n 20 swift test -j 2 --skip ShellKitGUITests` (branch current with `main` at `d7ceacad`; 1-minute
+  load 11 to 24): every bundle passes, Swift Testing runs of 1629, 44, 60, 29, 290, 49, 362, 240 and 42 tests.
+  `ChromiumEngineKitTests` 228 + 12 (`ChromiumInstalledExtensionTests`, every call through `any EngineExtensions`),
+  `ArktEngineABITests` 40 + 2 (`theInstalledListAndItsAnswersHaveFixedValues`,
+  `installedExtensionsGoThroughTheProtocol`): `git diff origin/main | grep -c '^+ *@Test'` is 14 and the diff removes
+  none, so the other bundles are `main`'s counts.
+- Lints `--filter 'LintTests|IsolationTests'`: 13 + 60 pass.
 - No GUI test added or changed, no shell UI touched; ArktCore untouched.
 
 ### Patch budget
@@ -8460,5 +8471,6 @@ Unchanged: 16 patch files, 8 seam and hook patch files, 22 upstream files outsid
 ### Cleanup
 
 Every engine run stopped by exact PID (`ps -p` prints nothing), and run 4's two `chrome_crashpad_handler` processes
-(started with it, parent gone) stopped by PID. Throwaway profiles under `profiles/964-20261124/` deleted. Nothing
-touched the Keychain (mock keychain only), `/Applications/Arkt.app` or real browser data.
+(started with it, parent gone) stopped by PID; run 5's helpers exited by themselves. Throwaway profiles under
+`profiles/964-20261124/` deleted. The fixtures and run logs stay under `arkt-artifacts/964/` (small) until the review
+ends. Nothing touched the Keychain (mock keychain only), `/Applications/Arkt.app` or real browser data.
