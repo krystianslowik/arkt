@@ -26,7 +26,8 @@ public final class ProfileImportCoordinator {
   public private(set) var isRunning = false
   private var task: Task<Void, Never>?
   private var recordFailed = false
-  /// Test seam: called with each pulled batch of cookies or logins before the cancel check and the write.
+  /// Test seam: called with each pulled batch of cookies or logins, or the extension ids, before the cancel check and
+  /// the write.
   var afterPull: (@MainActor (ImportDataType, [any Sendable]) -> Void)?
 
   private let engine: any EngineImporting
@@ -220,6 +221,11 @@ public final class ProfileImportCoordinator {
           visitsPerBatch: configuration.historyVisitsPerBatch)
       } catch { return TypeResult(outcome: .failed(reason: "could not read History")) }
       let watermark = record.historyWatermark
+      // Two clocks decide the 90-day window: this run's clock (the read above and the consent count) and the engine's
+      // own when it writes (`ImportRecording.record`). They agree except for a visit within the seconds or minutes
+      // between the two: the read keeps it, the engine reports it as skipped (in Arkt) instead of too old. The engine
+      // reports a visit whose scheme its history refuses as skipped too. Passing this run's clock to the engine needs
+      // a facade change (#938).
       // Batches are in time order, so each batch's newest visit is a valid watermark for the rest. Once a batch had
       // visits the engine refused, the watermark stops moving, so those visits are offered again next time.
       var frozen = false
@@ -312,7 +318,14 @@ public final class ProfileImportCoordinator {
       guard let ids = prepared.batches.first else {
         return TypeResult(outcome: .done(ImportItemCounts(skipped: prepared.alreadyHandled)))
       }
-      if Task.isCancelled { return TypeResult(outcome: .done(ImportItemCounts(skipped: prepared.alreadyHandled)), cancelled: true) }
+      afterPull?(.extensions, ids)
+      if Task.isCancelled {
+        // Same as a cancel during the install: with nothing in Arkt it is a cancelled type, not an import of zero (#938).
+        return TypeResult(
+          outcome: prepared.alreadyHandled == 0
+            ? .skipped(reason: "cancelled") : .done(ImportItemCounts(skipped: prepared.alreadyHandled)),
+          cancelled: true)
+      }
       guard let result = await engine.installExtensions(ids: ids) else {
         return TypeResult(outcome: .skipped(reason: "not yet available"))
       }
@@ -320,15 +333,28 @@ public final class ProfileImportCoordinator {
       counts.add(result)
       // A cancelled batch resolves its pending ids as failed, so nothing is recorded as handled.
       if result.failed == 0 { await persist(ArcImportRecord(extensionIDs: Set(ids))) }
-      // Nothing in Arkt because of the cancel is a cancelled type, not a refused one: no Retry (#935).
-      if Task.isCancelled && counts.written + counts.skipped == 0 {
-        return TypeResult(outcome: .skipped(reason: "cancelled"), cancelled: true)
+      // Ids the cancel ended are not refusals (#938). The engine reports them under the reason "cancelled"; a declined
+      // confirmation uses the same reason, so it is only read as a cancel when the run was cancelled.
+      if Task.isCancelled {
+        counts.failed = max(0, counts.failed - Self.cancelledInstalls(result.failureReason))
+        // Nothing in Arkt and nothing refused: a cancelled type, not a refused one: no Retry (#935).
+        if counts.written + counts.skipped + counts.failed == 0 {
+          return TypeResult(outcome: .skipped(reason: "cancelled"), cancelled: true)
+        }
       }
       return TypeResult(outcome: .done(counts), cancelled: Task.isCancelled)
     }
   }
 
   private struct ReadFailure: Error { var reason: String }
+
+  /// How many ids the engine's install batch ended for a cancel: the `cancelled: N` line of its failure reasons.
+  private static func cancelledInstalls(_ failureReason: String?) -> Int {
+    let prefix = "cancelled: "
+    return failureReason?.split(separator: "\n").lazy.compactMap { line in
+      line.hasPrefix(prefix) ? Int(line.dropFirst(prefix.count)) : nil
+    }.first ?? 0
+  }
 
   /// Pulls batch by batch. Secrets are decrypted by `next` only when asked for, and zeroed here after the write, on
   /// cancel and when a read fails, so plaintext lives for one batch at a time.

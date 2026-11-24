@@ -605,6 +605,22 @@ struct BrowserDataImportModelTests {
       == .imported(count: 4, failed: 0, tooOld: 5))
   }
 
+  @Test func aRefusedTypeCarriesItsPastTheWindowNote() {
+    #expect(BrowserDataImportModel.status(.done(ImportItemCounts(failed: 2, tooOld: 5)))
+      == .notImported(.refused(failed: 2, tooOld: 5)))
+  }
+
+  @Test func theWindowShownInTheRowIsTheEnginesRetentionWindow() throws {
+    let days = Int(ImportRecording.historyRetention / 86_400)
+    let state = BrowserDataImportState(
+      phase: .result, counts: BrowserDataCounts(), selection: [.history, .extensions],
+      rows: [.history: .imported(count: 1, failed: 0, tooOld: 2), .extensions: .notImported(.refused(failed: 1, tooOld: 2))],
+      result: BrowserDataImportResult(), locale: Locale(identifier: "en_US"))
+    let rows = state.groups.flatMap(\.rows)
+    #expect(rows.count == 2)
+    for row in rows { #expect(row.detail?.contains("2 older than \(days) days not imported") == true) }
+  }
+
   // MARK: The real coordinator
 
   @Test func aFullImportThroughTheRealCoordinatorShowsEveryTypeAndEndsInAResult() async throws {

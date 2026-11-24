@@ -132,7 +132,7 @@ public struct ProfileImportSummary: Equatable, Sendable {
         var parts = ["\(counts.written) \(type.noun)\(counts.written == 1 ? "" : "s") added"]
         if counts.skipped > 0 { parts.append("\(counts.skipped) skipped") }
         if counts.failed > 0 { parts.append("\(counts.failed) failed") }
-        if counts.tooOld > 0 { parts.append("\(counts.tooOld) older than 90 days") }
+        if counts.tooOld > 0 { parts.append("\(counts.tooOld) older than \(Int(ImportRecording.historyRetention / 86_400)) days") }
         lines.append("\(type.title): " + parts.joined(separator: ", "))
       case .skipped(let reason): lines.append("\(type.title): skipped, \(reason)")
       case .failed(let reason): lines.append("\(type.title): not imported, \(reason)")

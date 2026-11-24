@@ -8139,3 +8139,27 @@ Restored: passing.
   shown pages the cap is worked out from. A tall sheet can cover the Peek's strip. Not handled: it needs the Peek's
   tab and geometry in the cap, and its own test.
 - A short sheet stays centered in the window, as AppKit places it; only its top is capped.
+
+## Import result follow-ups (#938)
+
+Follow-ups from the review of #937. No engine, facade or patch change.
+
+- A type where every item was refused keeps its past-the-window note: `BrowserDataNotImportedReason.refused(failed:tooOld:)`
+  (`tooOld` defaults to 0), and the row reads "4 couldn't be imported, 5 older than 90 days not imported". Same wording as
+  the Imported row, so no new text.
+- Extensions, cancel before the install: with nothing already in Arkt the type is `.skipped("cancelled")`, as a cancel
+  during the install already was, not "Imported 0". The test seam `afterPull` now also reports the extension ids.
+- Extensions, cancel and refusal apart: when the run was cancelled, the ids the engine ended for it (its fixed
+  `cancelled: N` failure line) are taken out of `failed`. Something in Arkt plus cancelled ids shows no failure note; a
+  real refusal followed by a cancel keeps its failure count and its Retry. A declined confirmation uses the same
+  `cancelled` reason, so without a cancel of the run it stays a refusal. A typed cancel outcome per id would need the
+  engine contract, so it is not done here.
+- The 90-day boundary has two clocks: the coordinator's run-start clock (read, consent count) and the engine's own `now()`
+  in `ImportRecording.record`. A visit between the two clocks' windows is kept by the read and reported as skipped by the
+  engine. Visits whose scheme the engine's history refuses are also skipped. Documented in the coordinator; passing the
+  run's clock to `importHistory` is a facade change and stays open.
+- "90 days": `ProfileImportSummary.lines` now derives the day count from `ImportRecording.historyRetention`. ShellUI keeps
+  the literal (it does not see the engine API); `BrowserDataImportModelTests` checks the row wording against
+  `historyRetention / 86_400`.
+- History where every visit is refused: the watermark stays, and Retry sends the same visits again (a test with a result
+  that still reports the newest visit, as an unanswered batch does).

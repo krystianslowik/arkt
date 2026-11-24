@@ -60,8 +60,9 @@ public enum BrowserDataNotImportedReason: Equatable, Sendable {
   case keychainDenied
   /// Attempted and not read or written.
   case unreadable
-  /// Attempted, and every item was refused: none is in Arkt (#935).
-  case refused(failed: Int)
+  /// Attempted, and every item was refused: none is in Arkt (#935). `tooOld` are history visits past the 90 days an
+  /// import keeps, as for `.imported`.
+  case refused(failed: Int, tooOld: Int = 0)
 }
 
 public enum BrowserDataRowStatus: Equatable, Sendable {
