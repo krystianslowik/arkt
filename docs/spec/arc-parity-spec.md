@@ -105,7 +105,7 @@ Ctrl-Cmd-Q), in the warning line and in the conflict notice when an Arkt item al
 | KB-034 | Previous Space | Cmd-Opt-Left | global | none found | [O default]; [O menu]; P KS, SP | CONFIRMED |
 | KB-035 | Go to Space N (by Space order) | Ctrl-1 ... Ctrl-9 | global | dynamic | [O menu]; P KS, SP; [S] "Jumps over to your %@ Space" | CONFIRMED |
 | KB-036 | Reveal Current Tab (focus sidebar, scroll to current tab) | Ctrl-Space | global | `focusSidebar` | [O default] "Reveals the current tab in your Sidebar." | CONFIRMED |
-| KB-037 | Reveal Tab in Sidebar | unbound | global | none found | [O default] no key | CONFIRMED |
+| KB-037 | Reveal Tab in Sidebar | unbound | global | none found | [O default] no key; Arkt (maintainer, #945): Ctrl-Space's reveal without moving keyboard focus to the sidebar, behavior PARITY(NEEDS-RUNTIME-CHECK RT-39) | CONFIRMED |
 | KB-038 | Type Travel (menu search inside command bar) | unknown | global | `typeTravel` | [S] `typeTravel`, `controlKeyShowsTypeTravel`; default key not proven | NEEDS-RUNTIME-CHECK |
 | KB-039 | Exit current context (close Peek, exit full screen) | Esc | context | `exit` | [O default] description | CONFIRMED |
 | KB-040 | New Folder | unknown at runtime (the default menu maps Cmd-Shift-N, which the menu bar gives to Incognito) | global | `newFolder` | [O default]; [O menu] (CF-02) | NEEDS-RUNTIME-CHECK |
@@ -677,6 +677,7 @@ status to CONFIRMED (or rewrite the rule) and move any losing claim to section 7
 | RT-36 | BH-123, BH-067 | Cmd-W on a pane of a Pinned split | Make a split of Pinned tabs; focus one pane and press Cmd-W; note what the pane area shows afterwards |
 | RT-37 | Split View plan S3, S4 | Pane chrome | In a 2-pane and a 3-pane split: screenshot and note the gap between panes, the focused-pane indicator (border, dimming) and the pane header controls above each pane |
 | RT-38 | KB-070 to KB-075 | Where are the Split View menu items and what are they called? | Open each menu bar menu; note the menu (and submenu) that holds the Split View items and each item's title |
+| RT-39 | KB-037 | What does Reveal Tab in Sidebar do, and where is it? | Hide the sidebar, close the folder holding the current tab and scroll it out of view; choose Reveal Tab in Sidebar from the menu bar; note its menu, whether the sidebar shows, the folder opens and the row scrolls into view, and whether keyboard focus moves to the sidebar (do arrow keys move a sidebar cursor or act on the page?) |
 
 ---
 
