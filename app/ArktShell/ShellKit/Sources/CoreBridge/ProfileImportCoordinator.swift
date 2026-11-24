@@ -326,17 +326,27 @@ public final class ProfileImportCoordinator {
             ? .skipped(reason: "cancelled") : .done(ImportItemCounts(skipped: prepared.alreadyHandled)),
           cancelled: true)
       }
-      guard let result = await engine.installExtensions(ids: ids) else {
+      // One typed result per id when the engine has them; an engine with only the aggregate install has no way to tell a
+      // cancelled id from a refused one.
+      var result: ImportWriteResult
+      var endedByCancel = 0
+      if let results = await engine.installExtensionResults(ids: ids) {
+        result = ImportWriteResult(counting: results)
+        endedByCancel = results.count { $0.outcome == .failed(ExtensionInstallOutcome.cancelledReason) }
+      } else if let aggregate = await engine.installExtensions(ids: ids) {
+        result = aggregate
+      } else {
         return TypeResult(outcome: .skipped(reason: "not yet available"))
       }
       var counts = ImportItemCounts(skipped: prepared.alreadyHandled)
       counts.add(result)
       // A cancelled batch resolves its pending ids as failed, so nothing is recorded as handled.
       if result.failed == 0 { await persist(ArcImportRecord(extensionIDs: Set(ids))) }
-      // Ids the cancel ended are not refusals (#938). The engine reports them under the reason "cancelled"; a declined
-      // confirmation uses the same reason, so it is only read as a cancel when the run was cancelled.
+      // Ids the cancel ended are not refusals (#938). A declined confirmation fails its ids with "not confirmed", so it
+      // stays a refusal. The engine also gives "cancelled" for an aborted install, so the ids are only
+      // read as cancelled when this run was cancelled.
       if Task.isCancelled {
-        counts.failed = max(0, counts.failed - Self.cancelledInstalls(result.failureReason))
+        counts.failed -= endedByCancel
         // Nothing in Arkt and nothing refused: a cancelled type, not a refused one: no Retry (#935).
         if counts.written + counts.skipped + counts.failed == 0 {
           return TypeResult(outcome: .skipped(reason: "cancelled"), cancelled: true)
@@ -347,14 +357,6 @@ public final class ProfileImportCoordinator {
   }
 
   private struct ReadFailure: Error { var reason: String }
-
-  /// How many ids the engine's install batch ended for a cancel: the `cancelled: N` line of its failure reasons.
-  private static func cancelledInstalls(_ failureReason: String?) -> Int {
-    let prefix = "cancelled: "
-    return failureReason?.split(separator: "\n").lazy.compactMap { line in
-      line.hasPrefix(prefix) ? Int(line.dropFirst(prefix.count)) : nil
-    }.first ?? 0
-  }
 
   /// Pulls batch by batch. Secrets are decrypted by `next` only when asked for, and zeroed here after the write, on
   /// cancel and when a read fails, so plaintext lives for one batch at a time.

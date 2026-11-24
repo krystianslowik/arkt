@@ -8149,11 +8149,13 @@ Follow-ups from the review of #937. No engine, facade or patch change.
   the Imported row, so no new text.
 - Extensions, cancel before the install: with nothing already in Arkt the type is `.skipped("cancelled")`, as a cancel
   during the install already was, not "Imported 0". The test seam `afterPull` now also reports the extension ids.
-- Extensions, cancel and refusal apart: when the run was cancelled, the ids the engine ended for it (its fixed
-  `cancelled: N` failure line) are taken out of `failed`. Something in Arkt plus cancelled ids shows no failure note; a
-  real refusal followed by a cancel keeps its failure count and its Retry. A declined confirmation uses the same
-  `cancelled` reason, so without a cancel of the run it stays a refusal. A typed cancel outcome per id would need the
-  engine contract, so it is not done here.
+- Extensions, cancel and refusal apart: the coordinator asks `installExtensionResults(ids:)` (typed per id; an engine with
+  only the aggregate `installExtensions` is used as before, without the split). When the run was cancelled, the ids that
+  failed with `ExtensionInstallOutcome.cancelledReason` ("cancelled", from `Cancel()` and an aborted install in the
+  facade) are taken out of `failed`. Something in Arkt plus cancelled ids shows no failure note; a real refusal followed
+  by a cancel keeps its count and its Retry. A declined confirmation fails its ids with "not confirmed", so it is a
+  refusal with or without a cancel; one declined id plus two cancelled ones gives failed 1 and Retry. Nothing is parsed
+  from failure-reason lines.
 - The 90-day boundary has two clocks: the coordinator's run-start clock (read, consent count) and the engine's own `now()`
   in `ImportRecording.record`. A visit between the two clocks' windows is kept by the read and reported as skipped by the
   engine. Visits whose scheme the engine's history refuses are also skipped. Documented in the coordinator; passing the
@@ -8163,3 +8165,5 @@ Follow-ups from the review of #937. No engine, facade or patch change.
   `historyRetention / 86_400`.
 - History where every visit is refused: the watermark stays, and Retry sends the same visits again (a test with a result
   that still reports the newest visit, as an unanswered batch does).
+- Possible follow-up: an early cancel for history, cookies and passwords still reads "Imported 0" while extensions now
+  read Skipped. Not changed here.

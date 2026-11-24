@@ -293,8 +293,9 @@ extension BrowserDataImportState {
           if failed > 0 { notes.append("\(BrowserDataNumberFormat.text(failed, locale: locale)) couldn't be imported") }
           if tooOld > 0 { notes.append(tooOldNote(tooOld)) }
           if !notes.isEmpty {
-            detail = notes.joined(separator: ", ")
-            label += ", " + detail!
+            let joined = notes.joined(separator: ", ")
+            detail = joined
+            label += ", " + joined
           }
         }
       }

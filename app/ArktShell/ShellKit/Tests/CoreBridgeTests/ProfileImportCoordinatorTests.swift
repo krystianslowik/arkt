@@ -504,7 +504,7 @@ struct ProfileImportCoordinatorTests {
   @Test func cancelDuringTheInstallEndsTheRunWithoutRecordingTheIds() async throws {
     let harness = try Harness()
     let coordinator = harness.coordinator
-    harness.engine.installResult = ImportWriteResult(failed: 1, failureReason: "cancelled: 1\n")
+    harness.engine.installResults = [Self.install("a", .failed(ExtensionInstallOutcome.cancelledReason))]
     harness.engine.afterCall = { name, _ in if name == "extensions" { coordinator.cancel() } }
     let summary = try await harness.summary(ImportSelection([.extensions]))
     #expect(summary.cancelled)
@@ -531,7 +531,10 @@ struct ProfileImportCoordinatorTests {
   @Test func extensionsThatFailedBecauseOfACancelAreNotRefusalsWhenSomethingCameOver() async throws {
     let harness = try Harness()
     let coordinator = harness.coordinator
-    harness.engine.installResult = ImportWriteResult(written: 1, failed: 2, failureReason: "cancelled: 2\n")
+    harness.engine.installResults = [
+      Self.install("a", .installed), Self.install("b", .failed(ExtensionInstallOutcome.cancelledReason)),
+      Self.install("c", .failed(ExtensionInstallOutcome.cancelledReason)),
+    ]
     harness.engine.afterCall = { name, _ in if name == "extensions" { coordinator.cancel() } }
     let summary = try await harness.summary(ImportSelection([.extensions]))
     #expect(summary.cancelled)
@@ -543,7 +546,10 @@ struct ProfileImportCoordinatorTests {
   @Test func aRealRefusalFollowedByACancelIsStillARefusal() async throws {
     let harness = try Harness()
     let coordinator = harness.coordinator
-    harness.engine.installResult = ImportWriteResult(failed: 3, failureReason: "store refused: 1\ncancelled: 2\n")
+    harness.engine.installResults = [
+      Self.install("a", .failed("store refused")), Self.install("b", .failed(ExtensionInstallOutcome.cancelledReason)),
+      Self.install("c", .failed(ExtensionInstallOutcome.cancelledReason)),
+    ]
     harness.engine.afterCall = { name, _ in if name == "extensions" { coordinator.cancel() } }
     let summary = try await harness.summary(ImportSelection([.extensions]))
     #expect(summary.cancelled)
@@ -551,13 +557,46 @@ struct ProfileImportCoordinatorTests {
     #expect(summary.retryTypes == [.extensions])
   }
 
-  @Test func aDeclinedConfirmationWithoutACancelStaysARefusal() async throws {
+  @Test func aDeclinedConfirmationIsARefusalWithOrWithoutACancel() async throws {
+    // The engine fails the ids of a declined confirmation with "not confirmed", not with the cancel reason.
+    let declined = [Self.install("a", .failed("not confirmed")), Self.install("b", .failed("not confirmed"))]
     let harness = try Harness()
-    harness.engine.installResult = ImportWriteResult(failed: 2, failureReason: "cancelled: 2\n")
+    harness.engine.installResults = declined
     let summary = try await harness.summary(ImportSelection([.extensions]))
     #expect(!summary.cancelled)
     #expect(summary.outcomes[.extensions] == Self.counts(0, failed: 2))
     #expect(summary.retryTypes == [.extensions])
+
+    let cancelled = try Harness()
+    let coordinator = cancelled.coordinator
+    cancelled.engine.installResults = [
+      Self.install("a", .failed("not confirmed")), Self.install("b", .failed(ExtensionInstallOutcome.cancelledReason)),
+      Self.install("c", .failed(ExtensionInstallOutcome.cancelledReason)),
+    ]
+    cancelled.engine.afterCall = { name, _ in if name == "extensions" { coordinator.cancel() } }
+    let second = try await cancelled.summary(ImportSelection([.extensions]))
+    #expect(second.cancelled)
+    #expect(second.outcomes[.extensions] == Self.counts(0, failed: 1))
+    #expect(second.retryTypes == [.extensions])
+  }
+
+  @Test func aCancelledReasonWithoutACancelOfTheRunStaysARefusal() async throws {
+    let harness = try Harness()
+    harness.engine.installResults = [Self.install("a", .failed(ExtensionInstallOutcome.cancelledReason))]
+    let summary = try await harness.summary(ImportSelection([.extensions]))
+    #expect(!summary.cancelled)
+    #expect(summary.outcomes[.extensions] == Self.counts(0, failed: 1))
+    #expect(summary.retryTypes == [.extensions])
+  }
+
+  @Test func anEngineWithOnlyTheAggregateInstallStillImports() async throws {
+    let harness = try Harness()
+    harness.engine.installResult = ImportWriteResult(written: 1)
+    #expect(try await harness.summary(ImportSelection([.extensions])).outcomes[.extensions] == Self.counts(1))
+  }
+
+  private static func install(_ id: String, _ outcome: ExtensionInstallOutcome) -> ExtensionInstallResult {
+    ExtensionInstallResult(id: id, outcome: outcome)
   }
 
   @Test func historyWhereEveryVisitWasRefusedKeepsItsWatermarkAndRetrySendsItAgain() async throws {
