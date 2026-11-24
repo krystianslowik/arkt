@@ -1,6 +1,7 @@
 import AppKit
 import CoreBridge
 import EngineAPI
+import OSLog
 import Persistence
 import ShellUI
 
@@ -30,11 +31,14 @@ final class AppComposition {
 
   /// "Warn before quitting" for the Engine build's Quit item (#560); the development build's lives in `AppDelegate`.
   private let quitWarning = QuitWarningGate()
+  private static let quitLog = Logger(subsystem: "dev.arkt.shell", category: "quit")
 
   /// The Engine build's Quit item: with the setting on, the alert runs on the next turn (not inside the menu's key
   /// equivalent) and only Quit calls `quit`; with it off, `quit` runs at once, as before.
   func requestQuit() {
     let warns = session?.settings.warnsBeforeQuitting ?? false
+    // A Cmd-Q before the session exists (the launch load) quits without asking; logged to tell such a quit apart.
+    Self.quitLog.info("quit requested warns=\(warns, privacy: .public) session=\(self.session != nil, privacy: .public)")
     quitWarning.requestQuit(warns: warns, ask: { reply in
       RunLoop.main.perform(inModes: [.common]) {
         MainActor.assumeIsolated { reply(DialogAlert(content: .quitWarning).runModal() == .primary) }
