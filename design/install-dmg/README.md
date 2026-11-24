@@ -1,6 +1,6 @@
 # Install DMG window (draft, directions only)
 
-Issue #983. The Finder window that opens when a user mounts `Arkt-0.1.0-preview.1-arm64.dmg`. Three directions are
+Issue #983. The Finder window that opens when a user mounts `Arkt-0.1.0-preview.1-arm64.dmg`. Four directions are
 here for the maintainer to pick from; nothing is built yet.
 
 ## Gate
@@ -27,9 +27,10 @@ below are icon centers, in points from the content top-left, which is what the F
 
 | | Arkt.app | Applications | Arrow (drawn in art) | Label zone (art) | Hint |
 |---|---|---|---|---|---|
-| A porcelain | (190, 214) | (470, 214) | x 306 to 352, y 214, centered at x 330 | full-width band, y 272 to 312 | none |
-| B mustard | (190, 196) | (470, 196) | x 306 to 360, y 196 | full-width band, y 248 to 300 | centered, y 350 to 368 |
-| C graphite | (190, 200) | (470, 200) | x 304 to 360, y 200 | wells 150 x 28 at x 115 to 265 and 395 to 545, y 262 to 290 | centered, y 352 to 370 |
+| A porcelain | (190, 214) | (470, 214) | x 306 to 352, y 214, centered at x 330 | rounded card x 90 to 570, y 112 to 320, fading to stone at the bottom | none |
+| B mustard | (190, 196) | (470, 196) | x 306 to 360, y 196 | rounded card x 90 to 570, y 112 to 320, mustard fading to fold shadow | centered, y 350 to 368 |
+| C graphite | (190, 200) | (470, 200) | x 304 to 360, y 200 | rounded card, same frame as A and B | centered, y 352 to 370 |
+| D one tone | (190, 200) | (470, 200) | x 304 to 360, y 200 | the whole field | none |
 
 Labels sit about 76 pt below each icon center (Finder: icon bottom plus about 12).
 
@@ -37,23 +38,27 @@ Labels sit about 76 pt below each icon center (Finder: icon bottom plus about 12
 
 Finder draws labels in the system appearance and ignores the background: black text in light mode, white in dark
 mode (this is the usual behavior with a picture background; it has not been verified on a mounted DMG here, because
-no DMG is built yet). A light band fails in dark mode and a dark band fails in light mode. A tone with relative
+no DMG is built yet; a throwaway test DMG was tried in dark appearance, but the layout did not apply to the Finder window, so it showed nothing about picture backgrounds). A light band fails in dark mode and a dark band fails in light mode. A tone with relative
 luminance near 0.18 (about `#767676`) gives black and white text the same contrast, about 4.6:1. Every direction
 therefore puts the label zone on one mid-tone:
 
-- A: stone `#767571` shelf under the icons (black 4.6:1, white 4.6:1).
-- B: the brand fold shadow `#A96E12` band (black 4.9:1, white 4.3:1).
-- C: `#767A77` wells under each label (black 4.8:1, white 4.4:1).
+- A: a soft rounded card that fades from light stone to `#787773` where the labels sit (about 4.5:1 each).
+- B: a rounded card from mustard to the brand fold shadow `#A96E12` (black 4.9:1, white 4.3:1 at the labels).
+- C: a rounded card from graphite up to `#747875` at the labels (about 4.5:1 each).
+- D: the whole field is `#A96E12`, so nothing needs a zone.
 
 Finder's own selection pill and 2-line wrapping for long names still draw over the zone; the zones are taller than one line.
 
 ## Directions
 
-- **A, porcelain minimal.** `#FAF9F5`, graphite wordmark, a hairline arrow, a stone shelf the icons stand on, lots of
+A, B and C: the label zone is a rounded card (480 x 208 pt at x 90, y 112) behind both icons, with a gradient that reaches the mid-tone at label height.
+
+- **A, porcelain minimal.** `#FAF9F5`, graphite wordmark, a hairline arrow, a rounded stone card the icons stand on, lots of
   air. No hint.
 - **B, mustard hero.** `#E9B520` field with folded bands in `#F3CA3D` and `#DCA319`; the label zone is the `#A96E12`
   fold band. Bold graphite arrow. Hint in graphite on mustard (about 10:1).
-- **C, graphite.** `#202321`, ivory wordmark, a mustard arrow (a fill), plates under the labels. Hint in `#B9BDB8`.
+- **D, one tone, giant wordmark.** The whole field is `#A96E12`; a giant mustard wordmark at 20% opacity bleeds off both sides behind the icons; ivory arrow. No hint.
+- **C, graphite.** `#202321`, ivory wordmark, a mustard arrow (a fill), a rounded card under the icons. Hint in `#B9BDB8`.
 
 Type: the hint is Avenir Next 400 to 500 at 12.5 to 13 pt, rasterized into the background (no font is bundled).
 The wordmarks are the outlined vectors from `design/brand/vector/wordmarks/`.
@@ -68,10 +73,10 @@ icon in the mocks is a stand-in, Finder draws the real one.
 
 | Path | What it is |
 |---|---|
-| `directions/<a\|b\|c>/background.html` | The bare background (what ships), 660 x 420 pt |
-| `directions/<a\|b\|c>/background.png`, `background@2x.png` | The bare background at 1x and 2x |
-| `directions/<a\|b\|c>/mock.html` | Finder window mock with icons, labels and a title bar; `#light` (default) or `#dark` |
-| `directions/<a\|b\|c>/finder-light.png`, `finder-dark.png` | 2x renders of the mock (732 x 520 pt canvas) |
+| `directions/<a\|b\|c\|d>/background.html` | The bare background (what ships), 660 x 420 pt |
+| `directions/<a\|b\|c\|d>/background.png`, `background@2x.png` | The bare background at 1x and 2x |
+| `directions/<a\|b\|c\|d>/mock.html` | Finder window mock with icons, labels and a title bar; `#light` (default) or `#dark` |
+| `directions/<a\|b\|c\|d>/finder-light.png`, `finder-dark.png` | 2x renders of the mock (732 x 520 pt canvas) |
 | `directions/shared/` | Mock-only CSS and the Applications folder stand-in |
 
 Renders: headless Chromium (Playwright's `chrome-headless-shell`), `--force-device-scale-factor=2`, offline, with
