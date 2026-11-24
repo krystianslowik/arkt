@@ -143,7 +143,7 @@ extension SettingsWindowController {
   static let inArkt = "In Arkt"
   static let allApps = "All Apps"
   static let pressNewShortcut = "Press new shortcut"
-  static let cycleTitle = "Cycle through pinned extensions"
+  public static let cycleTitle = "Cycle through pinned extensions"
 
   // MARK: Model and engine
 

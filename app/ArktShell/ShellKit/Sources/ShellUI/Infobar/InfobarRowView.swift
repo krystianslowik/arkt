@@ -175,17 +175,61 @@ final class InfobarRowView: NSView {
   override var isFlipped: Bool { true }
   override var mouseDownCanMoveWindow: Bool { false }
 
-  /// Shows `infobar`'s values: the same row stays when only a title or an enabled state changed.
+  /// Shows `infobar`'s values: the same row and the same buttons stay when only a title, a tooltip or an enabled state
+  /// changed, so a refresh under the keyboard keeps the control VoiceOver's cursor sits on. The buttons are made again
+  /// only when the set of controls changes.
   func update(_ infobar: Infobar) {
     guard infobar != self.infobar else { return }
+    let old = self.infobar
     self.infobar = infobar
-    for view in [linkButton, okButton, cancelButton, closeButton] as [NSView?] { view?.removeFromSuperview() }
-    linkButton = nil; okButton = nil; cancelButton = nil; closeButton = nil
-    build()
+    let sameControls = (old.linkTitle == nil) == (infobar.linkTitle == nil)
+      && (old.ok == nil) == (infobar.ok == nil) && (old.cancel == nil) == (infobar.cancel == nil)
+      && (old.closeLabel == nil) == (infobar.closeLabel == nil)
+    if sameControls {
+      showValues()
+      if let title = infobar.linkTitle { configureLink(title) }
+      if let okButton, let ok = infobar.ok { configure(okButton, with: ok) }
+      if let cancelButton, let cancel = infobar.cancel { configure(cancelButton, with: cancel) }
+      if let closeButton, let label = infobar.closeLabel {
+        closeButton.setArchiveAccessibilityLabel(label)
+        closeButton.toolTip = label
+      }
+    } else {
+      for view in [linkButton, okButton, cancelButton, closeButton] as [NSView?] { view?.removeFromSuperview() }
+      linkButton = nil; okButton = nil; cancelButton = nil; closeButton = nil
+      build()
+    }
     needsLayout = true
   }
 
   private func build() {
+    showValues()
+    if let title = infobar.linkTitle {
+      let link = ArchiveLinkButton(style: .secondary, title: title, fontSize: InfobarMetrics.messageFontSize)
+      link.target = self
+      link.action = #selector(linkPressed(_:))
+      link.setAccessibilityIdentifierWithCell(AXID.Infobar.link)
+      addSubview(link)
+      linkButton = link
+      configureLink(title)
+    }
+    okButton = makeButton(infobar.ok, id: AXID.Infobar.ok, action: #selector(okPressed(_:)))
+    cancelButton = makeButton(infobar.cancel, id: AXID.Infobar.cancel, action: #selector(cancelPressed(_:)))
+    if let label = infobar.closeLabel {
+      let close = InfobarCloseButton(label: label)
+      close.target = self
+      close.action = #selector(closePressed(_:))
+      close.setAccessibilityIdentifierWithCell(AXID.Infobar.close)
+      addSubview(close)
+      closeButton = close
+    }
+    // VoiceOver reads the message (the row's label), then the link, the buttons and the close button, in that order;
+    // the icon is decoration.
+    setAccessibilityChildren([linkButton, okButton, cancelButton, closeButton].compactMap { $0 })
+  }
+
+  /// The message, the label and the icon.
+  private func showValues() {
     message.show(infobar)
     setAccessibilityLabel(infobar.message)
     if let data = infobar.iconPNG, let image = NSImage(data: data) {
@@ -204,42 +248,33 @@ final class InfobarRowView: NSView {
       hasIcon = false
     }
     iconView.isHidden = !hasIcon
-    if let title = infobar.linkTitle {
-      let link = ArchiveLinkButton(style: .secondary, title: title, fontSize: InfobarMetrics.messageFontSize)
-      link.target = self
-      link.action = #selector(linkPressed(_:))
-      link.setAccessibilityIdentifierWithCell(AXID.Infobar.link)
-      if let label = infobar.linkAccessibilityLabel { link.setArchiveAccessibilityLabel(label) }
-      addSubview(link)
-      linkButton = link
-    }
-    okButton = makeButton(infobar.ok, id: AXID.Infobar.ok, action: #selector(okPressed(_:)))
-    cancelButton = makeButton(infobar.cancel, id: AXID.Infobar.cancel, action: #selector(cancelPressed(_:)))
-    if let label = infobar.closeLabel {
-      let close = InfobarCloseButton(label: label)
-      close.target = self
-      close.action = #selector(closePressed(_:))
-      close.setAccessibilityIdentifierWithCell(AXID.Infobar.close)
-      addSubview(close)
-      closeButton = close
-    }
-    // VoiceOver reads the message (the row's label), then the link, the buttons and the close button, in that order;
-    // the icon is decoration.
-    setAccessibilityChildren([linkButton, okButton, cancelButton, closeButton].compactMap { $0 })
   }
 
   private func makeButton(_ button: InfobarButton?, id: String, action: Selector) -> ArchivePillButton? {
     guard let button else { return nil }
     let pill = ArchivePillButton(style: .neutral, title: button.title, metrics: .infobar)
-    pill.isEnabled = button.isEnabled
-    pill.toolTip = button.tooltip
     pill.target = self
     pill.action = action
-    pill.setArchiveAccessibilityLabel(button.title)
-    if let tooltip = button.tooltip { pill.setAccessibilityHelp(tooltip); pill.cell?.setAccessibilityHelp(tooltip) }
     pill.setAccessibilityIdentifierWithCell(id)
+    configure(pill, with: button)
     addSubview(pill)
     return pill
+  }
+
+  private func configure(_ pill: ArchivePillButton, with button: InfobarButton) {
+    pill.title = button.title
+    pill.isEnabled = button.isEnabled
+    pill.toolTip = button.tooltip
+    pill.setArchiveAccessibilityLabel(button.title)
+    pill.setAccessibilityHelp(button.tooltip)
+    pill.cell?.setAccessibilityHelp(button.tooltip)
+  }
+
+  private func configureLink(_ title: String) {
+    guard let linkButton else { return }
+    // Setting the title resets the accessibility label to the title; the engine's label, when there is one, follows.
+    linkButton.title = title
+    if let label = infobar.linkAccessibilityLabel { linkButton.setArchiveAccessibilityLabel(label) }
   }
 
   /// The controls F6 reaches (#478), in reading order: the link when it comes before the buttons, OK, Cancel, the link

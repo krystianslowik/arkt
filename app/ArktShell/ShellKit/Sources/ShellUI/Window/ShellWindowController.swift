@@ -1092,6 +1092,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     onRecoveryWindowClosed?()
     for node in shownNodes { onTabHidden?(node) }
     removePaneMouseMonitor()
+    extensionsPanel?.stopCycleRouting()               // #599: a Cmd-E hold and its monitor die with the window
     javaScriptDialogs.closeAll()
     permissionPrompts.closeAll()
     infobarStrips.closeAll()
@@ -1116,6 +1117,9 @@ extension ShellWindowController: NSMenuItemValidation {
     if let enabled = validateSidebarMenuItem(menuItem) { return enabled }
     if let enabled = validatePinnedMenuItem(menuItem) { return enabled }
     if menuItem.action == #selector(reopenClosedTab(_:)) { return canReopenClosedTab }
+    if menuItem.action == #selector(cyclePinnedExtensions(_:)) {                       // KB-047 (#599)
+      return extensionsPanel?.canCyclePinnedExtensions ?? false
+    }
     if menuItem.action == #selector(clearTodayTabs(_:)) { return canClearToday }       // KB-019 (#110)
     if menuItem.action == #selector(duplicateSelectedTabs(_:)) { return duplicateTargets != nil }   // KB-042
     if menuItem.action == #selector(toggleToolbar(_:)) {
