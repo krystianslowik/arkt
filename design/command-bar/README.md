@@ -36,7 +36,7 @@ a 0.5 pt outer edge and a soft shadow, 14 pt continuous corners. Light and dark 
 Typeface: the system font (SF Pro; `-apple-system` in the prototype). Brand rules (`design/brand/README.md`):
 
 - Mustard is a fill only. Here it is used once: the 2 pt caret. It is never text, never a stroke, never the selection.
-- The selection is a neutral fill (white 11 % in dark, graphite 7.5 % in light). No tick, no ring.
+- The selection is a neutral fill, `commandBarSelectedRow` (see the token table below). No tick, no ring.
 - No user-facing "Arc". Say "browser data" if the data source ever has to be named.
 - No contrast ratios or warnings in the UI.
 
