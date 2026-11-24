@@ -78,7 +78,9 @@ enum MainMenu {
   // MARK: - Menus
 
   private static func appItems(commands: AppCommands, services: NSMenu) -> [NSMenuItem] {
-    let quit = item("Quit Arkt", #selector(NSApplication.terminate(_:)), "q", target: NSApp)   // KB-069
+    // KB-069. Through the commands, not `terminate:` to NSApp: in the Engine build Chromium answers `terminate:` and
+    // cannot be cancelled after it, so "Warn before quitting" asks first (#560).
+    let quit = item("Quit Arkt", #selector(AppCommands.quit(_:)), "q", target: commands)
     quit.tag = Tag.exit
     return [
       item("About Arkt", #selector(NSApplication.orderFrontStandardAboutPanel(_:)), "", [], target: NSApp),

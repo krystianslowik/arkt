@@ -28,6 +28,20 @@ final class AppComposition {
   /// week-3 results W3-8 run B); the facade has no `chrome::AttemptExit()` call of its own.
   let quit: @MainActor () -> Void
 
+  /// "Warn before quitting" for the Engine build's Quit item (#560); the development build's lives in `AppDelegate`.
+  private let quitWarning = QuitWarningGate()
+
+  /// The Engine build's Quit item: with the setting on, the alert runs on the next turn (not inside the menu's key
+  /// equivalent) and only Quit calls `quit`; with it off, `quit` runs at once, as before.
+  func requestQuit() {
+    let warns = session?.settings.warnsBeforeQuitting ?? false
+    quitWarning.requestQuit(warns: warns, ask: { reply in
+      RunLoop.main.perform(inModes: [.common]) {
+        MainActor.assumeIsolated { reply(DialogAlert(content: .quitWarning).runModal() == .primary) }
+      }
+    }, terminate: quit)
+  }
+
   init(quit: @escaping @MainActor () -> Void = { NSApp.terminate(nil) }) {
     self.quit = quit
     commands.composition = self

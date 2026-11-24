@@ -50,6 +50,17 @@ final class AppCommands: NSObject {
 
   /// Help > Welcome to Arkt (onboarding spec, section 12): the first run again over the frontmost window.
   @objc func showWelcome(_ sender: Any?) { session?.showWelcome() }
+
+  /// Arkt > Quit Arkt (Cmd-Q, KB-069). The development build asks in `AppDelegate.applicationShouldTerminate`. In the
+  /// Engine build Chromium's `AppController` answers `terminate:`, so the composition asks before it calls it (#560).
+  @objc func quit(_ sender: Any?) {
+    #if ARKT_CHROMIUM_ENGINE
+    guard let composition else { return NSApp.terminate(sender) }
+    composition.requestQuit()
+    #else
+    NSApp.terminate(sender)
+    #endif
+  }
 }
 
 /// The Window menu's Little Arkt section (#356): rebuilt each time the menu opens, from the open Little Arkt windows.
@@ -61,6 +72,7 @@ extension AppCommands: NSMenuDelegate {
 
 extension AppCommands: NSMenuItemValidation {
   func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+    if menuItem.action == #selector(quit(_:)) { return true }   // before the data folder loads, and after it failed
     guard let session else { return false }
     switch menuItem.action {
     case #selector(importFromArc(_:)):

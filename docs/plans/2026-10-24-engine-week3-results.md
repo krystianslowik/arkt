@@ -8627,3 +8627,94 @@ Every engine run stopped by exact PID (`ps -p` prints nothing), with the `chrome
 (parent gone) stopped by PID. The two fault reports this task's own runs 2 and 5 created (16:06, 16:14) deleted.
 Throwaway profiles and scratch homes under `profiles/967-20261124/` deleted. Nothing touched the Keychain (mock
 keychain only), `/Applications/Arkt.app` or real browser data.
+
+## #560: Warn before quitting on the Engine build (shell only, no engine change)
+
+Date 2026-11-24. Branch `engine/560-quit-warning`, stacked on `engine/967-apps-folder` (#972), which also changes
+`PreProfileInit`; `out/Arkt` was built from this branch, so it carries the #967 seam. `$CR` branch `arkt` unchanged
+(0001-0016).
+
+### Gate
+
+- Baseline: since W3-9 the hook defaults `browser.confirm_to_quit` to false, so Cmd-Q on the Engine build quit at once
+  and the setting did nothing. Chromium's hold-to-quit panel showed only with a stored or policy value.
+- Every Cmd-Q reaches the shell's Quit item: Arkt windows send every Command key down to `NSApp.mainMenu`
+  (`ArktBrowserWindow::HandleKeyboardEvent`, `ArktWindow sendEvent:`, `ShellWindow`'s reserved keys), and with no window
+  the menu takes it directly. `-[BrowserCrApplication terminate:]` goes straight into `AppController`'s
+  `tryToTerminateApplication`, which nothing in the overlay can veto. So the shell asks before it calls `terminate:`;
+  no facade change and no patch.
+- Facade header unchanged. `.patches` unchanged (16 lines, 16 `arkt` commits: in sync). No patch number claimed.
+
+### What landed
+
+- The Quit item (Cmd-Q, still tagged `IDC_EXIT`) goes to `AppCommands.quit(_:)` instead of `terminate:` to NSApp.
+  Engine build: `AppComposition.requestQuit()`, which runs `QuitWarningGate.requestQuit(warns:ask:terminate:)` with
+  the setting; off, `NSApp.terminate` runs inside the same call as before; on, `DialogAlert(.quitWarning)` runs on the
+  next turn and only Quit terminates. Development build: `NSApp.terminate`, and `AppDelegate` asks as before.
+  `validateMenuItem` keeps Quit enabled before the data folder loads and after a failed launch.
+- Chromium's panel: `MenuCommandForKeyEvent` maps a key to `IDC_EXIT` only for an item whose action is `terminate:`
+  (`global_keyboard_shortcuts_mac.mm`), so with the new action `confirmQuitIfNeeded` no longer sees Cmd-Q as
+  `IDC_EXIT` and never shows the panel, whatever the pref says. No overlay change: the W3-9 default stays as it was.
+  A first version also cleared the stored pref in `PreProfileInit`; it was dropped once the runs below showed it was
+  not needed.
+
+### Smoke (Engine app built from this branch on `out/Arkt`, bundle id overridden to `dev.arkt.ArktTest560`, a copy under `~/Applications/ArktTest`, `ARKT_DATA_DIR`, `ARKT_ARC_DIR` and `ARKT_DEFAULTS_SUITE` under `~/Library/Application Support/ArktTest/560-<run>`, fresh profile with `Local State` seeded `browser.confirm_to_quit: true`, `--use-mock-keychain`; keys posted with `CGEvent.postToPid` to the app's own PID only, under the GUI test lock)
+
+| Runs | Setting | Sequence | Result |
+|---|---|---|---|
+| A2-A8 | on | Cmd-Q; Cmd-Q; Esc; Cmd-Q; Return | 7 of 7: one alert (a level-8 420x210 panel) after the first Cmd-Q, still one after the second; after Esc no alert, process running, no `quit started`; Cmd-Q asks again; Return quits: `quit started`, `engineWillBeginTerminating`, `app terminating`, `termination flush succeeded true`, process exited |
+| A9-A11 | on, a page open (`data:` URL) | as above | 3 of 3 as above; no hold-to-quit panel |
+| C1-C4 | on | two Cmd-Q 0, 0.1 and 0.3 s apart, then Esc | 4 of 4: one alert, running after Esc |
+| D1-D6 | off (D4-D6 with a page open) | one Cmd-Q | 6 of 6 exited within 0.5 s, `termination flush succeeded true`; no panel although the stored pref is true |
+| DEV-A1, A2, DEV-D1 | development build (`dev.arkt.ArktTest560dev`) | as A and D | unchanged: asks once, Esc keeps it running, Return quits; off quits at once |
+
+`FATAL`, `Check failed`, `DCHECK`: 0 in every run. One earlier run, A1 (the first launch of the first copy), quit
+about 2 s after its second Cmd-Q, before Esc, with the setting on. Its alert was not observed (that run's window
+listing left out level-8 windows). The same sequence on a fresh copy (A8), with a page (A9-A11) and with fast double
+presses (C1-C4) did not repeat it. Not explained; left open below.
+
+Self-test smoke (`out/Arkt`, `--arkt-facade-selftest`, Local State seeded true, the first version that still cleared
+the pref): `quit` gave `quit started`, `app terminating`, `keep-alive released (embedder flushed)` and the process
+exited by itself; the key was gone from Local State. The shipped branch does not clear the pref.
+
+### Deliberate break
+
+1. `QuitWarningGate.requestQuit` changed to terminate on any answer:
+   `✘ Test requestWithTheWarningOnAsksOnceAndCancelKeepsTheAppRunning() recorded an issue at
+   QuitWarningGateTests.swift:59:5: Expectation failed: probe.terminated == 0` (and lines 65 and 67). Restored: 4 of 4
+   pass.
+2. The Quit item put back to `terminate:` to NSApp, the Engine app rebuilt: with the setting on, one Cmd-Q quit with no
+   alert (`asks=0 after-esc=exited quitStarted=1`, run BA1). With the setting off, the stored pref true and a page
+   open, one Cmd-Q showed Chromium's hold-to-quit panel (a level-3 680x212 window), and the app was still running
+   10 s later (run BD2). Restored and rebuilt: runs A9-A11 and D4-D6 above.
+
+### Tests
+
+- `nice -n 20 swift test -j 2 --skip ShellKitGUITests`: 1636, 44, 60, 29, 312, 49, 362, 243, 42 (ShellUITests
+  1634 + 2: `requestWithTheWarningOffTerminatesAtOnceWithoutAsking`,
+  `requestWithTheWarningOnAsksOnceAndCancelKeepsTheAppRunning`). Lints: 13 + 60 pass.
+- `MainMenuKeyEquivalentTests` (GUI, 17 tests): `testQuitIsTerminateToNSAppTaggedExitInTheFirstMenu` became
+  `testQuitGoesToTheCommandsTaggedExitInTheFirstMenu`. 20 runs of the class under the GUI test lock, niced: 20 of 20
+  pass (`uptime` load 4.50 before, 4.16 after).
+- `xcodebuild` Engine and Debug configurations: `BUILD SUCCEEDED`.
+- No InMemoryEngine test: the facade and `EngineAPI` are unchanged, and the quit decision does not go through the
+  engine.
+
+### Patch budget
+
+Unchanged: 16 patch files, 8 seam and hook patch files, 22 upstream files outside 0001-0004. `.patches` 16 lines, 16
+`arkt` commits: in sync. Facade header unchanged.
+
+### Left open
+
+- Dock > Quit, a quit Apple event, logout and restart go to `terminate:` without the menu item and do not ask on the
+  Engine build. The development build asks for all of them, because it owns `applicationShouldTerminate`. Asking
+  there on the Engine build needs a hook in `AppController` (a patch).
+- Run A1 above.
+
+### Cleanup
+
+Every app run ended by its own quit or stopped by exact PID (`ps -p` prints nothing). The test app copies, their data
+folders and defaults suites deleted, and the copies and build products unregistered from LaunchServices. The build
+outputs stay on the Chromium disk (`embed-560`, `arkt-shell-dd/`) for the next engine tasks. Nothing touched
+the Keychain (mock keychain only), `/Applications/Arkt.app` or real browser data.
