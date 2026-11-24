@@ -40,6 +40,22 @@ final class TabsMenuTests: XCTestCase {
     XCTAssertTrue(aliases.allSatisfy(\.allowsKeyEquivalentWhenHidden))
   }
 
+  /// KB-037 (#945): Reveal Tab in Sidebar follows Reveal Current Tab, unbound, and reaches the window controller.
+  func testRevealTabInSidebarFollowsRevealCurrentTabWithoutAKey() throws {
+    let menu = try tabsMenu()
+    let action = #selector(ShellWindowController.revealTabInSidebar(_:))
+    let reveal = try XCTUnwrap(menu.items.firstIndex {
+      $0.action == #selector(ShellWindowController.revealCurrentTab(_:))
+    })
+    let item = menu.items[reveal + 1]
+    XCTAssertEqual(item.title, "Reveal Tab in Sidebar")
+    XCTAssertEqual(item.action, action)
+    XCTAssertEqual(item.keyEquivalent, "", "no default shortcut")
+    XCTAssertNil(item.target, "reaches the window controller through the responder chain")
+    XCTAssertFalse(NSWindow.instancesRespond(to: action))
+    XCTAssertTrue(ShellWindowController.instancesRespond(to: action))
+  }
+
   func testCommandOneToNineCarryTheirNumberAsTag() throws {
     let menu = try tabsMenu()
     let goTo = menu.items.filter { $0.action == #selector(ShellWindowController.goToSidebarItem(_:)) }
