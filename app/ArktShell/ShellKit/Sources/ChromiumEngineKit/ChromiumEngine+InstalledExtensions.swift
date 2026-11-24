@@ -39,7 +39,7 @@ extension ChromiumEngine {
   }
 
   /// The facade's sentence when developer mode is off (`loadUnpackedExtensionAtPath:completion:`).
-  static let developerModeOffReason = "developer mode is off"
+  static let developerModeOffReason = "Developer mode is off."
 
   /// Asks the facade only while developer mode is on; a facade that finds it off meanwhile answers with its own
   /// sentence, which maps to `.developerModeOff` too.

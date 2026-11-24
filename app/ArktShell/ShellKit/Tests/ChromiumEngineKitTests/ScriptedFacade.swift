@@ -1511,7 +1511,7 @@ final class ScriptedFacade: NSObject, ArktEngine {
 
   func loadUnpackedExtension(atPath path: String, completion: @escaping (String?, String?) -> Void) {
     loadUnpackedPaths.append(path)
-    let answer = extensionDeveloperMode ? loadUnpackedAnswer : (nil, "developer mode is off")
+    let answer = extensionDeveloperMode ? loadUnpackedAnswer : (nil, "Developer mode is off.")
     Task { @MainActor in completion(answer.0, answer.1) }
   }
 

@@ -8,7 +8,9 @@
 #include <string>
 #include <vector>
 
+#include "arkt/api/arkt_embedder.h"
 #include "arkt/api/arkt_engine_facade.h"
+#include "arkt/browser/arkt_extension_management.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/functional/bind.h"
@@ -1655,6 +1657,16 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
                              enabled:command == "ext-enable"];
     LOG(WARNING) << "ARKT selftest " << command << " " << argument
                  << " result=" << result;
+  } else if (command == "ext-disable-reason") {
+    // #964: ext-disable-reason <extension id> <disable_reason value>, as
+    // Chromium disables a corrupted extension (1024) or one whose update asks
+    // for more permissions (2).
+    int reason = 0;
+    base::StringToInt(words.size() > 2 ? words[2] : "0", &reason);
+    arkt::DisableExtensionForSelfTest(arkt::EmbedderProfile(), argument,
+                                      reason);
+    LOG(WARNING) << "ARKT selftest ext-disable-reason " << argument << " "
+                 << reason;
   } else if (command == "ext-devmode") {
     // #964: ext-devmode on|off
     _engine.extensionDeveloperMode = argument == "on";

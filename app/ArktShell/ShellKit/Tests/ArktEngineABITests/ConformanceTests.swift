@@ -610,7 +610,7 @@ final class TestEngine: NSObject, ArktEngine {
   func loadUnpackedExtension(atPath path: String, completion: @escaping (String?, String?) -> Void) {
     loadedPaths.append(path)
     let on = extensionDeveloperMode
-    Task { @MainActor in completion(on ? "loaded-id" : nil, on ? nil : "developer mode is off") }
+    Task { @MainActor in completion(on ? "loaded-id" : nil, on ? nil : "Developer mode is off.") }
   }
   private(set) var optionsPages: [(String, Int32?)] = []
   func openExtensionOptionsPage(_ extensionID: String, in browser: (any ArktBrowserHandle)?) {

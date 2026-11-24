@@ -4861,9 +4861,10 @@ void DeliverImportResult(void (^completion)(id<ArktImportResult>),
     extension.version = base::SysUTF8ToNSString(info.version);
     extension.shortDescription = base::SysUTF8ToNSString(info.description);
     if (watcher) {
-      const gfx::Image icon = watcher->Icon(info.id);
+      // Encoded once by the watcher; only copied here.
+      scoped_refptr<base::RefCountedMemory> png = watcher->IconPNG(info.id);
       extension.iconPNG =
-          icon.IsEmpty() ? nil : arkt::ImageSkiaPNG(*icon.ToImageSkia());
+          png ? [NSData dataWithBytes:png->data() length:png->size()] : nil;
     }
     extension.isEnabled = info.enabled;
     extension.mayChangeEnabled = info.may_change_enabled;

@@ -259,9 +259,12 @@ typedef NS_ENUM(NSInteger, ArktEngineEventKind) {
   // installedExtensions or extensionDeveloperMode changed (#964): an
   // extension was installed, updated, uninstalled, enabled, disabled,
   // terminated or loaded unpacked, developer mode was turned on or off (here,
-  // or by policy), or a listed extension's icon finished loading. No values;
-  // profile-wide, `tab` and `browser` are nil. The changes of one task are
-  // merged into one event, sent on a later task.
+  // or by policy), a listed extension's icon finished loading, or a disable
+  // reason, a blocklisting or the management policy changed what the list
+  // shows (an extension listed or not, enabled, mayChangeEnabled,
+  // canUninstall). No values; profile-wide, `tab` and `browser` are nil. The
+  // changes of one task are merged into one event, sent on a later task, so
+  // one event may carry several changes; an icon arrives as its own event.
   ArktEngineEventKindInstalledExtensionsChanged = 33,
 };
 
@@ -981,7 +984,8 @@ NS_SWIFT_UI_ACTOR
 @property(nonatomic, readonly) BOOL isEnabled;
 // The user may turn it the other way: setExtensionEnabled would answer
 // Applied for !isEnabled. NO for one the policy keeps in its state, a shared
-// module, an unpacked one while developer mode is off, and one waiting for
+// module, an unpacked one while developer mode is off, one with a disable
+// reason the user may not lift (see NotAllowed), and one waiting for
 // permission approval.
 @property(nonatomic, readonly) BOOL mayChangeEnabled;
 @property(nonatomic, readonly) ArktExtensionSource source;
@@ -1001,10 +1005,15 @@ typedef NS_ENUM(NSInteger, ArktExtensionEnableResult) {
   ArktExtensionEnableResultUnknownExtension = 1,
   // The management policy keeps it in its current state (installed or
   // blocked by policy, a component, a shared module, or an unpacked one while
-  // developer mode is off); nothing changed.
+  // developer mode is off), or, enabling, it has a disable reason the user
+  // may not lift: anything but a user's or another extension's disable, a
+  // reload, the greylist, an external install, or an unpacked one while
+  // developer mode is on (a corrupted or unverified extension, unsupported
+  // requirements, a custodian's or a remote install's approval, ...); nothing
+  // changed.
   ArktExtensionEnableResultNotAllowed = 2,
   // Enabling only: an update asks for more permissions, so Chromium disabled
-  // it. Chrome enables it after its re-enable prompt, which grants them; the
+  // it (and no other reason refuses it). Chrome enables it after its re-enable prompt, which grants them; the
   // engine does not grant them without one. Nothing changed.
   ArktExtensionEnableResultNeedsPermissionApproval = 3,
 };
@@ -1499,9 +1508,10 @@ NS_SWIFT_UI_ACTOR
 // extensionDeveloperMode is YES. `completion` runs on the main thread, never
 // inside the call, and always arrives except when the engine shuts down
 // first: the loaded extension's id (a folder loaded before keeps its id and is
-// reloaded), or nil with a short sentence: "developer mode is off", "blocked
-// by policy", or Chromium's load error as chrome://extensions shows it (for
-// example "Manifest file is missing or unreadable"). A loaded extension
+// reloaded), or nil with a short sentence: "Developer mode is off.",
+// "Blocked by policy.", "Not a folder." (a path that is not absolute), or
+// Chromium's load error as chrome://extensions shows it (for example
+// "Manifest file is missing or unreadable"). A loaded extension
 // reaches the sinks as InstalledExtensionsChanged before `completion` runs;
 // ExtensionInstalled is not sent for it.
 - (void)loadUnpackedExtensionAtPath:(NSString*)path

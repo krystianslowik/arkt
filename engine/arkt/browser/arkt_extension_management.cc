@@ -4,7 +4,9 @@
 #include <tuple>
 #include <utility>
 
+#include "arkt/browser/arkt_extension_uninstall.h"
 #include "base/logging.h"
+#include "base/memory/ref_counted_memory.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/sequenced_task_runner.h"
@@ -23,6 +25,7 @@
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/image_loader.h"
 #include "extensions/browser/management_policy.h"
+#include "extensions/browser/pref_names.h"
 #include "extensions/browser/ui_util.h"
 #include "extensions/browser/unpacked_installer.h"
 #include "extensions/common/extension.h"
@@ -31,7 +34,10 @@
 #include "extensions/common/manifest_handlers/description_info.h"
 #include "extensions/common/manifest_handlers/options_page_info.h"
 #include "extensions/common/manifest_handlers/shared_module_info.h"
+#include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/geometry/size.h"
+#include "ui/gfx/image/image_skia.h"
+#include "ui/gfx/image/image_skia_rep.h"
 
 namespace arkt {
 
@@ -151,12 +157,37 @@ ExtensionEnableResult CanChangeExtensionEnabled(
   if (policy->MustRemainDisabled(&extension, nullptr)) {
     return ExtensionEnableResult::kNotAllowed;
   }
-  if (extensions::ExtensionPrefs::Get(profile)->HasDisableReason(
-          extension.id(),
-          extensions::disable_reason::DISABLE_PERMISSIONS_INCREASE)) {
-    return ExtensionEnableResult::kNeedsPermissionApproval;
+  // EnableExtension clears every disable reason, so the user's toggle may
+  // enable only an extension whose every reason is one the user may lift, as
+  // chrome://extensions does through management.setEnabled. A corrupted or
+  // unverified one, one with unsupported requirements, one waiting for a
+  // custodian or a remote-install approval, and any reason this list does
+  // not know stay disabled.
+  bool permissions_increase = false;
+  for (const extensions::disable_reason::DisableReason reason :
+       extensions::ExtensionPrefs::Get(profile)->GetDisableReasons(
+           extension.id())) {
+    switch (reason) {
+      case extensions::disable_reason::DISABLE_USER_ACTION:
+      case extensions::disable_reason::DISABLE_RELOAD:
+      case extensions::disable_reason::DISABLE_GREYLIST:
+      case extensions::disable_reason::DISABLE_EXTERNAL_EXTENSION:
+      // management.setEnabled from another extension: Chrome leaves it to
+      // the user to enable again.
+      case extensions::disable_reason::DISABLE_BY_ANOTHER_EXTENSION:
+      // Only while developer mode is on: MustRemainDisabled refused it above
+      // otherwise.
+      case extensions::disable_reason::DISABLE_UNSUPPORTED_DEVELOPER_EXTENSION:
+        break;
+      case extensions::disable_reason::DISABLE_PERMISSIONS_INCREASE:
+        permissions_increase = true;
+        break;
+      default:
+        return ExtensionEnableResult::kNotAllowed;
+    }
   }
-  return ExtensionEnableResult::kApplied;
+  return permissions_increase ? ExtensionEnableResult::kNeedsPermissionApproval
+                              : ExtensionEnableResult::kApplied;
 }
 
 ExtensionEnableResult CheckSetExtensionEnabled(Profile* profile,
@@ -236,16 +267,22 @@ void LoadUnpackedExtension(
       },
       std::move(done));
   if (!profile) {
-    std::move(answer).Run(std::string(), "no profile");
+    std::move(answer).Run(std::string(), "No profile.");
     return;
   }
   if (!ExtensionDeveloperMode(profile)) {
-    std::move(answer).Run(std::string(), "developer mode is off");
+    std::move(answer).Run(std::string(), kDeveloperModeOffReason);
     return;
   }
   if (extensions::ExtensionManagementFactory::GetForBrowserContext(profile)
           ->BlocklistedByDefault()) {
-    std::move(answer).Run(std::string(), "blocked by policy");
+    std::move(answer).Run(std::string(), "Blocked by policy.");
+    return;
+  }
+  // A folder is named by an absolute path; nothing is read here (the UI
+  // thread does no disk work), the installer reports a missing manifest.
+  if (path.empty() || !path.IsAbsolute()) {
+    std::move(answer).Run(std::string(), "Not a folder.");
     return;
   }
   scoped_refptr<extensions::UnpackedInstaller> installer =
@@ -267,6 +304,19 @@ void LoadUnpackedExtension(
       },
       std::move(answer)));
   installer->Load(path);
+}
+
+void DisableExtensionForSelfTest(Profile* profile,
+                                 const std::string& id,
+                                 int reason) {
+  if (!profile || !ListedExtension(profile, id) ||
+      reason <= extensions::disable_reason::DISABLE_NONE ||
+      reason >= extensions::disable_reason::DISABLE_REASON_LAST) {
+    LOG(WARNING) << "ARKT: self-test disable reason refused";
+    return;
+  }
+  extensions::ExtensionRegistrar::Get(profile)->DisableExtension(
+      id, {static_cast<extensions::disable_reason::DisableReason>(reason)});
 }
 
 bool OpenExtensionOptionsPage(Profile* profile,
@@ -307,81 +357,113 @@ InstalledExtensionsWatcher::InstalledExtensionsWatcher(
           extensions::ExtensionRegistry::Get(profile)) {
     observation_.Observe(registry);
   }
+  if (extensions::ExtensionPrefs* extension_prefs =
+          extensions::ExtensionPrefs::Get(profile)) {
+    prefs_observation_.Observe(extension_prefs);
+  }
   // Developer mode changes even when no extension does (and a change by
   // policy reaches the pane the same way).
   prefs_.Init(profile->GetPrefs());
   prefs_.Add(prefs::kExtensionsUIDeveloperMode,
              base::BindRepeating(&InstalledExtensionsWatcher::NotifyChanged,
-                                 base::Unretained(this), "developer mode"));
+                                 base::Unretained(this), "developer mode",
+                                 /*force=*/true));
+  // The extension management policy (the prefs ExtensionManagement reads):
+  // a change can flip mayChangeEnabled or canUninstall with no registry
+  // event. Checked on a later task, after ExtensionManagement has refreshed.
+  for (const char* pref :
+       {extensions::pref_names::kInstallAllowList,
+        extensions::pref_names::kInstallDenyList,
+        extensions::pref_names::kInstallForceList,
+        extensions::pref_names::kAllowedInstallSites,
+        extensions::pref_names::kAllowedTypes,
+        extensions::pref_names::kExtensionManagement,
+        extensions::pref_names::kExtensionUnpublishedAvailability}) {
+    prefs_.Add(pref,
+               base::BindRepeating(&InstalledExtensionsWatcher::NotifyChanged,
+                                   base::Unretained(this), "policy",
+                                   /*force=*/false));
+  }
+  last_fingerprint_ = Fingerprint();
 }
 
 InstalledExtensionsWatcher::~InstalledExtensionsWatcher() = default;
 
-gfx::Image InstalledExtensionsWatcher::Icon(const std::string& id) {
+scoped_refptr<base::RefCountedMemory> InstalledExtensionsWatcher::IconPNG(
+    const std::string& id) {
   if (!profile_) {
-    return gfx::Image();
+    return nullptr;
   }
-  extensions::ExtensionRegistry* registry =
-      extensions::ExtensionRegistry::Get(profile_);
   const extensions::Extension* extension =
-      registry->GetExtensionById(id, kListedSets);
+      extensions::ExtensionRegistry::Get(profile_)->GetExtensionById(
+          id, kListedSets);
   if (!extension) {
     icons_.erase(id);
-    return gfx::Image();
+    return nullptr;
   }
-  const std::string version = extension->VersionString();
   auto it = icons_.find(id);
-  if (it != icons_.end() && it->second.version == version) {
-    return it->second.image;
+  if (it != icons_.end()) {
+    return it->second.png;
   }
-  icons_[id] = CachedIcon{version, false, gfx::Image()};
+  // Every install, update or reload drops the entry, so a new request (with
+  // its own generation) loads the icon the extension has now.
+  const uint64_t generation = ++last_generation_;
+  icons_[id] = CachedIcon{generation, false, nullptr};
   extensions::ImageLoader::Get(profile_)->LoadImageAtEveryScaleFactorAsync(
       extension, gfx::Size(kIconDip, kIconDip),
       base::BindOnce(&InstalledExtensionsWatcher::IconLoaded,
-                     weak_factory_.GetWeakPtr(), id, version));
-  return gfx::Image();
+                     weak_factory_.GetWeakPtr(), id, generation));
+  return nullptr;
 }
 
 void InstalledExtensionsWatcher::IconLoaded(const std::string& id,
-                                            const std::string& version,
+                                            uint64_t generation,
                                             const gfx::Image& image) {
   auto it = icons_.find(id);
-  // An update or an uninstall since the load started: a newer request owns
-  // the entry, or none does.
-  if (it == icons_.end() || it->second.version != version ||
+  // An install, reload or uninstall since the load started: a newer request
+  // owns the entry, or none does.
+  if (it == icons_.end() || it->second.generation != generation ||
       it->second.loaded) {
     return;
   }
   it->second.loaded = true;
-  it->second.image = image;
+  // Encoded once here (the 2x representation), not on every listing.
+  const gfx::ImageSkia* skia = image.IsEmpty() ? nullptr : image.ToImageSkia();
+  const gfx::ImageSkiaRep rep =
+      skia ? skia->GetRepresentation(2.0f) : gfx::ImageSkiaRep();
+  std::optional<std::vector<uint8_t>> png =
+      rep.is_null() ? std::nullopt
+                    : gfx::PNGCodec::EncodeBGRASkBitmap(
+                          rep.GetBitmap(), /*discard_transparency=*/false);
   // An extension without an icon has nothing new to show.
-  if (!image.IsEmpty()) {
-    NotifyChanged("icon");
+  if (png && !png->empty()) {
+    it->second.png =
+        base::MakeRefCounted<base::RefCountedBytes>(std::move(*png));
+    NotifyChanged("icon", /*force=*/true);
   }
 }
 
 void InstalledExtensionsWatcher::OnExtensionLoaded(
     content::BrowserContext* browser_context,
     const extensions::Extension* extension) {
-  NotifyChanged("loaded");
+  NotifyChanged("loaded", /*force=*/true);
 }
 
 void InstalledExtensionsWatcher::OnExtensionUnloaded(
     content::BrowserContext* browser_context,
     const extensions::Extension* extension,
     extensions::UnloadedExtensionReason reason) {
-  NotifyChanged("unloaded");
+  NotifyChanged("unloaded", /*force=*/true);
 }
 
 void InstalledExtensionsWatcher::OnExtensionInstalled(
     content::BrowserContext* browser_context,
     const extensions::Extension* extension,
     bool is_update) {
-  // A reload of an unpacked folder keeps its version but may change its icon.
   if (extension) {
     icons_.erase(extension->id());
   }
-  NotifyChanged(is_update ? "updated" : "installed");
+  NotifyChanged(is_update ? "updated" : "installed", /*force=*/true);
 }
 
 void InstalledExtensionsWatcher::OnExtensionUninstalled(
@@ -391,19 +473,57 @@ void InstalledExtensionsWatcher::OnExtensionUninstalled(
   if (extension) {
     icons_.erase(extension->id());
   }
-  NotifyChanged("uninstalled");
+  NotifyChanged("uninstalled", /*force=*/true);
 }
 
 void InstalledExtensionsWatcher::OnShutdown(
     extensions::ExtensionRegistry* registry) {
   observation_.Reset();
+  prefs_observation_.Reset();
   prefs_.RemoveAll();
   icons_.clear();
   profile_ = nullptr;
 }
 
-void InstalledExtensionsWatcher::NotifyChanged(const char* why) {
-  VLOG(1) << "ARKT: installed extensions changed: " << why;
+void InstalledExtensionsWatcher::OnExtensionDisableReasonsChanged(
+    const extensions::ExtensionId& extension_id,
+    extensions::DisableReasonSet disabled_reasons) {
+  // A disabled extension's reasons decide mayChangeEnabled.
+  NotifyChanged("disable reasons", /*force=*/false);
+}
+
+void InstalledExtensionsWatcher::OnExtensionPrefsUpdated(
+    const extensions::ExtensionId& extension_id) {
+  // Blocklisting a disabled extension writes its prefs and moves it out of
+  // the disabled set with no registry event.
+  NotifyChanged("extension prefs", /*force=*/false);
+}
+
+void InstalledExtensionsWatcher::OnExtensionPrefsWillBeDestroyed(
+    extensions::ExtensionPrefs* prefs) {
+  prefs_observation_.Reset();
+}
+
+std::string InstalledExtensionsWatcher::Fingerprint() const {
+  std::string fingerprint;
+  if (!profile_) {
+    return fingerprint;
+  }
+  for (const InstalledExtensionInfo& info : ListInstalledExtensions(profile_)) {
+    fingerprint +=
+        info.id + " " + info.version + " " + base::UTF16ToUTF8(info.name) +
+        " " + (info.enabled ? "1" : "0") +
+        (info.may_change_enabled ? "1" : "0") +
+        (GetUninstallAbility(profile_, info.id).can_uninstall ? "1" : "0") +
+        "\n";
+  }
+  return fingerprint;
+}
+
+void InstalledExtensionsWatcher::NotifyChanged(const char* why, bool force) {
+  VLOG(1) << "ARKT: installed extensions changed: " << why
+          << (force ? "" : " (check)");
+  force_pending_ = force_pending_ || force;
   if (notify_posted_) {
     return;
   }
@@ -415,7 +535,19 @@ void InstalledExtensionsWatcher::NotifyChanged(const char* why) {
                          return;
                        }
                        watcher->notify_posted_ = false;
-                       if (watcher->profile_) {
+                       const bool force = watcher->force_pending_;
+                       watcher->force_pending_ = false;
+                       if (!watcher->profile_) {
+                         return;
+                       }
+                       // A check (prefs, policy) reports only when what the
+                       // pane shows changed; a registry change, developer mode
+                       // or an icon always.
+                       std::string fingerprint = watcher->Fingerprint();
+                       const bool changed =
+                           fingerprint != watcher->last_fingerprint_;
+                       watcher->last_fingerprint_ = std::move(fingerprint);
+                       if (force || changed) {
                          watcher->changed_.Run();
                        }
                      },

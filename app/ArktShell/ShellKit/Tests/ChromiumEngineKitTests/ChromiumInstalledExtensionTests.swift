@@ -120,7 +120,7 @@ struct ChromiumInstalledExtensionTests {
   @Test func developerModeTurnedOffMeanwhileIsDeveloperModeOff() async {
     let engine = makeEngine()
     engine.setExtensionDeveloperModeEnabled(true)
-    facade.loadUnpackedAnswer = (nil, "developer mode is off")
+    facade.loadUnpackedAnswer = (nil, "Developer mode is off.")
     let result = await engine.loadUnpackedExtension(at: URL(fileURLWithPath: "/tmp/arkt-964/site-probe"))
     #expect(result == .developerModeOff)
   }

@@ -1,6 +1,8 @@
 #ifndef ARKT_BROWSER_ARKT_EXTENSION_MANAGEMENT_H_
 #define ARKT_BROWSER_ARKT_EXTENSION_MANAGEMENT_H_
 
+#include <stdint.h>
+
 #include <map>
 #include <string>
 #include <vector>
@@ -8,9 +10,14 @@
 #include "base/files/file_path.h"
 #include "base/functional/callback.h"
 #include "base/memory/raw_ptr.h"
+#include "base/memory/ref_counted_memory.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observation.h"
 #include "components/prefs/pref_change_registrar.h"
+#include "extensions/browser/disable_reason.h"
+#include "extensions/browser/extension_prefs.h"
+#include "extensions/browser/extension_prefs_observer.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_registry_observer.h"
 #include "ui/gfx/image/image.h"
@@ -68,6 +75,10 @@ struct InstalledExtensionInfo {
 // not in the registry sets read, so they are not listed.
 std::vector<InstalledExtensionInfo> ListInstalledExtensions(Profile* profile);
 
+// LoadUnpackedExtension's sentence while developer mode is off; the shell
+// matches it.
+inline constexpr char kDeveloperModeOffReason[] = "Developer mode is off.";
+
 // The answer to SetExtensionEnabledForUser. The values are the facade's
 // ArktExtensionEnableResult.
 enum class ExtensionEnableResult {
@@ -77,7 +88,9 @@ enum class ExtensionEnableResult {
   kUnknownExtension = 1,
   // The management policy keeps it in its current state (installed or
   // blocked by policy, a component, a shared module, or an unpacked one
-  // while developer mode is off).
+  // while developer mode is off), or, enabling, it has a disable reason the
+  // user may not lift (corrupted, not verified, unsupported requirements,
+  // waiting for a custodian or a remote-install approval, ...).
   kNotAllowed = 2,
   // Enabling only: it was disabled because an update asks for more
   // permissions. Chrome enables it only after its re-enable prompt, which
@@ -88,9 +101,13 @@ enum class ExtensionEnableResult {
 // Whether the user may move `extension` to `enabled` (#964): the checks
 // management.setEnabled and ExtensionRegistrar make. Disabling: the policy
 // lets the user modify it, it need not remain enabled, and it is not a
-// shared module. Enabling: the policy lets the user modify it and it need
-// not remain disabled. The listing's may_change_enabled is this answer, so
-// the list and the setter cannot disagree.
+// shared module. Enabling: the policy lets the user modify it, it need not
+// remain disabled, and every disable reason is one the user may lift (user
+// action, reload, greylist, external install, another extension, an
+// unpacked one while developer mode is on); a permissions increase among
+// them answers kNeedsPermissionApproval, any other reason kNotAllowed. The
+// listing's may_change_enabled is this answer, so the list and the setter
+// cannot disagree.
 ExtensionEnableResult CanChangeExtensionEnabled(
     Profile* profile,
     const extensions::Extension& extension,
@@ -125,15 +142,24 @@ bool SetExtensionDeveloperMode(Profile* profile, bool on);
 // Loads the unpacked extension in the folder `path` into `profile` as
 // chrome://extensions' Load unpacked does (developerPrivate.loadUnpacked,
 // UnpackedInstaller), without Chromium's error UI. Refused while developer
-// mode is off and when policy blocks installs by default. `done` runs on a
-// later task, never inside the call: with the loaded id and an empty error,
-// or an empty id and a short sentence ("developer mode is off", "blocked by
-// policy", or Chromium's load error, as chrome://extensions shows it).
+// mode is off, when policy blocks installs by default, and for a path that
+// is not absolute. `done` runs on a later task, never inside the call: with
+// the loaded id and an empty error, or an empty id and a short sentence
+// (kDeveloperModeOffReason, "Blocked by policy.", "Not a folder.", or
+// Chromium's load error, as chrome://extensions shows it).
 void LoadUnpackedExtension(
     Profile* profile,
     const base::FilePath& path,
     base::OnceCallback<void(const std::string& id, const std::string& error)>
         done);
+
+// Self-test only (--arkt-facade-selftest, #964): disables the listed
+// extension `id` with the single disable reason `reason` (a
+// disable_reason::DisableReason value), as Chromium does for a corrupted
+// extension or a permissions increase, so the enable gate can be checked.
+void DisableExtensionForSelfTest(Profile* profile,
+                                 const std::string& id,
+                                 int reason);
 
 // Opens the options page of the enabled, listed extension `id` as Chrome does
 // (ExtensionTabUtil::OpenOptionsPage), in `browser` when it is a window of
@@ -147,11 +173,14 @@ bool OpenExtensionOptionsPage(Profile* profile,
 // Reports changes to ListInstalledExtensions and ExtensionDeveloperMode,
 // merged into one callback per task: an extension installed, updated,
 // uninstalled, enabled, disabled, terminated or loaded unpacked, the
-// developer mode pref changed, or a listed icon finished loading. Also keeps
-// the listed extensions' icons (32 pt, at every scale factor), loaded off the
-// UI thread on first request. UI thread only.
-class InstalledExtensionsWatcher
-    : public extensions::ExtensionRegistryObserver {
+// developer mode pref changed, or a listed icon finished loading, always; a
+// disable reason, an extension's prefs (a blocklisting) or the management
+// policy prefs changed, only when the listed ids, versions, names, enabled,
+// may-change or may-uninstall states differ from the last report. Also keeps
+// the listed extensions' icons (32 pt, encoded once as PNG at 2x), loaded off
+// the UI thread on first request. UI thread only.
+class InstalledExtensionsWatcher : public extensions::ExtensionRegistryObserver,
+                                   public extensions::ExtensionPrefsObserver {
  public:
   InstalledExtensionsWatcher(Profile* profile, base::RepeatingClosure changed);
   InstalledExtensionsWatcher(const InstalledExtensionsWatcher&) = delete;
@@ -159,10 +188,10 @@ class InstalledExtensionsWatcher
       delete;
   ~InstalledExtensionsWatcher() override;
 
-  // The icon of the installed extension `id` when loaded; empty until then
-  // (the load starts here, and the changed callback follows it), and empty for
-  // an extension without an icon.
-  gfx::Image Icon(const std::string& id);
+  // The icon of the installed extension `id` as PNG at 2x when loaded; null
+  // until then (the load starts here, and the changed callback follows it),
+  // and null for an extension without an icon.
+  scoped_refptr<base::RefCountedMemory> IconPNG(const std::string& id);
 
   // extensions::ExtensionRegistryObserver:
   void OnExtensionLoaded(content::BrowserContext* browser_context,
@@ -178,28 +207,46 @@ class InstalledExtensionsWatcher
                               extensions::UninstallReason reason) override;
   void OnShutdown(extensions::ExtensionRegistry* registry) override;
 
+  // extensions::ExtensionPrefsObserver:
+  void OnExtensionDisableReasonsChanged(
+      const extensions::ExtensionId& extension_id,
+      extensions::DisableReasonSet disabled_reasons) override;
+  void OnExtensionPrefsUpdated(
+      const extensions::ExtensionId& extension_id) override;
+  void OnExtensionPrefsWillBeDestroyed(
+      extensions::ExtensionPrefs* prefs) override;
+
  private:
   struct CachedIcon {
-    // The version the icon was loaded for: an update reloads it (and every
-    // install or reload drops the entry, since a reload keeps the version).
-    std::string version;
+    // The request that owns the entry: every install, update or reload drops
+    // the entry, so a load that finishes after it is ignored.
+    uint64_t generation = 0;
     bool loaded = false;
-    gfx::Image image;
+    scoped_refptr<base::RefCountedMemory> png;
   };
 
-  void NotifyChanged(const char* why);
+  // `force`: report even when the listed state looks the same.
+  void NotifyChanged(const char* why, bool force);
   void IconLoaded(const std::string& id,
-                  const std::string& version,
+                  uint64_t generation,
                   const gfx::Image& image);
+  // What the pane shows of each listed extension, apart from icons.
+  std::string Fingerprint() const;
 
   raw_ptr<Profile> profile_;
   base::RepeatingClosure changed_;
   bool notify_posted_ = false;
+  bool force_pending_ = false;
+  std::string last_fingerprint_;
+  uint64_t last_generation_ = 0;
   std::map<std::string, CachedIcon> icons_;
   PrefChangeRegistrar prefs_;
   base::ScopedObservation<extensions::ExtensionRegistry,
                           extensions::ExtensionRegistryObserver>
       observation_{this};
+  base::ScopedObservation<extensions::ExtensionPrefs,
+                          extensions::ExtensionPrefsObserver>
+      prefs_observation_{this};
   base::WeakPtrFactory<InstalledExtensionsWatcher> weak_factory_{this};
 };
 
