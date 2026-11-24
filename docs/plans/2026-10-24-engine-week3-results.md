@@ -8563,3 +8563,67 @@ Lints: 13 + 60 pass.
   site probe stays `sites=3/0`; `FATAL`, `Check failed`, `DCHECK`: 0.
 - `nice -n 20 swift test -j 2 --skip ShellKitGUITests` on the merged tree: every bundle passes, 1634, 44, 60, 29,
   312, 49, 362, 243, 42. Lints: 13 + 60 pass.
+
+## #967: no app shortcut folder in ~/Applications when an extension is removed (seam, no patch)
+
+Date 2026-11-24. Branch `engine/967-apps-folder` from `main` at `f45d283b`. `$CR` branch `arkt` unchanged (0001-0016).
+
+### Gate
+
+- Seam, no patch: `AppShortcutManager::SuppressShortcutsForTesting()` from `ArktBrowserMainExtraParts::PreProfileInit`.
+- Facade header unchanged. `.patches` unchanged (16 lines, 16 `arkt` commits: in sync). No patch number claimed.
+- Build: `nice -n 15 autoninja -j 4 -C out/Arkt chrome`; Chromium disk 1.9 TB free, internal disk 34 GB free, swap
+  9.9 of 10 GB used (hence `-j 4`).
+
+### What writes the folder
+
+A launch alone does not. A fresh-profile launch with the self-test embedder under a scratch home
+(`CFFIXED_USER_HOME`) wrote nothing in 25 s, and an lldb breakpoint on `web_app::GetChromeAppsFolder` did not fire.
+Removing an extension does. `AppShortcutManager::OnExtensionUninstalled` (`chrome/browser/apps/platform_apps/`) has no
+`is_app` check, so every removal calls `web_app::DeleteAllShortcuts`, whose `DeletePlatformShortcuts` searches the
+apps folder through `GetChromeAppsFolder`. The first call in a process creates `~/Applications` (with `.localized`)
+if missing, then `Chromium Apps.localized/.localized/<locale>.strings`, and posts `NSWorkspace setIcon:forFile:` for
+the folder icon. IconServices logs an `os_log` fault inside that call, which macOS saves as
+`ExcUserFault_Arkt-*.ips` (`EXC_GUARD`, `GUARD_TYPE_USER`; not a crash). The #964 runs removed extensions, which is
+where the 11:40 and 11:48 writes on this machine came from. On a clean user the preview's first launch is clean;
+removing an extension in Settings > Extensions would create the folder.
+
+The flag is read on install (apps only), uninstall and profile removal. Arkt installs no Chrome apps or web apps.
+
+### Smoke (`out/Arkt/Arkt.app`, `--arkt-facade-selftest --arkt-engine-test-api --remote-debugging-port=9333`, fresh profiles under `profiles/967-20261124/`, `--use-mock-keychain --mute-audio`, `engine/test-extensions/action-probe` with `--load-extension`, `uninstall <id>` through the page title)
+
+| Run | Build | Home | Result |
+|---|---|---|---|
+| 1 | before | scratch | launch only, 25 s: no `Applications` in the scratch home |
+| 2 | before | scratch | `uninstall answered uninstalled`; `Applications/.localized`, `Applications/Chromium Apps.localized/{.localized,Icon}` created; `ExcUserFault_Arkt-2026-11-24-160636.ips` |
+| 3 | fix | scratch | `uninstall answered uninstalled`; nothing under the scratch home but `Library` |
+| 4 | fix | real | `uninstall answered uninstalled`; `~/Applications/Chromium Apps.localized` and its `Icon` mtime `2026-11-24 11:48:03` before and after, `~/Applications` `2026-10-26 01:05:25` before and after; no new `ExcUserFault_Arkt` |
+| 5 | break (call commented out) | scratch | `Applications/.localized` and `Applications/Chromium Apps.localized` back; `ExcUserFault_Arkt-2026-11-24-161442.ips` |
+| 6 | fix, rebuilt | scratch | as run 3; no new fault report |
+
+`FATAL`, `Check failed`, `DCHECK`: 0 in every run. Builds: 90 s, the break 69 s, the restore 69 s; `FAILED:` 0;
+`gn check out/Arkt "//arkt/*"`: OK.
+
+### Patch budget
+
+Unchanged: 16 patch files, 8 seam and hook patch files, 22 upstream files outside 0001-0004. `.patches` 16 lines, 16
+`arkt` commits: in sync. Facade header unchanged.
+
+### Left open
+
+- Other callers of `GetChromeAppsFolder` that the flag does not cover, none reachable in Arkt today:
+  `DeleteAllShortcutsForProfile` from `delete_profile_helper.cc` (Arkt deletes no profiles), and the web app paths
+  (`ShortcutSubManager`, `GetAppExistingShortCutLocation`, `RewriteDiyIcons`, the app shim launch,
+  `RevealAppShimInFinder`), which need an installed web app. Closing them all at once would take a one-hunk patch in
+  `apps_folder_support.mm`; not done.
+- `SuppressShortcutsForTesting` is a test hook called from product code. A rebase checks that upstream has not added
+  `CHECK_IS_TEST()` to it.
+- `~/Applications/Chromium Apps.localized` (from 2026-10-24, last written 11:48) and the fault reports from 11:40 and
+  11:49 are the maintainer's to keep or remove; this task did not touch them.
+
+### Cleanup
+
+Every engine run stopped by exact PID (`ps -p` prints nothing), with the `chrome_crashpad_handler` processes it left
+(parent gone) stopped by PID. The two fault reports this task's own runs 2 and 5 created (16:06, 16:14) deleted.
+Throwaway profiles and scratch homes under `profiles/967-20261124/` deleted. Nothing touched the Keychain (mock
+keychain only), `/Applications/Arkt.app` or real browser data.

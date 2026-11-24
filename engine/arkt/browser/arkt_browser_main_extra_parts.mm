@@ -24,6 +24,7 @@
 #include "base/task/sequenced_task_runner.h"
 #include "base/time/time.h"
 #include "base/values.h"
+#include "chrome/browser/apps/platform_apps/shortcut_manager.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/browser_window/public/browser_collection_observer.h"
@@ -265,6 +266,13 @@ void ArktBrowserMainExtraParts::PreProfileInit() {
   // (engine connector design, E1), and Arkt draws its own prompts.
   g_browser_process->local_state()->SetDefaultPrefValue(
       prefs::kPromotionsEnabled, base::Value(false));
+  // Arkt installs no Chrome apps or web apps, so it makes no app shortcuts.
+  // Without this, removing any extension (not only an app) runs
+  // AppShortcutManager::OnExtensionUninstalled, which looks for the app's
+  // shim in ~/Applications and creates "Chromium Apps.localized" there and
+  // sets its icon (#967). The flag is read on every install, uninstall and
+  // profile removal; Chromium names it for tests, but it is a plain switch.
+  AppShortcutManager::SuppressShortcutsForTesting();
   // Profile init precedes the startup browser, so every normal Browser is
   // created through the override.
   if (NativeWindowEnabled()) {

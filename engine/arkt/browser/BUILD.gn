@@ -58,6 +58,7 @@ source_set("browser") {
     "//arkt/api:embedder",
     "//base",
     "//chrome/browser:browser_process",
+    "//chrome/browser/apps/platform_apps",
     "//chrome/browser/profiles:profile",
     "//chrome/browser/ui:browser_window_header",
     "//chrome/browser/ui/browser_window",
