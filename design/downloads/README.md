@@ -50,9 +50,11 @@ rows); the rows never shrink below the sidebar's width.
 - **Library**: Cmd-Shift-L opens it, Cmd-Shift-J on Downloads, Cmd-Y on History (KB-065). It reopens on the section used
   last (BH-181). Clicking the Library button lists the 6 most recent files in the popover (A and C reuse the B popover
   for this; BH-180). It opens on a click only: hovering the button does nothing beyond its normal hover look (the
-  maintainer's decision in #987, replacing the 0.4 s hover listing). Rows: Open, Show in Finder on hover or selection,
-  Retry on failed, cancel on active. Return opens the selected file, Cmd-Return shows it in Finder, Delete removes it
-  from the list (not from disk). Clear List removes every finished row from the list and leaves the files.
+  maintainer's decision in #987, replacing the 0.4 s hover listing). Once open it behaves like a standard popover and
+  stays wherever the pointer goes; Esc, a click elsewhere, a second click on the button, Show Library or Review closes
+  it (#987). Rows: Open, Show in Finder on hover or selection, Retry on failed, cancel on active. Return opens the
+  selected file, Cmd-Return shows it in Finder, Delete removes it from the list (not from disk). Clear List removes
+  every finished row from the list and leaves the files.
 - **Location (BH-182)**: Settings, General, Downloads: "Ask Where to Save" (the system save panel opens for each
   download) or "Save to Folder" with a pop-up (Downloads, Desktop, Other...) and Choose.... If the folder is missing or not
   writable, the download falls back to Downloads and a toast says so ("Saved to Downloads. The chosen folder is

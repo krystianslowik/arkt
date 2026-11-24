@@ -439,7 +439,9 @@ rules are in section 5, not here.
 | BH-182 | Given the download-location setting, then downloads either prompt for a location or save to a chosen folder. | [S] `arc.promptForDownload`, `arc.folder`, `arc.other` | SINGLE-SOURCE |
 
 > **Deviation from BH-180 (maintainer decision, #987).** Hovering the Library button does not list the recent files.
-> The downloads popover opens on a click only; hovering shows nothing beyond the button's normal hover look.
+> The downloads popover opens on a click only; hovering shows nothing beyond the button's normal hover look. Once open
+> it stays until Esc, a click elsewhere, a second click on the button, Show Library or Review, like a standard popover;
+> the pointer leaving it does not close it.
 
 ### 2.15 Media and Picture in Picture
 

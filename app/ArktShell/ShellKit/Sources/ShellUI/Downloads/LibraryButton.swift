@@ -12,11 +12,6 @@ public final class LibraryButton: NSButton {
   private let ring = ProgressRing()
   private let dot = CALayer()
   private(set) public var ringState: DownloadsRingState = .idle
-  private var tracking: NSTrackingArea?
-  private(set) var isHovered = false
-  /// The pointer entered or left the button. The popover reads it only to keep a shown list open while the pointer
-  /// moves between the button and the panel; it never opens on hover (#987).
-  var onHoverChanged: (@MainActor (Bool) -> Void)?
   var reduceMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion } {
     didSet { ring.reduceMotion = reduceMotion }
   }
@@ -137,24 +132,5 @@ public final class LibraryButton: NSButton {
   override public func viewDidChangeBackingProperties() {
     super.viewDidChangeBackingProperties()
     restyle()
-  }
-
-  override public func updateTrackingAreas() {
-    super.updateTrackingAreas()
-    if let tracking { removeTrackingArea(tracking) }
-    let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
-                              owner: self)
-    addTrackingArea(area)
-    tracking = area
-  }
-
-  override public func mouseEntered(with event: NSEvent) { setHovered(true) }
-  override public func mouseExited(with event: NSEvent) { setHovered(false) }
-
-  /// The pointer is over the button (tests set it directly).
-  func setHovered(_ hovered: Bool) {
-    guard hovered != isHovered else { return }
-    isHovered = hovered
-    onHoverChanged?(hovered)
   }
 }

@@ -135,26 +135,6 @@ final class DownloadsWindowTests: XCTestCase {
     XCTAssertFalse(popover.isShown, "a second click closes it")
   }
 
-  /// Hovering never opens the popover (#987). Once a click showed it, leaving closes it after the grace.
-  func testHoveringOpensNothingAndLeavingAShownPopoverClosesItAfterTheGrace() throws {
-    let controller = makeWindow()
-    let button = try XCTUnwrap(controller.sidebarController.view.libraryButton)
-    let popover = try XCTUnwrap(center.popover(of: controller))
-    button.setHovered(true)
-    popover.firePendingTimer()
-    XCTAssertFalse(popover.isShown, "resting on the button opens nothing")
-    button.performClick(nil)
-    XCTAssertTrue(popover.isShown)
-    button.setHovered(false)
-    XCTAssertTrue(popover.isShown, "the grace keeps it for a moment")
-    popover.pointerInPanelChanged(true)
-    popover.firePendingTimer()
-    XCTAssertTrue(popover.isShown, "the pointer is on the popover")
-    popover.pointerInPanelChanged(false)
-    popover.firePendingTimer()
-    XCTAssertFalse(popover.isShown)
-  }
-
   func testAClickElsewhereClosesThePopoverButNotOneInsideIt() throws {
     let controller = makeWindow()
     let button = try XCTUnwrap(controller.sidebarController.view.libraryButton)

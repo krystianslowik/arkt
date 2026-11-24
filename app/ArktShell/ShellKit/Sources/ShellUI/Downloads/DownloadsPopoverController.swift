@@ -2,14 +2,14 @@ import AppKit
 import EngineAPI
 
 /// One window's downloads popover (design/downloads, direction B): a panel over the page, above the Library button.
-/// A click on the button toggles it; hovering the button opens nothing (#987). Once shown, it goes when the pointer has
-/// left both the button and the panel for a moment. Esc, a click elsewhere or choosing Show Library closes it and gives
-/// focus back to the button. The panel never takes focus unless it is clicked, so a download that starts never steals
-/// the keyboard.
+/// It behaves like a standard popover (#987): a click on the button toggles it, hovering opens nothing, and once shown it
+/// stays wherever the pointer goes. Esc, a click elsewhere, a second click on the button, Show Library or Review closes
+/// it and gives focus back to the button. The panel never takes focus unless it is clicked, so a download that starts
+/// never steals the keyboard.
 ///
-/// The state is one `Phase` (#877, #878). Everything one show creates (the panel, its view and pointer tracker, the
-/// click monitor and the model observation) is a `Session` that lives only in the open phases, and closing tears it
-/// down, so no show leaves anything behind for the next one. Every event goes through `send(_:)`.
+/// The state is one `Phase` (#877, #878). Everything one show creates (the panel, its view, the click monitor and the
+/// model observation) is a `Session` that lives only while open, and closing tears it down, so no show leaves anything
+/// behind for the next one. Every event goes through `send(_:)`.
 @MainActor
 final class DownloadsPopoverController: NSObject {
   /// What one show owns. Dropped as a whole when the popover closes.
@@ -18,16 +18,14 @@ final class DownloadsPopoverController: NSObject {
     let panel: DialogWindow
     let container: NSView
     let view: DownloadsPopoverView
-    let tracker: PointerTracker
     let monitor: Any?
     let observation: DownloadsObservation
 
-    init(panel: DialogWindow, container: NSView, view: DownloadsPopoverView, tracker: PointerTracker, monitor: Any?,
+    init(panel: DialogWindow, container: NSView, view: DownloadsPopoverView, monitor: Any?,
          observation: DownloadsObservation) {
       self.panel = panel
       self.container = container
       self.view = view
-      self.tracker = tracker
       self.monitor = monitor
       self.observation = observation
     }
@@ -35,23 +33,18 @@ final class DownloadsPopoverController: NSObject {
 
   enum Phase {
     case closed
-    case open(Session, pointerInside: Bool)
-    /// The pointer left the button and the panel; the timer closes the popover after the grace.
-    case leavePending(Session, Timer)
+    case open(Session)
   }
 
   enum Event: Equatable {
     case buttonPressed
-    case buttonHover(Bool)
-    case pointerInPanel(Bool)
-    case timerFired
     case show(takesKey: Bool)
     case hide(keyboard: Bool)
   }
 
   /// The phase without its payload, for tests and the transition log.
   enum PhaseName: Equatable {
-    case closed, open(pointerInside: Bool), leavePending
+    case closed, open
   }
 
   struct Transition: Equatable {
@@ -79,14 +72,12 @@ final class DownloadsPopoverController: NSObject {
     super.init()
     button.target = self
     button.action = #selector(buttonPressed(_:))
-    button.onHoverChanged = { [weak self] hovered in self?.send(.buttonHover(hovered)) }
   }
 
   isolated deinit {
     switch phase {
     case .closed: break
-    case .open(let session, _): detach(session)
-    case .leavePending(let session, let timer): timer.invalidate(); detach(session)
+    case .open(let session): detach(session)
     }
   }
 
@@ -95,7 +86,7 @@ final class DownloadsPopoverController: NSObject {
   /// The current show's session, if open. Read-only: tests and the controller read it; only `send` changes it.
   var session: Session? {
     switch phase {
-    case .open(let session, _), .leavePending(let session, _): session
+    case .open(let session): session
     case .closed: nil
     }
   }
@@ -103,14 +94,12 @@ final class DownloadsPopoverController: NSObject {
   var phaseName: PhaseName {
     switch phase {
     case .closed: .closed
-    case .open(_, let inside): .open(pointerInside: inside)
-    case .leavePending: .leavePending
+    case .open: .open
     }
   }
 
   var panel: DialogWindow? { session?.panel }
   var contentView: DownloadsPopoverView? { session?.view }
-  var pointerInPanel: Bool { if case .open(_, true) = phase { true } else { false } }
   var isShown: Bool { session?.panel.isVisible == true }
 
   // MARK: Events
@@ -121,11 +110,6 @@ final class DownloadsPopoverController: NSObject {
   func show(takesKey: Bool) { send(.show(takesKey: takesKey)) }
 
   func hide(keyboard: Bool) { send(.hide(keyboard: keyboard)) }
-
-  func pointerInPanelChanged(_ inside: Bool) { send(.pointerInPanel(inside)) }
-
-  /// Runs the pending close now (tests; the timer calls it too).
-  func firePendingTimer() { send(.timerFired) }
 
   /// A mouse down at `point` in `window`: closes the popover unless it is in the panel or on the button.
   func handleMouseDown(in window: NSWindow?, at point: NSPoint) {
@@ -147,37 +131,9 @@ final class DownloadsPopoverController: NSObject {
     case (.closed, .show(let takesKey)):
       open(takesKey: takesKey)
 
-    case (.open(let session, false), .buttonHover(false)):
-      phase = .leavePending(session, makeTimer(after: DownloadsMetrics.leaveGrace))
-    case (.open(let session, _), .pointerInPanel(let inside)):
-      if inside || button?.isHovered == true {
-        phase = .open(session, pointerInside: inside)
-      } else {
-        phase = .leavePending(session, makeTimer(after: DownloadsMetrics.leaveGrace))
-      }
-    case (.open(let session, _), .buttonPressed):
+    case (.open(let session), .buttonPressed):
       close(session, keyboard: false)
-    case (.open(let session, _), .hide(let keyboard)):
-      close(session, keyboard: keyboard)
-
-    case (.leavePending(let session, let timer), .buttonHover(true)):
-      timer.invalidate()
-      phase = .open(session, pointerInside: false)
-    case (.leavePending(let session, let timer), .pointerInPanel(true)):
-      timer.invalidate()
-      phase = .open(session, pointerInside: true)
-    case (.leavePending(let session, let timer), .timerFired):
-      timer.invalidate()
-      if button?.isHovered == true {
-        phase = .open(session, pointerInside: false)
-      } else {
-        close(session, keyboard: false)
-      }
-    case (.leavePending(let session, let timer), .buttonPressed):
-      timer.invalidate()
-      close(session, keyboard: false)
-    case (.leavePending(let session, let timer), .hide(let keyboard)):
-      timer.invalidate()
+    case (.open(let session), .hide(let keyboard)):
       close(session, keyboard: keyboard)
 
     default:
@@ -187,27 +143,6 @@ final class DownloadsPopoverController: NSObject {
     transitionLog.append(Transition(from: from, event: event, to: phaseName))
     if transitionLog.count > 64 { transitionLog.removeFirst(transitionLog.count - 64) }
     #endif
-  }
-
-  /// The timer of the leave grace. It fires only while its phase is current; a timer from an earlier phase does
-  /// nothing even if it was not invalidated.
-  private func makeTimer(after delay: TimeInterval) -> Timer {
-    Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] timer in
-      // The Timer itself cannot cross into the main-actor closure under Swift 6 region checking ("sending 'timer'
-      // risks causing data races"), so its identity does.
-      let fired = ObjectIdentifier(timer)
-      MainActor.assumeIsolated {
-        guard let self, let pending = self.pendingTimer, ObjectIdentifier(pending) == fired else { return }
-        self.send(.timerFired)
-      }
-    }
-  }
-
-  private var pendingTimer: Timer? {
-    switch phase {
-    case .leavePending(_, let timer): timer
-    case .closed, .open: nil
-    }
   }
 
   // MARK: Opening and closing
@@ -239,10 +174,6 @@ final class DownloadsPopoverController: NSObject {
     container.layer?.borderWidth = 0.5
     view.autoresizingMask = [.width, .height]
     container.addSubview(view)
-    let tracker = PointerTracker(frame: container.bounds)
-    tracker.autoresizingMask = [.width, .height]
-    tracker.onChange = { [weak self] inside in self?.send(.pointerInPanel(inside)) }
-    container.addSubview(tracker, positioned: .below, relativeTo: nil)
     window.contentView = container
     window.onEscape = { [weak self] in self?.hide(keyboard: true); return true }
     restyle(container)
@@ -250,14 +181,14 @@ final class DownloadsPopoverController: NSObject {
     parent.addChildWindow(window, ordered: .above)
     window.orderFront(nil)
     if takesKey { window.makeKey() }
-    let session = Session(panel: window, container: container, view: view, tracker: tracker,
+    let session = Session(panel: window, container: container, view: view,
                           monitor: installMonitor(), observation: model.addObserver { [weak self] _ in self?.modelChanged() })
-    phase = .open(session, pointerInside: false)
+    phase = .open(session)
     playAppearance(on: container)
   }
 
   /// Leaves `session` and moves to `closed`: the panel fades out (at once for the keyboard or under Reduce Motion), and
-  /// with it go the view and the tracker.
+  /// with it goes the view.
   private func close(_ session: Session, keyboard: Bool) {
     phase = .closed
     let window = session.panel
@@ -279,13 +210,10 @@ final class DownloadsPopoverController: NSObject {
     if wasKey || keyboard { button?.window?.makeFirstResponder(button) }
   }
 
-  /// Stops everything in `session` that reacts to the user or the model: the click monitor, the observation and the
-  /// pointer tracker, which leaves the view tree at once.
+  /// Stops everything in `session` that reacts to the user or the model: the click monitor and the observation.
   private func detach(_ session: Session) {
     if let monitor = session.monitor { NSEvent.removeMonitor(monitor) }
     session.observation.cancel()
-    session.tracker.onChange = nil
-    session.tracker.removeFromSuperview()
   }
 
   /// The panel's frame: left edge on the button's, `popoverGap` above it, kept inside the window.
@@ -375,18 +303,4 @@ final class DownloadsPopoverController: NSObject {
     for key in layer.animationKeys() ?? [] { found[key] = layer.animation(forKey: key) as? CABasicAnimation }
     return found
   }
-}
-
-/// Reports the pointer entering and leaving the panel.
-@MainActor
-final class PointerTracker: NSView {
-  var onChange: (@MainActor (Bool) -> Void)?
-  override func updateTrackingAreas() {
-    super.updateTrackingAreas()
-    for area in trackingAreas { removeTrackingArea(area) }
-    addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
-  }
-  override func mouseEntered(with event: NSEvent) { onChange?(true) }
-  override func mouseExited(with event: NSEvent) { onChange?(false) }
-  override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
