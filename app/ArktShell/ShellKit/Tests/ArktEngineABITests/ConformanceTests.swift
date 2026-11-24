@@ -31,6 +31,28 @@ final class TestExtensionAction: NSObject, ArktExtensionAction {
   }
 }
 
+/// An installed extension as the engine lists one (#964).
+final class TestInstalledExtension: NSObject, ArktInstalledExtension {
+  let extensionID: String
+  let name: String
+  let version: String
+  let shortDescription = ""
+  let iconPNG: Data? = nil
+  let isEnabled: Bool
+  let mayChangeEnabled: Bool
+  let siteAccess: ArktExtensionSiteAccessSummary = .someSites
+  let siteAccessSiteCount = 2
+  let source: ArktExtensionSource
+  let hasOptionsPage = false
+  let canUninstall = true
+  let canReportAbuse = false
+  init(extensionID: String, name: String, version: String, isEnabled: Bool, mayChangeEnabled: Bool,
+       source: ArktExtensionSource) {
+    self.extensionID = extensionID; self.name = name; self.version = version; self.isEnabled = isEnabled
+    self.mayChangeEnabled = mayChangeEnabled; self.source = source
+  }
+}
+
 /// A menu item as the engine returns one (#593).
 final class TestMenuItem: NSObject, ArktMenuItem {
   let kind: ArktMenuItemKind
@@ -577,6 +599,26 @@ final class TestEngine: NSObject, ArktEngine {
     shortcutSuspensionCalls.append(suspended)
   }
 
+  // Installed extensions (#964).
+  var installedExtensions: [any ArktInstalledExtension] = []
+  private(set) var enableCalls: [(String, Bool)] = []
+  func setExtensionEnabled(_ extensionID: String, enabled: Bool) -> ArktExtensionEnableResult {
+    enableCalls.append((extensionID, enabled))
+    return installedExtensions.contains { $0.extensionID == extensionID } ? .applied : .unknownExtension
+  }
+  var extensionDeveloperMode = false
+  private(set) var loadedPaths: [String] = []
+  /// As the header asks: the completion runs on a later main-thread turn, never inside the call.
+  func loadUnpackedExtension(atPath path: String, completion: @escaping (String?, String?) -> Void) {
+    loadedPaths.append(path)
+    let on = extensionDeveloperMode
+    Task { @MainActor in completion(on ? "loaded-id" : nil, on ? nil : "Developer mode is off.") }
+  }
+  private(set) var optionsPages: [(String, Int32?)] = []
+  func openExtensionOptionsPage(_ extensionID: String, in browser: (any ArktBrowserHandle)?) {
+    optionsPages.append((extensionID, browser?.windowId))
+  }
+
   private(set) var uninstalledExtensions: [(String, Bool, Int32?)] = []
   /// As the header asks: the completion runs on a later main-thread turn, never inside the call.
   func uninstallExtension(_ extensionID: String, reportAbuse: Bool, in browser: (any ArktBrowserHandle)?,
@@ -969,6 +1011,50 @@ struct ConformanceTests {
     for _ in 0..<100 where answer == nil { await Task.yield() }
     let answered = try #require(answer)
     #expect(answered.0 == false && answered.1 == "unknown extension")
+  }
+
+  @Test func theInstalledListAndItsAnswersHaveFixedValues() {
+    #expect(ArktEngineEventKind.installedExtensionsChanged.rawValue == 33)
+    #expect(ArktExtensionSource.webStore.rawValue == 0)
+    #expect(ArktExtensionSource.unpacked.rawValue == 1)
+    #expect(ArktExtensionSource.policy.rawValue == 2)
+    #expect(ArktExtensionSource.other.rawValue == 3)
+    #expect(ArktExtensionEnableResult.applied.rawValue == 0)
+    #expect(ArktExtensionEnableResult.unknownExtension.rawValue == 1)
+    #expect(ArktExtensionEnableResult.notAllowed.rawValue == 2)
+    #expect(ArktExtensionEnableResult.needsPermissionApproval.rawValue == 3)
+    #expect(ArktExtensionSiteAccessSummary.none.rawValue == 0)
+    #expect(ArktExtensionSiteAccessSummary.onClick.rawValue == 1)
+    #expect(ArktExtensionSiteAccessSummary.someSites.rawValue == 2)
+    #expect(ArktExtensionSiteAccessSummary.allSites.rawValue == 3)
+  }
+
+  @Test func installedExtensionsGoThroughTheProtocol() async throws {
+    let facade = TestEngine()
+    facade.installedExtensions = [TestInstalledExtension(extensionID: "probe", name: "Probe", version: "1.0",
+                                                         isEnabled: false, mayChangeEnabled: true,
+                                                         source: .unpacked)]
+    let engine: any ArktEngine = facade
+    let listed = try #require(engine.installedExtensions.first)
+    #expect(listed.version == "1.0" && !listed.isEnabled && listed.mayChangeEnabled && listed.source == .unpacked)
+    #expect(listed.siteAccess == .someSites && listed.siteAccessSiteCount == 2)
+    #expect(engine.setExtensionEnabled("probe", enabled: true) == .applied)
+    #expect(engine.setExtensionEnabled("gone", enabled: true) == .unknownExtension)
+    #expect(facade.enableCalls.map(\.1) == [true, true])
+
+    engine.extensionDeveloperMode = true
+    #expect(engine.extensionDeveloperMode)
+    var answer: (String?, String?)?
+    engine.loadUnpackedExtension(atPath: "/tmp/probe") { answer = ($0, $1) }
+    #expect(answer == nil, "never inside the call")
+    for _ in 0..<100 where answer == nil { await Task.yield() }
+    #expect(answer?.0 == "loaded-id" && answer?.1 == nil)
+    #expect(facade.loadedPaths == ["/tmp/probe"])
+
+    let browser = engine.createBrowser(host: TestWindowHost())
+    engine.openExtensionOptionsPage("probe", in: browser)
+    engine.openExtensionOptionsPage("probe", in: nil)
+    #expect(facade.optionsPages.map(\.1) == [browser.windowId, nil])
   }
 
   @Test func theActionSaysWhatTheUserMayDo() {

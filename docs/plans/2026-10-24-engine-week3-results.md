@@ -8312,3 +8312,254 @@ Follow-ups from the re-review of #943 (#941). Seam, no patch, no header change.
 - The #941 results entry said a re-announcement came "after another infobar arrived"; only a refresh of the focused
   row's own infobar rebuilt its buttons. Corrected above.
 - Real VoiceOver on the shell app stays with #932 (needs the user).
+
+## #964: installed extensions list, enable / disable, developer mode and Load unpacked (seam, no patch)
+
+Date 2026-11-24. Branch `engine/964-extensions-management` from `main` at `f8ebd681`. `$CR` branch `arkt` unchanged
+(0001-0016). Engine side of #600 (Settings > Extensions), built in parallel with it.
+
+### Gate
+
+- Seam, no patch. Everything the pane needs is public at the pin and reachable from the overlay:
+  `ExtensionRegistry::GenerateInstalledExtensionsSet` (enabled, disabled, terminated), `ManagementPolicy`
+  (`UserMayModifySettings`, `MustRemainEnabled`, `MustRemainDisabled`), `ExtensionRegistrar::EnableExtension` and
+  `DisableExtension`, `util::SetDeveloperModeForProfile` (what `developerPrivate.updateProfileConfiguration` calls),
+  `UnpackedInstaller` (what `developerPrivate.loadUnpacked` uses), `ExtensionRegistryObserver`, a
+  `PrefChangeRegistrar`, `ImageLoader` and `ExtensionTabUtil::OpenOptionsPage`.
+- Facade header: additive. Both copies `cmp` identical. Gate note on #964.
+- `.patches` unchanged (16 lines, 16 `arkt` commits: in sync). No patch number claimed.
+- Builds: `nice -n 15 autoninja -j 4 -C out/Arkt chrome`; Chromium disk 1.9 TB free, internal disk 31 to 33 GB free,
+  swap 9.9 of 10 GB used throughout; 1-minute load 13 to 31 from other work on the machine.
+
+### What landed
+
+- `arkt_extension_management.{h,cc}` (new, in `//arkt/browser:window`):
+  - `ListInstalledExtensions`: enabled, disabled and terminated extensions that
+    `ui_util::ShouldDisplayInExtensionSettings` shows (no component, theme or hosted-app items), sorted by name then
+    id. Blocklisted and policy-blocked ones are in neither set and are not listed. Per item: id, display name,
+    `GetVersionForDisplay` (the manifest's `version_name` when set), the localized description, on (enabled or
+    terminated, as `management.setEnabled` reads it), may change, source, options page.
+  - Source: policy (`Manifest::IsPolicyLocation`), unpacked (`IsUnpackedLocation`: Load unpacked and
+    `--load-extension`), Web Store (`ExtensionManagement::UpdatesFromWebstore`), other (a .crx from elsewhere, an
+    external install).
+  - `CanChangeExtensionEnabled`, one gate for the listing's `mayChangeEnabled` and the setter: disable needs
+    `UserMayModifySettings`, not `MustRemainEnabled` and not a shared module; enable needs `UserMayModifySettings`
+    and not `MustRemainDisabled`. An extension disabled for a permissions increase answers
+    NeedsPermissionApproval: Chrome enables it only after its re-enable prompt, which grants the permissions, and
+    the engine does not grant them silently.
+  - `SetExtensionEnabledForUser`: the gate, then `EnableExtension` or `DisableExtension` with
+    `DISABLE_USER_ACTION`; the registrar returns nothing, so the state is read back and an unforeseen refusal answers
+    NotAllowed.
+  - Developer mode through `util::SetDeveloperModeForProfile`, refused when the pref is not user-modifiable (policy).
+    At the pin, turning it off disables kUnpacked extensions (`DISABLE_UNSUPPORTED_DEVELOPER_EXTENSION` from
+    `ExtensionManagement::IsAllowedByUnpackedDeveloperModePolicy`, Chrome does the same); `--load-extension`
+    (kCommandLine) ones stay on. While it is off, enabling such an extension is refused (`MustRemainDisabled`).
+  - `LoadUnpackedExtension`: refused while developer mode is off and when `BlocklistedByDefault`, as
+    `developerPrivate.loadUnpacked`; `set_be_noisy_on_failure(false)`, so no Chromium error dialog. The answer is
+    always posted (UnpackedInstaller reports some errors from inside `Load`). The path and Chromium's error text stay
+    out of the log.
+  - `OpenExtensionOptionsPage`: `ExtensionTabUtil::OpenOptionsPage` in the named window, else the profile's last
+    active normal window. Beyond the issue's list: #600's details block needs it (the pane has no window to pass to
+    `performExtensionContextCommand`).
+  - `InstalledExtensionsWatcher`: `OnExtensionLoaded`, `Unloaded` (disable, terminate, uninstall, update),
+    `Installed` (install, update, Load unpacked, reload) and `Uninstalled`, the developer mode pref, and icon loads,
+    merged into one callback per task. Icons: 32 pt at every scale factor through `ImageLoader`, cached per id and
+    version and dropped on every install or reload (a reload of an unpacked folder keeps its version), so a first
+    listing has none and the event follows the load.
+- Facade (additive): `ArktInstalledExtension` (`extensionID`, `name`, `version`, `shortDescription`, `iconPNG` 32 pt at
+  2x, `isEnabled`, `mayChangeEnabled`, `source`, `hasOptionsPage`, `canUninstall`, `canReportAbuse`, the last two the
+  #721 gate's), `ArktExtensionSource` (WebStore 0, Unpacked 1, Policy 2, Other 3), `ArktExtensionEnableResult`
+  (Applied 0, UnknownExtension 1, NotAllowed 2, NeedsPermissionApproval 3), `installedExtensions`,
+  `-setExtensionEnabled:enabled:` (synchronous; inside a nested run loop the change is deferred and the answer is the
+  gate's), the readwrite `extensionDeveloperMode` (a readonly property plus a `-setExtensionDeveloperMode:` method
+  imports into Swift without the method), `-loadUnpackedExtensionAtPath:completion:`,
+  `-openExtensionOptionsPage:inBrowser:`, and event kind 33 `InstalledExtensionsChanged`. Load unpacked's completion
+  first delivers the events already recorded, so the list change of the load reaches the sinks before the answer
+  (Chromium notifies the registry observers before it calls the installer's callback, so the watcher's task always
+  runs first). Inside a notification it leaves them to the posted delivery and only that order is lost.
+- Self-test: `ext-list`, `ext-enable <id>`, `ext-disable <id>`, `ext-devmode on|off`, `ext-load <folder>`,
+  `ext-options <id> [nowin]`; each `InstalledExtensionsChanged` logs the list again.
+- Swift: the `EngineExtensions` members, `InstalledExtensionInfo`, `ExtensionOrigin`, `ExtensionEnableResult`,
+  `UnpackedExtensionResult` and `EngineExtensionEvent.installedExtensionsChanged` are #600's lines verbatim (commit
+  `864c69c3` on `feat/600-settings-extensions`, posted on #964), so the two branches merge without a conflict.
+  `ChromiumEngine+InstalledExtensions.swift` overrides them: NotAllowed and NeedsPermissionApproval map to
+  `.refused`; `mayChangeEnabled` is `canDisable`; Load unpacked asks the facade only while developer mode is on and
+  maps the facade's "developer mode is off" to `.developerModeOff`; the options page goes to the last active window.
+  `ChromiumEngine+Batches` maps kind 33 to `.installedExtensionsChanged`. Doubles in `ScriptedFacade` and
+  `ConformanceTests`.
+
+### Smoke (`out/Arkt/Arkt.app`, `--no-startup-window --arkt-facade-selftest --arkt-engine-test-api --remote-debugging-port=9333`, fresh profiles under `profiles/964-20261124/`, `--use-mock-keychain --mute-audio`, `--host-resolver-rules="MAP * ~NOTFOUND, EXCLUDE 127.0.0.1"`, `$REPO/engine/test-extensions/action-probe` and `site-probe` with `--load-extension`, commands through the page title over the DevTools protocol)
+
+Fixtures under `arkt-artifacts/964/` (outside the repo): `icon-probe` (version 2.3.1, `version_name` "2.3 beta", a
+128 px icon, an options page) for Load unpacked, an empty folder, and two copies of `install-probe` packed with the
+engine's `--pack-extension`: `store-probe` (the Web Store's `update_url`) and `plain-probe` (none), installed with
+`install-crx`. Run 1 is the full sequence; run 4 repeats the acceptance list on the committed code.
+
+| Step | Result |
+|---|---|
+| Startup, `ext-list` | `count=2 devmode=off`: both probes `v=1.0 enabled=yes mayChange=yes source=1`, site probe `options=yes` with its description; no component extension listed (PDF viewer and the others hidden) |
+| `install-crx` store probe, plain probe | one event each; `v=4.2 source=0 abuse=yes` and `v=0.7 source=3 abuse=no`; `count=4` |
+| `ext-disable` site probe | `result=0`; one batch `ExtensionActionsChanged,ExtensionCommandsChanged,InstalledExtensionsChanged`; `enabled=no mayChange=yes` |
+| `ext-enable` site probe | `result=0`; the same three kinds; `enabled=yes` |
+| `ext-enable` it again (already on) | `result=0`, no `InstalledExtensionsChanged` |
+| `ext-enable` an unknown id | `result=1` (UnknownExtension) |
+| `ext-load icon-probe` while developer mode is off | `answered id=nil reason=developer mode is off insideCall=no`, nothing loaded |
+| `ext-devmode on` | `now=on`; one event; `devmode=on` |
+| `ext-load icon-probe` | the list event (`count=5`, `v=2.3 beta source=1 options=yes icon=0`), then `answered id=hfjk... reason=none insideCall=no`; then a second event when the icon arrived: `icon=168` (64 px PNG) |
+| `ext-load` the empty folder | `answered id=nil reason=Manifest file is missing or unreadable insideCall=no`; no Chromium dialog (`dialog sheet shown`: 0) |
+| `ext-options icon-probe` | `openExtensionOptionsPage ... opened`; `tabCreated origin=engine active=yes url=chrome-extension://hfjk.../options.html` in the window |
+| `ext-devmode off` | one event; icon probe `enabled=no mayChange=no`; the `--load-extension` probes and the .crx ones stay on |
+| `ext-enable` icon probe while off | `result=2` (NotAllowed) |
+| `ext-devmode on` again | one event; icon probe `enabled=yes mayChange=yes` |
+| `ext-disable` plain probe, then `uninstall` it (disabled) | one event each; `count=4` after the uninstall; `uninstall answered uninstalled` |
+| Update: icon probe's folder changed to 2.4.0 (`version_name` 2.4), `ext-load` again | `extension installed ... update=1`; same id, `v=2.4`; one event, a second for the new version's icon |
+| Run 4, events per step | startup 1; install 1; disable 1; enable 1; developer mode on 1; load 2 (list, then icon), the list one before the answer; developer mode off 1; on 1; uninstall 1 |
+| Run 5 (the committed code: guarded flush, icon dropped on reload), events per step | disable 1, enable 1, developer mode on 1, load 2 (list before the answer); the icon file replaced and the folder loaded again with the same version: 2 events, icon 168 -> 0 -> 196 bytes (the new icon); developer mode off 1, icon probe `enabled=no mayChange=no` |
+| `FATAL`, `Check failed`, `DCHECK` | 0 in runs 1 to 5; no crash report |
+
+Not run: a policy refusal (no policy on this machine; the gate reads the same `ManagementPolicy` calls the #721
+uninstall gate does), an extension disabled for a permissions increase (NeedsPermissionApproval), a managed
+developer mode pref, a terminated extension's listing, and an embedded options page (`options_ui`), which
+`ExtensionTabUtil::OpenOptionsPage` opens as Chromium's extensions page showing the extension.
+
+Seen, not caused by this change: runs 1 and 4 each left a macOS `ExcUserFault_Arkt` report (an `os_log` fault inside
+`NSWorkspace setIcon:forFile:`, the process went on). The caller is Chromium's web-app code rewriting the folder icon
+of `~/Applications/Chromium Apps.localized` (`apps_folder_support.mm`), a folder earlier engine runs created on
+2026-10-24; each launch rewrites its `Icon` file. Not a crash and not in this change's code.
+
+### Deliberate breaks
+
+- Engine: `InstalledExtensionsWatcher::OnExtensionUnloaded` without its `NotifyChanged`, rebuilt (95 s, `FAILED:` 0).
+  Run 2: `ext-disable` site probe answered `result=0` and the list showed `enabled=no`, but the batch was
+  `ExtensionActionsChanged,ExtensionCommandsChanged` with no `InstalledExtensionsChanged` (1 event before, 1 after):
+  the pane would keep showing it on. Restored, rebuilt (90 s, `FAILED:` 0); run 3: disable 1 -> 2, enable 2 -> 3,
+  developer mode on 3 -> 4.
+- Swift: the `.installedExtensionsChanged` line removed from `ChromiumEngine+Batches`:
+  `theFacadesChangeArrivesAsInstalledExtensionsChanged` fails with `events → []`. Restored: 12 of 12
+  `ChromiumInstalledExtensionTests` pass.
+
+| Step | Result |
+|---|---|
+| Builds | first 82 s (a first attempt failed on a header edited during the build), break 95 s, restore 90 s, format pass and delivery order 96 s, final (guarded flush, icon dropped on reload) 109 s; `FAILED:` 0 each |
+| `gn check out/Arkt "//arkt/*"` | `Header dependency check OK` |
+
+### Tests
+
+- ShellKit `nice -n 20 swift test -j 2 --skip ShellKitGUITests` (branch current with `main` at `d7ceacad`; 1-minute
+  load 11 to 24): every bundle passes, Swift Testing runs of 1629, 44, 60, 29, 290, 49, 362, 240 and 42 tests.
+  `ChromiumEngineKitTests` 228 + 12 (`ChromiumInstalledExtensionTests`, every call through `any EngineExtensions`),
+  `ArktEngineABITests` 40 + 2 (`theInstalledListAndItsAnswersHaveFixedValues`,
+  `installedExtensionsGoThroughTheProtocol`): `git diff origin/main | grep -c '^+ *@Test'` is 14 and the diff removes
+  none, so the other bundles are `main`'s counts.
+- Lints `--filter 'LintTests|IsolationTests'`: 13 + 60 pass.
+- No GUI test added or changed, no shell UI touched; ArktCore untouched.
+
+### Patch budget
+
+Unchanged: 16 patch files, 8 seam and hook patch files, 22 upstream files outside 0001-0004. `.patches` 16 lines, 16
+`arkt` commits: in sync. Facade header copies `cmp` identical.
+
+### Left open
+
+- The pane itself and the InMemoryEngine side: #600.
+- An extension disabled for a permissions increase cannot be enabled from the pane (NeedsPermissionApproval, shown as
+  `.refused`); Chrome's re-enable prompt is not built.
+- Incognito allowance per extension (#600's criterion, after #558).
+- One event per task, not per change: a change and its icon load arrive as two events, several changes in one task
+  as one.
+
+### Cleanup
+
+Every engine run stopped by exact PID (`ps -p` prints nothing), and run 4's two `chrome_crashpad_handler` processes
+(started with it, parent gone) stopped by PID; run 5's helpers exited by themselves. Throwaway profiles under
+`profiles/964-20261124/` deleted. The fixtures and run logs stay under `arkt-artifacts/964/` (small) until the review
+ends. Nothing touched the Keychain (mock keychain only), `/Applications/Arkt.app` or real browser data.
+
+### #964 review fixes (PR #966)
+
+- Enable gate (security): `ExtensionRegistrar::EnableExtension` clears every disable reason, so enabling now needs
+  every reason to be one the user may lift, as `management.setEnabled` and chrome://extensions allow: user action,
+  another extension's disable, reload, greylist, external install, and an unpacked extension's developer-mode reason
+  while developer mode is on. A permissions increase answers NeedsPermissionApproval; any other reason (corrupted,
+  not verified, unsupported requirements, custodian or remote-install approval, or one the list does not know)
+  answers NotAllowed. `mayChangeEnabled` reads the same gate.
+- Events: the watcher also observes `ExtensionPrefsObserver` (`OnExtensionDisableReasonsChanged`,
+  `OnExtensionPrefsUpdated`, which a blocklisting writes) and the management policy prefs `ExtensionManagement`
+  reads. Those only request a check: the event goes out when the listed ids, versions, names, enabled,
+  `mayChangeEnabled` or `canUninstall` states differ from the last report. Registry changes, developer mode and icons
+  always report.
+- Icons: each load carries a generation (every install, update or reload drops the entry), so a same-version reload
+  shows the new icon; the PNG is encoded once when the load finishes and only copied on each listing.
+- Load unpacked refuses a path that is not absolute ("Not a folder."). The engine's own sentences are now sentences
+  ("Developer mode is off.", "Blocked by policy.", "Not a folder."); `ChromiumEngine` matches the first.
+- Self-test: `ext-disable-reason <id> <disable_reason value>` disables a listed extension with that single reason.
+
+Run 6 (`out/Arkt`, fresh profile `profiles/964-20261124/run6`, same flags; build 83 s, `FAILED:` 0;
+`gn check`: OK):
+
+| Step | Result |
+|---|---|
+| `ext-load fixtures/icon-probe` (relative) while developer mode is off | `reason=Developer mode is off. insideCall=no` |
+| `ext-disable` action probe | one event; `enabled=no mayChange=yes` |
+| `ext-disable-reason` action probe 1024 (`DISABLE_CORRUPTED`, added to a disabled extension: no registry event) | one event through the check; `mayChange=no` |
+| `ext-enable` action probe | `result=2` (NotAllowed), stays disabled |
+| `ext-disable-reason` site probe 2 (`DISABLE_PERMISSIONS_INCREASE`) | one event; `enabled=no mayChange=no` |
+| `ext-enable` site probe | `result=3` (NeedsPermissionApproval), stays disabled |
+| Developer mode on, `ext-load fixtures/icon-probe` (relative) | `reason=Not a folder.` |
+| Load the icon probe, replace its icon, load the same folder again (same version) | 2 events; icon 196 -> 168 bytes (the new icon) |
+| `FATAL`, `Check failed`, `DCHECK` | 0 |
+
+Not run: a real blocklisting and a policy change (no Safe Browsing blocklist or policy on this machine); both go
+through the check path the reason-only change above took.
+
+Swift after the review: #969's final `EngineExtensions.swift` taken verbatim (`ExtensionEnableResult.needsPermissionApproval`,
+absolute file URLs only); `ChromiumEngine` maps NeedsPermissionApproval to `.needsPermissionApproval` and answers
+`.failed(reason: "Not a folder.")` for a URL that is not an absolute file URL without asking the engine (the engine's
+own sentence for a relative path). `git merge-tree --write-tree HEAD origin/feat/600-settings-extensions`: clean.
+`nice -n 20 swift test -j 2 --skip ShellKitGUITests`: every bundle passes, 1629, 44, 60, 29, 290, 49, 362, 241, 42
+(`ChromiumEngineKitTests` 228 + 13, `ArktEngineABITests` 40 + 2). Lints: 13 + 60 pass.
+
+### #964: site access summary and an actionable toggle (after the #969 review)
+
+- `mayChangeEnabled` means the toggle is actionable: `CanChangeExtensionEnabled(...) != kNotAllowed`, so an
+  extension disabled for new permissions lists YES and its enable answers NeedsPermissionApproval.
+- `ArktInstalledExtension.siteAccess` (`ArktExtensionSiteAccessSummary`: None 0, OnClick 1, SomeSites 2, AllSites 3)
+  and `siteAccessSiteCount` (distinct granted hosts for SomeSites): chrome://extensions' host access
+  (`ExtensionInfoGenerator`'s `CreateRuntimeHostPermissionsInfo`): granted hosts from `GetGrantedPermissions`, or
+  `GetRuntimeGrantedPermissions` while `PermissionsManager::HasWithheldHostPermissions` (only for an extension
+  `CanAffectExtension`); none granted while withheld is OnClick; None when the extension asks for no hosts. Site
+  access is in the listed-state fingerprint, and `OnExtensionRuntimePermissionsChanged` requests a check.
+
+Run 8 (`out/Arkt`, build 84 s, `FAILED:` 0, `gn check` OK; fresh profile; first tab on a loopback page; the probes
+plus `sites-probe` asking for `https://example.com/*` and `https://*.example.org/*`, all with `--load-extension`):
+
+| Step | Result |
+|---|---|
+| `ext-list` | action probe `sites=0/0` (None), site probe `sites=3/0` (AllSites), sites probe `sites=2/2` (SomeSites, 2) |
+| Site probe's context menu, When You Click the Extension (`ext-pick 5`) | `ran`; one event; `sites=1/0` (OnClick) |
+| `DISABLE_PERMISSIONS_INCREASE` on the site probe | `enabled=no mayChange=yes`; `ext-enable` answers `result=3` |
+| `navigate chrome://extensions/?id=<site probe>` in the tab | `urlChanged url=chrome://extensions/?id=jhjn...`; the page has `extensions-manager` and shows its detail view |
+| `FATAL`, `Check failed`, `DCHECK` | 0; no crash report |
+
+Swift for this round: #969's final `EngineExtensions.swift` taken verbatim (`InstalledExtensionInfo.siteAccess`,
+`InstalledExtensionSiteAccess`, `canDisable` as an actionable switch). `ChromiumEngine` maps the summary one to one
+(None `.noHostAccess`, OnClick `.onClick`, SomeSites `.someSites(count:)` with `siteAccessSiteCount`, AllSites
+`.allSites`). `git merge-tree --write-tree HEAD origin/feat/600-settings-extensions` (at `8a289d1d`): clean, the file
+identical. `nice -n 20 swift test -j 2 --skip ShellKitGUITests`: every bundle passes, 1629, 44, 60, 29, 290, 49,
+362, 243, 42 (`ChromiumEngineKitTests` 228 + 15, `ArktEngineABITests` 40 + 2; 17 `@Test` added, none removed).
+Lints: 13 + 60 pass.
+
+### #964: re-review fixes, after #969 merged
+
+- `origin/main` (with #969, `57e98d36`) merged in once.
+- Site access with hosts not withheld counts the extension's active hosts, not the granted-permissions prefs (those
+  only grow, so after an update that drops hosts they counted stale ones). Docs now say the summary is based on
+  chrome://extensions' host access with two differences: None for an extension that asks for no hosts, and, when not
+  withheld, SomeSites or AllSites by the hosts it has now (Chrome always says "On all sites" then).
+- Wrapped the long `NeedsPermissionApproval` comment in the facade header (copies `cmp` identical) and the long
+  `siteAccess(_:count:)` signature.
+- Engine: 82 s, `FAILED:` 0; `gn check`: OK. Run 9 (fresh profile, deleted after): a Load-unpacked probe asking for
+  three hosts listed `sites=2/3`; its folder updated to 1.1 with one host dropped and loaded again: `sites=2/2`; the
+  site probe stays `sites=3/0`; `FATAL`, `Check failed`, `DCHECK`: 0.
+- `nice -n 20 swift test -j 2 --skip ShellKitGUITests` on the merged tree: every bundle passes, 1634, 44, 60, 29,
+  312, 49, 362, 243, 42. Lints: 13 + 60 pass.

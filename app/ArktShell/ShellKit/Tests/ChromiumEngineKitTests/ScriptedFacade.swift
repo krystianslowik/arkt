@@ -209,6 +209,33 @@ final class ScriptedAction: NSObject, ArktExtensionAction {
   }
 }
 
+/// One installed extension the scripted facade lists (#964).
+final class ScriptedInstalledExtension: NSObject, ArktInstalledExtension {
+  let extensionID: String
+  let name: String
+  let version: String
+  let shortDescription: String
+  let iconPNG: Data?
+  let isEnabled: Bool
+  let mayChangeEnabled: Bool
+  let siteAccess: ArktExtensionSiteAccessSummary
+  let siteAccessSiteCount: Int
+  let source: ArktExtensionSource
+  let hasOptionsPage: Bool
+  let canUninstall: Bool
+  let canReportAbuse: Bool
+  init(extensionID: String, name: String, version: String, shortDescription: String = "", iconPNG: Data? = nil,
+       isEnabled: Bool = true, mayChangeEnabled: Bool = true, siteAccess: ArktExtensionSiteAccessSummary = .none,
+       siteAccessSiteCount: Int = 0, source: ArktExtensionSource = .webStore, hasOptionsPage: Bool = false,
+       canUninstall: Bool = true, canReportAbuse: Bool = true) {
+    self.extensionID = extensionID; self.name = name; self.version = version
+    self.shortDescription = shortDescription; self.iconPNG = iconPNG; self.isEnabled = isEnabled
+    self.mayChangeEnabled = mayChangeEnabled; self.siteAccess = siteAccess
+    self.siteAccessSiteCount = siteAccessSiteCount; self.source = source; self.hasOptionsPage = hasOptionsPage
+    self.canUninstall = canUninstall; self.canReportAbuse = canReportAbuse
+  }
+}
+
 /// One extension command the scripted facade lists (#598).
 final class ScriptedExtensionCommand: NSObject, ArktExtensionCommand {
   let extensionID: String
@@ -1457,6 +1484,51 @@ final class ScriptedFacade: NSObject, ArktEngine {
 
   func setExtensionShortcutHandlingSuspended(_ suspended: Bool) {
     shortcutSuspensionCalls.append(suspended)
+  }
+
+  // MARK: Installed extensions (#964)
+
+  /// The profile's installed extensions, as `installedExtensions` returns them.
+  var installedList: [ScriptedInstalledExtension] = []
+  var installedExtensions: [any ArktInstalledExtension] { installedList }
+  /// What `setExtensionEnabled` answers; nothing changes in `installedList`.
+  var enableAnswer: ArktExtensionEnableResult = .applied
+  /// What each `setExtensionEnabled` call received, in order.
+  private(set) var enableCalls: [(extensionID: String, enabled: Bool)] = []
+
+  func setExtensionEnabled(_ extensionID: String, enabled: Bool) -> ArktExtensionEnableResult {
+    enableCalls.append((extensionID, enabled))
+    return enableAnswer
+  }
+
+  /// What each set of `extensionDeveloperMode` received, in order.
+  private(set) var developerModeCalls: [Bool] = []
+  /// The developer mode pref; a set takes effect at once, as the real facade's does outside a nested run loop.
+  var extensionDeveloperMode = false {
+    didSet { developerModeCalls.append(extensionDeveloperMode) }
+  }
+
+  /// The paths each `loadUnpackedExtension` call received, in order.
+  private(set) var loadUnpackedPaths: [String] = []
+  /// What the load answers: an id, or nil and a reason. The completion runs on a later turn, as the header asks.
+  var loadUnpackedAnswer: (extensionID: String?, reason: String?) = (nil, "Manifest file is missing or unreadable")
+
+  func loadUnpackedExtension(atPath path: String, completion: @escaping (String?, String?) -> Void) {
+    loadUnpackedPaths.append(path)
+    let answer = extensionDeveloperMode ? loadUnpackedAnswer : (nil, "Developer mode is off.")
+    Task { @MainActor in completion(answer.0, answer.1) }
+  }
+
+  /// What each `openExtensionOptionsPage` call received, in order: the id and the named window (nil for none).
+  private(set) var optionsPageCalls: [(extensionID: String, window: Int32?)] = []
+
+  func openExtensionOptionsPage(_ extensionID: String, in browser: (any ArktBrowserHandle)?) {
+    optionsPageCalls.append((extensionID, browser?.windowId))
+  }
+
+  /// The installed list or developer mode changed (#964): one profile-wide `InstalledExtensionsChanged`.
+  func recordInstalledExtensionsChanged() {
+    record(ScriptedEvent(.installedExtensionsChanged, tab: nil, browser: nil))
   }
 
   /// The profile's commands changed (#598): one profile-wide `ExtensionCommandsChanged`, no tab or window.
