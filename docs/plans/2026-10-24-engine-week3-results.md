@@ -8926,3 +8926,30 @@ none.
 Every engine and app run stopped by exact PID with its helpers (`ps` shows none). Profiles, the app copy, its data
 folder and defaults suite, and the screenshot deleted; the app copy and build products unregistered from
 LaunchServices. Nothing touched the Keychain (mock keychain only), `/Applications/Arkt.app` or real browser data.
+
+## #74: Arkt icons in the engine bundle (patch 0017, in progress)
+
+### Gate
+
+1. Task: replace Chromium's app icon, asset catalog and product logos with the approved Arkt artwork
+   (`macOS/mustard-on-white`, `tile/mustard-on-white.svg`). No seam: `branding_path_component` is joined at three
+   directory depths, so no value reaches `//arkt`, and an `//arkt` `bundle_data` with the same output collides with
+   Chromium's (details and paths in `engine/README.md`, "Icons (#74)").
+2. Facade header: unchanged.
+3. `.patches`: one new patch, 0017 (no open pull request touches `engine/patches`): `chrome/BUILD.gn` takes
+   `app.icns` and `Assets.car` from `//arkt/branding/mac/`; nine product logo PNGs replaced in place.
+4. Build: `nice -n 15 autoninja -j 4 -C out/Arkt chrome`, then `gn check out/Arkt "//arkt/*"`. Free disk at the
+   gate: 1.9 TB on the Chromium disk, 27 GiB on `/`; swap 9.8 of 10 GB used, so `-j 4`.
+
+### What landed so far
+
+- `engine/arkt/branding/mac/`: `app.icns` (the kit file, byte for byte), `Assets.car` built by `actool` from
+  `Assets.xcassets` (checked in: `AppIcon` from the kit icns, `Icon` from the tile at 256 and 512). `assetutil`
+  lists only `AppIcon`, `Icon` and the packed assets; a second `actool` run gives a byte-identical car.
+- `engine/arkt/branding/theme/`: the logo PNGs at Chromium's pixel sizes, rendered from the tile with `rsvg-convert`.
+- `engine/README.md`: verified paths, why a patch, the rebuild commands and the build check.
+
+### Left open
+
+- Patch 0017 (apply on branch `arkt`, Export), the build, `gn check` and the `cmp` checks in the README.
+- Finder, Dock and About visual check; re-verify after re-signing (#12, #22).
