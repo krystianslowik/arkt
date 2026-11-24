@@ -73,10 +73,20 @@ wordmark 180 x 76) and stay for the existing graphics. A monochrome silhouette i
 ## App icon
 
 The app uses mustard on white. `app/ArktShell/App/Assets.xcassets/AppIcon.appiconset` holds the ten macOS sizes
-(16 to 512 pt, 1x and 2x), taken from the kit's `mustard-on-white.icns`, which was rendered from
-`vector/macOS/mustard-on-white.svg`. To change the finish or refresh the icon, render the new master to an `.icns`,
-then run `iconutil -c iconset <file>.icns -o <dir>.iconset` and copy its PNGs over the ones in the appiconset (the
-file names match `Contents.json`).
+(16 to 512 pt, 1x and 2x), rendered from `vector/macOS/mustard-on-white.svg`. The small sizes are Lanczos reductions
+of the 1024 px render; there is no separately drawn small-size variant yet. To regenerate them (or switch the finish),
+run this from the repository root in zsh, with `rsvg-convert` (librsvg) and `magick` (ImageMagick) installed:
+
+    S=design/brand/vector/macOS/mustard-on-white.svg
+    I=app/ArktShell/App/Assets.xcassets/AppIcon.appiconset
+    T=$(mktemp -d) && rsvg-convert -w 1024 -h 1024 $S -o $T/master.png
+    for pt in 16 32 128 256 512; do
+      magick $T/master.png -filter Lanczos -resize ${pt}x${pt} -strip $I/icon_${pt}x${pt}.png
+      magick $T/master.png -filter Lanczos -resize $((pt*2))x$((pt*2)) -strip $I/icon_${pt}x${pt}@2x.png
+    done
+    rm -rf $T
+
+The file names match `Contents.json`, so it needs no edit.
 
 ## License
 

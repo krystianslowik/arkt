@@ -1,6 +1,6 @@
 # Arkt macOS vector kit
 
-Use the SVG in macOS/ for an app-icon canvas. Each master is 1024 × 1024, with an approximately 824 px tile and room for the outer shadow. The matching .icns includes ten standard and Retina representations. Mustard on white and mustard on graphite correspond to the supplied light and dark examples.
+Use the SVG in macOS/ for an app-icon canvas. Each master is 1024 × 1024, with an approximately 824 px tile and room for the outer shadow. The kit also shipped a matching .icns per finish; it is not checked in, because the app icon is rendered from the SVG (see "App icon" in ../README.md). Mustard on white and mustard on graphite correspond to the supplied light and dark examples.
 
 Use tile/ for a tightly cropped icon with transparent corners. Use backdrop/ for the corresponding opaque presentation crop. The wordmarks in wordmarks/ use separate outlined letters at the supplied 180 × 76 proportions.
 
