@@ -8753,8 +8753,8 @@ The self-test's `quit` command calls `ChromeDevToolsManagerDelegate::AllowBrowse
 
 | Runs | Build | Result |
 |---|---|---|
-| port, before | `main` | still running 16 s after `quit` (`app terminating`, `engineWillTerminate`, `keep-alive released (embedder flushed)` logged); stopped by PID |
-| no port, before | `main` + the temporary log | exited, status 0 |
+| port, before | without the fix | still running 16 s after `quit` (`app terminating`, `engineWillTerminate`, `keep-alive released (embedder flushed)` logged); stopped by PID |
+| no port, before | without the fix, with the temporary log | exited, status 0 |
 | port 1-7 | fix | 7 of 7 exited with status 0, gone at the first check after the `quit` line (polled every 0.25 to 0.5 s) |
 | no port 1-5 | fix | 5 of 5 exited with status 0 |
 | break | the call commented out | port: still running 10 s after `quit`, stopped by PID; no port: exited, status 0 |
