@@ -1,0 +1,14 @@
+/* 2 Inline: the sidebar address pill grows into the panel. Same left edge, same top edge, no scrim. */
+.bar { position: absolute; left: 10px; top: 46px; width: 470px; border-radius: 12px; overflow: hidden;
+  background: var(--bar); -webkit-backdrop-filter: blur(40px) saturate(1.6); backdrop-filter: blur(40px) saturate(1.6);
+  box-shadow: inset 0 0 0 1px var(--bar-edge), var(--shadow); transform-origin: 0 0; }
+.field { height: 34px; display: flex; align-items: center; gap: 7px; padding: 0 11px; font-size: 13px; color: var(--strong); }
+.field .ico { width: 13px; height: 13px; color: var(--ink-2); }
+.ph { color: var(--ink-3); margin-left: 3px; }
+.list { border-top: 1px solid var(--hair); padding: 5px; position: relative; max-height: 320px; overflow: hidden; }
+.row { height: 36px; border-radius: 7px; display: flex; align-items: center; gap: 10px; padding: 0 9px; }
+.row .t { flex: 0 1 auto; min-width: 110px; font-size: 13px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .t b { font-weight: 600; color: var(--strong); }
+.row .u { flex: 0 100 auto; min-width: 0; font-size: 12px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .r { margin-left: auto; flex: none; padding-left: 6px; font-size: 11.5px; color: var(--ink-3); display: flex; align-items: center; }
+.row.sel { background: var(--sel); } .row.sel .r { color: var(--ink-2); }
