@@ -1,0 +1,13 @@
+<!doctype html><meta charset="utf-8"><title>Arkt install DMG window mock, direction a</title>
+<link rel="stylesheet" href="../shared/mock.css">
+<!-- #light (default) or #dark switches the Finder appearance. Icon centers are in points from the content top-left. -->
+<body>
+<div class="window"><div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="title">Arkt</div></div>
+<div class="content">
+<iframe src="background.html" title="background"></iframe>
+<div class="icon" style="left:126px;top:150px"><img src="../../../brand/vector/macOS/mustard-on-white.svg" alt="Arkt"></div>
+<div class="icon" style="left:406px;top:150px"><img src="../shared/applications.svg" alt="Applications"></div>
+<div class="label" style="left:130px;top:282px">Arkt</div>
+<div class="label" style="left:410px;top:282px">Applications</div>
+</div></div>
+<script>document.documentElement.dataset.mode = location.hash === "#dark" ? "dark" : "light";</script>
