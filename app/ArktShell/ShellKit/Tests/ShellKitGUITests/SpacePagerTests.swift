@@ -435,15 +435,18 @@ final class SpacePagerTests: XCTestCase {
 
   /// Timestamp of the last scripted trackpad event, in nanoseconds of system uptime.
   private var trackpadClock = DispatchTime.now().uptimeNanoseconds
+  /// The pager's settle clock in these tests (`nowForTesting`): settle frames are presented at chosen times on it.
+  private var settleClock: CFTimeInterval = 1_000
 
   /// A trackpad scroll event at `point` in the pager, with CGEvent's phase values (1 began, 2 changed, 4 ended,
   /// 8 cancelled, 128 may begin; momentum 1 began, 2 changed, 3 ended). Built from a CGEvent it has no window; its
   /// location is placed so that its window location is `point`'s, so `NSWindow.sendEvent` hit-tests it there. Events
   /// are 1/120 s apart, as a trackpad sends them, so release velocities are a real finger's.
   private func trackpadEvent(_ phase: Int64, momentum: Int64 = 0, dx: Int32 = 0, dy: Int32 = 0,
-                             at point: NSPoint) throws -> NSEvent {
+                             at point: NSPoint? = nil) throws -> NSEvent {
     let pager = controller.pager
     let window = try XCTUnwrap(pager.window)
+    let point = point ?? stillPointer
     let cg = try XCTUnwrap(CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2,
                                    wheel1: dy, wheel2: dx, wheel3: 0))
     cg.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
@@ -460,6 +463,70 @@ final class SpacePagerTests: XCTestCase {
     return event
   }
 
+  /// Where the fingers' pointer rests in these tests: over the outlines, left of the middle.
+  private var stillPointer: NSPoint {
+    NSPoint(x: controller.pager.bounds.midX, y: controller.pager.bounds.height * 0.4)
+  }
+
+  /// Settles are driven by hand on `settleClock`: no display link, no wall time.
+  private func driveSettlesByHand() {
+    let pager = controller.pager
+    pager.reduceMotionForTesting = false
+    pager.driver.drivesDisplayLink = false
+    pager.nowForTesting = { [unowned self] in self.settleClock }
+  }
+
+  /// Presents `count` settle frames, 1/120 s apart on `settleClock`, while a settle runs.
+  private func presentFrames(_ count: Int) {
+    for _ in 0..<count where controller.pager.isSettling {
+      settleClock += 1.0 / 120
+      controller.pager.driver.tick(at: settleClock)
+    }
+  }
+
+  /// Presents settle frames until the settle ends (at most 3 s of them).
+  private func settleByHand() {
+    presentFrames(360)
+    XCTAssertFalse(controller.pager.isSettling, "the settle ended within 3 s of frames")
+  }
+
+  private func outline(_ index: Int) throws -> SidebarScrollView {
+    try XCTUnwrap(controller.pager.pages[index] as? SpacePageView).scrollView
+  }
+
+  /// The scroll events each outline's `NSScrollView` handles itself (what scrolls it), recorded at AppKit's boundary
+  /// while `body` runs. Not the clip view's origin: `NSScrollView` applies a trackpad scroll on a later display pass
+  /// and starts its own fling, and it does not scroll for a synthetic momentum event at all, so the origin can only
+  /// be read against wall time. Recording the calls is exact and does not depend on this branch's code.
+  private func recordingOutlineScrolls(_ body: (OutlineScrollLog) throws -> Void) throws {
+    let selector = #selector(NSResponder.scrollWheel(with:))
+    let method = try XCTUnwrap(class_getInstanceMethod(NSScrollView.self, selector))
+    XCTAssertNotEqual(method, class_getInstanceMethod(NSResponder.self, selector), "NSScrollView's own method")
+    typealias ScrollWheel = @convention(c) (AnyObject, Selector, NSEvent) -> Void
+    let originalIMP = method_getImplementation(method)
+    let original = unsafeBitCast(originalIMP, to: ScrollWheel.self)
+    let log = OutlineScrollLog()
+    let recording: @convention(block) (AnyObject, NSEvent) -> Void = { view, event in
+      MainActor.assumeIsolated { log.record(view, event) }
+      original(view, selector, event)
+    }
+    method_setImplementation(method, imp_implementationWithBlock(recording))
+    defer { method_setImplementation(method, originalIMP) }
+    try body(log)
+  }
+
+  /// A vertical scroll on `view`: began, three moves of `dy`, ended.
+  private func scrollVertically(_ view: NSView, dy: Int32 = -20) throws {
+    view.scrollWheel(with: try trackpadEvent(1))
+    for _ in 0..<3 { view.scrollWheel(with: try trackpadEvent(2, dy: dy)) }
+    view.scrollWheel(with: try trackpadEvent(4))
+  }
+
+  /// Momentum events (began, two changes, ended) carrying `dx` and `dy`, sent to `view`.
+  private func momentum(to view: NSView, dx: Int32 = 0, dy: Int32) throws {
+    for phase: Int64 in [1, 2, 2, 3] { view.scrollWheel(with: try trackpadEvent(0, momentum: phase, dx: dx, dy: dy)) }
+  }
+
   /// Counts the scroll events each page's scroll view receives.
   private func countScrollEvents() -> () -> [Int] {
     var counts = Array(repeating: 0, count: controller.pager.pages.count)
@@ -469,16 +536,6 @@ final class SpacePagerTests: XCTestCase {
       page.scrollView.onUserScroll = { counts[i] += 1; previous?() }
     }
     return { counts }
-  }
-
-  /// Presents the running settle's frames by hand until it ends.
-  private func settleByHand(_ pager: SpacePagerView) {
-    var time = CACurrentMediaTime()
-    let deadline = time + 3
-    while pager.isSettling, time < deadline {
-      time += 1.0 / 120
-      pager.driver.tick(at: time)
-    }
   }
 
   /// Every gesture ends with the pager resting on exactly one page.
@@ -495,72 +552,156 @@ final class SpacePagerTests: XCTestCase {
 
   /// #986: AppKit sends each event of a scroll gesture to the view under the pointer, and a swipe moves the next
   /// Space's page under a still pointer. The rest of the swipe, its end included, lands on that page's scroll view.
-  /// Its outline was last scrolled vertically; the swipe must still end, and settle on one page.
+  /// Its outline was last scrolled vertically; the swipe must still end and settle on one page, and no event of the
+  /// swipe, its momentum included, may scroll that outline.
   func testASwipeThatMovesTheNextPageUnderThePointerStillSettles() throws {
     let pager = controller.pager
-    pager.reduceMotionForTesting = false
-    pager.driver.drivesDisplayLink = false
+    driveSettlesByHand()
     let window = try XCTUnwrap(pager.window)
-    let next = try XCTUnwrap(pager.pages[1] as? SpacePageView)
-    let point = NSPoint(x: pager.bounds.midX, y: pager.bounds.height * 0.4)
-    // The user scrolled the next Space's outline before (a vertical gesture on its scroll view).
-    next.scrollView.scrollWheel(with: try trackpadEvent(1, at: point))
-    next.scrollView.scrollWheel(with: try trackpadEvent(2, dy: -20, at: point))
-    next.scrollView.scrollWheel(with: try trackpadEvent(4, at: point))
+    try scrollVertically(try outline(1))                   // the user scrolled the next Space's outline before
     let received = countScrollEvents()
 
-    window.sendEvent(try trackpadEvent(1, at: point))
-    var steps = 0
-    while pager.position < 0.75, steps < 60 {
-      window.sendEvent(try trackpadEvent(2, dx: 12, at: point))
-      steps += 1
+    try recordingOutlineScrolls { log in
+      window.sendEvent(try trackpadEvent(1))
+      var steps = 0
+      while pager.position < 0.75, steps < 60 {
+        window.sendEvent(try trackpadEvent(2, dx: 12))
+        steps += 1
+      }
+      window.sendEvent(try trackpadEvent(4))
+      try momentum(to: try outline(1), dx: 6, dy: -4)    // AppKit's window dispatch drops synthetic momentum
+      XCTAssertGreaterThan(received()[1], 0, "the swipe's later events land on the next page's scroll view")
+      XCTAssertEqual(log.events(of: try outline(1)), [], "no event of the swipe scrolls the outline it lands on")
+      XCTAssertEqual(log.events(of: try outline(0)), [], "nor the outline it began on")
     }
-    window.sendEvent(try trackpadEvent(4, at: point))
-    for momentum: Int64 in [1, 2, 2, 3] { window.sendEvent(try trackpadEvent(0, momentum: momentum, dx: 6, at: point)) }
-    XCTAssertGreaterThan(received()[1], 0, "the swipe's later events land on the next page's scroll view")
     XCTAssertFalse(pager.isTracking, "the swipe ended")
-    settleByHand(pager)
+    settleByHand()
     assertRestsOnOnePage(1, "after the swipe")
     pager.stopInteraction()
+  }
+
+  /// A vertical scroll's momentum scrolls the outline it began on; a swipe's momentum, wherever it lands, scrolls no
+  /// outline (the spring owns the deceleration). Momentum is sent to the scroll views directly: AppKit's window
+  /// dispatch does not deliver a synthetic momentum event to a view.
+  func testMomentumScrollsTheOutlineOnlyAfterAVerticalScroll() throws {
+    let pager = controller.pager
+    driveSettlesByHand()
+    let first = try outline(0)
+    let next = try outline(1)
+    try recordingOutlineScrolls { log in
+      try scrollVertically(first)
+      try momentum(to: first, dy: -20)
+      XCTAssertEqual(log.events(of: first), ["began", "changed", "changed", "changed", "ended",
+                                             "momentum began", "momentum changed", "momentum changed",
+                                             "momentum ended"], "a vertical scroll and its momentum scroll the outline")
+    }
+    try recordingOutlineScrolls { log in
+      first.scrollWheel(with: try trackpadEvent(1))
+      for _ in 0..<8 { first.scrollWheel(with: try trackpadEvent(2, dx: 24)) }
+      first.scrollWheel(with: try trackpadEvent(4))
+      XCTAssertTrue(pager.isSettling, "the swipe settles")
+      try momentum(to: first, dx: 12, dy: -6)
+      try momentum(to: next, dx: 12, dy: -6)
+      XCTAssertEqual(log.events(of: first), [], "a swipe and its momentum do not scroll the outline it began on")
+      XCTAssertEqual(log.events(of: next), [], "nor the next page's outline its momentum lands on")
+    }
+    settleByHand()
+    assertRestsOnOnePage(1, "after the swipe")
+  }
+
+  /// A touch freezes a settle; the gesture turns out vertical and the settle resumes, which moves the strip under
+  /// the fingers, so the rest of the scroll lands on the next page's scroll view. The scroll, its end and its momentum
+  /// stay with the outline it began on.
+  func testAVerticalScrollThatResumesASettleKeepsScrollingItsOutline() throws {
+    let pager = controller.pager
+    driveSettlesByHand()
+    let first = try outline(0)
+    let next = try outline(1)
+    pager.go(to: 1)
+    presentFrames(3)
+    XCTAssertTrue(pager.isSettling, "the settle runs when the fingers touch down")
+    try recordingOutlineScrolls { log in
+      first.scrollWheel(with: try trackpadEvent(128))
+      XCTAssertEqual(pager.frozenTarget, 1)
+      first.scrollWheel(with: try trackpadEvent(1))
+      first.scrollWheel(with: try trackpadEvent(2, dy: -20))
+      XCTAssertTrue(pager.isSettling, "a vertical gesture lets the frozen settle finish")
+      settleByHand()
+      for _ in 0..<3 { next.scrollWheel(with: try trackpadEvent(2, dy: -20)) }   // now under the pointer
+      next.scrollWheel(with: try trackpadEvent(4))
+      try momentum(to: next, dy: -20)
+      XCTAssertEqual(log.events(of: first), ["may begin", "began", "changed", "changed", "changed", "changed", "ended",
+                                             "momentum began", "momentum changed", "momentum changed",
+                                             "momentum ended"], "the scroll, its end and its momentum stay with it")
+      XCTAssertEqual(log.events(of: next), [], "the outline the later events landed on does not scroll")
+    }
+    assertRestsOnOnePage(1, "after the settle")
+  }
+
+  /// A swipe whose end never arrived (the app lost it): the next touch settles it on the nearest page, whatever the
+  /// new gesture turns out to be.
+  func testANewGestureAfterASwipeThatLostItsEndSettlesOnOnePage() throws {
+    let pager = controller.pager
+    driveSettlesByHand()
+    let first = try outline(0)
+    first.scrollWheel(with: try trackpadEvent(1))
+    while pager.position < 0.7 { first.scrollWheel(with: try trackpadEvent(2, dx: 12)) }
+    XCTAssertTrue(pager.isTracking)
+    // No ended event. The next gesture is a vertical scroll.
+    try scrollVertically(first)
+    XCTAssertFalse(pager.isTracking, "the new gesture ended the stale swipe")
+    settleByHand()
+    assertRestsOnOnePage(1, "after the vertical scroll")
+  }
+
+  /// Focus leaving mid-swipe can swallow the gesture's end: the window resigning key, or the app deactivating,
+  /// settles the swipe on the nearest page.
+  func testLosingFocusMidSwipeSettlesOnOnePage() throws {
+    let pager = controller.pager
+    let window = try XCTUnwrap(pager.window)
+    driveSettlesByHand()
+    for (name, object, target) in [(NSWindow.didResignKeyNotification, window as AnyObject?, 1),
+                                   (NSApplication.didResignActiveNotification, NSApp as AnyObject?, 0)] {
+      pager.beginTracking()
+      pager.track(delta: target == 1 ? -0.7 * pager.bounds.width : 0.7 * pager.bounds.width, at: 0.01)
+      NotificationCenter.default.post(name: name, object: object)
+      XCTAssertFalse(pager.isTracking, "\(name.rawValue) ended the swipe")
+      settleByHand()
+      assertRestsOnOnePage(target, name.rawValue)
+    }
   }
 
   /// #986: quick swipes back and forth under a still pointer, a fast flick with momentum, a second swipe that catches
   /// the settle, and a touch that lifts without moving. After each one the pager rests on one page.
   func testQuickSwipesUnderAStillPointerEachEndOnOnePage() throws {
     let pager = controller.pager
-    pager.reduceMotionForTesting = false
-    pager.driver.drivesDisplayLink = false
+    driveSettlesByHand()
     let window = try XCTUnwrap(pager.window)
-    let point = NSPoint(x: pager.bounds.midX, y: pager.bounds.height * 0.4)
-    for case let page as SpacePageView in pager.pages {   // every outline was scrolled before
-      page.scrollView.scrollWheel(with: try trackpadEvent(1, at: point))
-      page.scrollView.scrollWheel(with: try trackpadEvent(2, dy: -20, at: point))
-      page.scrollView.scrollWheel(with: try trackpadEvent(4, at: point))
-    }
+    for index in pager.pages.indices { try scrollVertically(try outline(index)) }   // every outline scrolled before
     func flick(_ dx: Int32, frames: Int) throws {
-      window.sendEvent(try trackpadEvent(1, at: point))
-      for _ in 0..<frames { window.sendEvent(try trackpadEvent(2, dx: dx, at: point)) }
-      window.sendEvent(try trackpadEvent(4, at: point))
-      for momentum: Int64 in [1, 2, 3] { window.sendEvent(try trackpadEvent(0, momentum: momentum, dx: dx, at: point)) }
-    }
-    func presentFrames(_ count: Int) {
-      var time = CACurrentMediaTime()
-      for _ in 0..<count where pager.isSettling { time += 1.0 / 120; pager.driver.tick(at: time) }
+      window.sendEvent(try trackpadEvent(1))
+      for _ in 0..<frames { window.sendEvent(try trackpadEvent(2, dx: dx)) }
+      window.sendEvent(try trackpadEvent(4))
+      // AppKit's window dispatch drops synthetic momentum events, so they go to the scroll view under the pointer.
+      let page = pager.pages[min(max(Int(pager.position.rounded()), 0), pager.pages.count - 1)]
+      if let page = page as? SpacePageView { try momentum(to: page.scrollView, dx: dx, dy: 0) }
     }
     let width = Int32(pager.bounds.width)
     try flick(width / 8, frames: 7)                        // to page 1, past half way
-    settleByHand(pager)
+    settleByHand()
     assertRestsOnOnePage(1, "flick to page 1")
     try flick(width / 8, frames: 7)                        // to page 2 ...
     presentFrames(3)
+    XCTAssertTrue(pager.isSettling, "the settle to page 2 runs when the next swipe catches it")
     try flick(-width / 8, frames: 7)                       // ... caught mid-settle and swiped back toward page 1
-    settleByHand(pager)
+    settleByHand()
     assertRestsOnOnePage(1, "swipe that caught the settle")
     try flick(-width / 8, frames: 7)                       // to page 0 ...
     presentFrames(3)
-    window.sendEvent(try trackpadEvent(128, at: point))    // ... a touch mid-settle that lifts without moving
-    window.sendEvent(try trackpadEvent(8, at: point))
-    settleByHand(pager)
+    XCTAssertTrue(pager.isSettling, "the settle to page 0 runs when the fingers touch down")
+    window.sendEvent(try trackpadEvent(128))               // ... a touch mid-settle that lifts without moving
+    window.sendEvent(try trackpadEvent(8))
+    settleByHand()
     assertRestsOnOnePage(0, "touch that lifted")
     pager.stopInteraction()
   }
@@ -571,5 +712,34 @@ final class SpacePagerTests: XCTestCase {
     if let field = view as? NSTextField { titles.append(field.stringValue) }
     for sub in view.subviews { titles += collectVisibleTitles(sub) }
     return titles
+  }
+}
+
+/// Scroll events `NSScrollView` handled itself, per scroll view, as phase names in order (#986 tests).
+@MainActor
+final class OutlineScrollLog {
+  private var entries: [(view: ObjectIdentifier, event: String)] = []
+
+  func record(_ view: AnyObject, _ event: NSEvent) {
+    entries.append((ObjectIdentifier(view), Self.name(of: event)))
+  }
+
+  func events(of view: NSScrollView) -> [String] {
+    entries.filter { $0.view == ObjectIdentifier(view) }.map(\.event)
+  }
+
+  private static func name(of event: NSEvent) -> String {
+    func phase(_ p: NSEvent.Phase) -> String {
+      switch p {
+      case .mayBegin: "may begin"
+      case .began: "began"
+      case .changed: "changed"
+      case .stationary: "stationary"
+      case .ended: "ended"
+      case .cancelled: "cancelled"
+      default: "none"
+      }
+    }
+    return event.momentumPhase != [] ? "momentum \(phase(event.momentumPhase))" : phase(event.phase)
   }
 }

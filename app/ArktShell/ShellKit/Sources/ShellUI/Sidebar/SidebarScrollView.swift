@@ -2,7 +2,7 @@ import AppKit
 
 /// Vertical-only scroller for one Space's outline. No background; the theme shows through.
 /// Trackpad gestures go through the Space pager, which locks each gesture to one axis for every page (BH-035,
-/// GS-001, #986): horizontal ones page the Spaces, vertical ones come back here and scroll the outline.
+/// GS-001, #986): horizontal ones page the Spaces, vertical ones scroll the outline they began on.
 @MainActor
 public final class SidebarScrollView: NSScrollView {
   /// Decides each trackpad gesture's axis and pages horizontal ones (the `SpacePagerView`).
@@ -36,6 +36,9 @@ public final class SidebarScrollView: NSScrollView {
       super.scrollWheel(with: event)
       return
     }
-    for e in pager.routeGestureEvent(event) { super.scrollWheel(with: e) }
+    pager.routeGestureEvent(event, from: self)
   }
+
+  /// Scrolls the outline with an event of a vertical gesture that began here (the pager routes it, #986).
+  func scrollOutline(with event: NSEvent) { super.scrollWheel(with: event) }
 }
