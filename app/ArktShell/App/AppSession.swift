@@ -505,6 +505,7 @@ final class AppSession {
   private func settingsServices() -> SettingsServices {
     var services = SettingsServices()
     services.shortcutEditor = shortcutEditor
+    services.extensions = engine as? any EngineExtensions                               // #597
     services.openLibrary = { [weak self] in self?.showLibrary() }                     // #132
     services.isDefaultBrowser = { DefaultBrowser.isDefault() }
     services.makeDefaultBrowser = { await DefaultBrowser.makeDefault() }

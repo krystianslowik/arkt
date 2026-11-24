@@ -281,6 +281,20 @@ struct InMemoryEngineExtensionTests {
     return engine
   }
 
+  /// The recorder suspends extension shortcuts while it listens (#597; engine side #954). The default is a no-op, so an
+  /// engine without the call keeps working; InMemoryEngine records the flag for the shell's tests.
+  @Test func shortcutHandlingSuspensionIsRecordedAndDefaultsToANoOp() {
+    let plain = ActionsOnlyEngine()
+    plain.setExtensionShortcutHandlingSuspended(true)
+    let engine = InMemoryEngine()
+    #expect(engine.isExtensionShortcutHandlingSuspended == false)
+    engine.setExtensionShortcutHandlingSuspended(true)
+    #expect(engine.isExtensionShortcutHandlingSuspended)
+    let reached: any EngineExtensions = engine
+    reached.setExtensionShortcutHandlingSuspended(false)
+    #expect(engine.isExtensionShortcutHandlingSuspended == false, "the call reaches the engine through the protocol")
+  }
+
   @Test func commandsDefaultToTheAppScope() {
     let engine = commandsEngine()
     #expect(engine.extensionCommands.map(\.scope) == [.inApp, .inApp])

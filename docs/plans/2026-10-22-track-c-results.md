@@ -3567,3 +3567,31 @@ Section stay as built; F12 stays reserved; the recorder rules and the Reset All 
   window is not key (macOS 27 cooperative activation, local only); its assertions are unchanged when it is (#953).
 - Deleted: `docs/shortcut-wiring-test-notes.md` (stale) and `ShellKit/Probes/ProtectedShortcutProbe.swift` (never
   compiled; `ShortcutMenuBindingTests` covers its checks).
+
+### Extension Shortcuts in Settings, Shortcuts (#597)
+
+- Settings > Shortcuts gains "Extension Shortcuts" after the app sections: first "Cycle through pinned extensions"
+  (Cmd-E, read-only until #599), then one group per extension; each command with its title and description line
+  ("Open <extension>" over "The main action" for the action command; `chrome.commands` gives other commands one
+  string), its shortcut as keycaps or Set Shortcut when unset, and an In Arkt / All Apps pop-up (maintainer review
+  on #957: match the design). Shown only when the engine runs extensions
+  (`SettingsServices.extensions`). `ExtensionShortcutsModel` holds the logic; the engine holds the commands.
+- The recorder is #828's: the window key route, `ShortcutEditorModel.rejection` plus the keys `chrome.commands` can
+  name and no Option with Cmd or Ctrl, Esc cancels, Delete clears, Tab leaves. Its conflict notice is the row under
+  the command (`shortcuts-conflict`): Keep Existing is the mustard pill and the default (#590), Use a quiet link. The
+  app recorder keeps #828's panel. Use on an app shortcut clears it first and restores it if the engine refuses.
+- Conflict owners both ways: an extension command conflicts with the editor's shortcuts, the main-menu items and keys
+  Arkt keeps (`ShortcutCatalog.keptOwners`, plus Ctrl-Tab and Ctrl-Shift-Tab from `ReservedKeys`) and the other
+  extension commands; `ShortcutEditorModel.extensionOwners` makes extension commands owners for app shortcuts (Use
+  there changes nothing when the engine keeps the extension's shortcut). Shift with a digit, comma or period matches
+  both the unshifted key and the character the current layout types with Shift (`UCKeyTranslate`; "/" for Shift-7 on
+  German). Keys go by what the layout prints (Dvorak's "," is Comma, its "'" is no extension key), the digit row by
+  key code. A pane rebuild reads the commands and the owners once (`OwnerIndex`).
+- A scope change ends a recording in progress; command changes that arrive while a recorder listens show when it
+  stops.
+- `EngineExtensions.setExtensionShortcutHandlingSuspended(_:)` (no-op default; InMemoryEngine records it; ChromiumEngine
+  in #954). Settings derives it from both recorders and sends it only on a change.
+- The scope chosen for an unset command stays in the row until a shortcut is set (the facade ignores scope when
+  clearing). Engine answers: `.rejected` and `.unknownCommand` show a notice line, a late `.conflict` opens the notice.
+- Follow-up: "Not set: Arkt uses this shortcut" with the extension's suggested key needs `suggestedShortcut` on
+  `ArktExtensionCommand` and `ExtensionCommand` (#922 review); not in this change.
