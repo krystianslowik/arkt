@@ -978,6 +978,8 @@ final class DownloadRecord {
   var isEnding = false
   /// Removes the partial file and marks the item cancelled; runs once, when WebKit has finished the cancel.
   var finishCancel: (@MainActor () -> Void)?
+  /// Holds a cancel back until WebKit has created the target file; ended when it does, or when the download ends.
+  var fileWatch: DispatchSourceFileSystemObject?
 }
 
 /// The WKDownloadDelegate of one download, forwarding to the engine.
@@ -1165,6 +1167,8 @@ extension FakeEngine {
   func downloadFailed(_ id: DownloadID, error: any Error, resumeData: Data?) {
     guard let record = downloadRecords[id], let item = download(id), item.state.isActive, !record.isEnding else {
       downloadRecords[id]?.download = nil
+      downloadRecords[id]?.fileWatch?.cancel()
+      downloadRecords[id]?.fileWatch = nil
       downloadRecords[id]?.finishCancel?()          // the cancel failed the download: it is over either way
       return
     }
@@ -1212,12 +1216,45 @@ extension FakeEngine {
     }
     guard let download = record.download else { record.finishCancel?(); return }
     record.download = nil
-    download.cancel { _ in
-      MainActor.assumeIsolated {
-        withExtendedLifetime(download) {}
-        record.finishCancel?()
+    // WebKit creates the target file some time after the destination is decided, and a cancel that overtakes it lets
+    // the file appear after the cancel is done and after it was removed. So the cancel waits for the file.
+    let sendCancel: @MainActor () -> Void = {
+      record.fileWatch = nil
+      download.cancel { _ in
+        MainActor.assumeIsolated {
+          withExtendedLifetime(download) {}
+          record.finishCancel?()
+        }
       }
     }
+    guard let target = item.targetPath else { sendCancel(); return }
+    record.fileWatch = Self.performOnceFileExists(at: target, sendCancel)
+  }
+
+  /// Runs `action` once the file exists: at once when it does, else when its folder next changes and it is there.
+  /// Returns the watch to end early, or nil when the action has run.
+  private static func performOnceFileExists(
+    at file: URL, _ action: @escaping @MainActor () -> Void
+  ) -> DispatchSourceFileSystemObject? {
+    let exists = { FileManager.default.fileExists(atPath: file.path()) }
+    let descriptor = open(file.deletingLastPathComponent().path(), O_EVTONLY)
+    guard descriptor >= 0, !exists() else {
+      if descriptor >= 0 { close(descriptor) }
+      MainActor.assumeIsolated { action() }
+      return nil
+    }
+    let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: descriptor, eventMask: .write, queue: .main)
+    source.setEventHandler { [weak source] in
+      MainActor.assumeIsolated {
+        guard exists() else { return }
+        source?.cancel()
+        action()
+      }
+    }
+    source.setCancelHandler { close(descriptor) }
+    source.resume()
+    if exists() { source.cancel(); MainActor.assumeIsolated { action() }; return nil }   // it appeared while installing
+    return source
   }
 
   private func resumeDownload(_ id: DownloadID) {
@@ -1239,6 +1276,7 @@ extension FakeEngine {
   private func removeDownloadItem(_ id: DownloadID) {
     guard downloadItems.contains(where: { $0.id == id }) else { return }
     downloadItems.removeAll { $0.id == id }
+    downloadRecords[id]?.fileWatch?.cancel()
     downloadRecords[id] = nil
     hub.emit(DownloadEvent.downloadRemoved(id))
   }
