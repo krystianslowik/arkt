@@ -8832,8 +8832,9 @@ second instance was avoided). Handoff and other opens that come without an Apple
   Full `ShellKitGUITests`: 2418 tests, 55 skipped, 4 failures, in `FakeEngineContractTests`,
   `FolderMotionBudgetTests` and `SidebarFaviconDecodeTests`, none touched here. The machine was busy with engine
   builds at the time, and those three classes pass on their own (59 tests, 0 failures).
-- Deliberate break (shell): before the shell change, the new pure test failed with `Expectation failed:
-  origin == .dockReopen` and `takesSession(origin, ownerIsAlive: false)`.
+- Deliberate break (shell): the reuse condition put back to `request.kind == .reopen` failed the new GUI test
+  (`XCTAssertEqual failed: ("2") is not equal to ("1")`, and the shown window got no engine window); restored. Before
+  the shell change, the new pure test failed with `Expectation failed: origin == .dockReopen`.
 
 ### Patch budget
 
