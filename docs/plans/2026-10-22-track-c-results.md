@@ -3658,4 +3658,17 @@ Section stay as built; F12 stays reserved; the recorder rules and the Reset All 
   unpacked extensions are on asks first ("Turn off developer mode?", Turn Off / Cancel), because Chromium turns them
   off. `loadUnpackedExtension(at:)` takes an absolute file URL only. The doc of `.installedExtensionsChanged` now
   says one event may carry several changes and a late icon comes as its own event.
+- #969 review and the maintainer's decisions (2026-11-24):
+  - The caption is the design's site-access line, built from `InstalledExtensionInfo.siteAccess`
+    (`InstalledExtensionSiteAccess`: `allSites`, `someSites(count:)`, `onClick`, `noHostAccess`). The short
+    description shows only without site access.
+  - The new-permissions sheet's Review Permissions opens `chrome://extensions/?id=<id>` in a browser window
+    (`SettingsServices.openInBrowser`; a new window when none is open).
+  - The developer-mode-off copy says the extensions come back on, and gives no count.
+  - `canDisable` now means the switch is actionable (false only where the engine says NotAllowed). InMemoryEngine's
+    developer mode matches Chromium: off locks the unpacked extensions it turned off, and on turns them back on with
+    one event. Such a row reads "Turned off while developer mode is off.".
+  - InMemoryEngine's `setExtensionEnabled` removes or restores the extension's actions.
+  - Rows update in place when only their state changed; icons are decoded once per extension and PNG.
+  - A load that finishes after Settings closed is ignored.
 - Not in this change: the per-extension incognito allowance (after #558).
