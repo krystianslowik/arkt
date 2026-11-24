@@ -8548,3 +8548,18 @@ Swift for this round: #969's final `EngineExtensions.swift` taken verbatim (`Ins
 identical. `nice -n 20 swift test -j 2 --skip ShellKitGUITests`: every bundle passes, 1629, 44, 60, 29, 290, 49,
 362, 243, 42 (`ChromiumEngineKitTests` 228 + 15, `ArktEngineABITests` 40 + 2; 17 `@Test` added, none removed).
 Lints: 13 + 60 pass.
+
+### #964: re-review fixes, after #969 merged
+
+- `origin/main` (with #969, `57e98d36`) merged in once.
+- Site access with hosts not withheld counts the extension's active hosts, not the granted-permissions prefs (those
+  only grow, so after an update that drops hosts they counted stale ones). Docs now say the summary is based on
+  chrome://extensions' host access with two differences: None for an extension that asks for no hosts, and, when not
+  withheld, SomeSites or AllSites by the hosts it has now (Chrome always says "On all sites" then).
+- Wrapped the long `NeedsPermissionApproval` comment in the facade header (copies `cmp` identical) and the long
+  `siteAccess(_:count:)` signature.
+- Engine: 82 s, `FAILED:` 0; `gn check`: OK. Run 9 (fresh profile, deleted after): a Load-unpacked probe asking for
+  three hosts listed `sites=2/3`; its folder updated to 1.1 with one host dropped and loaded again: `sites=2/2`; the
+  site probe stays `sites=3/0`; `FATAL`, `Check failed`, `DCHECK`: 0.
+- `nice -n 20 swift test -j 2 --skip ShellKitGUITests` on the merged tree: every bundle passes, 1634, 44, 60, 29,
+  312, 49, 362, 243, 42. Lints: 13 + 60 pass.

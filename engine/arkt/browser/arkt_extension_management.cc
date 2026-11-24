@@ -107,9 +107,12 @@ int DistinctHostCount(const extensions::URLPatternSet& hosts) {
   return static_cast<int>(distinct.size());
 }
 
-// chrome://extensions' host access (ExtensionInfoGenerator's
-// CreateRuntimeHostPermissionsInfo), with kNone for an extension that asks
-// for no host permissions.
+// Based on chrome://extensions' host access (ExtensionInfoGenerator's
+// CreateRuntimeHostPermissionsInfo), with two differences: kNone for an
+// extension that asks for no host permissions, and, when hosts are not
+// withheld, all sites split from N sites by the active hosts (Chrome always
+// says "On all sites" then). The active hosts, not the granted prefs: those
+// only grow, so after an update that drops hosts they would count stale ones.
 void ReadSiteAccess(Profile* profile,
                     const extensions::Extension& extension,
                     InstalledExtensionInfo* info) {
@@ -126,11 +129,10 @@ void ReadSiteAccess(Profile* profile,
   // can affect (not a policy-installed one); the others have what they asked.
   const bool withheld = manager->CanAffectExtension(extension) &&
                         manager->HasWithheldHostPermissions(extension);
-  std::unique_ptr<const extensions::PermissionSet> granted =
-      withheld ? prefs->GetRuntimeGrantedPermissions(extension.id())
-               : prefs->GetGrantedPermissions(extension.id());
+  std::unique_ptr<const extensions::PermissionSet> runtime_granted =
+      withheld ? prefs->GetRuntimeGrantedPermissions(extension.id()) : nullptr;
   const extensions::PermissionSet& set =
-      granted ? *granted : data->active_permissions();
+      runtime_granted ? *runtime_granted : data->active_permissions();
   if (set.effective_hosts().is_empty()) {
     info->site_access = withheld ? ExtensionSiteAccessSummary::kOnClick
                                  : ExtensionSiteAccessSummary::kNone;

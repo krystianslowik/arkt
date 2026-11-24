@@ -47,8 +47,9 @@ enum class InstalledExtensionSource {
 };
 
 // What an extension may read and change on sites, independent of any tab
-// (#964, Settings > Extensions): chrome://extensions' host access. The values
-// are the facade's ArktExtensionSiteAccessSummary.
+// (#964, Settings > Extensions), based on chrome://extensions' host access
+// (see ReadSiteAccess for the two differences). The values are the facade's
+// ArktExtensionSiteAccessSummary.
 enum class ExtensionSiteAccessSummary {
   // It asks for no host permissions.
   kNone = 0,

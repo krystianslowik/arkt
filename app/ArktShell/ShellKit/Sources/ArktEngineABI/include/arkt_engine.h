@@ -967,7 +967,10 @@ typedef NS_ENUM(NSInteger, ArktExtensionSource) {
 };
 
 // What an installed extension may read and change on sites, independent of
-// any tab (#964): chrome://extensions' host access for it.
+// any tab (#964). Based on chrome://extensions' host access, with two
+// differences: None for an extension that asks for no hosts, and, when its
+// hosts are not withheld, SomeSites or AllSites by the hosts it has now
+// (Chrome always says "On all sites" then).
 typedef NS_ENUM(NSInteger, ArktExtensionSiteAccessSummary) {
   // It asks for no host permissions.
   ArktExtensionSiteAccessSummaryNone = 0,
@@ -1031,8 +1034,9 @@ typedef NS_ENUM(NSInteger, ArktExtensionEnableResult) {
   // changed.
   ArktExtensionEnableResultNotAllowed = 2,
   // Enabling only: an update asks for more permissions, so Chromium disabled
-  // it (and no other reason refuses it). Chrome enables it after its re-enable prompt, which grants them; the
-  // engine does not grant them without one. Nothing changed.
+  // it (and no other reason refuses it). Chrome enables it after its
+  // re-enable prompt, which grants them; the engine does not grant them
+  // without one. Nothing changed.
   ArktExtensionEnableResultNeedsPermissionApproval = 3,
 };
 

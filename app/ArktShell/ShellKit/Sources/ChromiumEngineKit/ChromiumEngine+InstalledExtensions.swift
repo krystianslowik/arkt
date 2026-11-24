@@ -70,7 +70,8 @@ extension ChromiumEngine {
   }
 
   /// One to one with the facade's summary; the count belongs to SomeSites only.
-  private static func siteAccess(_ summary: ArktExtensionSiteAccessSummary, count: Int) -> InstalledExtensionSiteAccess {
+  private static func siteAccess(_ summary: ArktExtensionSiteAccessSummary,
+                                 count: Int) -> InstalledExtensionSiteAccess {
     switch summary {
     case .none: .noHostAccess
     case .onClick: .onClick
