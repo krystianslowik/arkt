@@ -41,7 +41,7 @@ macOS; no font is bundled.
 | Path | What it is |
 |---|---|
 | `background.png`, `background@2x.png` | The porcelain background, 660 x 420 and 1320 x 840 px, no icons. **This is what ships** (decision: porcelain) |
-| `screens/install-light.png`, `screens/install-dark.png` | 2x renders of the Finder window mock (732 x 520 pt canvas): both on the shipped porcelain background: `install-light.png` with light Finder (black labels), `install-dark.png` with dark Finder (white labels, the weak case) |
+| `screens/install-light.png`, `screens/install-dark.png` | 2x renders of the Finder window mock (732 x 520 pt canvas): both on the shipped porcelain background: `install-light.png` with light Finder (black labels), `install-dark.png` with dark Finder chrome and dark labels |
 | `prototype/index.html` | The background source (`#light` ships; `#dark` is an unused graphite reference); the static particle generator is `prototype/particles.js` |
 | `prototype/mock.html` | The Finder window mock with a title bar, the real app icon and a stand-in Applications icon (Finder draws the real one) |
 
@@ -49,12 +49,14 @@ Renders: headless Chromium (Playwright's `chrome-headless-shell`), offline, `--f
 `--window-size=732,520` for the mock and `660,420` for the background. The generator is seeded and static; it is a
 simplified Canvas 2D version of the onboarding field (`design/onboarding/prototype/field.js`).
 
-## Open point: label readability on the shipped porcelain background
+## Label readability (checked in a real Finder)
 
-The shipped background is porcelain. Finder draws labels in the system appearance (black in light mode, white in dark
-mode; not yet confirmed on a mounted DMG here). Black labels read well. In dark-mode Finder the white labels sit on
-porcelain and are close to invisible (`screens/install-dark.png` shows this honestly). Under each label the art has a
-calm zone: dust and wave motes thin out over about 24 pt around a 140 x 36 pt area, so nothing competes with the text.
-That helps black labels and does not help white ones; no porcelain halo can, because the problem is white on near-white.
-Real fix if it matters: a soft mid-tone glow behind the labels (about 4.5:1 for both colors), at the cost of the clean
-porcelain look. To be decided after the real-Finder check.
+The shipped background is porcelain. Finder picks the icon label color from the background picture, not from the system
+appearance: on a real mounted DMG in dark mode the labels stayed dark on the porcelain picture. So the labels are dark
+in light and dark mode, and no glow or card is needed. `screens/install-dark.png` shows dark Finder chrome with dark
+labels. Under each label the art keeps a calm zone: dust and wave motes thin out over about 24 pt around a 140 x 36 pt
+area, so nothing competes with the text.
+
+Path bar: if the user has Finder's path bar on (View > Show Path Bar, a per-user setting), it covers the bottom of the
+window and hides the bottom-right first-open hint. The hint is edge text, so losing it there is acceptable; the release
+notes carry the same instruction.
