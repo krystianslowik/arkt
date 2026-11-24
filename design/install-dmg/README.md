@@ -40,20 +40,21 @@ macOS; no font is bundled.
 
 | Path | What it is |
 |---|---|
-| `background.png`, `background@2x.png` | The porcelain background, 660 x 420 and 1320 x 840 px, no icons (what ships) |
-| `background-dark.png`, `background-dark@2x.png` | The graphite background, same sizes |
-| `screens/install-light.png`, `screens/install-dark.png` | 2x renders of the Finder window mock (732 x 520 pt canvas): the porcelain background with light Finder, the graphite background with dark Finder |
-| `prototype/index.html` | The background source (`#light` or `#dark`); the static particle generator is `prototype/particles.js` |
+| `background.png`, `background@2x.png` | The porcelain background, 660 x 420 and 1320 x 840 px, no icons. **This is what ships** (decision: porcelain) |
+| `screens/install-light.png`, `screens/install-dark.png` | 2x renders of the Finder window mock (732 x 520 pt canvas): both on the shipped porcelain background: `install-light.png` with light Finder (black labels), `install-dark.png` with dark Finder (white labels, the weak case) |
+| `prototype/index.html` | The background source (`#light` ships; `#dark` is an unused graphite reference); the static particle generator is `prototype/particles.js` |
 | `prototype/mock.html` | The Finder window mock with a title bar, the real app icon and a stand-in Applications icon (Finder draws the real one) |
 
 Renders: headless Chromium (Playwright's `chrome-headless-shell`), offline, `--force-device-scale-factor=2`,
 `--window-size=732,520` for the mock and `660,420` for the background. The generator is seeded and static; it is a
 simplified Canvas 2D version of the onboarding field (`design/onboarding/prototype/field.js`).
 
-## Open point: label readability with one background
+## Open point: label readability on the shipped porcelain background
 
-A DMG has one background image, but Finder draws labels in the system appearance (black in light mode, white in dark
-mode; not yet confirmed on a mounted DMG here). A porcelain background gives black labels full contrast and white
-labels almost none; a graphite background is the reverse. Labels sit in a calm zone with thinned dust, with no card
-behind them. Options: ship one field and accept the weaker appearance, or a mid-tone field that holds both colors but
-leaves the onboarding look. To be settled with a real-Finder check before the build issue.
+The shipped background is porcelain. Finder draws labels in the system appearance (black in light mode, white in dark
+mode; not yet confirmed on a mounted DMG here). Black labels read well. In dark-mode Finder the white labels sit on
+porcelain and are close to invisible (`screens/install-dark.png` shows this honestly). Under each label the art has a
+calm zone: dust and wave motes thin out over about 24 pt around a 140 x 36 pt area, so nothing competes with the text.
+That helps black labels and does not help white ones; no porcelain halo can, because the problem is white on near-white.
+Real fix if it matters: a soft mid-tone glow behind the labels (about 4.5:1 for both colors), at the cost of the clean
+porcelain look. To be decided after the real-Finder check.

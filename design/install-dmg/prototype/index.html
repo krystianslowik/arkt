@@ -8,7 +8,10 @@ p{position:absolute;left:0;width:660px;top:112px;margin:0;text-align:center;font
 <script>
 // icons at (200, 262) and (460, 262); labels about 338 to 354
 document.documentElement.className = MODE;
-const calmZ = [[60, 36, 600, 140, 0.18], [130, 328, 270, 364, 0.04], [390, 328, 530, 364, 0.04], [300, 394, 660, 420, 0.03]];
+const labelZ = [[130, 328, 270, 364], [390, 328, 530, 364]];
+const feather = (z, k, e, keep) => [z[0] - e, z[1] - e, z[2] + e, z[3] + e, keep];
+// a calm zone under each label: nearly empty in the middle, thinning out over 24 pt so there is no visible hole
+const calmZ = [...labelZ.map(z => [...z, 0.03]), ...labelZ.map(z => feather(z, 0, 10, 0.3)), ...labelZ.map(z => feather(z, 0, 24, 0.65)), [60, 36, 600, 140, 0.18], [300, 394, 660, 420, 0.03]];
 dust(4300, calmZ);
 // the wave: flat along the bottom on the left, rising to the right, as in Welcome
 const rise = x => 70 * Math.pow(Math.max(0, (x - 300) / 360), 1.5);
