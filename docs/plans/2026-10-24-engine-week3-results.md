@@ -8768,3 +8768,87 @@ Unchanged: 16 patch files, 8 seam and hook patch files, 22 upstream files outsid
 Every engine run stopped by exact PID, including the process the break relaunched and the helpers left behind (`ps`
 shows none on the profile). Throwaway profiles under `profiles/929-20261124/` deleted. Nothing touched the Keychain
 (mock keychain only), `/Applications/Arkt.app` or real browser data.
+
+## #328: a link from another app with no window reports startupURL (seam, no patch)
+
+Date 2026-11-24. Branch `engine/328-url-kind` from `main` at `8541b804`, merged with `main` at `410c5152`. `$CR`
+branch `arkt` unchanged (0001-0016).
+
+### Gate
+
+- Seam, no patch. W3-9 recorded that no Apple event is current while `OpenStartupTabsInBrowserWithProfile` builds the
+  window on a warm `open -a`. On 156 that does not hold. A temporary log in `ClassifyRequest` (not committed) printed
+  `ae=4755524c/4755524c` (get-URL) both for a get-URL event sent to the process by PID and for a real
+  `open -g -a out/Arkt/Arkt.app <url>` through LaunchServices; one browser process before and after. The
+  `-application:openURLs:` path runs synchronously inside the event handler once startup is complete
+  (`openStartupTabsReplacingNTP:` -> `OpenStartupTabsInBrowser` -> `RunInLastProfileSafely` with the profile loaded).
+- Facade header unchanged. `.patches` unchanged (16 lines, 16 `arkt` commits: in sync). No patch number claimed.
+- Build: `nice -n 15 autoninja -j 4 -C out/Arkt chrome`, 73 s, `FAILED:` 0; `gn check out/Arkt "//arkt/*"`: OK.
+
+### What landed
+
+- Engine (`arkt_embedder.mm`): on the default-params branch of `ClassifyRequest`, `URLFromOtherApplication()` reads
+  `NSAppleEventManager.currentAppleEvent`. A get-URL event (`GURL`/`GURL`) or an open-documents event
+  (`aevt`/`odoc`) gives `kind=startupURL` with the event's URL (the first file of an open-documents list). A reopen
+  event, no event, or any other event keeps `reopen` and the held-window path (`ReclassifyHeld`, #299) as before.
+- Shell (maintainer decision 2026-11-24, recorded on #328): an opener-less `.startupURL` is treated like a Dock
+  reopen (`EngineWindowRequest.opensLikeADockReopen`). It reuses a shown shell window that has no engine window yet
+  (`ShellWindowSet.host(for:)`), and it may own the session (`SessionWindowPolicy.origin` gives `.dockReopen`). So a
+  link with no window behaves as before, and a cold launch with a link now restores the session frame, Space and
+  tabs. Two GUI tests that used `.startupURL` as a generic engine-requested kind now use `.extension`, keeping
+  their intent.
+
+### Smoke (`out/Arkt/Arkt.app`, self-test embedder, `--no-startup-window`, fresh profiles under `profiles/328-20261124/`, `--use-mock-keychain --mute-audio`, the self-test's window closed through DevTools first (`browsers normal=0`), then one Apple event)
+
+| Run | Event | Result |
+|---|---|---|
+| w1 | get-URL sent by PID | `host asked kind=startupURL`, `url=http://127.0.0.1:9/alpha`; one window, one tab at that URL |
+| w2 | `open -g -a <bundle> <url>` (LaunchServices) | the same with `/beta`; one browser process before and after |
+| w3 | reopen sent by PID | `kind=reopen`, `url=none`; one window with `chrome://newtab/` |
+| w4 | `open -g -a <bundle>` (LaunchServices, Dock-style reopen) | `kind=reopen` |
+| w5 | open-documents, one file | `kind=startupURL`, the file URL; one tab |
+| w6 | open-documents, two files | `kind=startupURL` with the first file's URL; one window, two tabs |
+| w7 | `open -g -a <bundle> <url1> <url2>` | `kind=startupURL` with the first URL; one window, two tabs |
+| break | `URLFromOtherApplication` returning no event | w1 again: `kind=reopen`, `url=none` |
+| r1, r2 | restored and rebuilt (68 s) | get-URL: `startupURL`; reopen: `reopen` |
+
+`FATAL`, `Check failed`, `DCHECK`: 0 in every run. Engine app (built from this branch, bundle id
+`dev.arkt.ArktTest328`, throwaway `ARKT_*` folders): at a first launch, the onboarding window has no engine window;
+a get-URL sent to the app's PID gave `window request kind startupURL`, and the link took that window (one window
+before and after). The no-window case on the Engine app was not run (the onboarding window did not close with Close
+Window); the self-test runs above and the GUI tests cover it.
+
+Not covered: a cold launch through LaunchServices (unchanged `ReclassifyHeld` path; a LaunchServices launch of a
+second instance was avoided). Handoff and other opens that come without an Apple event stay `reopen`.
+
+### Tests
+
+- `nice -n 20 swift test -j 2 --skip ShellKitGUITests`: 1637, 44, 60, 29, 312, 49, 362, 243, 42 (ShellUITests
+  1636 + 1, `aLinkFromAnotherAppWithNoOpenerCanOwnTheSessionLikeADockReopen`; `engineRequestedWindowsNeverOwnTheSession`
+  now also checks a `.startupURL` with an opener). Lints 13 + 60.
+- GUI: `testALinkRequestReusesAShownWindowWithoutAnEngineWindow` (new, `ShellWindowSetTests`).
+  `ShellWindowSetTests|WindowLifecycleTests|SessionRestoreTests|EngineHostingTests`: 60 tests, 0 failures. 20 runs of
+  `ShellWindowSetTests|SessionRestoreTests` (27 tests) under the GUI lock: 20 of 20 (`uptime` load 4.32, then 5.67).
+  Full `ShellKitGUITests`: 2418 tests, 55 skipped, 4 failures, in `FakeEngineContractTests`,
+  `FolderMotionBudgetTests` and `SidebarFaviconDecodeTests`, none touched here. The machine was busy with engine
+  builds at the time, and those three classes pass on their own (59 tests, 0 failures).
+- Deliberate break (shell): before the shell change, the new pure test failed with `Expectation failed:
+  origin == .dockReopen` and `takesSession(origin, ownerIsAlive: false)`.
+
+### Patch budget
+
+Unchanged: 16 patch files, 8 seam and hook patch files, 22 upstream files outside 0001-0004. `.patches` 16 lines, 16
+`arkt` commits: in sync. Facade header unchanged.
+
+### Overlap
+
+Draft #825 (link routing, not touched): its routing runs in the FakeEngine `AppDelegate` path. On the Engine build
+Chromium opens the links, so the reported kind does not change its assumptions. `git merge-tree` of this branch with
+#825 lists the same six conflicting files as `main` with #825 (`ShellWindowSet.swift` among them); this branch adds
+none.
+
+### Cleanup
+
+Every engine and app run stopped by exact PID with its helpers (`ps` shows none). Profiles, the app copy, its data
+folder and defaults suite, and the screenshot deleted; the app copy and build products unregistered from
+LaunchServices. Nothing touched the Keychain (mock keychain only), `/Applications/Arkt.app` or real browser data.
