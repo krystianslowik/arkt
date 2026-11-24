@@ -36,6 +36,7 @@ source_set("embedder") {
     "//arkt/browser:window",
     "//base",
     "//chrome/app:command_ids",
+    "//chrome/browser/devtools",
     "//chrome/browser/lifetime",
     "//chrome/browser/lifetime:termination_notification",
     "//chrome/browser/profiles:profile",
