@@ -268,6 +268,7 @@ jobs:
           ARKT_CUSTOM_ICON_SHOTS_DIR: ${{ runner.temp }}/custom-icon-screenshots
           ARKT_RESTORE_SHOTS_DIR: ${{ runner.temp }}/restore-pages-screenshots
           ARKT_EXTENSION_SHORTCUTS_SHOTS_DIR: ${{ runner.temp }}/extension-shortcuts-screenshots
+          ARKT_EXTENSIONS_SETTINGS_SHOTS_DIR: ${{ runner.temp }}/extensions-settings-screenshots
         run: swift test --filter ShellKitGUITests
       - name: Upload synthetic custom icon screenshots
         if: always()
@@ -291,6 +292,14 @@ jobs:
         with:
           name: extension-shortcuts-screenshots
           path: ${{ runner.temp }}/extension-shortcuts-screenshots/*.png
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Upload Settings Extensions screenshots
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: extensions-settings-screenshots
+          path: ${{ runner.temp }}/extensions-settings-screenshots/*.png
           if-no-files-found: warn
           retention-days: 7
 

@@ -485,9 +485,10 @@ final class ExtensionsSettingsTests: XCTestCase {
     return rep?.representation(using: .png, properties: [:]) ?? Data()
   }
 
-  /// Opt-in: the pane's states in light and dark, the window as on screen (`screencapture -l`, no shadow), to compare
-  /// with design/settings `extensions` and `extensions-empty`. Synthetic extensions only.
-  func testExtensionsShots() throws {
+  /// Opt-in: the pane's states in light and dark, to compare with design/settings `extensions` and `extensions-empty`.
+  /// The window's content is drawn into the PNG (the load error: the sheet's), so the shots do not depend on screen
+  /// capture. Synthetic extensions only.
+  func testExtensionsShots() async throws {
     guard let path = ProcessInfo.processInfo.environment["ARKT_EXTENSIONS_SETTINGS_SHOTS_DIR"], !path.isEmpty else {
       throw XCTSkip("set ARKT_EXTENSIONS_SETTINGS_SHOTS_DIR to export the Settings > Extensions screenshots")
     }
@@ -526,31 +527,37 @@ final class ExtensionsSettingsTests: XCTestCase {
         let controller = make(engine: engine, appearance: dark ? .darkAqua : .aqua)
         controller.show(pane: .extensions)
         let window = try XCTUnwrap(controller.window)
-        window.setFrameTopLeftPoint(NSPoint(x: 80, y: (window.screen?.visibleFrame.maxY ?? 900) - 40))
         if state == "-details" { try clickRow("onepassword", in: controller) }
         if state == "-worst-case" { try clickRow("corp", in: controller) }
         if state == "-load-error" {
           engine.unpackedLoadFailure = "Manifest file is missing or unreadable."
           controller.unpackedFolderPicker = { _, done in done(URL(fileURLWithPath: "/tmp/empty", isDirectory: true)) }
           try find(id("loadUnpacked"), in: controller, as: NSButton.self).performClick(nil)
-          let deadline = Date(timeIntervalSinceNow: 5)
-          while controller.extensionAlert == nil, Date() < deadline {
-            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
-          }
+          await controller.pendingUnpackedLoad?.value
         }
-        window.contentView?.layoutSubtreeIfNeeded()
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.8))       // the sheet's slide and the switches settle
+        let shown = state == "-load-error" ? try XCTUnwrap(controller.extensionAlert?.window) : window
+        let content = try XCTUnwrap(shown.contentView)
+        content.layoutSubtreeIfNeeded()
         let file = folder.appendingPathComponent("extensions\(state)-\(dark ? "dark" : "light").png")
-        let capture = Process()
-        capture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-        capture.arguments = ["-x", "-o", "-l", String(window.windowNumber), file.path]
-        try capture.run()
-        capture.waitUntilExit()
-        XCTAssertEqual(capture.terminationStatus, 0)
+        try write(content, background: shown.backgroundColor, to: file)
         controller.closeExtensionSheets()
         window.close()
       }
     }
+  }
+
+  /// Draws `view` over the window background into a PNG.
+  private func write(_ view: NSView, background: NSColor, to url: URL) throws {
+    let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+    view.effectiveAppearance.performAsCurrentDrawingAppearance {
+      NSGraphicsContext.saveGraphicsState()
+      NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: bitmap)
+      background.setFill()
+      NSRect(x: 0, y: 0, width: bitmap.size.width, height: bitmap.size.height).fill()
+      NSGraphicsContext.restoreGraphicsState()
+    }
+    view.cacheDisplay(in: view.bounds, to: bitmap)
+    try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: url)
   }
 }
 
