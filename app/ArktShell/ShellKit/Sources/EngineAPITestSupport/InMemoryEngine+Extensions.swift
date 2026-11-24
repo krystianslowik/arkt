@@ -195,8 +195,10 @@ extension InMemoryEngine {
 
   /// Removes the extension's action from every window, its pin and its commands, then reports
   /// `.extensionActionsChanged` for each window that listed it and `.commandsChanged` when it had commands. The engine
-  /// forgets it, so a later install starts unpinned. Every call is recorded with its window; an unknown id, and one
-  /// whose action says `canUninstall` false (the Chromium engine's safety net, #721), change nothing else.
+  /// forgets it, so a later install starts unpinned. A listed extension leaves `installedExtensions` too, reported last
+  /// as `.installedExtensionsChanged` (#600). Every call is recorded with its window; an unknown id, one whose action or
+  /// listing says `canUninstall` false (the Chromium engine's safety net, #721), and one in `failingUninstallIDs`
+  /// change nothing else.
   public func uninstallExtension(_ extensionID: String, reportAbuse: Bool, in window: EngineWindowID?) {
     uninstalledExtensions.append(ExtensionUninstall(extensionID: extensionID, reportAbuse: reportAbuse,
                                                     window: window))
@@ -204,14 +206,17 @@ extension InMemoryEngine {
     let removable = listing.allSatisfy { window in
       actions[window]?.allSatisfy { $0.extensionID != extensionID || $0.canUninstall } ?? true
     }
-    guard removable else { return }
+    guard removable, !refusesUninstall(extensionID) else { return }
     let hadCommands = extensionCommands.contains { $0.id.extensionID == extensionID }
+    let wasInstalled = installedExtensions.contains { $0.id == extensionID }
     knownExtensionIDs.remove(extensionID)
     pinnedExtensionIDs.removeAll { $0 == extensionID }
+    installedExtensions.removeAll { $0.id == extensionID }
     for window in listing { actions[window]?.removeAll { $0.extensionID == extensionID } }
     if hadCommands { extensionCommands.removeAll { $0.id.extensionID == extensionID } }
     for window in listing { hub.emit(.extensionActionsChanged(window)) }
     if hadCommands { hub.emit(EngineExtensionEvent.commandsChanged) }
+    if wasInstalled { hub.emit(EngineExtensionEvent.installedExtensionsChanged) }
   }
 
   // MARK: - Test drivers
@@ -224,7 +229,8 @@ extension InMemoryEngine {
   }
 
   /// Test driver: an extension finished installing (#592), in Chromium's order: its `action` joins every window's list
-  /// (pinned at the end of the order with `pinned`), `.extensionActionsChanged` for each window that lists it, then
+  /// (pinned at the end of the order with `pinned`), `.extensionActionsChanged` for each window that lists it, the
+  /// extension joins `installedExtensions` (`.installedExtensionsChanged`, #600) unless listed already, then
   /// `.installed`. Whether new extensions pin by default is the shell's product decision, not the engine's (#590,
   /// question 2). `source` overrides `info.source` when given.
   public func installExtension(_ info: InstalledExtension, action: ExtensionAction? = nil, pinned: Bool = false,
@@ -232,6 +238,7 @@ extension InMemoryEngine {
     var info = info
     if let source { info.source = source }
     knownExtensionIDs.insert(info.id)
+    let listed = listInstalled(info)
     if pinned, !pinnedExtensionIDs.contains(info.id) { pinnedExtensionIDs.append(info.id) }
     if let action {
       for window in windowIDs where actions[window]?.contains(where: { $0.id == action.id }) != true {
@@ -239,6 +246,7 @@ extension InMemoryEngine {
       }
     }
     if action != nil || pinned { announceActions(of: info.id) }
+    if listed { hub.emit(EngineExtensionEvent.installedExtensionsChanged) }
     hub.emit(EngineExtensionEvent.installed(info))
   }
 }

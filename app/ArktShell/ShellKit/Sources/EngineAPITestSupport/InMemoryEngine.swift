@@ -103,6 +103,18 @@ public final class InMemoryEngine: EngineClient, EngineExtensions, EngineImporti
   public var heldGlobalShortcuts: Set<ExtensionShortcut> = []
   /// Calls to `uninstallExtension`, in order, known ids or not (#720).
   public internal(set) var uninstalledExtensions: [ExtensionUninstall] = []
+  /// The installed list (#600; `InMemoryEngine+InstalledExtensions.swift`), in install order. `setInstalledExtensions`
+  /// sets it; `installExtension`, `uninstallExtension`, `setExtensionEnabled` and `loadUnpackedExtension` change it.
+  public internal(set) var installedExtensions: [InstalledExtensionInfo] = []
+  public internal(set) var isExtensionDeveloperModeEnabled = false
+  /// Extensions whose uninstall fails in the engine: the call is recorded, nothing changes (#600).
+  public var failingUninstallIDs: Set<String> = []
+  /// The reason the next unpacked loads fail with; nil: they load.
+  public var unpackedLoadFailure: String?
+  /// Folders passed to `loadUnpackedExtension(at:)` while developer mode was on, in order.
+  public internal(set) var loadedUnpackedFolders: [URL] = []
+  /// Extensions whose options page `openExtensionOptionsPage` opened, in order.
+  public internal(set) var openedOptionsPages: [String] = []
   /// The extension's own action context items, by extension id (`setExtensionContextItems`, #915).
   var extensionContextItems: [String: [EngineMenuItem]] = [:]
   /// Context menu commands run through `performExtensionContextCommand`, in order.
