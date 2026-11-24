@@ -112,6 +112,22 @@ public enum ShortcutCatalog {
     return owners
   }()
 
+  /// What Arkt keeps, by binding (#597), in one walk of the menu: main-menu items whose action is not in `editable`
+  /// (the editor's own actions are checked through the editor), and the keys owned outside the menu.
+  static func keptOwnerIndex(in menu: NSMenu?, editable: Set<ShortcutActionID>) -> [ShortcutBinding: [String]] {
+    var index: [ShortcutBinding: [String]] = [:]
+    func add(_ title: String, _ binding: ShortcutBinding) {
+      if !(index[binding] ?? []).contains(title) { index[binding, default: []].append(title) }
+    }
+    for item in menu.map(items(in:)) ?? [] where item.submenu == nil && !item.isSeparatorItem
+      && !item.keyEquivalent.isEmpty {
+      if let id = actionID(item), editable.contains(id) { continue }
+      add(item.title, ShortcutBinding(key: item.keyEquivalent, modifiers: item.keyEquivalentModifierMask))
+    }
+    for owner in ownersOutsideTheMenu { add(owner.title, owner.binding) }
+    return index
+  }
+
   private static var bindingKey: UInt8 = 0
   private static var originalBindingKey: UInt8 = 0
 
@@ -240,6 +256,13 @@ public enum ShortcutCatalog {
     case 0x09: ("\u{21E5}", "Tab")
     case 0x1B: ("\u{238B}", "Escape")
     case 0x08, 0x7F: ("\u{232B}", "Delete")
+    // Keys an extension command can name (#597).
+    case NSDeleteFunctionKey: ("\u{2326}", "Forward Delete")
+    case NSHomeFunctionKey: ("\u{2196}", "Home")
+    case NSEndFunctionKey: ("\u{2198}", "End")
+    case NSPageUpFunctionKey: ("\u{21DE}", "Page Up")
+    case NSPageDownFunctionKey: ("\u{21DF}", "Page Down")
+    case NSInsertFunctionKey: ("Insert", "Insert")
     default: (key.uppercased(), key.uppercased())
     }
   }

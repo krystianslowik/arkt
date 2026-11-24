@@ -160,6 +160,10 @@ extension InMemoryEngine {
     return .applied
   }
 
+  public func setExtensionShortcutHandlingSuspended(_ suspended: Bool) {
+    isExtensionShortcutHandlingSuspended = suspended
+  }
+
   /// The commands that run an extension's action, which take no media key.
   private static let actionCommandNames: Set<String> = ["_execute_action", "_execute_browser_action",
                                                         "_execute_page_action"]

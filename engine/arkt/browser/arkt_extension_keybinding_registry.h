@@ -26,6 +26,17 @@ namespace arkt {
 // read as Shift plus the letter.
 bool MainMenuHasAccelerator(const ui::Accelerator& accelerator);
 
+// Suspends or resumes extension shortcut handling while the shell's shortcut
+// recorder listens (#954), as developerPrivate.setShortcutHandlingSuspended
+// does for Chrome's shortcuts page: every Arkt window's registry (and one made
+// later, while suspended) runs no command, and `profile`'s
+// ExtensionCommandsGlobalRegistry suspends the process's global accelerator
+// listener, which unregisters every global hot key until resumed. Process-wide;
+// a second call with the same value changes nothing. `profile` may be null
+// (windows only).
+void SetExtensionShortcutHandlingSuspended(Profile* profile, bool suspended);
+bool ExtensionShortcutHandlingSuspended();
+
 // The extension keyboard shortcuts of one Arkt window (#598). Chrome keeps
 // them in ExtensionKeybindingRegistryViews, which registers them with the
 // window's views::FocusManager; an Arkt window has no Views and no focus

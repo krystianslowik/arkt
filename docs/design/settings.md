@@ -64,6 +64,8 @@ engine bridge), **out** (deliberately not offered; see section 9).
 | Appearance | Play sound effects | toggle | `playUserInterfaceSoundsDisabled` (inverted) | on | planned (Arkt has no sounds yet) | BH-207 |
 | Shortcuts | Every menu action: view, record, reset | recorder per row | `StorableKeyBindings` (overrides only) | menu defaults | view: exists as menus; rebind: six commands (#119), the rest planned (#946) | BH-198, BH-199, BH-202 |
 | Shortcuts | Arkt first / Website first / Press twice for Arkt | popup per customized row and in the row's context menu | per-binding priority | Arkt first | planned | BH-200, BH-201 |
+| Shortcuts | Extension Shortcuts, first row: Cycle through pinned extensions, Cmd-E | keycaps (read-only) | none | Cmd-E | row exists (#597); the behaviour is #599 | KB-047 |
+| Shortcuts | Extension Shortcuts: one group per extension, record, clear, In Arkt or All Apps | recorder or Set Shortcut pill, scope pop-up per command | Chromium `CommandService` (engine) | the extension's suggestion | **exists** (#597; suspension while recording: engine side #954) | BH-202 |
 | Extensions | Installed list: enable, pin, details | toggle, pin button, row click | Chromium extension prefs | n/a | engine, planned (#121) | 2.x extensions |
 | Extensions | Developer mode | toggle | Chromium `extensions.ui.developer_mode` | off | engine, planned | none |
 | Privacy | Block third-party cookies | toggle | Chromium cookie controls | on | engine, planned | none (Chromium) |
@@ -239,6 +241,12 @@ shadow becomes that edge in dark.
   Delete clears the shortcut (the action stays in the list, unbound); Tab leaves the recorder without changing it. In
   the conflict state, focus moves to Keep Existing; Return and Escape keep the existing bindings. Use Shortcut
   explicitly reassigns the binding ([#828 decision](https://github.com/krystianslowik/arkt/pull/828#issuecomment-6721408776)).
+- Extension Shortcuts (#597) use the same recorder and key rules; their conflict notice is the row under the command
+  (design/extensions `shortcuts-conflict`) with Keep Existing as the mustard pill and a quiet Use. An extension command conflicts with
+  Arkt's shortcuts and the other extension commands, and an app shortcut conflicts with an extension command; Use
+  takes the shortcut from its owner except from a command Settings cannot change. While a recorder listens, the
+  engine's extension shortcuts are suspended (`setExtensionShortcutHandlingSuspended`), and they resume when it stops
+  (Escape, a shortcut set or cleared, focus leaving the recorder or the window, another pane, the window closing).
 - VoiceOver: the window is "Settings, General" (title). Toolbar items are radio buttons in a tab group ("General, tab,
   1 of 7, selected"). Each row's control carries the row label as its accessibility label and the caption as its help
   (`setAccessibilityHelp`). Toggles are switches ("Warn before quitting, switch, off"). Keycaps read as words

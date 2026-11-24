@@ -1,9 +1,18 @@
 import AppKit
 import Carbon.HIToolbox
 
+/// The recorder field of the app and the extension shortcut rows (#119, #597).
 @MainActor
-private final class ShortcutRecorderButton: NSButton {
+class ShortcutRecorderButton: NSButton {
   override var acceptsFirstResponder: Bool { true }
+  /// Focus left the recorder (a click on another control, the search field); the owner stops listening.
+  var onResign: (@MainActor () -> Void)?
+
+  override func resignFirstResponder() -> Bool {
+    let resigned = super.resignFirstResponder()
+    if resigned { onResign?() }
+    return resigned
+  }
 }
 
 extension SettingsWindowController {
@@ -22,6 +31,11 @@ extension SettingsWindowController {
     button.bezelStyle = .rounded
     button.setAccessibilityIdentifierWithCell("settings.shortcuts.record.\(id.rawValue)")
     button.setAccessibilityLabel("Record shortcut for \(title)")
+    button.onResign = { [weak self] in
+      guard let self, let editor = self.services.shortcutEditor, editor.recordingAction == id,
+            !editor.hasConflict else { return }
+      self.cancelShortcutRecording()
+    }
     let target = SettingsActionTarget { [weak self, weak button] in
       guard let self, let button, let editor = self.services.shortcutEditor else { return }
       self.cancelShortcutRecording()
@@ -40,7 +54,7 @@ extension SettingsWindowController {
       self.cancelShortcutRecording()
       editor.reset(id)
       self.refreshShortcutPresentation()
-      if (!editor.conflictingActions.isEmpty || !editor.protectedConflicts.isEmpty) { self.showShortcutConflict() }
+      if editor.hasConflict { self.showShortcutConflict() }
     }
     actionTargets.append(resetTarget)
     let reset = NSMenuItem(title: "Reset Shortcut to Default", action: #selector(SettingsActionTarget.fire(_:)),
@@ -57,7 +71,7 @@ extension SettingsWindowController {
     guard let editor = services.shortcutEditor else { return }
     for (id, button) in shortcutRecorders {
       button.toolTip = nil
-      if editor.recordingAction == id && editor.conflictingActions.isEmpty && editor.protectedConflicts.isEmpty {
+      if editor.recordingAction == id && !editor.hasConflict {
         button.title = "Type shortcut…"
       } else if let blocked = editor.blockedOverrides[id], let first = blocked.first {
         button.title = "Unavailable"
@@ -74,6 +88,7 @@ extension SettingsWindowController {
       button.setAccessibilityValue(button.title)
     }
     shortcutResetAll?.isEnabled = !editor.overrides.isEmpty
+    syncExtensionShortcutSuspension()
   }
 
   private func refreshShortcutPresentation() {
@@ -82,16 +97,17 @@ extension SettingsWindowController {
     if services.shortcutEditor?.recordingAction == nil { applyShortcutSearch() }
   }
 
-  private func shortcutDescription(_ binding: ShortcutBinding) -> String {
+  func shortcutDescription(_ binding: ShortcutBinding) -> String {
     let item = NSMenuItem(title: "", action: nil, keyEquivalent: binding.key)
     item.keyEquivalentModifierMask = binding.modifiers
     return ShortcutCatalog.entry(for: item)?.spoken ?? binding.key.uppercased()
   }
 
   func handleShortcutKey(_ event: NSEvent) -> Bool {
+    if extensionShortcuts?.recordingCommand != nil { return handleExtensionShortcutKey(event) }
     guard selectedPane == .shortcuts, let editor = services.shortcutEditor,
           editor.recordingAction != nil else { return false }
-    if (!editor.conflictingActions.isEmpty || !editor.protectedConflicts.isEmpty) {
+    if editor.hasConflict {
       if [kVK_Escape, kVK_Return, kVK_ANSI_KeypadEnter].contains(Int(event.keyCode)) {
         editor.keepExisting()
         dismissShortcutConflict()
@@ -116,7 +132,7 @@ extension SettingsWindowController {
     editor.record(event: event)
     refreshShortcutPresentation()
     showShortcutRejection(editor.rejection, for: event)
-    if (!editor.conflictingActions.isEmpty || !editor.protectedConflicts.isEmpty) {
+    if editor.hasConflict {
       showShortcutConflict()
     } else if editor.rejection == nil, editor.recordingAction == nil, let binding = editor.binding(for: id),
               services.isSystemShortcut(binding) {
@@ -126,7 +142,7 @@ extension SettingsWindowController {
   }
 
   /// Why the recorder refused a key (maintainer decision 2026-11-16), in the warning's place; nil removes it.
-  private func showShortcutRejection(_ rejection: ShortcutEditorModel.Rejection?, for event: NSEvent) {
+  func showShortcutRejection(_ rejection: ShortcutEditorModel.Rejection?, for event: NSEvent) {
     shortcutWarningView?.removeFromSuperview()
     shortcutWarningView = nil
     guard let rejection, let root = window?.contentView, let key = event.charactersIgnoringModifiers else { return }
@@ -135,6 +151,10 @@ extension SettingsWindowController {
       "shortcuts need Command or Control (F1 to F20 can be used alone), so typing keeps working."
     case .textEditing: "text fields use it to move, select or delete text."
     case .confirmOrFocusKey: "Return, Tab and Escape confirm, move focus and cancel."
+    case .notAnExtensionKey:
+      "extension shortcuts use a letter, a digit, comma, period, Space, an arrow, Home, End, Page Up, Page Down, "
+        + "Insert or Forward Delete."
+    case .optionWithCommandOrControl: "extension shortcuts can\u{2019}t combine Option with Command or Control."
     }
     let flags = event.modifierFlags.intersection([.command, .option, .control, .shift])
     let keys = [kVK_Return, kVK_ANSI_KeypadEnter].contains(Int(event.keyCode)) && flags.isEmpty
@@ -149,70 +169,89 @@ extension SettingsWindowController {
 
   func cancelShortcutRecording() {
     services.shortcutEditor?.cancelRecording()
+    cancelExtensionShortcutRecording()
     shortcutWarningView?.removeFromSuperview()
     shortcutWarningView = nil
     dismissShortcutConflict()
     refreshShortcutControls()
+    syncExtensionShortcutSuspension()
+    if extensionRowsNeedRefresh { refreshExtensionRows() }
   }
 
-  private func dismissShortcutConflict() {
+  func dismissShortcutConflict() {
     window?.defaultButtonCell = nil
     shortcutConflictView?.removeFromSuperview()
     shortcutConflictView = nil
   }
 
   private func showShortcutConflict() {
-    guard let editor = services.shortcutEditor, let binding = editor.pendingShortcut,
-          let root = window?.contentView else { return }
+    guard let editor = services.shortcutEditor, let binding = editor.pendingShortcut else { return }
     let protected = editor.protectedConflicts.first
     let title = protected?.title ?? editor.conflictingActions.first.flatMap { id in
       editor.catalog.first(where: { $0.id == id })?.title
-    }
+    } ?? editor.extensionConflicts.first?.title
     guard let title else { return }
+    var explanation = protected == nil ? "" : " This command cannot be changed here; keep the existing shortcut and try another."
+    if protected == nil, !editor.extensionConflicts.isEmpty { explanation = " Using it here removes it there." }
+    // Ctrl-Space and Ctrl-1 ... 9 are both Arkt items and macOS shortcuts, so the notice carries the system warning too.
+    let system = services.isSystemShortcut(binding) ? " \(Self.systemShortcutWarning)" : ""
+    presentShortcutConflict(
+      message: "\(shortcutDescription(binding)) is already used by \(title).\(explanation)\(system)",
+      useTitle: "Use Shortcut", canUse: protected == nil,
+      keep: { [weak self] in self?.cancelShortcutRecording() },
+      use: { [weak self] in
+        guard let self, let editor = self.services.shortcutEditor else { return }
+        let id = editor.recordingAction
+        editor.useRecordedShortcut()
+        // Still a conflict: a protected owner, or the engine kept an extension's shortcut. The notice stays.
+        if editor.hasConflict {
+          self.showShortcutConflict()
+          return
+        }
+        self.dismissShortcutConflict()
+        self.refreshShortcutPresentation()
+        if let id, let binding = editor.binding(for: id), self.services.isSystemShortcut(binding) {
+          self.showShortcutWarning()
+        }
+      })
+  }
+
+  /// The conflict notice of the app and the extension recorders: the message, Keep Existing (the default, Return,
+  /// #590) and Use, which is unavailable while a command Settings cannot change holds the shortcut.
+  func presentShortcutConflict(message text: String, useTitle: String, canUse: Bool,
+                               keep keepAction: @escaping @MainActor () -> Void,
+                               use useAction: @escaping @MainActor () -> Void) {
+    guard let root = window?.contentView else { return }
     dismissShortcutConflict()
     let panel = NSView(frame: NSRect(x: 40, y: 105, width: max(300, root.bounds.width - 80), height: 130))
     panel.wantsLayer = true
-    panel.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+    // Resolved in the window's appearance, not the process's (a light Settings window on a dark system).
+    root.effectiveAppearance.performAsCurrentDrawingAppearance {
+      panel.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+    }
     panel.layer?.cornerRadius = ShellRadius.popover
     panel.autoresizingMask = [.width]
-    let explanation = protected == nil ? "" : " This command cannot be changed here; keep the existing shortcut and try another."
-    // Ctrl-Space and Ctrl-1 ... 9 are both Arkt items and macOS shortcuts, so the notice carries the system warning too.
-    let system = services.isSystemShortcut(binding) ? " \(Self.systemShortcutWarning)" : ""
-    let message = settingsLabel("\(shortcutDescription(binding)) is already used by \(title).\(explanation)\(system)",
-                                size: 13)
+    let message = settingsLabel(text, size: 13)
     message.setAccessibilityLabel(message.stringValue)
     message.setAccessibilityIdentifier("settings.shortcuts.conflict.message")
     message.frame = NSRect(x: 12, y: 12, width: panel.bounds.width - 24, height: 64)
     message.autoresizingMask = [.width]
     panel.addSubview(message)
     let keep = NSButton(title: "Keep Existing", target: nil, action: nil)
-    let use = NSButton(title: "Use Shortcut", target: nil, action: nil)
+    let use = NSButton(title: useTitle, target: nil, action: nil)
     keep.setAccessibilityIdentifierWithCell("settings.shortcuts.conflict.keep")
     use.setAccessibilityIdentifierWithCell("settings.shortcuts.conflict.use")
-    use.isEnabled = protected == nil
-    if protected != nil { use.toolTip = "This shortcut belongs to a command that cannot be changed here." }
-    let keepTarget = SettingsActionTarget { [weak self] in self?.cancelShortcutRecording() }
-    let useTarget = SettingsActionTarget { [weak self] in
-      guard let self, let editor = self.services.shortcutEditor else { return }
-      let id = editor.recordingAction
-      editor.useRecordedShortcut()
-      if !editor.protectedConflicts.isEmpty {
-        self.showShortcutConflict()
-        return
-      }
-      self.dismissShortcutConflict()
-      self.refreshShortcutPresentation()
-      if let id, let binding = editor.binding(for: id), self.services.isSystemShortcut(binding) {
-        self.showShortcutWarning()
-      }
-    }
+    use.isEnabled = canUse
+    if !canUse { use.toolTip = "This shortcut belongs to a command that cannot be changed here." }
+    let keepTarget = SettingsActionTarget(keepAction)
+    let useTarget = SettingsActionTarget(useAction)
     actionTargets.append(contentsOf: [keepTarget, useTarget])
     keep.target = keepTarget
     keep.action = #selector(SettingsActionTarget.fire(_:))
     use.target = useTarget
     use.action = #selector(SettingsActionTarget.fire(_:))
     keep.frame = NSRect(x: 12, y: 84, width: 140, height: 30)
-    use.frame = NSRect(x: 160, y: 84, width: 140, height: 30)
+    use.frame = NSRect(x: 160, y: 84, width: max(140, use.intrinsicContentSize.width + 16), height: 30)
     panel.addSubview(keep)
     panel.addSubview(use)
     root.addSubview(panel)
@@ -221,7 +260,7 @@ extension SettingsWindowController {
     window?.makeFirstResponder(keep)
   }
 
-  private func showShortcutWarning() {
+  func showShortcutWarning() {
     shortcutWarningView?.removeFromSuperview()
     guard let root = window?.contentView else { return }
     let warning = settingsLabel(Self.systemShortcutWarning, size: 12)
