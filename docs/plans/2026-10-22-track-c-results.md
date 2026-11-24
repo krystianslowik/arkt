@@ -3595,3 +3595,33 @@ Section stay as built; F12 stays reserved; the recorder rules and the Reset All 
   clearing). Engine answers: `.rejected` and `.unknownCommand` show a notice line, a late `.conflict` opens the notice.
 - Follow-up: "Not set: Arkt uses this shortcut" with the extension's suggested key needs `suggestedShortcut` on
   `ArktExtensionCommand` and `ExtensionCommand` (#922 review); not in this change.
+
+### Settings > Extensions (#600)
+
+- The placeholder is replaced by the pane in `design/settings` (`extensions`, `extensions-empty`). The installed list
+  is one row per extension, sorted by name: its 20 pt icon (or the puzzle tile), the name, "Version X. <short
+  description>" ("Turned off." when off, "Installed by your organization." for policy), the pin toggle and the
+  switch. Under it are the note, then Get more extensions (a neutral Open Chrome Web Store) and Developer mode. With no
+  extensions the pane shows the empty state, and its Open Chrome Web Store is the pane's one primary.
+- Details: a click on a row (a clear `SettingsRowButton` over the row, so the keyboard and VoiceOver reach it) opens a
+  block under it with the description, "Version X · <origin>", Options... (with an options page), Keyboard
+  Shortcuts... (with commands; it opens Shortcuts searched for the extension) and Remove... (the #720 sheet; only when
+  the user may remove it, Report abuse only for a Web Store extension). One block is open at a time. These parts are
+  not drawn in the design; the questions are on #600.
+- Developer mode on shows the add row Load Unpacked... (the folder panel). A failed load shows the shared dialog
+  sheet with one answer and the engine's reason; a loaded extension's details open.
+- The pane shows what the engine reports. It rebuilds on `.installedExtensionsChanged`, after its own pin and
+  developer mode calls, and when Settings becomes key, and only when what it shows changed. Keyboard focus stays on
+  the same control. A refused switch snaps back. A failed uninstall leaves the row, and a remove sheet whose
+  extension went away closes.
+- Manage routing: the panel's Manage Extensions... opens the pane; an action's Manage Extension... passes its
+  extension id (`ExtensionsPanelController.onManage`, `ShellWindowController.onManageExtensions`,
+  `AppSession.showSettings(pane:extensionID:)`), and the pane opens with those details shown and scrolled into view.
+  The install toast offers only Pin (design/extensions `toast-pin`), so it has no Manage to route.
+- EngineAPI (the split with #964): `installedExtensions` (`InstalledExtensionInfo`, `ExtensionOrigin`),
+  `setExtensionEnabled(_:enabled:) -> ExtensionEnableResult`, `isExtensionDeveloperModeEnabled` /
+  `setExtensionDeveloperModeEnabled(_:)`, `loadUnpackedExtension(at:) async -> UnpackedExtensionResult`,
+  `openExtensionOptionsPage(_:)` and `EngineExtensionEvent.installedExtensionsChanged`. Each has a default that
+  refuses or does nothing; InMemoryEngine implements them, and `installExtension` / `uninstallExtension` keep the list
+  in step with the windows' actions. ChromiumEngine gets them in #964.
+- Not in this change: the per-extension incognito allowance (after #558).
