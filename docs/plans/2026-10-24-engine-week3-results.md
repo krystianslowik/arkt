@@ -8628,6 +8628,8 @@ Every engine run stopped by exact PID (`ps -p` prints nothing), with the `chrome
 Throwaway profiles and scratch homes under `profiles/967-20261124/` deleted. Nothing touched the Keychain (mock
 keychain only), `/Applications/Arkt.app` or real browser data.
 
+
+
 ## #560: Warn before quitting on the Engine build (shell only, no engine change)
 
 Date 2026-11-24. Branch `engine/560-quit-warning`, stacked on `engine/967-apps-folder` (#972), which also changes

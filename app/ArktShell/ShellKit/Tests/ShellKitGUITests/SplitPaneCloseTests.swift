@@ -1323,6 +1323,34 @@ final class SplitPaneCloseTests: XCTestCase {
     harness.controller.close()
   }
 
+  /// #892: the X on a pane whose page holds the close (a leave-site prompt), then Stay: the pane stays and the split
+  /// forgets the pending reflow, so a later close of that pane by Cmd-W does not take the spring as the X would.
+  func testStayAfterThePaneXForgetsThePendingReflow() throws {
+    let world = try Self.makeWorld(panes: 3)
+    let harness = Harness(world.sidebar, reduceMotion: false)
+    harness.controller.window?.orderFrontRegardless()
+    harness.controller.activate(node: world.panes[0])
+    let heldTab = try XCTUnwrap(harness.tab(world.panes[1]))
+    harness.engine.holdClose(heldTab)
+
+    try harness.clickClose(1)
+    XCTAssertEqual(harness.engine.snapshot(of: heldTab)?.isClosing, true, "the close is held")
+    XCTAssertNotNil(harness.controller.splitState.reflowAfterClose, "the X marks its pane")
+
+    XCTAssertTrue(harness.engine.answerDialog(heldTab, accept: false))   // Stay
+
+    XCTAssertEqual(harness.engine.snapshot(of: heldTab)?.isClosing, false)
+    XCTAssertNil(harness.controller.splitState.reflowAfterClose, "Stay forgets the pending reflow")
+    XCTAssertEqual(harness.split.paneCount, 3)
+
+    harness.controller.activate(node: world.panes[1])
+    harness.controller.closeTab(nil)                          // Cmd-W on that pane: held again, then Leave
+    XCTAssertTrue(harness.engine.answerDialog(heldTab, accept: true))
+    waitUntil("the split shrinks to 2 panes") { harness.split.paneCount == 2 }
+    XCTAssertFalse(harness.split.isReflowing, "a keyboard close stays instant")
+    harness.controller.close()
+  }
+
   /// A Pinned pane's X closes its page and leaves the placeholder (decision 6); focus stays on the other pane.
   func testCloseButtonOnAPinnedPaneLeavesAPlaceholder() throws {
     let world = try Self.makeWorld(panes: 2, pinned: true)
