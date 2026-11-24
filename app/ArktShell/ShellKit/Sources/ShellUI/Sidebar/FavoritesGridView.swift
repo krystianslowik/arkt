@@ -775,13 +775,14 @@ public final class FavoritesGridView: NSView, NSCollectionViewDataSource, NSColl
     return FavoriteTileView.SplitStack(panes: panes, order: order, images: images)
   }
 
-  /// A tile's tooltip and VoiceOver label: the tab's title, or a split's pane titles joined as its outline row has
-  /// them (#801).
+  /// A tile's tooltip and VoiceOver label: the tab's title, or a split's name (#787), else its pane titles joined,
+  /// as its outline row shows them (#801, #939).
   private func label(of id: NodeID) -> String {
     switch source.node(id) {
     case .tab(_, let url, let title)?:
       return HostDisplay.title(title, for: url)
     case .split?:
+      if let name = source.splitTitle(id) { return name }
       return source.children(of: .split(id)).compactMap { pane -> String? in
         if case .tab(_, let url, let title)? = source.node(pane) { return HostDisplay.title(title, for: url) }
         return nil
