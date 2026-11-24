@@ -465,9 +465,9 @@ blocks carry no comments, so they paste into an interactive zsh as they are.
 Start from a clean folder and no mounted `Arkt` volume, so a rerun cannot reuse old files (a second `ln -s` would
 write into `/Applications`) and the image mounts at `/Volumes/Arkt`, not `/Volumes/Arkt 1`:
 
-    D=$REPO/design/install-dmg; W=$OUT/dmg
+    D=${REPO:?}/design/install-dmg; W=${OUT:?}/dmg
     [[ -e /Volumes/Arkt ]] && hdiutil detach /Volumes/Arkt
-    rm -rf ${W:?} && mkdir -p $W/src/.background
+    rm -rf $W && mkdir -p $W/src/.background
 
 Stage the contents (`ditto` keeps the bundle's symlinks and metadata), build the volume icon from the app icon set,
 and mount a writable image. `iconutil` warns about the set's `Contents.json`; the warning is harmless:
