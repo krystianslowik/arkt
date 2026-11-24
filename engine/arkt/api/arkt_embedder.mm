@@ -12,6 +12,7 @@
 #include "arkt/api/arkt_reentrancy_probe.h"
 #import "arkt/api/arkt_selftest_embedder.h"
 #include "arkt/browser/arkt_browser_window.h"
+#include "arkt/browser/arkt_extension_keybinding_registry.h"
 #include "base/apple/scoped_cftyperef.h"
 #include "base/callback_list.h"
 #include "base/command_line.h"
@@ -627,6 +628,12 @@ class Embedder : public FacadeDelegate {
 
   void OnAppTerminating() {
     LOG(WARNING) << "ARKT: app terminating";
+    // Suspension does not outlive the engine (#954): the global hot keys go
+    // back to the listener so its own teardown unregisters them.
+    if (ExtensionShortcutHandlingSuspended()) {
+      LOG(WARNING) << "ARKT: releasing extension shortcut suspension";
+      SetExtensionShortcutHandlingSuspended(EmbedderProfile(), false);
+    }
     base::WeakPtr<Embedder> weak = weak_factory_.GetWeakPtr();
     [embedder_ engineWillTerminate:^{
       if (weak) {

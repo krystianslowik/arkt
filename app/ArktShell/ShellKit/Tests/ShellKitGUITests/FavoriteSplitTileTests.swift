@@ -273,7 +273,7 @@ final class FavoriteSplitTileTests: XCTestCase {
                                                "Remove from Favorites", "Close and Keep Favorite"])
   }
 
-  /// The split's tile is named after its panes, as its outline row is: tooltip and VoiceOver label.
+  /// An unnamed split's tile is named after its panes, as its outline row is: tooltip and VoiceOver label.
   func testFavoriteSplitTileIsLabelledWithItsPaneTitles() throws {
     let world = try Self.makeWorld()
     let harness = makeHarness(world.sidebar)
@@ -282,6 +282,40 @@ final class FavoriteSplitTileTests: XCTestCase {
                                               orientation: .horizontal).split
 
     let tile = try harness.tile(split)
+    XCTAssertEqual(tile.toolTip, "F0 | T0")
+    XCTAssertEqual(tile.accessibilityLabel(), "F0 | T0")
+  }
+
+  /// A named split's tile is labelled with the name, not its pane titles (#939), as its outline row is (#787).
+  func testNamedFavoriteSplitTileIsLabelledWithItsName() throws {
+    let world = try Self.makeWorld()
+    let harness = makeHarness(world.sidebar)
+    harness.controller.activate(node: world.favorite)
+    let split = try harness.source.addToSplit(.existing(world.today[0]), target: world.favorite, at: 1,
+                                              orientation: .horizontal).split
+    harness.source.renameNode(split, to: "Research")
+
+    let tile = try harness.tile(split)
+    XCTAssertEqual(tile.toolTip, "Research")
+    XCTAssertEqual(tile.accessibilityLabel(), "Research")
+  }
+
+  /// Renaming the split while its tile is shown updates the label on `.node(split)`; clearing the name brings the
+  /// pane titles back (#939).
+  func testRenamingAFavoriteSplitUpdatesItsTileLabel() throws {
+    let world = try Self.makeWorld()
+    let harness = makeHarness(world.sidebar)
+    harness.controller.activate(node: world.favorite)
+    let split = try harness.source.addToSplit(.existing(world.today[0]), target: world.favorite, at: 1,
+                                              orientation: .horizontal).split
+    let tile = try harness.tile(split)
+    XCTAssertEqual(tile.toolTip, "F0 | T0")
+
+    harness.source.renameNode(split, to: "Research")
+    XCTAssertEqual(tile.toolTip, "Research")
+    XCTAssertEqual(tile.accessibilityLabel(), "Research")
+
+    harness.source.renameNode(split, to: nil)
     XCTAssertEqual(tile.toolTip, "F0 | T0")
     XCTAssertEqual(tile.accessibilityLabel(), "F0 | T0")
   }

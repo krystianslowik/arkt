@@ -8139,3 +8139,131 @@ Restored: passing.
   shown pages the cap is worked out from. A tall sheet can cover the Peek's strip. Not handled: it needs the Peek's
   tab and geometry in the cap, and its own test.
 - A short sheet stays centered in the window, as AppKit places it; only its top is capped.
+
+## #954: suspend extension shortcut handling while the shortcut recorder listens (seam, no patch)
+
+Date 2026-11-16. Branch `engine/954-suspend-extension-shortcuts` from `main` at `1d9de3c0`. `$CR` branch `arkt`
+unchanged (0001-0016). Partner of #597, which builds the recorder in parallel.
+
+### Gate
+
+- Seam, no patch. `ExtensionCommandsGlobalRegistry::Get(profile)->SetShortcutHandlingSuspended(bool)` is public at the
+  pin (inherited from `ExtensionKeybindingRegistry`); it is the call `developerPrivate.setShortcutHandlingSuspended`
+  makes. Its `OnShortcutHandlingSuspended` suspends the process's `GlobalAcceleratorListener`, whose suspend path calls
+  `StopListeningForAccelerator` for every global accelerator (on the Mac `UnregisterEventHotKey`) and registers them
+  again on resume. The window registries are the overlay's own.
+- Facade header: additive, `-setExtensionShortcutHandlingSuspended:` on `ArktEngine`. Both copies `cmp` identical.
+  Gate note on #954.
+- `.patches` unchanged (16 lines, 16 `arkt` commits: in sync). No patch number claimed.
+- Builds: `nice -n 15 autoninja -j 4 -C out/Arkt chrome`; Chromium disk 1.9 TB free, internal disk 28 to 30 GB free,
+  swap 19.8 to 20.8 of 20.5 to 21.5 GB used; load average 5.2 to 9.3.
+
+### What landed
+
+- `arkt_extension_keybinding_registry.{h,mm}`: `SetExtensionShortcutHandlingSuspended(profile, suspended)` and
+  `ExtensionShortcutHandlingSuspended()`. One process-wide flag. The setter calls the profile's
+  `ExtensionCommandsGlobalRegistry` (the global hot keys) and `SetShortcutHandlingSuspended` on every live
+  `ArktExtensionKeybindingRegistry` (a set kept by the constructor and destructor). Registries are made lazily (when a
+  window first becomes key or sees a key); one made while suspended starts suspended. `HandleAccelerator` already
+  refused while `shortcut_handling_suspended()` (#598).
+- Facade: `-setExtensionShortcutHandlingSuspended:`. Synchronous, flags only, no `RunOrDefer` and no
+  `CheckNotInNotification`: a release from window close or focus loss, inside an engine event or a nested run loop,
+  runs at once and is never dropped. Not counted: a second YES changes nothing, one NO resumes.
+- `setExtensionCommandShortcut` while suspended: the suspended listener refuses new hot keys
+  (`GlobalAcceleratorListener::RegisterAccelerator` returns false), which the setter would report as
+  GlobalShortcutTaken and roll back. The facade resumes for the write and suspends again after it, so the recorder may
+  commit before or after it releases; the new hot key is unregistered by the re-suspend and registered on resume.
+- Teardown: `Embedder::OnAppTerminating` releases a suspension (`ARKT: releasing extension shortcut suspension`), so
+  the listener's own teardown unregisters the hot keys. The profile's global registry also resumes a suspended
+  listener in its destructor (Chromium's).
+- Self-test: `ext-suspend on|off`, and `hotkey-held <shortcut>`, which asks Carbon for the same hot key on the
+  application target with the key code Chromium's listener uses: `eventHotKeyExistsErr` (-9878) means this process
+  holds it, `noErr` that it is free (the probe's own registration is removed at once). The embedder target links
+  `Carbon.framework` for it.
+- Swift: `EngineExtensions.setExtensionShortcutHandlingSuspended(_:)` with a no-op default, a protocol requirement so
+  `ChromiumEngine`'s version is reached through `any EngineExtensions`. The lines are #597's own (commit `805add17` on
+  its branch), taken verbatim so the two branches merge without a conflict; InMemoryEngine's recording is #597's.
+  `ChromiumEngine` forwards it to the facade. Tests:
+  `suspendingAndResumingReachTheFacadeInOrder` (through `any EngineExtensions` and `ScriptedFacade`) and
+  `shortcutSuspensionGoesThroughTheProtocol` (`ConformanceTests`).
+
+### Smoke (`out/Arkt/Arkt.app`, `--no-startup-window --arkt-facade-selftest --arkt-engine-test-api`, run 1 with `--remote-debugging-port`, fresh profiles under `profiles/954-20261116/`, `--use-mock-keychain --mute-audio`, `--host-resolver-rules="MAP * ~NOTFOUND, EXCLUDE 127.0.0.1"`, `--vmodule=arkt_extension_keybinding_registry=1`, a loopback fixture whose pages log every key down they see, `commands-probe` unpacked with `--load-extension`, commands through page titles)
+
+In Arkt command: `run-probe` (Ctrl+Shift+Y, its manifest suggestion). All Apps command: `unset` set to Ctrl+Shift+9
+global through `ext-set`. "Fires" for the In Arkt command is the registry's `dispatched` line plus a `run-probe` record
+in the probe's `storage.local`; for the All Apps command it is the hot key's registration (`hotkey-held`), see the note
+below the table.
+
+| Step | Result |
+|---|---|
+| 1. `unset` Ctrl+Shift+9 global; `hotkey-held` 9 and 8 | Applied; 9 `held` (-9878), 8 `free` (0) |
+| 2. Off: Ctrl+Shift+Y, page focused and window focused | `dispatched` both; two `run-probe` records; the page saw no key |
+| 3. `ext-suspend on` | `suspended windows=1 global=yes`; `hotkey-held` 9 `free` |
+| 4. On: Ctrl+Shift+Y, page and window | nothing dispatched, no record; the page saw `CSKeyY` |
+| 5. On: `new-window` on `/b` (its registry is made while suspended), Ctrl+Shift+Y page and window | registry made, nothing dispatched, no record; `/b` saw `CSKeyY` |
+| 6. `ext-suspend on` again | `suspended windows=2 global=yes`; 9 still `free` |
+| 7. On: `split-key` Ctrl+Shift+7 global | Applied (no GlobalShortcutTaken): `resumed`, the write, `suspended`; 7 `free` |
+| 8. `ext-suspend off` | `resumed windows=2 global=yes`; 9 `held`, 7 `held` |
+| 9. Off: Ctrl+Shift+Y page and window, in both windows | four `dispatched`, four records with each window's tab id |
+| 10. `ext-suspend off` again; Ctrl+Shift+Y page | 9 still `held`; `dispatched`; listing shows `split-key` Ctrl+Shift+7 and `unset` Ctrl+Shift+9, both global |
+| 11. `ext-suspend on`, close window `/b`, `hotkey-held` 9 | window destroyed with suspension on; 9 `free` |
+| 12. Run 1 `quit` while suspended | `app terminating`, `releasing extension shortcut suspension`, `resumed windows=0 global=yes`, `keep-alive released`; with the CDP port the process then stays (W3-3), stopped by PID |
+| 13. Run 2 (no CDP port, a page that sends its own commands): global set, `ext-suspend on` before any registry exists, `quit` | `suspended windows=0 global=yes`, 9 `free`; at quit the suspension is released; the process exited 0 |
+| 14. Run 4 (restored build, as run 2): suspended before the window's registry exists, then Ctrl+Shift+Y page | the registry made after the suspend dispatches nothing; after `off` 9 `held` and Y `dispatched`; exit 0 |
+| 15. Run 5 (the committed code, after the format pass), as run 4 plus the window-focused key and a quit while suspended | on: 9 `free`, Y page and window nothing; off: 9 `held`, Y page and window `dispatched`; quit while suspended releases it; exit 0 |
+| `FATAL`, `Check failed`, `DCHECK` | 0 in runs 1 to 5; no crash reports |
+
+All Apps by a real key press was not run. A standalone check registered Control-Shift-F17 with a
+`kEventHotKeyPressed` handler under a running `NSApplication` and posted the key with `CGEventPost` at the HID and the
+session taps: the handler did not run (0 of 2). The cause was not established (the check has no control showing the
+posted event was delivered at all). Posting into the engine was not tried either way: the self-test app was not
+frontmost (`appActive=no`), so while suspended the key would have gone to another app. Synthesizing
+`kEventHotKeyPressed` directly would hit the `CHECK` in `GlobalAcceleratorListener::NotifyKeyPressed` for an id the
+listener does not know. So the global rows check what decides whether a press fires: whether the system hot key is
+registered. A real press, in Arkt and in another app, while recording is part of #921.
+
+### Deliberate breaks
+
+- Engine: the global registry call skipped in `SetExtensionShortcutHandlingSuspended`
+  (`if (/* DISABLES CODE */ (false) && global)`), rebuilt (71 s, `FAILED:` 0). Run 3: after `ext-suspend on`,
+  `hotkey-held Ctrl+Shift+9` still `held status=-9878`, so an All Apps shortcut would still fire while the recorder
+  listens. Restored, rebuilt (69 s, `FAILED:` 0); run 4: `free status=0` while suspended, `held` after `off`.
+- Swift: `ChromiumEngine.setExtensionShortcutHandlingSuspended` without the facade call (the protocol default would
+  answer the same): `suspendingAndResumingReachTheFacadeInOrder` fails with `facade.shortcutSuspensionCalls → []`.
+  Restored: 11 of 11 `ChromiumExtensionCommandTests` pass.
+
+| Step | Result |
+|---|---|
+| Builds | first 2 min (incremental), break 18 s (`-Wunreachable-code` stopped the first form of the break), 71 s, restore 69 s, format 89 s; `FAILED:` 0 except the stopped break |
+| `gn check out/Arkt "//arkt/*"` | `Header dependency check OK` |
+
+### Tests
+
+- ShellKit `nice -n 20 swift test -j 2 --skip ShellKitGUITests` (while the engine build machine was loaded, 1-minute
+  load 7.7 to 9.3): every bundle passes, Swift Testing runs of 1604, 44, 60, 29, 289, 49, 352, 228 and 40 tests.
+  `ChromiumEngineKitTests` 227 + 1 (`suspendingAndResumingReachTheFacadeInOrder`) and `ArktEngineABITests` 39 + 1
+  (`shortcutSuspensionGoesThroughTheProtocol`): `git diff origin/main | grep -c '^+ *@Test'` is 2, and the diff
+  removes none, so the other bundles are `main`'s counts. Run again after the format pass and #597's EngineAPI lines:
+  the same counts, all passing (1-minute load 16 to 44 from other work on the machine).
+- Lints `--filter 'LintTests|IsolationTests'`: 13 + 60 pass.
+- No GUI test added or changed, no shell UI touched; ArktCore untouched.
+
+### Patch budget
+
+Unchanged: 16 patch files, 8 seam and hook patch files, 22 upstream files outside 0001-0004. `.patches` 16 lines, 16
+`arkt` commits: in sync. Facade header copies `cmp` identical.
+
+### Left open
+
+- A real All Apps key press while the recorder listens, in Arkt and in another app: #921 (needs the user).
+- An extension installed or updated while suspended: CommandService assigns its global suggestion and the suspended
+  listener refuses the hot key, so that one global shortcut does not register until its command is set again or the
+  engine restarts. Rare (install during a recording) and not fixed here.
+- The shell's recorder turning it on and off (Esc, commit, focus loss, window close): #597.
+
+### Cleanup
+
+Every engine run and the fixture server stopped by exact PID (`ps -p` prints nothing). Throwaway profiles under
+`profiles/954-20261116/` deleted; no crash reports from these runs. No global hot key left registered (run 1 was
+stopped, runs 2 to 4 exited). Nothing touched the Keychain (mock keychain only), the clipboard or
+`/Applications/Arkt.app`.
