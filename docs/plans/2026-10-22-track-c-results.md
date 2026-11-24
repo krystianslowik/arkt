@@ -3671,4 +3671,8 @@ Section stay as built; F12 stays reserved; the recorder rules and the Reset All 
   - InMemoryEngine's `setExtensionEnabled` removes or restores the extension's actions.
   - Rows update in place when only their state changed; icons are decoded once per extension and PNG.
   - A load that finishes after Settings closed is ignored.
+- Re-review: InMemoryEngine locks every unpacked extension while developer mode is off. Ones already off are locked
+  too, and turning it back on unlocks them but leaves them off. Each unpacked load counts its own answer (a token). The
+  icon cache is keyed by id and compares the PNG bytes. A caption that appears or goes rebuilds the row. Settings'
+  browser links go to the most recent regular window (`ShellWindowSet.primaryRegular`).
 - Not in this change: the per-extension incognito allowance (after #558).
