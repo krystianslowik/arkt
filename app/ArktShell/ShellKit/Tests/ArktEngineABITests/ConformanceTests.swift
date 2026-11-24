@@ -572,6 +572,11 @@ final class TestEngine: NSObject, ArktEngine {
       : TestShortcutChange(result: .applied, conflictExtensionID: nil, conflictCommandName: nil)
   }
 
+  private(set) var shortcutSuspensionCalls: [Bool] = []
+  func setExtensionShortcutHandlingSuspended(_ suspended: Bool) {
+    shortcutSuspensionCalls.append(suspended)
+  }
+
   private(set) var uninstalledExtensions: [(String, Bool, Int32?)] = []
   /// As the header asks: the completion runs on a later main-thread turn, never inside the call.
   func uninstallExtension(_ extensionID: String, reportAbuse: Bool, in browser: (any ArktBrowserHandle)?,
@@ -932,6 +937,14 @@ struct ConformanceTests {
     #expect(cleared.result == .applied && cleared.conflictCommandName == nil)
     #expect(facade.shortcutCalls.map(\.0) == ["Command+T", nil])
     #expect(facade.shortcutCalls.map(\.3) == [false, true])
+  }
+
+  @Test func shortcutSuspensionGoesThroughTheProtocol() {
+    let facade = TestEngine()
+    let engine: any ArktEngine = facade
+    engine.setExtensionShortcutHandlingSuspended(true)
+    engine.setExtensionShortcutHandlingSuspended(false)
+    #expect(facade.shortcutSuspensionCalls == [true, false])
   }
 
   @Test func theCommandsEventAndShortcutAnswersHaveFixedValues() {

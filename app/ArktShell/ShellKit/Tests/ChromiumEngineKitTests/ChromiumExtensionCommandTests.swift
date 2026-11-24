@@ -152,4 +152,14 @@ struct ChromiumExtensionCommandTests {
 
     #expect(events == [.commandsChanged])
   }
+
+  // MARK: - Suspension while the recorder listens (#954)
+
+  @Test func suspendingAndResumingReachTheFacadeInOrder() {
+    let engine: any EngineExtensions = ChromiumEngine(facade: facade)
+    engine.setExtensionShortcutHandlingSuspended(true)
+    engine.setExtensionShortcutHandlingSuspended(true)
+    engine.setExtensionShortcutHandlingSuspended(false)
+    #expect(facade.shortcutSuspensionCalls == [true, true, false])
+  }
 }

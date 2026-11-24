@@ -40,6 +40,13 @@ extension ChromiumEngine {
     @unknown default: return .unknownCommand
     }
   }
+
+  /// Chrome's `developerPrivate.setShortcutHandlingSuspended` (#954): the engine suspends every Arkt window's extension
+  /// shortcuts and unregisters the global ones' system hot keys until resumed, and resumes on its own when the
+  /// application terminates. Synchronous, so a release from window close or focus loss is never deferred.
+  public func setExtensionShortcutHandlingSuspended(_ suspended: Bool) {
+    facade.setExtensionShortcutHandlingSuspended(suspended)
+  }
 }
 
 // MARK: - Chromium's shortcut form
