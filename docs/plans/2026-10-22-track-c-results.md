@@ -3444,7 +3444,7 @@ extras in v1; spec section 5).
 | KB-017 | Cmd-S | bound, editable | View > Hide / Show Sidebar (`MainMenu.swift:179`) |
 | KB-018 | Shift-Cmd-D | bound | View > Show / Hide Toolbar (`MainMenu.swift:180`) |
 | KB-019 | Shift-Cmd-K | bound | File > Clear Today Tabs (`MainMenu.swift:120`) |
-| KB-020, KB-021 | Cmd-1 ... Cmd-9 | bound | Tabs > Go to Sidebar Item N (`TabsMenu.swift:34-39`) |
+| KB-020, KB-021 | Cmd-1 ... Cmd-9 | bound | Tabs > Go to Sidebar Item N (`TabsMenu.swift:34-43`) |
 | KB-022, KB-023 | Ctrl-Tab, Ctrl-Shift-Tab | bound | Tab switcher, raw key events (`TabSwitcherKeys.swift`; no menu item, it follows Ctrl's release) |
 | KB-024, KB-025 | Ctrl-`, W in the switcher | bound | `TabSwitcherKeys.swift` |
 | KB-026, KB-027 | Ctrl-Cmd-Right / Left | bound | Tabs > Cycle Tab Forward / Backward (`TabsMenu.swift:23-25`) |
@@ -3454,13 +3454,13 @@ extras in v1; spec section 5).
 | KB-033, KB-034 | Opt-Cmd-Right / Left | bound | Spaces > Next / Previous Space (`MainMenu.swift:226-227`) |
 | KB-035 | Ctrl-1 ... Ctrl-9 | bound | Spaces menu entries (`SpacesMenu.swift`); also a macOS system shortcut, see spec section 1 and below |
 | KB-036 | Ctrl-Space | bound | Tabs > Reveal Current Tab (`TabsMenu.swift:28`); also a macOS system shortcut |
-| KB-037 | unbound | deferred, needs the maintainer | Reveal Tab in Sidebar: no behavior in the spec that differs from KB-036; question and default in #945 |
+| KB-037 | unbound | bound unbound (new) | Tabs > Reveal Tab in Sidebar (`TabsMenu.swift:29`, #945): Ctrl-Space's reveal (shows a hidden sidebar, opens the folders holding the current tab, scrolls to it) without moving keyboard focus, per the maintainer's answer on #945; Arc's behavior is RT-39 in #78 |
 | KB-038 | unknown | owned | Type Travel, #561 |
 | KB-039 | Esc | bound / owned | closes a Peek (`PeekController.handleEscape`); full screen exit is #613 |
-| KB-040 | unknown (CF-02) | bound unbound | Tabs > New Folder, no key until RT-04 (`TabsMenu.swift:46`) |
+| KB-040 | unknown (CF-02) | bound unbound | Tabs > New Folder, no key until RT-04 (`TabsMenu.swift:47`) |
 | KB-041 | unbound | bound unbound | File > Back to Pinned URL (`MainMenu.swift:125`) |
-| KB-042 | unbound | bound unbound (new) | Tabs > Duplicate (`TabsMenu.swift:30`): the current tab, a pane's split, or the selection |
-| KB-043 | unbound | per action | Show Archive and Clear Archive (`MainMenu.swift:246-248`), Rename (row menus and Rename Space), Collapse / Expand All Folders (`TabsMenu.swift:47-48`), Collapse / Expand Pinned Section (new, `MainMenu.swift:224`), New Space and Reset Space (`MainMenu.swift:217`, `222`): bound without a key. Cast: #653. Capture Full Page and Pretty Screenshot: #646. Space Manager: #635. Clear Cookies and Refresh, Clear Cache and Refresh, Network Inspector: #630. Share: no Share command for a tab yet (#362 covers the sidebar menus); nothing to bind until it exists |
+| KB-042 | unbound | bound unbound (new) | Tabs > Duplicate (`TabsMenu.swift:31`): the current tab, a pane's split, or the selection |
+| KB-043 | unbound | per action | Show Archive and Clear Archive (`MainMenu.swift:246-248`), Rename (row menus and Rename Space), Collapse / Expand All Folders (`TabsMenu.swift:48-49`), Collapse / Expand Pinned Section (new, `MainMenu.swift:224`), New Space and Reset Space (`MainMenu.swift:217`, `222`): bound without a key. Cast: #653. Capture Full Page and Pretty Screenshot: #646. Space Manager: #635. Clear Cookies and Refresh, Clear Cache and Refresh, Network Inspector: #630. Share: no Share command for a tab yet (#362 covers the sidebar menus); nothing to bind until it exists |
 | KB-044, KB-045 | Opt-Cmd-N | bound | File > New Little Arkt Window (`MainMenu.swift:111`) and the system-wide hotkey (`AppSession.swift`) |
 | KB-046 | Ctrl-Cmd-J | out of scope | Live Calendars / Join Meeting (OS-06, #124) |
 | KB-047 | Cmd-E | bound (new) | hidden View item "Cycle through pinned extensions" (`MainMenu.swift:197`), reserved before a focused page (`ReservedKeys.swift`); later taps and the Command release through an app event monitor (`ExtensionsPanelController.cyclePinnedExtensions`, #599) |

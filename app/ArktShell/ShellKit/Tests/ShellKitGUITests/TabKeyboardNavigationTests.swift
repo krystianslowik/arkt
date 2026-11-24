@@ -394,6 +394,60 @@ final class TabKeyboardNavigationTests: XCTestCase {
     XCTAssertFalse(controller.window?.firstResponder === grid.collectionView)
   }
 
+  // MARK: Reveal Tab in Sidebar (KB-037, #945)
+
+  /// Ctrl-Space's reveal without its focus move: the sidebar shows, the folder opens, the row scrolls into view, and
+  /// the page keeps keyboard focus with no ring in the sidebar.
+  func testRevealTabInSidebarShowsTheRowWithoutTakingFocus() throws {
+    controller.activate(node: folderTabs[1])
+    page.outlineController.handleClick(row: page.outlineController.row(for: folder), modifiers: [])   // collapse
+    XCTAssertFalse(page.outlineController.isFolderOpen(folder))
+    controller.rootView.sidebarVisible = false
+    controller.returnFocusToPage()
+    let before = controller.window?.firstResponder
+
+    controller.revealTabInSidebar(nil)
+
+    XCTAssertTrue(controller.rootView.sidebarVisible)
+    XCTAssertTrue(page.outlineController.isFolderOpen(folder))
+    let row = page.outlineController.row(for: folderTabs[1])
+    XCTAssertTrue(page.scrollView.contentView.bounds.contains(outline.rect(ofRow: row)), "the row is in view")
+    XCTAssertTrue(controller.window?.firstResponder === before, "keyboard focus stays where it was")
+    XCTAssertFalse(controller.window?.firstResponder === outline)
+    XCTAssertNil(outline.keyboardFocusRow)
+    XCTAssertTrue(outline.keyboardFocusRing.isHidden)
+  }
+
+  func testRevealTabInSidebarScrollsAnOffScreenRowIntoView() throws {
+    let last = try XCTUnwrap(today.last)
+    controller.activate(node: last)
+    page.scrollView.contentView.scroll(to: .zero)
+    page.scrollView.reflectScrolledClipView(page.scrollView.contentView)
+    let row = page.outlineController.row(for: last)
+    XCTAssertFalse(page.scrollView.contentView.bounds.contains(outline.rect(ofRow: row)))
+
+    controller.revealTabInSidebar(nil)
+
+    XCTAssertTrue(page.scrollView.contentView.bounds.contains(outline.rect(ofRow: row)))
+    XCTAssertTrue(controller.sidebarReveal.pill.isShowing, "the same reveal as a keyboard jump (BH-018)")
+    XCTAssertNil(outline.keyboardFocusRow)
+  }
+
+  func testRevealTabInSidebarOnAFavoriteShowsTheSidebarWithoutFocusingTheTile() throws {
+    controller.activate(node: favorites[0])
+    controller.rootView.sidebarVisible = false
+    controller.returnFocusToPage()
+    let before = controller.window?.firstResponder
+
+    controller.revealTabInSidebar(nil)
+
+    let grid = controller.sidebarController.view.favorites
+    XCTAssertTrue(controller.rootView.sidebarVisible)
+    XCTAssertNil(grid.keyboardFocusID)
+    XCTAssertTrue(controller.window?.firstResponder === before)
+    XCTAssertNil(outline.keyboardFocusRow)
+  }
+
   /// The next pointer click removes the ring.
   func testAClickInTheSidebarRemovesTheFocusRing() throws {
     controller.activate(node: pinned)
