@@ -10,21 +10,21 @@ body { font-family: var(--sys); -webkit-font-smoothing: antialiased; position: r
 
 /* Theme tokens. dark is the default; body.light overrides. */
 body {
-  --ink: rgb(250 249 245 / .92); --ink-2: rgb(250 249 245 / .6); --ink-3: rgb(250 249 245 / .38);
-  --strong: var(--porcelain); --hair: rgb(255 255 255 / .08); --sel: rgb(255 255 255 / .11);
-  --kbd: rgb(255 255 255 / .08); --well: rgb(255 255 255 / .06);
-  --bar: rgb(40 43 41 / .88); --bar-edge: rgb(255 255 255 / .1);
-  --scrim: rgb(8 9 8 / .34);
+  --ink: rgb(250 249 245 / .92); --ink-2: rgb(250 249 245 / .72); --ink-3: rgb(250 249 245 / .62);
+  --strong: var(--porcelain); --hair: rgb(255 255 255 / .07); --sel: rgb(255 255 255 / .10);
+  --kbd: rgb(255 255 255 / .07); --well: rgb(255 255 255 / .06);
+  --bar: rgb(41 44 42 / .84); --bar-edge: rgb(255 255 255 / .09);
+  --scrim: rgb(10 11 10 / .28);
   --shadow: 0 0 0 .5px rgb(0 0 0 / .6), 0 24px 64px -12px rgb(0 0 0 / .65), 0 6px 18px rgb(0 0 0 / .25);
   background: #1b1d1c;
 }
 body.light {
-  --ink: rgb(32 35 33 / .9); --ink-2: rgb(32 35 33 / .62); --ink-3: rgb(32 35 33 / .42);
-  --strong: var(--graphite); --hair: rgb(32 35 33 / .09); --sel: rgb(32 35 33 / .075);
-  --kbd: rgb(32 35 33 / .06); --well: rgb(32 35 33 / .05);
-  --bar: rgb(252 251 248 / .9); --bar-edge: rgb(255 255 255 / .8);
-  --scrim: rgb(32 35 33 / .12);
-  --shadow: 0 0 0 .5px rgb(32 35 33 / .22), 0 22px 56px -14px rgb(32 35 33 / .38), 0 5px 14px rgb(32 35 33 / .1);
+  --ink: rgb(32 35 33 / .9); --ink-2: rgb(32 35 33 / .72); --ink-3: rgb(32 35 33 / .68);
+  --strong: var(--graphite); --hair: rgb(32 35 33 / .09); --sel: rgb(32 35 33 / .07);
+  --kbd: rgb(32 35 33 / .055); --well: rgb(32 35 33 / .05);
+  --bar: rgb(253 252 249 / .86); --bar-edge: rgb(255 255 255 / .70);
+  --scrim: rgb(32 35 33 / .10);
+  --shadow: 0 0 0 .5px rgb(32 35 33 / .18), 0 22px 56px -14px rgb(32 35 33 / .38), 0 5px 14px rgb(32 35 33 / .1);
   background: #e6e1d3;
 }
 

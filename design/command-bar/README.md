@@ -40,18 +40,28 @@ Typeface: the system font (SF Pro; `-apple-system` in the prototype). Brand rule
 - No user-facing "Arc". Say "browser data" if the data source ever has to be named.
 - No contrast ratios or warnings in the UI.
 
-| Token (existing in `ShellTokens`) | Use |
-|---|---|
-| `commandBarSurface` | panel fill, with the blur; dark `rgb(40 43 41 / 88%)`, light `rgb(252 251 248 / 90%)` |
-| `commandBarText` | field text, row titles, bold query match |
-| `commandBarSecondaryText` | row URL, verb, trailing time, icons |
-| `commandBarTertiaryText` (new, if not present) | placeholder, group headers; dark white 38 %, light graphite 42 % |
-| `commandBarDivider` | hairline under the field |
-| `commandBarSelectedRow` | selected and hovered row fill; hover is the same fill at 60 % |
-| `commandBarBorder` | 1 pt inner edge, 0.5 pt outer edge |
-| `commandBarScrim` | dark 34 % black, light 12 % graphite |
+No new tokens and no changed token values. Every value below already exists in `ShellTokens`
+(`app/ArktShell/ShellKit/Sources/ShellUI/Theme/ShellTokens.swift`); the prototype uses the same numbers.
 
-The mustard tick token, pill fills and preview tokens go away with the code that used them.
+| Token | Value (light / dark) | Use here |
+|---|---|---|
+| `commandBarSurface` | `#FDFCF9` 86 % / `#292C2A` 84 %, over the blur | panel fill |
+| `commandBarSurfaceOpaque` | `#FAF9F5` / `#262927` | panel fill under Reduce Transparency, and the surface contrast is measured on |
+| `commandBarText` | graphite / porcelain | field text, row titles, the bold query match |
+| `commandBarSecondaryText` | graphite 72 % / porcelain 72 % | icons, the verb, key cap label |
+| `commandBarTertiaryText` | graphite 68 % / porcelain 62 % | row URL, trailing time, group headers, placeholder |
+| `commandBarDivider` | graphite 9 % / white 7 % | hairline under the field |
+| `commandBarInnerEdge`, `commandBarBorder` | white 70 % / white 9 %; graphite 18 % / black 60 % | 1 pt inner edge, 0.5 pt outer edge |
+| `commandBarSelectedRow` | graphite 7 % / white 10 % | selected and hovered row fill |
+| `commandBarKeyCap` | graphite 5.5 % / white 7 % | Return key cap |
+| `commandBarScrim` | graphite 10 % / `#0A0B0A` 28 % | dim over the window |
+| `increasedContrastEdge` | black 20 % / white 20 %, 1 pt | Increase Contrast: the panel's edge |
+
+Token usage changes (values unchanged): row titles now use `commandBarText` at rest (the hybrid used
+`commandBarSecondaryText`), so the bold match and the selected fill carry the hierarchy.
+
+Removed with the code that used them: `commandBarPillWell`, `commandBarPillOn`, `commandBarPillOnText`,
+`commandBarTick`, `commandBarThumbnailWell`, `commandBarOpenDot`.
 
 ## Layout
 
@@ -103,6 +113,8 @@ only when the window is too short (see small window).
 - Titles are one line, tail ellipsis, never wrap. The title is protected: the URL truncates first.
 - The URL is dropped entirely when less than 48 wide would remain, rather than showing a stub.
 - A suggestion that is too long truncates with an ellipsis like a title.
+- **Go** row: the typed text is the title, tail ellipsis, no URL slot.
+- **Paste and Go** row: the title "Paste and Go" is protected; the clipboard address sits in the URL slot, tail ellipsis, dropped under the same 48 pt rule.
 - The field scrolls horizontally with the caret; it never wraps and never grows.
 - Right-to-left and CJK text align and truncate by their own direction; the layout mirrors.
 
@@ -158,9 +170,10 @@ rule (motion with a purpose; none here has one) and Raycast/Spotlight practice.
 | Hover | Instant fill change. |
 | Press on a row | Fill goes to 100 % of its token while the button is down (feedback on pointer-down, action on release). No scale. |
 
-Reduce Motion: identical, there is nothing to reduce. **Reduce Transparency**: opaque `commandBarSurface`, blur off,
-shadow stays. **Increased Contrast**: the 1 pt inner edge goes to a defined border at full contrast; secondary text
-steps up one level.
+Reduce Motion: identical, there is nothing to reduce. **Reduce Transparency**: the panel fills with
+`commandBarSurfaceOpaque`, blur off, shadow stays. **Increase Contrast**: the panel gets a 1 pt `increasedContrastEdge`
+(black 20 % / white 20 %, drawn as a layer border so nothing changes size), and tertiary text (URL, time, group
+headers, placeholder) uses `commandBarSecondaryText`.
 
 ## What keeps it fast and reliable
 
@@ -196,3 +209,5 @@ steps up one level.
 3. **Current tab** is excluded from Tabs. Confirm that Cmd-L on the page you are already on should never offer to
    "switch" to it.
 4. **Extensions and folders as results** (#562) are not in this design. Say if they should return as a fourth group.
+5. **Space rows** (switch to a Space by name, built in #112) are dropped: tabs in other Spaces are still found under
+   Tabs. Confirm, or say they return as a row kind under Tabs.
