@@ -97,6 +97,8 @@ public final class InMemoryEngine: EngineClient, EngineExtensions, EngineImporti
   /// driver action's `isPinned` seeds the pin the first time its extension is seen.
   var knownExtensionIDs: Set<String> = []
   public internal(set) var extensionCommands: [ExtensionCommand] = []
+  /// Whether extension shortcuts are suspended (`setExtensionShortcutHandlingSuspended`, #597): the last value set.
+  public internal(set) var isExtensionShortcutHandlingSuspended = false
   /// Global shortcuts another application or the system holds: `.global` with one of these is rejected.
   public var heldGlobalShortcuts: Set<ExtensionShortcut> = []
   /// Calls to `uninstallExtension`, in order, known ids or not (#720).
