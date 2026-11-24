@@ -8540,3 +8540,11 @@ plus `sites-probe` asking for `https://example.com/*` and `https://*.example.org
 | `DISABLE_PERMISSIONS_INCREASE` on the site probe | `enabled=no mayChange=yes`; `ext-enable` answers `result=3` |
 | `navigate chrome://extensions/?id=<site probe>` in the tab | `urlChanged url=chrome://extensions/?id=jhjn...`; the page has `extensions-manager` and shows its detail view |
 | `FATAL`, `Check failed`, `DCHECK` | 0; no crash report |
+
+Swift for this round: #969's final `EngineExtensions.swift` taken verbatim (`InstalledExtensionInfo.siteAccess`,
+`InstalledExtensionSiteAccess`, `canDisable` as an actionable switch). `ChromiumEngine` maps the summary one to one
+(None `.noHostAccess`, OnClick `.onClick`, SomeSites `.someSites(count:)` with `siteAccessSiteCount`, AllSites
+`.allSites`). `git merge-tree --write-tree HEAD origin/feat/600-settings-extensions` (at `8a289d1d`): clean, the file
+identical. `nice -n 20 swift test -j 2 --skip ShellKitGUITests`: every bundle passes, 1629, 44, 60, 29, 290, 49,
+362, 243, 42 (`ChromiumEngineKitTests` 228 + 15, `ArktEngineABITests` 40 + 2; 17 `@Test` added, none removed).
+Lints: 13 + 60 pass.
