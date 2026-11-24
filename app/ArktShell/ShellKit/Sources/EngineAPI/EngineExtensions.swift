@@ -98,10 +98,12 @@ public protocol EngineExtensions: AnyObject {
   func setExtensionEnabled(_ extensionID: String, enabled: Bool) -> ExtensionEnableResult
   /// Chromium's developer mode (`extensions.ui.developer_mode`), profile-wide. Default: false.
   var isExtensionDeveloperModeEnabled: Bool { get }
-  /// Turns developer mode on or off. Default: a no-op.
+  /// Turns developer mode on or off. Off, Chromium turns off the unpacked extensions (`ExtensionOrigin.unpacked`);
+  /// the shell asks first. Default: a no-op.
   func setExtensionDeveloperModeEnabled(_ enabled: Bool)
   /// Loads the unpacked extension in `folder` (the folder that holds its `manifest.json`), as Chromium's Load
-  /// unpacked does, without the engine's dialogs. Only while developer mode is on; otherwise `.developerModeOff` and
+  /// unpacked does, without the engine's dialogs. `folder` is a file URL (`isFileURL`) with an absolute path; any
+  /// other URL answers `.failed` and nothing loads. Only while developer mode is on; otherwise `.developerModeOff` and
   /// nothing loads. The answer comes when the load finished or failed; a loaded extension arrives as
   /// `.installedExtensionsChanged` before the answer (no `.installed`: unpacked extensions report no install). Default:
   /// `.failed`.
@@ -191,6 +193,9 @@ public enum ExtensionEnableResult: Equatable, Sendable {
   case applied
   /// The engine refused (policy, or a blocklisted extension); nothing changed.
   case refused
+  /// Chromium turned the extension off because an update asks for more permissions
+  /// (`kNeedsPermissionApproval`); it stays off until the user approves them. Nothing changed.
+  case needsPermissionApproval
   /// No such extension (it went away).
   case unknownExtension
 }
@@ -456,6 +461,8 @@ public enum EngineExtensionEvent: Equatable, Sendable {
   /// `extensionCommands` changed: a shortcut or scope set, an extension with commands added or removed.
   case commandsChanged
   /// `installedExtensions` changed (#600): an install, an uninstall, an extension turned on or off, an unpacked load
-  /// or reload, an update (a new version, name or icon). One event per change; the shell reads the list again.
+  /// or reload, an update (a new version, name or icon). One event may carry several changes, and an icon that arrives
+  /// after its extension (Chromium loads icons asynchronously) comes as an event of its own; the shell reads the
+  /// whole list again on each.
   case installedExtensionsChanged
 }

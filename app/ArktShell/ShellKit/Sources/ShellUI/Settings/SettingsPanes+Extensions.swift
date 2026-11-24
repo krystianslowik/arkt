@@ -265,12 +265,17 @@ extension SettingsWindowController {
     refreshExtensionsPane()
   }
 
-  /// The switch: the engine turns it on or off; a refusal puts the switch back.
+  /// The switch: the engine turns it on or off; a refusal puts the switch back. An extension whose update asks for
+  /// more permissions stays off, and the one-answer sheet says why.
   private func setExtension(_ extensionID: String, enabled: Bool) {
     guard let engine = services.extensions else { return }
     let result = engine.setExtensionEnabled(extensionID, enabled: enabled)
     refreshExtensionsPane()
     guard result != .applied else { return }
+    if result == .needsPermissionApproval {
+      let name = engine.installedExtensions.first { $0.id == extensionID }?.name ?? ""
+      showExtensionAlert(Self.needsPermissionContent(name))
+    }
     let control = builtPane(.extensions).flatMap {
       Self.view(AXID.Settings.control("extensions", "enabled.\(extensionID)"), in: $0)
     } as? SettingsSwitch
@@ -283,8 +288,19 @@ extension SettingsWindowController {
     refreshExtensionsPane()
   }
 
-  /// Developer mode: the switch shows what the engine has afterwards (an engine without it stays off).
+  /// Developer mode: the switch shows what the engine has afterwards (an engine without it stays off). Turning it off
+  /// while unpacked extensions are on asks first, since Chromium turns them off; Cancel leaves it on.
   private func setExtensionDeveloperMode(_ on: Bool) {
+    guard let engine = services.extensions else { return }
+    let unpacked = engine.installedExtensions.filter { $0.origin == .unpacked && $0.isEnabled }
+    if !on, !unpacked.isEmpty {
+      askToTurnOffDeveloperMode(unpacked: unpacked.count)
+      return
+    }
+    applyExtensionDeveloperMode(on)
+  }
+
+  private func applyExtensionDeveloperMode(_ on: Bool) {
     guard let engine = services.extensions else { return }
     engine.setExtensionDeveloperModeEnabled(on)
     refreshExtensionsPane()
@@ -297,12 +313,34 @@ extension SettingsWindowController {
     setShortcutSearch(name)
   }
 
-  /// Load Unpacked...: the folder panel, then the engine loads the folder. A load error shows on the shared dialog
+  static func developerModeOffContent(unpacked count: Int) -> DialogContent {
+    let which = count == 1 ? "The unpacked extension" : "The \(count) unpacked extensions"
+    return DialogContent(title: "Turn off developer mode?",
+                         paragraphs: [.init("\(which) you loaded from a folder will be turned off.")],
+                         primaryTitle: "Turn Off", cancelTitle: "Cancel", defaultButton: .cancel,
+                         primaryHelp: "Turns off developer mode and the unpacked extensions",
+                         width: resetSettingsWidth)
+  }
+
+  /// The confirmation for developer mode off; the switch stays on until Turn Off.
+  private func askToTurnOffDeveloperMode(unpacked count: Int) {
+    extensionsDeveloperSwitch?.setOn(true, animated: true)
+    guard extensionAlert == nil, let window, window.attachedSheet == nil else { return }
+    let sheet = DialogSheet(content: Self.developerModeOffContent(unpacked: count))
+    sheet.onAnswer = { [weak self] answer in
+      self?.extensionAlert = nil
+      if answer == .primary { self?.applyExtensionDeveloperMode(false) }
+    }
+    extensionAlert = sheet
+    sheet.begin(on: window)
+  }
+
+  /// Load Unpacked...: the folder panel, then the engine loads the folder (an absolute file URL only). A load error shows on the shared dialog
   /// sheet with one answer; a loaded extension's details open.
   private func loadUnpackedExtension() {
     guard let engine = services.extensions, window?.attachedSheet == nil else { return }
     unpackedFolderPicker(window) { [weak self] folder in
-      guard let self, let folder else { return }
+      guard let self, let folder, folder.isFileURL, folder.path.hasPrefix("/") else { return }
       self.pendingUnpackedLoad = Task { [weak self] in
         let result = await engine.loadUnpackedExtension(at: folder)
         self?.finishUnpackedLoad(result)
@@ -317,7 +355,7 @@ extension SettingsWindowController {
       refreshExtensionsPane()
       scrollToExtension(id)
     case .failed(let reason):
-      showExtensionAlert(reason)
+      showExtensionAlert(Self.loadFailedContent(reason))
     case .developerModeOff:
       refreshExtensionsPane()
       extensionsDeveloperSwitch?.setOn(false, animated: true)
@@ -328,9 +366,18 @@ extension SettingsWindowController {
     DialogContent(title: loadFailedTitle, paragraphs: [.init(reason)], primaryTitle: "OK", width: resetSettingsWidth)
   }
 
-  private func showExtensionAlert(_ reason: String) {
+  /// Why a switch did not turn an extension on: its update asks for more permissions.
+  static func needsPermissionContent(_ name: String) -> DialogContent {
+    let title = name.isEmpty ? "This extension needs new permissions" : "\u{201C}\(name)\u{201D} needs new permissions"
+    return DialogContent(title: title,
+                         paragraphs: [.init("Its latest update asks for more access, so it stays off until you "
+                           + "review the new permissions on the extensions page (chrome://extensions).")],
+                         primaryTitle: "OK", width: resetSettingsWidth, titleMaxLines: 2)
+  }
+
+  private func showExtensionAlert(_ content: DialogContent) {
     guard extensionAlert == nil, let window, window.attachedSheet == nil else { return }
-    let sheet = DialogSheet(content: Self.loadFailedContent(reason))
+    let sheet = DialogSheet(content: content)
     sheet.onAnswer = { [weak self] _ in self?.extensionAlert = nil }
     extensionAlert = sheet
     sheet.begin(on: window)

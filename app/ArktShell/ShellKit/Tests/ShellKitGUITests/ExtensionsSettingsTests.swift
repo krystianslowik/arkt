@@ -168,6 +168,22 @@ final class ExtensionsSettingsTests: XCTestCase {
     XCTAssertEqual(inner.installedExtensions.first { $0.id == "onepassword" }?.isEnabled, true)
   }
 
+  /// An extension Chromium turned off because its update asks for more permissions stays off, and a sheet says why.
+  func testAnExtensionNeedingNewPermissionsStaysOffAndSaysWhy() throws {
+    let engine = engine()
+    engine.permissionApprovalIDs = ["json"]
+    let controller = open(engine)
+    let control = try toggle("json", in: controller)
+    control.performClick(nil)
+    XCTAssertFalse(try toggle("json", in: controller).isOn, "the switch shows it is still off")
+    XCTAssertEqual(engine.installedExtensions.first { $0.id == "json" }?.isEnabled, false)
+    let alert = try XCTUnwrap(controller.extensionAlert)
+    XCTAssertEqual(alert.view.titleField.stringValue, "\u{201C}JSON Formatter\u{201D} needs new permissions")
+    XCTAssertNil(alert.view.cancelButton, "one answer")
+    alert.view.primaryButton.performClick(nil)
+    XCTAssertNil(controller.extensionAlert)
+  }
+
   func testAPolicyExtensionCannotBeTurnedOffOrRemoved() throws {
     let locked = InstalledExtensionInfo(id: "corp", name: "Corp Guard", version: "3.2", description: "Required.",
                                         canDisable: false, canUninstall: false, origin: .policy)
@@ -319,6 +335,43 @@ final class ExtensionsSettingsTests: XCTestCase {
     try find(id("developerMode"), in: controller, as: SettingsSwitch.self).performClick(nil)
     XCTAssertFalse(engine.isExtensionDeveloperModeEnabled)
     XCTAssertFalse(has(id("loadUnpacked"), in: controller))
+  }
+
+  /// Developer mode off turns off the unpacked extensions (Chromium does): the pane asks first; Cancel keeps it on.
+  func testTurningOffDeveloperModeWithUnpackedExtensionsAsksFirst() throws {
+    var list = designList()
+    list.append(InstalledExtensionInfo(id: "tidy", name: "Tidy Clips", version: "0.1", origin: .unpacked))
+    let engine = engine(list)
+    engine.setExtensionDeveloperModeEnabled(true)
+    let controller = open(engine)
+    try find(id("developerMode"), in: controller, as: SettingsSwitch.self).performClick(nil)
+    let ask = try XCTUnwrap(controller.extensionAlert)
+    XCTAssertEqual(ask.view.titleField.stringValue, "Turn off developer mode?")
+    XCTAssertTrue(ask.content.paragraphs.map(\.text).contains(
+      "The unpacked extension you loaded from a folder will be turned off."))
+    XCTAssertTrue(engine.isExtensionDeveloperModeEnabled, "nothing changes before the answer")
+    XCTAssertTrue(try find(id("developerMode"), in: controller, as: SettingsSwitch.self).isOn)
+    try XCTUnwrap(ask.view.cancelButton).performClick(nil)
+    XCTAssertTrue(engine.isExtensionDeveloperModeEnabled)
+    XCTAssertTrue(has(id("loadUnpacked"), in: controller))
+
+    try find(id("developerMode"), in: controller, as: SettingsSwitch.self).performClick(nil)
+    try XCTUnwrap(controller.extensionAlert).view.primaryButton.performClick(nil)
+    XCTAssertFalse(engine.isExtensionDeveloperModeEnabled)
+    XCTAssertEqual(engine.installedExtensions.first { $0.id == "tidy" }?.isEnabled, false)
+    XCTAssertEqual(try row("tidy", in: controller).captionText, "Version 0.1. Turned off.")
+    XCTAssertFalse(has(id("loadUnpacked"), in: controller))
+  }
+
+  func testLoadUnpackedPassesOnlyAFileURL() async throws {
+    let engine = engine()
+    engine.setExtensionDeveloperModeEnabled(true)
+    let controller = open(engine)
+    controller.unpackedFolderPicker = { _, done in done(URL(string: "https://example.com/extension")) }
+    try find(id("loadUnpacked"), in: controller, as: NSButton.self).performClick(nil)
+    await controller.pendingUnpackedLoad?.value
+    XCTAssertTrue(engine.loadedUnpackedFolders.isEmpty)
+    XCTAssertNil(controller.pendingUnpackedLoad)
   }
 
   func testLoadUnpackedLoadsTheChosenFolder() async throws {

@@ -10,13 +10,23 @@ extension InMemoryEngine {
     guard let index = installedExtensions.firstIndex(where: { $0.id == extensionID }) else { return .unknownExtension }
     guard installedExtensions[index].isEnabled != enabled else { return .applied }
     guard installedExtensions[index].canDisable else { return .refused }
+    if enabled, permissionApprovalIDs.contains(extensionID) { return .needsPermissionApproval }
     installedExtensions[index].isEnabled = enabled
     hub.emit(EngineExtensionEvent.installedExtensionsChanged)
     return .applied
   }
 
+  /// Off turns off every unpacked extension, as Chromium does, with one `.installedExtensionsChanged` when any was on.
   public func setExtensionDeveloperModeEnabled(_ enabled: Bool) {
     isExtensionDeveloperModeEnabled = enabled
+    guard !enabled else { return }
+    var changed = false
+    for index in installedExtensions.indices
+    where installedExtensions[index].origin == .unpacked && installedExtensions[index].isEnabled {
+      installedExtensions[index].isEnabled = false
+      changed = true
+    }
+    if changed { hub.emit(EngineExtensionEvent.installedExtensionsChanged) }
   }
 
   /// Answers at once, without a sleep: `.developerModeOff` while developer mode is off; `.failed` with
@@ -24,6 +34,7 @@ extension InMemoryEngine {
   /// folder (one entry per folder: loading it again reloads it), `.installedExtensionsChanged` is reported, then
   /// `.loaded`.
   public func loadUnpackedExtension(at folder: URL) async -> UnpackedExtensionResult {
+    guard folder.isFileURL, folder.path.hasPrefix("/") else { return .failed(reason: Self.notAFolderReason) }
     guard isExtensionDeveloperModeEnabled else { return .developerModeOff }
     loadedUnpackedFolders.append(folder)
     if let unpackedLoadFailure { return .failed(reason: unpackedLoadFailure) }
@@ -43,6 +54,9 @@ extension InMemoryEngine {
     guard installedExtensions.contains(where: { $0.id == extensionID && $0.hasOptionsPage }) else { return }
     openedOptionsPages.append(extensionID)
   }
+
+  /// The reason a URL that is not an absolute file URL fails with.
+  public static let notAFolderReason = "Choose a folder on this Mac."
 
   // MARK: - Test drivers
 

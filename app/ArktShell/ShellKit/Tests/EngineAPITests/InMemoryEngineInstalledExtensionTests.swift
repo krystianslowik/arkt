@@ -112,7 +112,39 @@ struct InMemoryEngineInstalledExtensionTests {
     token.cancel()
   }
 
+  @Test func turningOnAnExtensionThatNeedsNewPermissionsAnswersSo() {
+    let engine = InMemoryEngine()
+    engine.setInstalledExtensions([info("p", "Updated", enabled: false)])
+    engine.permissionApprovalIDs = ["p"]
+    let (token, events) = observe(engine)
+    #expect(engine.setExtensionEnabled("p", enabled: true) == .needsPermissionApproval)
+    #expect(engine.installedExtensions.first?.isEnabled == false)
+    #expect(events().isEmpty)
+    token.cancel()
+  }
+
   // MARK: - Developer mode and Load unpacked
+
+  @Test func developerModeOffTurnsOffUnpackedExtensions() {
+    let engine = InMemoryEngine()
+    engine.setInstalledExtensions([info("u", "Unpacked", origin: .unpacked), info("w", "Store")])
+    engine.setExtensionDeveloperModeEnabled(true)
+    let (token, events) = observe(engine)
+    engine.setExtensionDeveloperModeEnabled(false)
+    #expect(engine.installedExtensions.map(\.isEnabled) == [false, true])
+    #expect(events() == [.installedExtensionsChanged])
+    engine.setExtensionDeveloperModeEnabled(false)
+    #expect(events() == [.installedExtensionsChanged], "nothing left to turn off, no event")
+    token.cancel()
+  }
+
+  @Test func loadUnpackedTakesOnlyAnAbsoluteFileURL() async throws {
+    let engine = InMemoryEngine()
+    engine.setExtensionDeveloperModeEnabled(true)
+    let web = try #require(URL(string: "https://example.com/extension"))
+    #expect(await engine.loadUnpackedExtension(at: web) == .failed(reason: InMemoryEngine.notAFolderReason))
+    #expect(engine.loadedUnpackedFolders.isEmpty)
+  }
 
   @Test func developerModeIsAProfileSwitch() {
     let engine = InMemoryEngine()
