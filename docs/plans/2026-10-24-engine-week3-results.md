@@ -8474,3 +8474,40 @@ Every engine run stopped by exact PID (`ps -p` prints nothing), and run 4's two 
 (started with it, parent gone) stopped by PID; run 5's helpers exited by themselves. Throwaway profiles under
 `profiles/964-20261124/` deleted. The fixtures and run logs stay under `arkt-artifacts/964/` (small) until the review
 ends. Nothing touched the Keychain (mock keychain only), `/Applications/Arkt.app` or real browser data.
+
+### #964 review fixes (PR #966)
+
+- Enable gate (security): `ExtensionRegistrar::EnableExtension` clears every disable reason, so enabling now needs
+  every reason to be one the user may lift, as `management.setEnabled` and chrome://extensions allow: user action,
+  another extension's disable, reload, greylist, external install, and an unpacked extension's developer-mode reason
+  while developer mode is on. A permissions increase answers NeedsPermissionApproval; any other reason (corrupted,
+  not verified, unsupported requirements, custodian or remote-install approval, or one the list does not know)
+  answers NotAllowed. `mayChangeEnabled` reads the same gate.
+- Events: the watcher also observes `ExtensionPrefsObserver` (`OnExtensionDisableReasonsChanged`,
+  `OnExtensionPrefsUpdated`, which a blocklisting writes) and the management policy prefs `ExtensionManagement`
+  reads. Those only request a check: the event goes out when the listed ids, versions, names, enabled,
+  `mayChangeEnabled` or `canUninstall` states differ from the last report. Registry changes, developer mode and icons
+  always report.
+- Icons: each load carries a generation (every install, update or reload drops the entry), so a same-version reload
+  shows the new icon; the PNG is encoded once when the load finishes and only copied on each listing.
+- Load unpacked refuses a path that is not absolute ("Not a folder."). The engine's own sentences are now sentences
+  ("Developer mode is off.", "Blocked by policy.", "Not a folder."); `ChromiumEngine` matches the first.
+- Self-test: `ext-disable-reason <id> <disable_reason value>` disables a listed extension with that single reason.
+
+Run 6 (`out/Arkt`, fresh profile `profiles/964-20261124/run6`, same flags; build 83 s, `FAILED:` 0;
+`gn check`: OK):
+
+| Step | Result |
+|---|---|
+| `ext-load fixtures/icon-probe` (relative) while developer mode is off | `reason=Developer mode is off. insideCall=no` |
+| `ext-disable` action probe | one event; `enabled=no mayChange=yes` |
+| `ext-disable-reason` action probe 1024 (`DISABLE_CORRUPTED`, added to a disabled extension: no registry event) | one event through the check; `mayChange=no` |
+| `ext-enable` action probe | `result=2` (NotAllowed), stays disabled |
+| `ext-disable-reason` site probe 2 (`DISABLE_PERMISSIONS_INCREASE`) | one event; `enabled=no mayChange=no` |
+| `ext-enable` site probe | `result=3` (NeedsPermissionApproval), stays disabled |
+| Developer mode on, `ext-load fixtures/icon-probe` (relative) | `reason=Not a folder.` |
+| Load the icon probe, replace its icon, load the same folder again (same version) | 2 events; icon 196 -> 168 bytes (the new icon) |
+| `FATAL`, `Check failed`, `DCHECK` | 0 |
+
+Not run: a real blocklisting and a policy change (no Safe Browsing blocklist or policy on this machine); both go
+through the check path the reason-only change above took.
