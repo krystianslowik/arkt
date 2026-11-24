@@ -3624,4 +3624,9 @@ Section stay as built; F12 stays reserved; the recorder rules and the Reset All 
   `openExtensionOptionsPage(_:)` and `EngineExtensionEvent.installedExtensionsChanged`. Each has a default that
   refuses or does nothing; InMemoryEngine implements them, and `installExtension` / `uninstallExtension` keep the list
   in step with the windows' actions. ChromiumEngine gets them in #964.
+- From the #966 review: `ExtensionEnableResult.needsPermissionApproval` (Chromium's kNeedsPermissionApproval). The
+  switch stays off and a one-answer sheet says the extension needs new permissions. Turning developer mode off while
+  unpacked extensions are on asks first ("Turn off developer mode?", Turn Off / Cancel), because Chromium turns them
+  off. `loadUnpackedExtension(at:)` takes an absolute file URL only. The doc of `.installedExtensionsChanged` now
+  says one event may carry several changes and a late icon comes as its own event.
 - Not in this change: the per-extension incognito allowance (after #558).
