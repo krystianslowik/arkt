@@ -123,7 +123,68 @@ struct InMemoryEngineInstalledExtensionTests {
     token.cancel()
   }
 
+  @Test func anExtensionNeedingNewPermissionsCanStillBeToggled() {
+    let engine = InMemoryEngine()
+    engine.setInstalledExtensions([info("p", "Updated", enabled: false)])
+    engine.permissionApprovalIDs = ["p"]
+    #expect(engine.installedExtensions.first?.canDisable == true, "the toggle is actionable: it answers why")
+  }
+
+  @Test func siteAccessDefaultsToNoHostAccess() {
+    #expect(InstalledExtensionInfo(id: "a", name: "A", version: "1").siteAccess == .noHostAccess)
+    let some = InstalledExtensionInfo(id: "b", name: "B", version: "1", siteAccess: .someSites(count: 3))
+    #expect(some.siteAccess == .someSites(count: 3))
+  }
+
+  @Test func turningOffRemovesTheActionsAndTurningOnRestoresThem() {
+    let engine = InMemoryEngine()
+    let first = engine.createWindow(host: StubWindowHost())
+    let second = engine.createWindow(host: StubWindowHost())
+    for window in [first, second] {
+      engine.setExtensionActions([ExtensionAction(id: "a", name: "A"), ExtensionAction(id: "b", name: "B")],
+                                 in: window)
+    }
+    engine.setInstalledExtensions([info("a", "A"), info("b", "B")])
+    let recorder = EventRecorder(engine)
+    #expect(engine.setExtensionEnabled("a", enabled: false) == .applied)
+    #expect(engine.extensionActions(in: first).map(\.id) == ["b"])
+    #expect(engine.extensionActions(in: second).map(\.id) == ["b"])
+    #expect(recorder.windowEvents == [.extensionActionsChanged(first), .extensionActionsChanged(second)])
+    #expect(engine.setExtensionEnabled("a", enabled: true) == .applied)
+    #expect(engine.extensionActions(in: first).map(\.id).sorted() == ["a", "b"])
+    #expect(recorder.windowEvents.count == 4)
+  }
+
   // MARK: - Developer mode and Load unpacked
+
+  @Test func developerModeOffLocksTheUnpackedExtensionsItTurnedOff() {
+    let engine = InMemoryEngine()
+    engine.setInstalledExtensions([info("u", "Unpacked", origin: .unpacked),
+                                   info("v", "Off already", enabled: false, origin: .unpacked)])
+    engine.setExtensionDeveloperModeEnabled(true)
+    engine.setExtensionDeveloperModeEnabled(false)
+    let u = engine.installedExtensions.first { $0.id == "u" }
+    #expect(u?.isEnabled == false && u?.canDisable == false, "listed as off and locked while developer mode is off")
+    #expect(engine.installedExtensions.first { $0.id == "v" }?.canDisable == true, "one the user turned off stays theirs")
+    #expect(engine.setExtensionEnabled("u", enabled: true) == .refused)
+  }
+
+  @Test func developerModeOnTurnsThemBackOnWithOneEvent() {
+    let engine = InMemoryEngine()
+    engine.setInstalledExtensions([info("u", "Unpacked", origin: .unpacked),
+                                   info("v", "Off already", enabled: false, origin: .unpacked)])
+    engine.setExtensionDeveloperModeEnabled(true)
+    engine.setExtensionDeveloperModeEnabled(false)
+    let (token, events) = observe(engine)
+    engine.setExtensionDeveloperModeEnabled(true)
+    let u = engine.installedExtensions.first { $0.id == "u" }
+    #expect(u?.isEnabled == true && u?.canDisable == true)
+    #expect(engine.installedExtensions.first { $0.id == "v" }?.isEnabled == false, "only the ones it turned off")
+    #expect(events() == [.installedExtensionsChanged])
+    engine.setExtensionDeveloperModeEnabled(true)
+    #expect(events() == [.installedExtensionsChanged], "already on: no event")
+    token.cancel()
+  }
 
   @Test func developerModeOffTurnsOffUnpackedExtensions() {
     let engine = InMemoryEngine()

@@ -29,6 +29,9 @@ public struct SettingsServices {
   /// Open Chrome Web Store (Settings > Extensions, #600): the Web Store in a new tab of the frontmost browser window.
   /// The pill is disabled while nil.
   public var openWebStore: (@MainActor () -> Void)?
+  /// Opens a URL in a new tab of the frontmost browser window, or of a new window when none is open: chrome://extensions
+  /// on an extension that needs new permissions (#600).
+  public var openInBrowser: (@MainActor (URL) -> Void)?
   /// Whether a binding conflicts with a system shortcut (BH-199): the static list of macOS defaults.
   public var isSystemShortcut: @MainActor (ShortcutBinding) -> Bool = { SystemShortcuts.contains($0) }
   /// The Spaces, in sidebar order.

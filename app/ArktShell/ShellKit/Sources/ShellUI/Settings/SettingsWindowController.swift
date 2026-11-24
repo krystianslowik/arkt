@@ -118,6 +118,9 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
   public internal(set) var pendingUnpackedLoad: Task<Void, Never>?
   /// Closure targets of the Extensions pane's own buttons, replaced on each rebuild.
   var extensionTargets: [NSObject] = []
+  /// Each row's controls, for updates in place, and the decoded icons by extension and PNG.
+  var extensionRowControls: [String: ExtensionRowControls] = [:]
+  var extensionIconCache: [String: NSImage] = [:]
   /// Shows the folder panel for Load Unpacked... and answers the chosen folder, nil when cancelled; tests replace it.
   var unpackedFolderPicker: @MainActor (NSWindow?, @escaping @MainActor (URL?) -> Void) -> Void = { window, done in
     let panel = NSOpenPanel()

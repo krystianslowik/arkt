@@ -507,11 +507,8 @@ final class AppSession {
     var services = SettingsServices()
     services.shortcutEditor = shortcutEditor
     services.extensions = engine as? any EngineExtensions                               // #597
-    services.openWebStore = { [weak self] in                                            // #600
-      guard let window = self?.shownWindow() else { return }
-      window.showWindow(nil)
-      window.openInNewTab(OnboardingController.Options.chromeWebStore)
-    }
+    services.openInBrowser = { [weak self] url in self?.openInBrowserTab(url) }       // #600
+    services.openWebStore = { [weak self] in self?.openInBrowserTab(OnboardingController.Options.chromeWebStore) }
     services.openLibrary = { [weak self] in self?.showLibrary() }                     // #132
     services.isDefaultBrowser = { DefaultBrowser.isDefault() }
     services.makeDefaultBrowser = { await DefaultBrowser.makeDefault() }
@@ -526,6 +523,14 @@ final class AppSession {
     services.spaces = { [weak self] in self.map { SettingsSpaceSummary.list(from: $0.source) } ?? [] }
     services.archiveRows = archiveSettings.settingsRows                                // #448
     return services
+  }
+
+  /// Settings' links into a browser window (#600): a new tab of the primary window, or of a new window (no blank first
+  /// tab) when none is open.
+  private func openInBrowserTab(_ url: URL) {
+    let window = windows.primary ?? windows.openWindow(opensFirstTab: false)
+    window.showWindow(nil)
+    window.openInNewTab(url)
   }
 
   // MARK: - Arc import (E4c)

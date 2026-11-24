@@ -15,6 +15,7 @@ final class ExtensionsSettingsTests: XCTestCase {
   private var suiteName = ""
   private var defaults = UserDefaults.standard
   private var webStoreOpens = 0
+  private var openedURLs: [URL] = []
 
   override func setUp() async throws {
     _ = NSApplication.shared
@@ -22,6 +23,7 @@ final class ExtensionsSettingsTests: XCTestCase {
     suiteName = "dev.arkt.tests.extensionsSettings.\(UUID().uuidString)"
     defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
     webStoreOpens = 0
+    openedURLs = []
   }
 
   override func tearDown() async throws {
@@ -49,11 +51,13 @@ final class ExtensionsSettingsTests: XCTestCase {
   private func designList() -> [InstalledExtensionInfo] {
     [
       InstalledExtensionInfo(id: "ublock", name: "uBlock Origin Lite", version: "2025.1",
-                             description: "Blocks ads and trackers.", iconPNG: Self.icon),
+                             description: "Blocks ads and trackers.", iconPNG: Self.icon,
+                             siteAccess: .someSites(count: 3)),
       InstalledExtensionInfo(id: "json", name: "JSON Formatter", version: "0.9", description: "Formats JSON.",
                              isEnabled: false),
       InstalledExtensionInfo(id: "onepassword", name: "1Password", version: "8.11",
-                             description: "Fills your passwords.", iconPNG: Self.icon, hasOptionsPage: true),
+                             description: "Fills your passwords.", iconPNG: Self.icon, hasOptionsPage: true,
+                             siteAccess: .allSites),
     ]
   }
 
@@ -70,6 +74,7 @@ final class ExtensionsSettingsTests: XCTestCase {
     services.isSystemShortcut = { _ in false }
     services.extensions = engine
     services.openWebStore = { [weak self] in self?.webStoreOpens += 1 }
+    services.openInBrowser = { [weak self] url in self?.openedURLs.append(url) }
     let controller = SettingsWindowController(settings: AppSettings(defaults: defaults), services: services)
     if let appearance { controller.window?.appearance = NSAppearance(named: appearance) }
     controllers.append(controller)
@@ -127,7 +132,8 @@ final class ExtensionsSettingsTests: XCTestCase {
     XCTAssertEqual(controller.shownExtensionIDs, ["onepassword", "json", "ublock"], "sorted by name")
     let first = try row("onepassword", in: controller)
     XCTAssertEqual(first.labelText, "1Password")
-    XCTAssertEqual(first.captionText, "Version 8.11. Fills your passwords.")
+    XCTAssertEqual(first.captionText, "Version 8.11. Can read and change data on all sites.")
+    XCTAssertEqual(try row("ublock", in: controller).captionText, "Version 2025.1. Can read and change data on 3 sites.")
     XCTAssertEqual(try row("json", in: controller).captionText, "Version 0.9. Turned off.")
     let texts = controller.visibleTexts()
     XCTAssertTrue(texts.contains("Installed"))
@@ -142,6 +148,42 @@ final class ExtensionsSettingsTests: XCTestCase {
     XCTAssertEqual(store.style, .neutral)
     store.performClick(nil)
     XCTAssertEqual(webStoreOpens, 1)
+  }
+
+  /// The design's site-access line; the short description only for an extension without site access (#600 decision).
+  func testTheCaptionSaysWhatTheExtensionCanReadAndChange() throws {
+    let list = [
+      InstalledExtensionInfo(id: "a", name: "A", version: "1", siteAccess: .allSites),
+      InstalledExtensionInfo(id: "b", name: "B", version: "2", siteAccess: .someSites(count: 1)),
+      InstalledExtensionInfo(id: "c", name: "C", version: "3", siteAccess: .someSites(count: 12)),
+      InstalledExtensionInfo(id: "d", name: "D", version: "4", siteAccess: .onClick),
+      InstalledExtensionInfo(id: "e", name: "E", version: "5", description: "Formats JSON."),
+      InstalledExtensionInfo(id: "f", name: "F", version: "6"),
+    ]
+    let controller = open(engine(list))
+    XCTAssertEqual(try row("a", in: controller).captionText, "Version 1. Can read and change data on all sites.")
+    XCTAssertEqual(try row("b", in: controller).captionText, "Version 2. Can read and change data on 1 site.")
+    XCTAssertEqual(try row("c", in: controller).captionText, "Version 3. Can read and change data on 12 sites.")
+    XCTAssertEqual(try row("d", in: controller).captionText,
+                   "Version 4. Can read and change data when you click it.")
+    XCTAssertEqual(try row("e", in: controller).captionText, "Version 5. Formats JSON.")
+    XCTAssertEqual(try row("f", in: controller).captionText, "Version 6.")
+  }
+
+  /// A switch flipped on a row whose list did not change shape updates in place: the same row and switch stay.
+  func testASwitchFlipUpdatesTheRowInPlace() throws {
+    let engine = engine()
+    let controller = open(engine)
+    let rowBefore = try row("onepassword", in: controller)
+    let control = try toggle("onepassword", in: controller)
+    control.performClick(nil)
+    XCTAssertTrue(try row("onepassword", in: controller) === rowBefore, "no rebuild for a state change")
+    XCTAssertTrue(try toggle("onepassword", in: controller) === control)
+    XCTAssertFalse(control.isOn)
+    XCTAssertEqual(rowBefore.captionText, "Version 8.11. Turned off.")
+    XCTAssertFalse(try pin("onepassword", in: controller).isEnabled)
+    engine.installExtension(InstalledExtension(id: "zz", name: "Zebra"))
+    XCTAssertFalse(try row("onepassword", in: controller) === rowBefore, "a new extension rebuilds the list")
   }
 
   func testTheSwitchTurnsAnExtensionOffAndOnThroughTheEngine() throws {
@@ -168,19 +210,33 @@ final class ExtensionsSettingsTests: XCTestCase {
     XCTAssertEqual(inner.installedExtensions.first { $0.id == "onepassword" }?.isEnabled, true)
   }
 
-  /// An extension Chromium turned off because its update asks for more permissions stays off, and a sheet says why.
-  func testAnExtensionNeedingNewPermissionsStaysOffAndSaysWhy() throws {
+  /// An extension Chromium turned off because its update asks for more permissions stays off; the sheet names it and
+  /// opens chrome://extensions on it in a browser window (#600 decision B). Its switch is actionable (`canDisable`).
+  func testAnExtensionNeedingNewPermissionsStaysOffAndOpensItsPage() throws {
     let engine = engine()
     engine.permissionApprovalIDs = ["json"]
     let controller = open(engine)
     let control = try toggle("json", in: controller)
+    XCTAssertTrue(control.isEnabled, "the switch can be pressed, so the sheet can say why")
     control.performClick(nil)
     XCTAssertFalse(try toggle("json", in: controller).isOn, "the switch shows it is still off")
     XCTAssertEqual(engine.installedExtensions.first { $0.id == "json" }?.isEnabled, false)
     let alert = try XCTUnwrap(controller.extensionAlert)
     XCTAssertEqual(alert.view.titleField.stringValue, "\u{201C}JSON Formatter\u{201D} needs new permissions")
-    XCTAssertNil(alert.view.cancelButton, "one answer")
+    XCTAssertEqual(alert.view.primaryButton.title, "Review Permissions")
+    XCTAssertEqual(alert.view.cancelButton?.title, "Cancel")
     alert.view.primaryButton.performClick(nil)
+    XCTAssertEqual(openedURLs, [URL(string: "chrome://extensions/?id=json")!])
+    XCTAssertNil(controller.extensionAlert)
+  }
+
+  func testCancelOnTheNewPermissionsSheetOpensNothing() throws {
+    let engine = engine()
+    engine.permissionApprovalIDs = ["json"]
+    let controller = open(engine)
+    try toggle("json", in: controller).performClick(nil)
+    try XCTUnwrap(controller.extensionAlert?.view.cancelButton).performClick(nil)
+    XCTAssertTrue(openedURLs.isEmpty)
     XCTAssertNil(controller.extensionAlert)
   }
 
@@ -348,7 +404,8 @@ final class ExtensionsSettingsTests: XCTestCase {
     let ask = try XCTUnwrap(controller.extensionAlert)
     XCTAssertEqual(ask.view.titleField.stringValue, "Turn off developer mode?")
     XCTAssertTrue(ask.content.paragraphs.map(\.text).contains(
-      "The unpacked extension you loaded from a folder will be turned off."))
+      "Unpacked extensions you loaded from a folder will be turned off. They come back on when you turn developer "
+        + "mode on again."))
     XCTAssertTrue(engine.isExtensionDeveloperModeEnabled, "nothing changes before the answer")
     XCTAssertTrue(try find(id("developerMode"), in: controller, as: SettingsSwitch.self).isOn)
     try XCTUnwrap(ask.view.cancelButton).performClick(nil)
@@ -359,8 +416,13 @@ final class ExtensionsSettingsTests: XCTestCase {
     try XCTUnwrap(controller.extensionAlert).view.primaryButton.performClick(nil)
     XCTAssertFalse(engine.isExtensionDeveloperModeEnabled)
     XCTAssertEqual(engine.installedExtensions.first { $0.id == "tidy" }?.isEnabled, false)
-    XCTAssertEqual(try row("tidy", in: controller).captionText, "Version 0.1. Turned off.")
+    XCTAssertEqual(try row("tidy", in: controller).captionText, "Version 0.1. Turned off while developer mode is off.")
+    XCTAssertFalse(try toggle("tidy", in: controller).isEnabled, "locked until developer mode is on again")
     XCTAssertFalse(has(id("loadUnpacked"), in: controller))
+
+    try find(id("developerMode"), in: controller, as: SettingsSwitch.self).performClick(nil)
+    XCTAssertEqual(engine.installedExtensions.first { $0.id == "tidy" }?.isEnabled, true, "back on with it")
+    XCTAssertTrue(try toggle("tidy", in: controller).isOn)
   }
 
   func testLoadUnpackedPassesOnlyAFileURL() async throws {
@@ -425,6 +487,21 @@ final class ExtensionsSettingsTests: XCTestCase {
     XCTAssertEqual(controller.shownExtensionIDs, ["onepassword", "json", "ublock"])
   }
 
+  func testALoadThatFinishesAfterSettingsClosedIsIgnored() async throws {
+    let engine = engine()
+    engine.setExtensionDeveloperModeEnabled(true)
+    engine.unpackedLoadFailure = "Manifest file is missing or unreadable."
+    let controller = open(engine)
+    controller.unpackedFolderPicker = { _, done in done(URL(fileURLWithPath: "/tmp/empty", isDirectory: true)) }
+    try find(id("loadUnpacked"), in: controller, as: NSButton.self).performClick(nil)
+    let load = try XCTUnwrap(controller.pendingUnpackedLoad)
+    controller.window?.close()
+    XCTAssertNil(controller.pendingUnpackedLoad, "the window's close forgets it")
+    await load.value
+    XCTAssertNil(controller.extensionAlert, "no sheet on a closed window")
+    XCTAssertNil(controller.expandedExtensionID)
+  }
+
   // MARK: Empty
 
   func testNoExtensionsShowsTheEmptyStateWithTheOnePrimary() throws {
@@ -464,6 +541,23 @@ final class ExtensionsSettingsTests: XCTestCase {
     XCTAssertEqual(controller.selectedPane, .extensions)
     XCTAssertEqual(controller.expandedExtensionID, "ublock")
     XCTAssertTrue(has(id("details.ublock"), in: controller))
+  }
+
+  /// Manage on the 40th extension: its details are scrolled into view, from an open window and from a closed one.
+  func testManageScrollsAFarRowsDetailsIntoView() throws {
+    let list = (0..<40).map { InstalledExtensionInfo(id: String(format: "ext%02d", $0), name: String(format: "Ext %02d", $0),
+                                                     version: "1") }
+    for opensFirst in [true, false] {
+      let controller = make(engine: engine(list))
+      if opensFirst { controller.show(pane: .general) }
+      controller.show(extensionID: "ext39")
+      controller.window?.contentView?.layoutSubtreeIfNeeded()
+      let details = try find(id("details.ext39"), in: controller)
+      XCTAssertFalse(details.visibleRect.isEmpty, "details visible (window open first: \(opensFirst))")
+      let row = try row("ext39", in: controller)
+      XCTAssertFalse(row.visibleRect.isEmpty)
+      controller.window?.close()
+    }
   }
 
   func testManageForAClosedWindowAndAnUnknownExtension() throws {
@@ -551,10 +645,11 @@ final class ExtensionsSettingsTests: XCTestCase {
       InstalledExtensionInfo(id: "onepassword", name: "1Password", version: "8.11",
                              description: "Fills your passwords and keeps them safe.",
                              iconPNG: Self.tile("1", NSColor(srgbRed: 0.16, green: 0.36, blue: 0.85, alpha: 1)),
-                             hasOptionsPage: true),
+                             hasOptionsPage: true, siteAccess: .allSites),
       InstalledExtensionInfo(id: "ublock", name: "uBlock Origin Lite", version: "2025.1",
                              description: "Blocks ads and trackers on all sites.",
-                             iconPNG: Self.tile("u", NSColor(srgbRed: 0.5, green: 0.08, blue: 0.08, alpha: 1))),
+                             iconPNG: Self.tile("u", NSColor(srgbRed: 0.5, green: 0.08, blue: 0.08, alpha: 1)),
+                             siteAccess: .onClick),
       InstalledExtensionInfo(id: "json", name: "JSON Formatter", version: "0.9", description: "Formats JSON.",
                              iconPNG: Self.tile("{}", NSColor(srgbRed: 0.24, green: 0.33, blue: 0.29, alpha: 1)),
                              isEnabled: false),

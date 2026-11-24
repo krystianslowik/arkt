@@ -20,6 +20,17 @@ extension SettingsWindowController {
   static let loadUnpackedTitle = "Load Unpacked..."
   static let loadFailedTitle = "Couldn\u{2019}t load the extension"
 
+  /// A row's live controls, updated in place when only the extension's state changed.
+  @MainActor
+  final class ExtensionRowControls {
+    weak var row: SettingsRowView?
+    weak var enabled: SettingsSwitch?
+    weak var pin: ExtensionsPinToggle?
+    init(row: SettingsRowView, enabled: SettingsSwitch, pin: ExtensionsPinToggle) {
+      self.row = row; self.enabled = enabled; self.pin = pin
+    }
+  }
+
   /// What the pane shows; it rebuilds only when this changes.
   struct ExtensionsPaneState: Equatable {
     var list: [InstalledExtensionInfo]
@@ -41,12 +52,14 @@ extension SettingsWindowController {
     }
   }
 
-  /// The window closed: no observation, no sheets, nothing expanded next time.
+  /// The window closed: no observation, no sheets, nothing expanded next time, and a load in flight forgotten (its
+  /// answer is ignored).
   func stopObservingInstalledExtensions() {
     installedExtensionsObservation?.cancel()
     installedExtensionsObservation = nil
     closeExtensionSheets()
     expandedExtensionID = nil
+    pendingUnpackedLoad = nil
   }
 
   private func currentExtensionsPaneState() -> ExtensionsPaneState {
@@ -63,8 +76,10 @@ extension SettingsWindowController {
                                withCommands: Set(engine.extensionCommands.map(\.id.extensionID)))
   }
 
-  /// Rebuilds the pane, when it is built and what it shows changed, keeping the keyboard focus on the same control.
-  /// The remove sheet closes when its extension went away; details close with their extension.
+  /// Follows what the engine reports, when the pane is built and what it shows changed. A change that keeps the rows
+  /// (the same ids in the same order, the same details and developer mode, no new name or icon) updates the rows in
+  /// place, so a switch just flipped stays put; anything else rebuilds the pane, keeping the keyboard focus on the
+  /// same control. The remove sheet closes when its extension went away; details close with their extension.
   func refreshExtensionsPane() {
     let state = currentExtensionsPaneState()
     if expandedExtensionID != state.expanded { expandedExtensionID = state.expanded }
@@ -73,8 +88,13 @@ extension SettingsWindowController {
       sheet.dismiss()
     }
     guard let pane = builtPane(.extensions), state != shownExtensionsState else { return }
+    if let shown = shownExtensionsState, Self.rowsMatch(shown, state) {
+      shownExtensionsState = state
+      for info in state.list { updateExtensionRow(info, pinned: state.pinned.contains(info.id), state: state) }
+      return
+    }
     let focused = (window?.firstResponder as? NSView)?.accessibilityIdentifier()
-    pane.setBlocks(extensionsBlocks())
+    pane.setBlocks(extensionsBlocks(state))
     if selectedPane == .extensions { fitWindowToPane() }
     updateKeyViewLoop()
     if let focused, !focused.isEmpty, let view = Self.view(focused, in: pane) { window?.makeFirstResponder(view) }
@@ -111,13 +131,53 @@ extension SettingsWindowController {
     paneContainer.scrollToVisible(rect.insetBy(dx: 0, dy: -SettingsMetrics.chromeHeight / 2))
   }
 
+  /// The rows can stay: only per-row state (on or off, pin, caption) changed. The expanded extension's details show its
+  /// info, so any change to it rebuilds.
+  private static func rowsMatch(_ old: ExtensionsPaneState, _ new: ExtensionsPaneState) -> Bool {
+    guard old.list.map(\.id) == new.list.map(\.id), old.expanded == new.expanded,
+          old.developerMode == new.developerMode, old.withCommands == new.withCommands else { return false }
+    return zip(old.list, new.list).allSatisfy { before, after in
+      before.name == after.name && before.iconPNG == after.iconPNG && (after.id != new.expanded || before == after)
+    }
+  }
+
+  /// One row follows its extension's state in place: the caption, the switch (animated) and the pin.
+  private func updateExtensionRow(_ info: InstalledExtensionInfo, pinned: Bool, state: ExtensionsPaneState) {
+    guard let controls = extensionRowControls[info.id] else { return }
+    controls.row?.setCaption(Self.extensionCaption(info, developerMode: state.developerMode))
+    if let enabled = controls.enabled {
+      enabled.setOn(info.isEnabled, animated: true)
+      enabled.isEnabled = info.canDisable
+      enabled.alphaValue = info.canDisable ? 1 : SettingsTokens.disabledControlAlpha
+    }
+    if let pin = controls.pin {
+      pin.isOn = pinned
+      pin.toolTip = pinned ? "Unpin" : "Pin"
+      pin.isEnabled = info.isEnabled
+      pin.alphaValue = info.isEnabled ? 1 : SettingsTokens.disabledControlAlpha
+    }
+  }
+
+  /// The icon's image, decoded once per extension and PNG.
+  private func extensionIcon(_ info: InstalledExtensionInfo) -> NSImage? {
+    guard let png = info.iconPNG else { return nil }
+    let key = "\(info.id)#\(png.hashValue)"
+    if let image = extensionIconCache[key] { return image }
+    let image = NSImage(data: png)
+    extensionIconCache[key] = image
+    return image
+  }
+
   // MARK: Blocks
 
-  func extensionsBlocks() -> [SettingsBlockView] {
-    let state = currentExtensionsPaneState()
+  func extensionsBlocks(_ given: ExtensionsPaneState? = nil) -> [SettingsBlockView] {
+    let state = given ?? currentExtensionsPaneState()
     shownExtensionsState = state
     shownExtensionIDs = state.list.map(\.id)
     extensionTargets = []
+    extensionRowControls = [:]
+    let current = Set(state.list.map(\.id))
+    extensionIconCache = extensionIconCache.filter { current.contains(String($0.key.prefix { $0 != "#" })) }
     let engine = services.extensions
     let hasList = !state.list.isEmpty
     let store = pill(.extensions, "openWebStore", Self.openWebStoreTitle, primary: !hasList, small: hasList) {
@@ -144,7 +204,8 @@ extension SettingsWindowController {
     }
     var rows: [SettingsBlockView] = []
     for info in state.list {
-      rows.append(extensionRow(info, pinned: state.pinned.contains(info.id), expanded: state.expanded == info.id))
+      rows.append(extensionRow(info, pinned: state.pinned.contains(info.id), expanded: state.expanded == info.id,
+                               developerMode: state.developerMode))
       if state.expanded == info.id { rows.append(extensionDetails(info, hasCommands: state.withCommands.contains(info.id))) }
     }
     return [
@@ -153,17 +214,24 @@ extension SettingsWindowController {
     ]
   }
 
-  /// "Version 8.11. <description>", "Version 0.9. Turned off." or, for a policy extension, "Version 3.2. Installed by
-  /// your organization."; one line, cut at the end.
-  static func extensionCaption(_ info: InstalledExtensionInfo) -> String {
+  /// The row's caption, one line cut at the end (the design's site-access line, #600 decision): "Version 8.11. Can read
+  /// and change data on all sites." (on N sites, when you click it); the short description for an extension without
+  /// site access; "Turned off." ("Turned off while developer mode is off." for an unpacked one then); "Installed by
+  /// your organization." for policy.
+  static func extensionCaption(_ info: InstalledExtensionInfo, developerMode: Bool) -> String {
     let version = info.version.isEmpty ? "" : "Version \(info.version)."
     let detail: String
     if !info.isEnabled {
-      detail = "Turned off."
+      detail = info.origin == .unpacked && !developerMode ? "Turned off while developer mode is off." : "Turned off."
     } else if info.origin == .policy {
       detail = "Installed by your organization."
     } else {
-      detail = info.description.trimmingCharacters(in: .whitespacesAndNewlines)
+      switch info.siteAccess {
+      case .allSites: detail = "Can read and change data on all sites."
+      case .someSites(let count): detail = "Can read and change data on \(count) site\(count == 1 ? "" : "s")."
+      case .onClick: detail = "Can read and change data when you click it."
+      case .noHostAccess: detail = info.description.trimmingCharacters(in: .whitespacesAndNewlines)
+      }
     }
     return [version, detail].filter { !$0.isEmpty }.joined(separator: " ")
   }
@@ -185,22 +253,27 @@ extension SettingsWindowController {
     return target
   }
 
-  private func extensionRow(_ info: InstalledExtensionInfo, pinned: Bool, expanded: Bool) -> SettingsRowView {
+  private func extensionRow(_ info: InstalledExtensionInfo, pinned: Bool, expanded: Bool,
+                            developerMode: Bool) -> SettingsRowView {
     let id = info.id
     let pin = ExtensionsPinToggle()
     pin.isOn = pinned
     pin.setArchiveAccessibilityLabel("Pin \(info.name)")
     pin.toolTip = pinned ? "Unpin" : "Pin"
-    let pinTarget = target { [weak self] in self?.setExtensionPinned(id, pinned: !pinned) }
+    let pinTarget = target { [weak self, weak pin] in
+      guard let pin else { return }
+      self?.setExtensionPinned(id, pinned: !pin.isOn)
+    }
     pin.target = pinTarget
     pin.action = #selector(SettingsActionTarget.fire(_:))
     identify(pin, .extensions, "pin.\(id)")
     let enabled = toggle(.extensions, "enabled.\(id)", on: info.isEnabled) { [weak self] on in
       self?.setExtension(id, enabled: on)
     }
-    let row = SettingsRowView(label: info.name, caption: Self.extensionCaption(info),
-                              leading: SettingsExtensionIcon(png: info.iconPNG), trailing: [pin, enabled],
+    let row = SettingsRowView(label: info.name, caption: Self.extensionCaption(info, developerMode: developerMode),
+                              leading: SettingsExtensionIcon(image: extensionIcon(info)), trailing: [pin, enabled],
                               singleLine: true)
+    extensionRowControls[id] = ExtensionRowControls(row: row, enabled: enabled, pin: pin)
     row.toolTip = info.name
     // After the row: a row enables the controls it holds. Chromium pins only extensions that are on.
     pin.isEnabled = info.isEnabled
@@ -274,7 +347,7 @@ extension SettingsWindowController {
     guard result != .applied else { return }
     if result == .needsPermissionApproval {
       let name = engine.installedExtensions.first { $0.id == extensionID }?.name ?? ""
-      showExtensionAlert(Self.needsPermissionContent(name))
+      showNeedsPermissionSheet(extensionID: extensionID, name: name)
     }
     let control = builtPane(.extensions).flatMap {
       Self.view(AXID.Settings.control("extensions", "enabled.\(extensionID)"), in: $0)
@@ -294,7 +367,7 @@ extension SettingsWindowController {
     guard let engine = services.extensions else { return }
     let unpacked = engine.installedExtensions.filter { $0.origin == .unpacked && $0.isEnabled }
     if !on, !unpacked.isEmpty {
-      askToTurnOffDeveloperMode(unpacked: unpacked.count)
+      askToTurnOffDeveloperMode()
       return
     }
     applyExtensionDeveloperMode(on)
@@ -313,20 +386,20 @@ extension SettingsWindowController {
     setShortcutSearch(name)
   }
 
-  static func developerModeOffContent(unpacked count: Int) -> DialogContent {
-    let which = count == 1 ? "The unpacked extension" : "The \(count) unpacked extensions"
-    return DialogContent(title: "Turn off developer mode?",
-                         paragraphs: [.init("\(which) you loaded from a folder will be turned off.")],
-                         primaryTitle: "Turn Off", cancelTitle: "Cancel", defaultButton: .cancel,
-                         primaryHelp: "Turns off developer mode and the unpacked extensions",
-                         width: resetSettingsWidth)
+  /// No count: Chromium also turns off extensions loaded with --load-extension, which the list cannot tell apart.
+  static var developerModeOffContent: DialogContent {
+    DialogContent(title: "Turn off developer mode?",
+                  paragraphs: [.init("Unpacked extensions you loaded from a folder will be turned off. They come "
+                    + "back on when you turn developer mode on again.")],
+                  primaryTitle: "Turn Off", cancelTitle: "Cancel", defaultButton: .cancel,
+                  primaryHelp: "Turns off developer mode and the unpacked extensions", width: resetSettingsWidth)
   }
 
   /// The confirmation for developer mode off; the switch stays on until Turn Off.
-  private func askToTurnOffDeveloperMode(unpacked count: Int) {
+  private func askToTurnOffDeveloperMode() {
     extensionsDeveloperSwitch?.setOn(true, animated: true)
     guard extensionAlert == nil, let window, window.attachedSheet == nil else { return }
-    let sheet = DialogSheet(content: Self.developerModeOffContent(unpacked: count))
+    let sheet = DialogSheet(content: Self.developerModeOffContent)
     sheet.onAnswer = { [weak self] answer in
       self?.extensionAlert = nil
       if answer == .primary { self?.applyExtensionDeveloperMode(false) }
@@ -348,7 +421,10 @@ extension SettingsWindowController {
     }
   }
 
+  /// A load that finishes after Settings closed is ignored: the closed window forgot it.
   private func finishUnpackedLoad(_ result: UnpackedExtensionResult) {
+    guard window?.isVisible == true, pendingUnpackedLoad != nil else { return }
+    pendingUnpackedLoad = nil
     switch result {
     case .loaded(let id):
       expandedExtensionID = id
@@ -366,13 +442,38 @@ extension SettingsWindowController {
     DialogContent(title: loadFailedTitle, paragraphs: [.init(reason)], primaryTitle: "OK", width: resetSettingsWidth)
   }
 
-  /// Why a switch did not turn an extension on: its update asks for more permissions.
+  /// Why a switch did not turn an extension on: its update asks for more permissions. Review Permissions opens
+  /// chrome://extensions on it in a browser window (#600 decision B).
   static func needsPermissionContent(_ name: String) -> DialogContent {
     let title = name.isEmpty ? "This extension needs new permissions" : "\u{201C}\(name)\u{201D} needs new permissions"
     return DialogContent(title: title,
                          paragraphs: [.init("Its latest update asks for more access, so it stays off until you "
-                           + "review the new permissions on the extensions page (chrome://extensions).")],
-                         primaryTitle: "OK", width: resetSettingsWidth, titleMaxLines: 2)
+                           + "review the new permissions on the browser\u{2019}s extensions page.")],
+                         primaryTitle: "Review Permissions", cancelTitle: "Cancel",
+                         primaryHelp: "Opens the extension on the extensions page in a browser window",
+                         width: resetSettingsWidth, titleMaxLines: 2)
+  }
+
+  /// chrome://extensions on one extension.
+  static func extensionsPageURL(_ extensionID: String) -> URL? {
+    var components = URLComponents()
+    components.scheme = "chrome"
+    components.host = "extensions"
+    components.path = "/"
+    components.queryItems = [URLQueryItem(name: "id", value: extensionID)]
+    return components.url
+  }
+
+  private func showNeedsPermissionSheet(extensionID: String, name: String) {
+    guard extensionAlert == nil, let window, window.attachedSheet == nil else { return }
+    let sheet = DialogSheet(content: Self.needsPermissionContent(name))
+    sheet.onAnswer = { [weak self] answer in
+      guard let self else { return }
+      self.extensionAlert = nil
+      if answer == .primary, let url = Self.extensionsPageURL(extensionID) { self.services.openInBrowser?(url) }
+    }
+    extensionAlert = sheet
+    sheet.begin(on: window)
   }
 
   private func showExtensionAlert(_ content: DialogContent) {

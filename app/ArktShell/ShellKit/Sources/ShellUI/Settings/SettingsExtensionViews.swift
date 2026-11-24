@@ -8,8 +8,8 @@ import AppKit
 final class SettingsExtensionIcon: NSView {
   private let image: NSImage?
 
-  init(png: Data?) {
-    image = png.flatMap(NSImage.init(data:))
+  init(image: NSImage?) {
+    self.image = image
     super.init(frame: NSRect(x: 0, y: 0, width: 20, height: 20))
     setAccessibilityElement(false)
   }

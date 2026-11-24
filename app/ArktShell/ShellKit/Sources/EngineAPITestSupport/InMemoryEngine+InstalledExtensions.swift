@@ -6,27 +6,65 @@ import Foundation
 // install and uninstall drivers keep both in step.
 
 extension InMemoryEngine {
+  /// Turning off removes the extension's actions from every window and turning on restores them, each window with
+  /// `.extensionActionsChanged`, then `.installedExtensionsChanged`. `canDisable` false answers `.refused`; an id in
+  /// `permissionApprovalIDs` answers `.needsPermissionApproval` to turning on.
   public func setExtensionEnabled(_ extensionID: String, enabled: Bool) -> ExtensionEnableResult {
     guard let index = installedExtensions.firstIndex(where: { $0.id == extensionID }) else { return .unknownExtension }
     guard installedExtensions[index].isEnabled != enabled else { return .applied }
     guard installedExtensions[index].canDisable else { return .refused }
     if enabled, permissionApprovalIDs.contains(extensionID) { return .needsPermissionApproval }
     installedExtensions[index].isEnabled = enabled
+    moveActions(of: [extensionID], enabled: enabled)
     hub.emit(EngineExtensionEvent.installedExtensionsChanged)
     return .applied
   }
 
-  /// Off turns off every unpacked extension, as Chromium does, with one `.installedExtensionsChanged` when any was on.
+  /// Off turns off every unpacked extension that is on, as Chromium does, and locks it (`canDisable` false) until
+  /// developer mode is on again, which turns those back on. One `.installedExtensionsChanged` for each change.
   public func setExtensionDeveloperModeEnabled(_ enabled: Bool) {
+    guard enabled != isExtensionDeveloperModeEnabled || !enabled else { return }
     isExtensionDeveloperModeEnabled = enabled
-    guard !enabled else { return }
-    var changed = false
-    for index in installedExtensions.indices
-    where installedExtensions[index].origin == .unpacked && installedExtensions[index].isEnabled {
-      installedExtensions[index].isEnabled = false
-      changed = true
+    var changed: [String] = []
+    for index in installedExtensions.indices {
+      let info = installedExtensions[index]
+      if enabled, developerModeDisabledIDs.contains(info.id) {
+        installedExtensions[index].isEnabled = true
+        installedExtensions[index].canDisable = true
+        changed.append(info.id)
+      } else if !enabled, info.origin == .unpacked, info.isEnabled {
+        installedExtensions[index].isEnabled = false
+        installedExtensions[index].canDisable = false
+        changed.append(info.id)
+      }
     }
-    if changed { hub.emit(EngineExtensionEvent.installedExtensionsChanged) }
+    if enabled { developerModeDisabledIDs = [] } else { developerModeDisabledIDs.formUnion(changed) }
+    guard !changed.isEmpty else { return }
+    moveActions(of: changed, enabled: enabled)
+    hub.emit(EngineExtensionEvent.installedExtensionsChanged)
+  }
+
+  /// Takes the extensions' actions out of every window (off) or puts the kept ones back (on), reporting
+  /// `.extensionActionsChanged` for each window that changed.
+  private func moveActions(of extensionIDs: [String], enabled: Bool) {
+    var touched: [EngineWindowID] = []
+    for id in extensionIDs {
+      if enabled {
+        for (window, kept) in turnedOffActions.removeValue(forKey: id) ?? [:] where windowIDs.contains(window) {
+          actions[window, default: []].append(contentsOf: kept)
+          if !touched.contains(window) { touched.append(window) }
+        }
+      } else {
+        for window in windowIDs {
+          let kept = actions[window]?.filter { $0.extensionID == id } ?? []
+          guard !kept.isEmpty else { continue }
+          actions[window]?.removeAll { $0.extensionID == id }
+          turnedOffActions[id, default: [:]][window] = kept
+          if !touched.contains(window) { touched.append(window) }
+        }
+      }
+    }
+    for window in windowIDs where touched.contains(window) { hub.emit(.extensionActionsChanged(window)) }
   }
 
   /// Answers at once, without a sleep: `.developerModeOff` while developer mode is off; `.failed` with

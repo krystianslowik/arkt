@@ -109,6 +109,10 @@ public final class InMemoryEngine: EngineClient, EngineExtensions, EngineImporti
   public internal(set) var isExtensionDeveloperModeEnabled = false
   /// Extensions whose uninstall fails in the engine: the call is recorded, nothing changes (#600).
   public var failingUninstallIDs: Set<String> = []
+  /// Unpacked extensions developer mode turned off: listed with `canDisable` false until it is on again (#600).
+  public internal(set) var developerModeDisabledIDs: Set<String> = []
+  /// The actions of turned-off extensions, by extension and window, restored when they are turned on again.
+  var turnedOffActions: [String: [EngineWindowID: [ExtensionAction]]] = [:]
   /// Extensions Chromium turned off for new permissions: turning one on answers `.needsPermissionApproval`.
   public var permissionApprovalIDs: Set<String> = []
   /// The reason the next unpacked loads fail with; nil: they load.
