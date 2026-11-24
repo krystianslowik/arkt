@@ -253,6 +253,53 @@ final class PinnedExtensionCycleKeyTests: XCTestCase {
     shellWindow.removeChildWindow(popup)
   }
 
+  // MARK: The popup stays key after the hold
+
+  /// After a hold the last popup stays open and is the key window (the engine makes it key), so the next Cmd-E never
+  /// reaches the browser window. The app's router takes it there too, as the first tap of a new hold.
+  func testANewHoldWhileThePopupIsKeyOpensTheFirstAgain() throws {
+    pin(["a", "b", "c"])
+    try firstTap()
+    try nextTap()
+    try releaseCommand()
+    XCTAssertFalse(panel.isCyclingPinnedExtensions)
+    let popup = extraWindow()                                  // the engine's popup hangs off the browser window
+    shellWindow.addChildWindow(popup, ordered: .above)
+    NSApp.sendEvent(try commandE(in: popup))
+    XCTAssertEqual(opened, ["a", "b", "a"], "the new hold starts at the first pinned extension")
+    XCTAssertTrue(panel.isCyclingPinnedExtensions)
+    shellWindow.removeChildWindow(popup)
+  }
+
+  func testWithNonePinnedTheRouterTakesNothingFromAChildWindow() throws {
+    pin([], unpinned: ["x"])
+    let popup = extraWindow()
+    shellWindow.addChildWindow(popup, ordered: .above)
+    XCTAssertFalse(panel.handleCycleEvent(try commandE(in: popup)), "the key goes on to that window")
+    XCTAssertEqual(opened, [])
+    shellWindow.removeChildWindow(popup)
+  }
+
+  func testTheRouterTakesNothingFromAnUnrelatedWindow() throws {
+    pin(["a"])
+    XCTAssertFalse(panel.handleCycleEvent(try commandE(in: extraWindow())), "Little Arkt or Settings keeps its Cmd-E")
+    XCTAssertEqual(opened, [])
+  }
+
+  func testOnboardingKeepsCommandE() throws {
+    pin(["a"])
+    let onboarding = controller.presentOnboarding(
+      services: FakeOnboardingServices(sidebar: StubSidebar(), arcFound: false),
+      options: .init(mode: .reentry, includesExtensions: false), stage: LateFoldStage())
+    XCTAssertNotNil(onboarding)
+    let page = try focusPage()
+    try firstTap()
+    XCTAssertEqual(opened, [], "the first run covers the browser")
+    XCTAssertFalse(controller.validateMenuItem(try menuItem))
+    controller.onboardingDidFinish()
+    page.removeFromSuperview()
+  }
+
   // MARK: Anchor
 
   func testThePopupAnchorsToTheExtensionsButtonOrWithTheSidebarHiddenToThePage() throws {

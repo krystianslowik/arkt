@@ -3607,9 +3607,13 @@ Section stay as built; F12 stays reserved; the recorder rules and the Reset All 
   Cmd-E only while an extension is pinned and no sheet is up. The View menu's hidden item has no live key
   (`allowsKeyEquivalentWhenHidden` off); it only names Cmd-E's owner for both recorders (#597), and validates on the
   same condition. Cmd-E is not in `ReservedKeys.arkt`.
-- Later taps: the engine makes the popup the key window and its `HandleKeyboardEvent` keeps nothing, so the later taps
-  and the release never reach the browser window. An app event monitor (`keyDown`, `flagsChanged`), installed on the
-  first tap, takes them. It continues the hold only for an event with no window, the browser window, or a window
+- Cmd-E is Arkt's, and active, while an extension is pinned; the recorders keep it protected either way.
+- Later taps: the engine makes the popup the key window and its `HandleKeyboardEvent` keeps nothing, so the later taps,
+  the release, and the first tap of the next hold while the last popup is still open never reach the browser window.
+  An app event monitor (`keyDown`, `flagsChanged`), live for the window's whole life, routes them
+  (`ExtensionsPanelController.handleCycleEvent`); with no hold it takes only a Cmd-E in a window hanging off the
+  browser window, and only while an extension is pinned. No Cmd-E is taken while the first run covers the
+  window. It continues the hold only for an event with no window, the browser window, or a window
   whose parent chain reaches it (the engine popup); a tap in Little Arkt, Settings or another browser window ends the
   hold and passes on. The hold also ends on the Command release, on any key without Command (a release missed during
   menu tracking), when the app resigns active (Cmd-Tab away mid-hold), and when the window closes.

@@ -339,6 +339,8 @@ extension ShellWindowController {
     panel.onBrowseWebStore = { [weak self] in self?.open(OnboardingController.Options.chromeWebStore, inNewTab: true) }
     panel.onRemove = { [weak panel] action in panel?.presentRemoveSheet(for: action) }    // #720
     panel.cycleAnchor = { [weak self] in self?.extensionCycleAnchor }                    // #599
+    panel.cycleAllowed = { [weak self] in self?.onboarding == nil }
+    panel.startCycleRouting()
     (window as? ShellWindow)?.keyEquivalentHandler = { [weak self] event in self?.takeCycleKey(event) ?? false }
     extensionsButton = button
     extensionsPanel = panel
@@ -351,8 +353,9 @@ extension ShellWindowController {
     extensionsPanel?.cyclePinnedExtensions()
   }
 
-  /// Cmd-E before the focused page, only while an extension is pinned and no sheet is up; otherwise the page keeps it
-  /// (maintainer, #599). The menu is not asked: its item would swallow the key even disabled.
+  /// Cmd-E before the focused page, only while an extension is pinned, no sheet is up and no first run covers the
+  /// window; otherwise the page keeps it (maintainer, #599). The menu is not asked: its item would swallow the key even
+  /// disabled.
   func takeCycleKey(_ event: NSEvent) -> Bool {
     guard ExtensionsPanelController.cycleKey.matches(event), let panel = extensionsPanel,
           panel.canCyclePinnedExtensions else { return false }

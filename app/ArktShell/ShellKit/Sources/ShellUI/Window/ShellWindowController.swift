@@ -1092,7 +1092,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     onRecoveryWindowClosed?()
     for node in shownNodes { onTabHidden?(node) }
     removePaneMouseMonitor()
-    extensionsPanel?.endCycle()                       // #599: a Cmd-E hold dies with its window
+    extensionsPanel?.stopCycleRouting()               // #599: a Cmd-E hold and its monitor die with the window
     javaScriptDialogs.closeAll()
     permissionPrompts.closeAll()
     infobarStrips.closeAll()
