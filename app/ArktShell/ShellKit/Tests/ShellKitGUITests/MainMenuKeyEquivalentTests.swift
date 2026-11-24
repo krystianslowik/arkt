@@ -250,6 +250,27 @@ final class MainMenuKeyEquivalentTests: XCTestCase {
     XCTAssertEqual(items(reachedBy: try key(kVK_ANSI_I, [.maskCommand, .maskAlternate])).first?.isHidden, false)
   }
 
+  /// KB-031, KB-032 (#948): Cmd-Left and Cmd-Right go back and forward through hidden aliases of History > Back and
+  /// Forward. They are not reserved, so a focused page keeps them first, and the History menu leaves them to editable
+  /// text (`HistoryMenu`).
+  func testCommandLeftAndRightAreHiddenAliasesOfBackAndForwardAndNotReserved() throws {
+    let cases: [(Int, String, EngineCommand)] = [(kVK_LeftArrow, "Back", .back), (kVK_RightArrow, "Forward", .forward)]
+    for (keyCode, title, command) in cases {
+      let event = try key(keyCode, .maskCommand)
+      let hits = items(reachedBy: event)
+      XCTAssertEqual(hits.map(\.title), [title])
+      let alias = try XCTUnwrap(hits.first)
+      XCTAssertEqual(alias.tag, command.rawValue, title)
+      XCTAssertEqual(alias.action, #selector(ShellWindow.commandDispatch(_:)), title)
+      XCTAssertNil(alias.target, title)
+      XCTAssertTrue(alias.isHidden, "one \(title) in the History menu")
+      XCTAssertTrue(alias.allowsKeyEquivalentWhenHidden, title)
+      XCTAssertTrue(alias.menu is HistoryMenu, title)
+      XCTAssertFalse(ReservedKeys.arkt.matches(event), "\(title): a focused page keeps the key first")
+      XCTAssertTrue(items(reachedBy: try key(keyCode, [.maskCommand, .maskShift])).isEmpty, "Shift-Cmd selects text")
+    }
+  }
+
   /// KB-069: Window > Minimize All on Opt-Cmd-M, the Option alternate of Minimize, sent to `NSApp` like the other
   /// app-level items.
   func testMinimizeAllIsTheOptionAlternateOfMinimize() throws {
@@ -518,8 +539,9 @@ final class MainMenuInventoryTests: XCTestCase {
     }
     let dispatching = allItems().filter { $0.action == #selector(ShellWindow.commandDispatch(_:)) }
     XCTAssertEqual(dispatching.filter { !$0.isHidden }.count, expected.count, "no other commandDispatch: item")
-    // KB-057 and KB-049 (#119): Cmd-= and F12, hidden second keys of listed commands.
-    XCTAssertEqual(dispatching.filter(\.isHidden).map(\.tag), [38001, 40004])
+    // KB-057 and KB-049 (#119), KB-031 and KB-032 (#948): Cmd-=, F12, Cmd-Left and Cmd-Right, hidden second keys of
+    // listed commands.
+    XCTAssertEqual(dispatching.filter(\.isHidden).map(\.tag), [38001, 40004, 33000, 33001])
   }
 
   /// `IDC_NEW_WINDOW`, the one id the menu and host use that has no `EngineCommand` constant, matches
