@@ -3450,7 +3450,7 @@ extras in v1; spec section 5).
 | KB-026, KB-027 | Ctrl-Cmd-Right / Left | bound | Tabs > Cycle Tab Forward / Backward (`TabsMenu.swift:23-25`) |
 | KB-028, KB-029 | Opt-Cmd-Down / Up | bound | Tabs > Next / Previous Tab (`TabsMenu.swift:17-18`) |
 | KB-030 | Cmd-} / Cmd-{ | bound | hidden aliases in the Tabs menu; RT-02 in #78 |
-| KB-031, KB-032 | Cmd-[ / Cmd-]; Cmd-Left / Cmd-Right | Cmd-[ / Cmd-] bound; Cmd-Left / Cmd-Right deferred to #948 | History > Back / Forward (`MainMenu.swift:203-204`); Cmd-Left / Right are not menu keys on purpose (a menu item would take them from text fields, `MainMenu.swift:199`) and no handler exists in the shell or the engine overlay |
+| KB-031, KB-032 | Cmd-[ / Cmd-]; Cmd-Left / Cmd-Right | bound | History > Back / Forward (`MainMenu.swift:206-209`); Cmd-Left / Right are hidden aliases (#948), not reserved, so a focused page uses them first and the menu gets only the ones it left (`ArktBrowserWindow::HandleKeyboardEvent`); `HistoryMenu` declines them while the event's window edits text, so the command bar, address bar and rename fields keep the caret moves |
 | KB-033, KB-034 | Opt-Cmd-Right / Left | bound | Spaces > Next / Previous Space (`MainMenu.swift:226-227`) |
 | KB-035 | Ctrl-1 ... Ctrl-9 | bound | Spaces menu entries (`SpacesMenu.swift`); also a macOS system shortcut, see spec section 1 and below |
 | KB-036 | Ctrl-Space | bound | Tabs > Reveal Current Tab (`TabsMenu.swift:28`); also a macOS system shortcut |
