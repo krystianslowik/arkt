@@ -272,6 +272,7 @@ final class InfobarRowView: NSView {
 
   private func configureLink(_ title: String) {
     guard let linkButton else { return }
+    // Setting the title resets the accessibility label to the title; the engine's label, when there is one, follows.
     linkButton.title = title
     if let label = infobar.linkAccessibilityLabel { linkButton.setArchiveAccessibilityLabel(label) }
   }

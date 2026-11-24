@@ -340,6 +340,23 @@ final class InfobarKeyboardTests: XCTestCase {
     XCTAssertFalse(row.okButton === ok, "the set of controls changed: the buttons are made again")
   }
 
+  /// A kept link button follows its infobar's accessibility label: set, then gone, then the title speaks (#944).
+  func testARefreshThatDropsTheLinksAccessibilityLabelResetsIt() throws {
+    let first = try XCTUnwrap(engine.raiseInfobar(in: tab, message: "One"))
+    func infobar(label: String?) -> Infobar {
+      Infobar(id: first, tab: tab, message: "One", linkTitle: "Learn more", linkAccessibilityLabel: label,
+              ok: InfobarButton(title: "OK"), closeLabel: "Close")
+    }
+    presenter.handle(.infobarsChanged(tab, [infobar(label: "Learn more about this prompt")]))
+    let row = try XCTUnwrap(try strip().rows.first)
+    let link = try XCTUnwrap(row.linkButton)
+    XCTAssertEqual(link.accessibilityLabel(), "Learn more about this prompt")
+    presenter.handle(.infobarsChanged(tab, [infobar(label: nil)]))
+    XCTAssertTrue(row.linkButton === link, "the link button is kept")
+    XCTAssertEqual(link.accessibilityLabel(), "Learn more")
+    XCTAssertEqual(link.cell?.accessibilityLabel(), "Learn more")
+  }
+
   /// Left and Right on a row with one control go around to that same control: nothing new to tell.
   func testLeftAndRightOnAOneControlRowTellVoiceOverNothingAgain() throws {
     engine.raiseInfobar(in: tab, message: "Note", okTitle: nil, cancelTitle: nil)
