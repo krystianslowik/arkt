@@ -20,6 +20,7 @@
 #include "base/strings/string_split.h"
 #include "base/strings/sys_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/devtools/chrome_devtools_manager_delegate.h"
 #include "ui/base/accelerators/command.h"
 #import "ui/base/cocoa/nsmenu_additions.h"
 #include "ui/base/window_open_disposition.h"
@@ -1778,8 +1779,12 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
                  << tab.browser.windowId;
     [tab.browser close];
   } else if (command == "quit") {
-    // Quit as the shell's Quit item does.
+    // Quit as the shell's Quit item does. With --no-startup-window and
+    // --remote-debugging-port, DevTools holds a REMOTE_DEBUGGING keep-alive
+    // until a client sends Browser.close, so the process outlived the quit
+    // (#934). This run asked to quit; let it end.
     LOG(WARNING) << "ARKT selftest quit";
+    ChromeDevToolsManagerDelegate::AllowBrowserToClose();
     [NSApp performSelector:@selector(terminate:) withObject:nil afterDelay:0];
   } else if (command == "new-tab") {
     // A background tab at `argument` in this tab's window.
