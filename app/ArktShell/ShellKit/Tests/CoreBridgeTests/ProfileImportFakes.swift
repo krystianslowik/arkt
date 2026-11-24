@@ -20,6 +20,9 @@ final class RecordingImportEngine: EngineImporting {
 
   /// What `installExtensions` returns; nil is an engine without the install step.
   var installResult: ImportWriteResult?
+  /// What `installExtensionResults` returns, one result per id; when set it answers instead of `installResult`. nil
+  /// leaves the engine on the aggregate `installExtensions`.
+  var installResults: [ExtensionInstallResult]?
   /// Overrides the counts of a type's next results, for example `["bookmarks": ImportWriteResult(failed: 1)]`.
   var scripted: [String: ImportWriteResult] = [:]
   /// Runs after each call has been recorded, with the call's name and the number of calls of that kind so far.
@@ -66,6 +69,14 @@ final class RecordingImportEngine: EngineImporting {
   func importBookmarks(_ batch: [BookmarkRecord]) async -> ImportWriteResult {
     bookmarkBatches.append(batch)
     return finish("bookmarks", default: ImportWriteResult(written: batch.count))
+  }
+
+  func installExtensionResults(ids: [String]) async -> [ExtensionInstallResult]? {
+    guard let installResults else { return nil }
+    installCalls.append(ids)
+    calls.append("extensions")
+    afterCall?("extensions", installCalls.count)
+    return installResults
   }
 
   func installExtensions(ids: [String]) async -> ImportWriteResult? {

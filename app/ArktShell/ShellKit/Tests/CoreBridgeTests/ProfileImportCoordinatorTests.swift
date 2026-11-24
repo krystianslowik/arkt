@@ -504,7 +504,7 @@ struct ProfileImportCoordinatorTests {
   @Test func cancelDuringTheInstallEndsTheRunWithoutRecordingTheIds() async throws {
     let harness = try Harness()
     let coordinator = harness.coordinator
-    harness.engine.installResult = ImportWriteResult(failed: 1, failureReason: "cancelled: 1\n")
+    harness.engine.installResults = [Self.install("a", .failed(ExtensionInstallOutcome.cancelledReason))]
     harness.engine.afterCall = { name, _ in if name == "extensions" { coordinator.cancel() } }
     let summary = try await harness.summary(ImportSelection([.extensions]))
     #expect(summary.cancelled)
@@ -512,6 +512,122 @@ struct ProfileImportCoordinatorTests {
     // Nothing came over because of the cancel, not a refusal: no Retry (#935).
     #expect(summary.outcomes[.extensions] == .skipped(reason: "cancelled"))
     #expect(!summary.canRetry)
+  }
+
+  // MARK: Follow-ups from the #937 review (#938)
+
+  @Test func aCancelBeforeTheInstallIsACancelledTypeNotAnImportOfZero() async throws {
+    let harness = try Harness()
+    let coordinator = harness.coordinator
+    harness.engine.installResult = ImportWriteResult(written: 1)
+    coordinator.afterPull = { type, _ in if type == .extensions { coordinator.cancel() } }
+    let summary = try await harness.summary(ImportSelection([.extensions]))
+    #expect(summary.cancelled)
+    #expect(summary.outcomes[.extensions] == .skipped(reason: "cancelled"))
+    #expect(!summary.canRetry)
+    #expect(harness.engine.installCalls.isEmpty)
+  }
+
+  @Test func extensionsThatFailedBecauseOfACancelAreNotRefusalsWhenSomethingCameOver() async throws {
+    let harness = try Harness()
+    let coordinator = harness.coordinator
+    harness.engine.installResults = [
+      Self.install("a", .installed), Self.install("b", .failed(ExtensionInstallOutcome.cancelledReason)),
+      Self.install("c", .failed(ExtensionInstallOutcome.cancelledReason)),
+    ]
+    harness.engine.afterCall = { name, _ in if name == "extensions" { coordinator.cancel() } }
+    let summary = try await harness.summary(ImportSelection([.extensions]))
+    #expect(summary.cancelled)
+    #expect(summary.outcomes[.extensions] == Self.counts(1))
+    #expect(!summary.canRetry)
+    #expect(await harness.records.stored.extensionIDs.isEmpty, "a batch with failures is not recorded")
+  }
+
+  @Test func aRealRefusalFollowedByACancelIsStillARefusal() async throws {
+    let harness = try Harness()
+    let coordinator = harness.coordinator
+    harness.engine.installResults = [
+      Self.install("a", .failed("store refused")), Self.install("b", .failed(ExtensionInstallOutcome.cancelledReason)),
+      Self.install("c", .failed(ExtensionInstallOutcome.cancelledReason)),
+    ]
+    harness.engine.afterCall = { name, _ in if name == "extensions" { coordinator.cancel() } }
+    let summary = try await harness.summary(ImportSelection([.extensions]))
+    #expect(summary.cancelled)
+    #expect(summary.outcomes[.extensions] == Self.counts(0, failed: 1))
+    #expect(summary.retryTypes == [.extensions])
+  }
+
+  @Test func aDeclinedConfirmationIsARefusalWithOrWithoutACancel() async throws {
+    // The engine fails the ids of a declined confirmation with "not confirmed", not with the cancel reason.
+    let declined = [Self.install("a", .failed("not confirmed")), Self.install("b", .failed("not confirmed"))]
+    let harness = try Harness()
+    harness.engine.installResults = declined
+    let summary = try await harness.summary(ImportSelection([.extensions]))
+    #expect(!summary.cancelled)
+    #expect(summary.outcomes[.extensions] == Self.counts(0, failed: 2))
+    #expect(summary.retryTypes == [.extensions])
+
+    let cancelled = try Harness()
+    let coordinator = cancelled.coordinator
+    cancelled.engine.installResults = [
+      Self.install("a", .failed("not confirmed")), Self.install("b", .failed(ExtensionInstallOutcome.cancelledReason)),
+      Self.install("c", .failed(ExtensionInstallOutcome.cancelledReason)),
+    ]
+    cancelled.engine.afterCall = { name, _ in if name == "extensions" { coordinator.cancel() } }
+    let second = try await cancelled.summary(ImportSelection([.extensions]))
+    #expect(second.cancelled)
+    #expect(second.outcomes[.extensions] == Self.counts(0, failed: 1))
+    #expect(second.retryTypes == [.extensions])
+  }
+
+  @Test func aCancelledReasonWithoutACancelOfTheRunStaysARefusal() async throws {
+    let harness = try Harness()
+    harness.engine.installResults = [Self.install("a", .failed(ExtensionInstallOutcome.cancelledReason))]
+    let summary = try await harness.summary(ImportSelection([.extensions]))
+    #expect(!summary.cancelled)
+    #expect(summary.outcomes[.extensions] == Self.counts(0, failed: 1))
+    #expect(summary.retryTypes == [.extensions])
+  }
+
+  @Test func anEngineWithOnlyTheAggregateInstallStillImports() async throws {
+    let harness = try Harness()
+    harness.engine.installResult = ImportWriteResult(written: 1)
+    #expect(try await harness.summary(ImportSelection([.extensions])).outcomes[.extensions] == Self.counts(1))
+  }
+
+  private static func install(_ id: String, _ outcome: ExtensionInstallOutcome) -> ExtensionInstallResult {
+    ExtensionInstallResult(id: id, outcome: outcome)
+  }
+
+  @Test func historyWhereEveryVisitWasRefusedKeepsItsWatermarkAndRetrySendsItAgain() async throws {
+    let harness = try Harness()
+    let total = harness.folder.manifest.visitCount
+    // The engine stored the visits but never confirmed them, and still reports the newest time it saw.
+    let newest = harness.folder.manifest.history.flatMap(\.visits).map(\.date).max()
+    harness.engine.scripted["history"] = ImportWriteResult(
+      failed: total, failureReason: "no answer from the history store: \(total)\n", latestVisit: newest)
+    let first = try await harness.summary(ImportSelection([.history]))
+    #expect(first.outcomes[.history] == Self.counts(0, failed: total))
+    #expect(first.retryTypes == [.history])
+    #expect(await harness.records.stored.historyWatermark == nil, "the watermark does not move past refused visits")
+
+    harness.engine.scripted["history"] = nil
+    var events: [ProfileImportEvent] = []
+    for await event in try harness.coordinator.retry(root: harness.folder.root, after: first) { events.append(event) }
+    let retried = try Harness.summary(of: events)
+    #expect(retried.outcomes[.history] == Self.counts(total))
+    #expect(harness.engine.historyCalls.map(\.visits) == [total, total])
+    #expect(harness.engine.historyCalls.allSatisfy { $0.watermark == nil })
+    #expect(harness.engine.visitCount == 2 * total)
+    #expect(await harness.records.stored.historyWatermark != nil)
+  }
+
+  @Test func theNinetyDaysInTheSummaryAreTheEnginesRetentionWindow() {
+    let days = Int(ImportRecording.historyRetention / 86_400)
+    #expect(days == 90)
+    var summary = ProfileImportSummary()
+    summary.outcomes[.history] = .done(ImportItemCounts(written: 1, tooOld: 2))
+    #expect(summary.lines == ["History: 1 visit added, 2 older than \(days) days"])
   }
 
   // MARK: Result counts (#935)

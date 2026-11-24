@@ -26,7 +26,8 @@ public final class ProfileImportCoordinator {
   public private(set) var isRunning = false
   private var task: Task<Void, Never>?
   private var recordFailed = false
-  /// Test seam: called with each pulled batch of cookies or logins before the cancel check and the write.
+  /// Test seam: called with each pulled batch of cookies or logins, or the extension ids, before the cancel check and
+  /// the write.
   var afterPull: (@MainActor (ImportDataType, [any Sendable]) -> Void)?
 
   private let engine: any EngineImporting
@@ -220,6 +221,11 @@ public final class ProfileImportCoordinator {
           visitsPerBatch: configuration.historyVisitsPerBatch)
       } catch { return TypeResult(outcome: .failed(reason: "could not read History")) }
       let watermark = record.historyWatermark
+      // Two clocks decide the 90-day window: this run's clock (the read above and the consent count) and the engine's
+      // own when it writes (`ImportRecording.record`). They agree except for a visit within the seconds or minutes
+      // between the two: the read keeps it, the engine reports it as skipped (in Arkt) instead of too old. The engine
+      // reports a visit whose scheme its history refuses as skipped too. Passing this run's clock to the engine needs
+      // a facade change (#938).
       // Batches are in time order, so each batch's newest visit is a valid watermark for the rest. Once a batch had
       // visits the engine refused, the watermark stops moving, so those visits are offered again next time.
       var frozen = false
@@ -312,17 +318,39 @@ public final class ProfileImportCoordinator {
       guard let ids = prepared.batches.first else {
         return TypeResult(outcome: .done(ImportItemCounts(skipped: prepared.alreadyHandled)))
       }
-      if Task.isCancelled { return TypeResult(outcome: .done(ImportItemCounts(skipped: prepared.alreadyHandled)), cancelled: true) }
-      guard let result = await engine.installExtensions(ids: ids) else {
+      afterPull?(.extensions, ids)
+      if Task.isCancelled {
+        // Same as a cancel during the install: with nothing in Arkt it is a cancelled type, not an import of zero (#938).
+        return TypeResult(
+          outcome: prepared.alreadyHandled == 0
+            ? .skipped(reason: "cancelled") : .done(ImportItemCounts(skipped: prepared.alreadyHandled)),
+          cancelled: true)
+      }
+      // One typed result per id when the engine has them; an engine with only the aggregate install has no way to tell a
+      // cancelled id from a refused one.
+      var result: ImportWriteResult
+      var endedByCancel = 0
+      if let results = await engine.installExtensionResults(ids: ids) {
+        result = ImportWriteResult(counting: results)
+        endedByCancel = results.count { $0.outcome == .failed(ExtensionInstallOutcome.cancelledReason) }
+      } else if let aggregate = await engine.installExtensions(ids: ids) {
+        result = aggregate
+      } else {
         return TypeResult(outcome: .skipped(reason: "not yet available"))
       }
       var counts = ImportItemCounts(skipped: prepared.alreadyHandled)
       counts.add(result)
       // A cancelled batch resolves its pending ids as failed, so nothing is recorded as handled.
       if result.failed == 0 { await persist(ArcImportRecord(extensionIDs: Set(ids))) }
-      // Nothing in Arkt because of the cancel is a cancelled type, not a refused one: no Retry (#935).
-      if Task.isCancelled && counts.written + counts.skipped == 0 {
-        return TypeResult(outcome: .skipped(reason: "cancelled"), cancelled: true)
+      // Ids the cancel ended are not refusals (#938). A declined confirmation fails its ids with "not confirmed", so it
+      // stays a refusal. The engine also gives "cancelled" for an aborted install, so the ids are only
+      // read as cancelled when this run was cancelled.
+      if Task.isCancelled {
+        counts.failed -= endedByCancel
+        // Nothing in Arkt and nothing refused: a cancelled type, not a refused one: no Retry (#935).
+        if counts.written + counts.skipped + counts.failed == 0 {
+          return TypeResult(outcome: .skipped(reason: "cancelled"), cancelled: true)
+        }
       }
       return TypeResult(outcome: .done(counts), cancelled: Task.isCancelled)
     }

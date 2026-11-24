@@ -8267,3 +8267,31 @@ Every engine run and the fixture server stopped by exact PID (`ps -p` prints not
 `profiles/954-20261116/` deleted; no crash reports from these runs. No global hot key left registered (run 1 was
 stopped, runs 2 to 4 exited). Nothing touched the Keychain (mock keychain only), the clipboard or
 `/Applications/Arkt.app`.
+
+## Import result follow-ups (#938)
+
+Follow-ups from the review of #937. No engine, facade or patch change.
+
+- A type where every item was refused keeps its past-the-window note: `BrowserDataNotImportedReason.refused(failed:tooOld:)`
+  (`tooOld` defaults to 0), and the row reads "4 couldn't be imported, 5 older than 90 days not imported". Same wording as
+  the Imported row, so no new text.
+- Extensions, cancel before the install: with nothing already in Arkt the type is `.skipped("cancelled")`, as a cancel
+  during the install already was, not "Imported 0". The test seam `afterPull` now also reports the extension ids.
+- Extensions, cancel and refusal apart: the coordinator asks `installExtensionResults(ids:)` (typed per id; an engine with
+  only the aggregate `installExtensions` is used as before, without the split). When the run was cancelled, the ids that
+  failed with `ExtensionInstallOutcome.cancelledReason` ("cancelled", from `Cancel()` and an aborted install in the
+  facade) are taken out of `failed`. Something in Arkt plus cancelled ids shows no failure note; a real refusal followed
+  by a cancel keeps its count and its Retry. A declined confirmation fails its ids with "not confirmed", so it is a
+  refusal with or without a cancel; one declined id plus two cancelled ones gives failed 1 and Retry. Nothing is parsed
+  from failure-reason lines.
+- The 90-day boundary has two clocks: the coordinator's run-start clock (read, consent count) and the engine's own `now()`
+  in `ImportRecording.record`. A visit between the two clocks' windows is kept by the read and reported as skipped by the
+  engine. Visits whose scheme the engine's history refuses are also skipped. Documented in the coordinator; passing the
+  run's clock to `importHistory` is a facade change and stays open.
+- "90 days": `ProfileImportSummary.lines` now derives the day count from `ImportRecording.historyRetention`. ShellUI keeps
+  the literal (it does not see the engine API); `BrowserDataImportModelTests` checks the row wording against
+  `historyRetention / 86_400`.
+- History where every visit is refused: the watermark stays, and Retry sends the same visits again (a test with a result
+  that still reports the newest visit, as an unanswered batch does).
+- Possible follow-up: an early cancel for history, cookies and passwords still reads "Imported 0" while extensions now
+  read Skipped. Not changed here.
