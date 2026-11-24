@@ -1,36 +1,36 @@
+/* Renders the Arkt window behind the bar and applies the theme from the URL hash:
+   index.html#s=empty|search|worst&theme=dark|light */
+const H = Object.fromEntries(new URLSearchParams(location.hash.slice(1)));
+if (H.s === 'small') document.documentElement.classList.add('small');
+if (H.theme === 'light') document.body.classList.add('light');
 document.getElementById('win').innerHTML = `
 <aside class="side">
   <div class="lights"><i></i><i></i><i></i></div>
-  <div class="urlpill"><svg viewBox="0 0 12 12"><rect x="2" y="5.5" width="8" height="5.5" rx="1.2" fill="currentColor"/><path d="M4 5.5V4a2 2 0 0 1 4 0v1.5" stroke="currentColor" stroke-width="1.3" fill="none"/></svg>git-scm.com</div>
-  <div class="pins">
-    <div><span class="fav f-mail">M</span></div>
-    <div><span class="fav f-cal">31</span></div>
-    <div><span class="fav f-fig">F</span></div>
+  <div class="urlpill" id="pill"><svg viewBox="0 0 12 12"><rect x="2" y="5.5" width="8" height="5.5" rx="1.2" fill="currentColor"/><path d="M4 5.5V4a2 2 0 0 1 4 0v1.5" stroke="currentColor" stroke-width="1.3" fill="none"/></svg>fluidinterfaces.example</div>
+  <div class="pins"><div><span class="fav f-mail">M</span></div><div><span class="fav f-cal">31</span></div><div><span class="fav f-fig">F</span></div></div>
+  <div class="tabs">
+    <div class="space">Work</div>
+    <div class="tab"><span class="fav f-lin">L</span>Cycle 42 &middot; Linear</div>
+    <div class="tab"><span class="fav f-gh">G</span>acme/atlas &middot; Pull requests</div>
+    <div class="tab on"><span class="fav f-blog">D</span>Designing Fluid Interfaces</div>
+    <div class="tab"><span class="fav f-doc">D</span>Q4 roadmap</div>
+    <div class="tab"><span class="fav f-apple">W</span>WWDC session: AppKit 120Hz</div>
+    <div class="tab"><span class="fav f-git">g</span>Git - Branches in a Nutshell</div>
+    <div class="sep"></div>
+    <div class="tab newtab"><svg class="ico" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg>New Tab</div>
   </div>
-  <div class="space">Work</div>
-  <div class="tab"><span class="fav f-lin">L</span>Cycle 42 &middot; Linear</div>
-  <div class="tab"><span class="fav f-gh">G</span>krystianslowik/arkt &middot; Pull...</div>
-  <div class="tab on"><span class="fav f-git"><b>g</b></span>Git - Branches in a Nutshell</div>
-  <div class="tab"><span class="fav f-doc">D</span>Q4 roadmap</div>
-  <div class="tab"><span class="fav f-yt">&#9654;</span>WWDC session: AppKit 120Hz</div>
-  <div class="sep"></div>
-  <div class="tab newtab"><svg class="ico" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg>New Tab</div>
-  <div class="sidefoot"><i class="on"></i><i></i><i></i></div>
 </aside>
-<main class="page"><div class="doc">
-  <div class="docnav"><span class="logo">git --book</span><span>About</span><span>Documentation</span><span>Downloads</span><span>Community</span></div>
+<main class="page">
+  <div class="docnav"><span class="logo">fluid.</span><span>Essays</span><span>Talks</span><span>About</span></div>
   <div class="docbody">
-    <nav class="toc"><b>3. Git Branching</b><span class="cur">3.1 Branches in a Nutshell</span><br>3.2 Basic Branching and Merging<br>3.3 Branch Management<br>3.4 Branching Workflows<br>3.5 Remote Branches<br>3.6 Rebasing<br>3.7 Summary</nav>
+    <nav class="toc"><b>On this page</b>Response<br>Direct manipulation<br>Interruptibility<br>Springs<br>Momentum<br>Summary</nav>
     <article class="art">
-      <div class="crumb">Chapter 3 &middot; Section 1</div>
-      <h1>Branches in a Nutshell</h1>
-      <p>To really understand the way Git does branching, we need to take a step back and examine how Git stores its data. Git doesn't store data as a series of changesets or differences, but instead as a series of snapshots.</p>
-      <p>When you make a commit, Git stores a commit object that contains a pointer to the snapshot of the content you staged. This object also contains the author's name and email address, the message that you typed, and pointers to the commit or commits that directly came before this commit.</p>
-      <pre><em>$</em> git add README test.rb LICENSE
-<em>$</em> git commit -m 'Initial commit'
-<em>$</em> git branch testing</pre>
-      <div class="figure"><i></i><i></i><i class="h"></i><i></i></div>
-      <p>A branch in Git is simply a lightweight movable pointer to one of these commits. The default branch name in Git is master.</p>
+      <div class="crumb">Essay &middot; 12 min read</div>
+      <h1>Designing Fluid Interfaces</h1>
+      <p>An interface feels alive when it responds the instant you touch it, moves continuously, and can be redirected at any moment. The moment lag appears, the feeling of directness falls off a cliff.</p>
+      <p>Everything that follows is a way to get closer to that: respond on press, not on release; track the pointer one to one; animate from the value on screen, not the target.</p>
+      <div class="figure"><i></i><i></i><i></i><i></i></div>
+      <p>A spring has no fixed duration. New input just changes the target, and the motion stays continuous.</p>
     </article>
   </div>
-</div></main>`;
+</main>`;

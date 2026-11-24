@@ -1,219 +1,198 @@
 # Command bar
 
-Design for the command bar (#112): the Cmd-T / Cmd-L overlay that opens URLs, searches, switches tabs and runs
-actions. This is the approved direction, the "hybrid": the compact glass bar of the first mock with the filter pills
-and preview column of the fourth. The build is tracked in the issues that reference this design.
+Design for the command bar (#988, replacing the hybrid from #112): the overlay that Cmd-T and Cmd-L open to type an
+address, search, switch to an open tab or open a page from history. Everyday chrome, so it uses the system font.
 
-- Prototype: [`design/command-bar/prototype/`](prototype/). Open any `hybrid-*.html` in a browser. Each file is one
-  state at 1280 x 800 pt; `base.css` draws the window behind the bar, `hybrid.css` is the bar itself.
-- Screenshots: [`design/command-bar/screens/`](screens/). Index at the end of this document.
-- Rejected directions, kept for history: [`design/command-bar/directions/`](directions/).
-- Scope: the look, layout and behavior of the bar. Search and ranking logic, site search, Paste and Go and the
-  archived results already exist (#322, #365) and keep their behavior; this design only restyles and extends them.
+The maintainer's brief: "simple, fast and reliable". One field, one list, no modes, nothing to learn. The grouped
+direction was picked from four mocks (Spotlight, Inline, Grouped, Answer first). The previous hybrid is kept in
+[`directions/hybrid/`](directions/hybrid/) with the reason; the other three mocks live only in the history of the
+#988 pull request.
+
+- Prototype: [`prototype/index.html`](prototype/index.html), 1280 x 800 pt. States by URL hash:
+  `#s=empty|search|url|worst|none|small&theme=light|dark`. `small` is the 640 x 420 pt minimum window.
+- Screens: [`screens/`](screens/), `<state>-<light|dark>.png`, 2x, each under 400 KB. Titles and URLs are synthetic.
+- Render (zsh, from the repo root; headless Chromium from Playwright):
+
+      CH=$(print -l ~/Library/Caches/ms-playwright/chromium_headless_shell-*/**/chrome-headless-shell(N) | tail -1)
+      $CH --headless --disable-gpu --hide-scrollbars --force-device-scale-factor=2 --window-size=1280,800 \
+        --screenshot=design/command-bar/screens/search-dark.png \
+        "file://$PWD/design/command-bar/prototype/index.html#s=search&theme=dark"
+
+## What it is, and what it is not
+
+One text field and one list. The list has up to three groups, in a fixed order: **Tabs**, **History**, **Search**.
+Each group shows at most 3 rows. Return runs the selected row. That is the whole surface.
+
+Removed from the hybrid, and not coming back in this design: filter pills and Cmd-1 to Cmd-4, the preview column and
+Split View in the bar, the hint strip, the Esc key cap, the mustard selection tick and the sliding selection, per-row
+kind labels ("Switch to Tab" on every row), the actions group, site search with its Tab key, archived results and the
+bar widening. Kept: open tabs, history, search suggestions, typed addresses, and Paste and Go as one row.
 
 ## Look
 
-One compact, centred glass bar over a lightly dimmed window. The window behind it keeps its colors; the dim is a
-black 28 % scrim, enough to separate the bar without hiding the page. The bar is a blurred, saturated surface with a
-1 pt inner edge, a 0.5 pt outer edge and a soft drop shadow, 16 pt continuous corners. It works in light and dark.
+A centred glass panel over a lightly dimmed window. The panel is a blurred, saturated surface with a 1 pt inner edge,
+a 0.5 pt outer edge and a soft shadow, 14 pt continuous corners. Light and dark are both required; the screens show both.
 
-Typeface: the system font, as in every AppKit view in the shell. The prototype uses `-apple-system`, which is the
-same face.
+Typeface: the system font (SF Pro; `-apple-system` in the prototype). Brand rules (`design/brand/README.md`):
 
-Brand rules:
+- Mustard is a fill only. Here it is used once: the 2 pt caret. It is never text, never a stroke, never the selection.
+- The selection is a neutral fill (white 11 % in dark, graphite 7.5 % in light). No tick, no ring.
+- No user-facing "Arc". Say "browser data" if the data source ever has to be named.
+- No contrast ratios or warnings in the UI.
 
-- Mustard is a fill only: the selected-row tick, the caret, the Switch to Tab button and chips. Never a text color
-  and never a stroke. Text on a mustard fill is graphite.
-- No user-facing "Arc" anywhere: row captions, empty states, accessibility labels. Say "browser data" where the data
-  source would be named.
-- Light and dark are both required; the light screenshot is the pill, button and scrim reference for light mode.
+| Token (existing in `ShellTokens`) | Use |
+|---|---|
+| `commandBarSurface` | panel fill, with the blur; dark `rgb(40 43 41 / 88%)`, light `rgb(252 251 248 / 90%)` |
+| `commandBarText` | field text, row titles, bold query match |
+| `commandBarSecondaryText` | row URL, verb, trailing time, icons |
+| `commandBarTertiaryText` (new, if not present) | placeholder, group headers; dark white 38 %, light graphite 42 % |
+| `commandBarDivider` | hairline under the field |
+| `commandBarSelectedRow` | selected and hovered row fill; hover is the same fill at 60 % |
+| `commandBarBorder` | 1 pt inner edge, 0.5 pt outer edge |
+| `commandBarScrim` | dark 34 % black, light 12 % graphite |
+
+The mustard tick token, pill fills and preview tokens go away with the code that used them.
 
 ## Layout
 
-All values in points.
+All values in points. Window sizes from 640 x 420 (the shell minimum) up.
 
 | Element | Value |
 |---|---|
-| Bar width | 680 by default; 968 when the preview column is shown |
-| Bar position | horizontally centred in the window; top edge fixed so results grow downward (the prototype uses 176 from the top of an 800 high window) |
-| Bar corners | 16, continuous |
-| Query field | 58 high, 22 regular, 18 leading inset, magnifier 18 |
-| Filter pills | right of the query field, in one 26 high capsule; 22 high pills, 12 medium, count in 10.5 tabular figures |
-| Esc key cap | at the right end of the field row |
-| List padding | 6 on every side |
-| Row | 40 high, 9 corner radius, 12 horizontal padding, 12 gap between slot and title |
-| Group header | 11 semibold, secondary text, 8 above and 4 below |
-| Hint strip | 34 high, 11.5, hairline above, key caps 18 high |
-| Preview column | 300 wide, 12 padding, hairline on its leading edge |
-| Preview height | no taller than the five rows it sits beside (5 x 40 plus the list padding); the bar does not grow for it |
-| Preview thumbnail | 116 high, 10 corner radius |
-| Preview buttons | 30 high, 8 corner radius, 12.5 semibold |
+| Panel width | `min(600, window width - 48)`; 600 in any window 648 or wider |
+| Panel position | horizontally centred; top edge `clamp(48, 14 % of window height, 110)` and fixed, so results grow downward only |
+| Panel height | field plus list; at most `window height - top - 24`, then the list scrolls |
+| Panel corners | 14, continuous |
+| Field | 54 high; 20 regular; 20 side inset; magnifier 18, 12 gap to the text; placeholder "Search or enter address" |
+| Caret | 2 wide, mustard fill |
+| Divider | 1 hairline under the field |
+| List padding | 6 on the sides, 6 on top, 8 on the bottom |
+| Group header | 11 semibold, tertiary text, +0.02 em tracking; 26 high including 10 above (20 high, 4 above, for the first group) |
+| Row | 36 high, 8 corner radius, 10 horizontal padding, 12 gap |
+| Row slot | 18 wide: favicon 16 (4 radius) or a 16 symbol (clock for history, magnifier for search, globe for Go, clipboard for Paste and Go) |
+| Row title | 14 regular, text; the part that matches the query 600 weight |
+| Row URL | 13 regular, tertiary text, host and path without the scheme |
+| Trailing | 12; history rows show the relative time ("Yesterday") when not selected; the selected row shows its verb and the Return key cap |
+| Return key cap | 20 high, 5 radius, 11 medium |
+| Scrollbar | system overlay scroller, right edge |
 
-Rows shown: at most five without scrolling in the search states. The empty state shows more (see
-[Empty state](#empty-state)).
+### Row order and what each group searches
 
-## Row anatomy
+Selection always starts on the first row of the list. Rows keep their position while typing: a late result never
+inserts above the selection.
 
-Left to right: a 20 wide slot with the favicon (16) or a symbol, the title in 14, an optional secondary URL in 13
-that truncates first, then a trailing group that is right-aligned.
+1. **Literal row, no header, only when it applies.** It sits above the groups and is the selected row.
+   - Empty field and the clipboard holds an address: **Paste and Go**, with the address in the URL slot.
+   - The field parses as an address (scheme, or `host.tld`, with optional path): **Go**, showing the text as typed.
+2. **Tabs.** Open tabs in this window, all Spaces, excluding the current tab. Matches word starts in the title and in
+   host and path. Ranked by match quality, then by recency of viewing. Empty field: the 3 most recently viewed.
+3. **History.** Browser history, matched like tabs, ranked by frecency. A page that is already an open tab is not
+   shown again. Empty field: the 3 most recent visits. Row shows the relative time.
+4. **Search.** Only with text in the field. First row, always present: **Search for "<text>"** with the exact text
+   (sent as typed, with the user's search engine from Settings). Then up to 2 suggestions from the search engine when
+   "Include search engine suggestions" is on (#562). Suggestions arrive asynchronously and fill rows below the
+   literal row; nothing above them moves.
 
-| Row kind | Slot | Title | Secondary | Trailing |
-|---|---|---|---|---|
-| Open tab | favicon | page title, query match in semibold | host and path | Return key cap on the selected row, otherwise "Switch to Tab" for the selected row when no preview |
-| Search suggestion | magnifier | suggestion, query match in semibold | none | "Search" |
-| History | clock | page title | host and path | relative time ("Yesterday") |
-| Site search | the site's favicon | "Search <site> for <query>" | none | Tab key cap, then Return on the selected row |
-| Action | symbol | verb ("Copy URL", "New Space") | detail where useful | shortcut key caps |
-| Paste and Go | clipboard glyph | "Paste and Go" | the clipboard URL | Return key cap on the selected row |
-| Archived result | favicon | page title | host, Space, when archived | "Restore from Archive" |
+Consequences worth stating: there is no "no results" dead end, because the Search row is always there; an address
+that is also a tab shows both the Go row and the tab; the cap of 3 means the panel is at most 3 groups x 3 rows plus a
+literal row, 10 rows and 3 headers (about 500 high with the field), and in a normal window never scrolls. It scrolls
+only when the window is too short (see small window).
 
-Selected row: a `commandBarSelectedRow`-style fill with a 0.5 pt inner edge, and a thin mustard tick on the leading
-edge, 3 wide, inset 10 from the top and bottom of the row, with a rounded trailing edge. The tick is a fill; there is
-no mustard stroke around the row. Hover uses the same fill without the tick.
+### Truncation
 
-## Filters
+- Titles are one line, tail ellipsis, never wrap. The title is protected: the URL truncates first.
+- The URL is dropped entirely when less than 48 wide would remain, rather than showing a stub.
+- A suggestion that is too long truncates with an ellipsis like a title.
+- The field scrolls horizontally with the caret; it never wraps and never grows.
+- Right-to-left and CJK text align and truncate by their own direction; the layout mirrors.
 
-Pills: **All**, **Tabs**, **History**, **Actions**. They sit to the right of the query field and filter the result
-list without changing the query.
+### States (see `screens/`)
 
-- Each pill shows the match count for the current query in a smaller tabular figure. With an empty query the counts
-  are hidden.
-- The selected pill is a filled capsule (light fill with dark text in dark mode, dark fill with light text in light
-  mode). Only one pill is selected at a time; All is the default on every open.
-- Archived results belong to All and Tabs. Suggestions and site-search rows belong to All only.
-- Cmd-1 to Cmd-4 select the pills in order. The hint strip shows "Cmd 1-4 Filter".
-- A filter that matches nothing shows one empty row: "No <filter> match <query>".
-
-## Preview column
-
-The bar widens from 680 to 968 and adds a 300 wide column on the right when the selected row is a **tab** or a
-**history** row. For every other selected row (search suggestion, site search, action, Paste and Go, archived
-result) the bar stays at 680 with no preview.
-
-The column holds, top to bottom:
-
-1. The thumbnail: a snapshot of the live tab; for a history row, a cached snapshot if one exists, otherwise the
-   favicon on a neutral well. The thumbnail never blocks the bar: until it loads, the well shows.
-2. The title, 14 semibold, one line, tail truncation.
-3. A meta line, "<host> · open in <Space>, <time>", for example "github.com · open in Work, 12 min ago", led by the
-   open-dot (6 pt, green), which shows only when the page is open in a tab. A history row shows "<host>, visited
-   <time>" with no dot.
-4. Two buttons, side by side:
-   - **Split View** (Cmd-Return), the secondary button.
-   - **Switch to Tab** (Return), the primary button and the only mustard one. For a history row that is not open, the
-     primary reads "Open" and Split View opens the page in a new split pane.
-
-Moving the selection between two rows that both show a preview keeps the column in place and swaps its content.
-
-## Empty state
-
-With an empty query the bar is 680 wide, the placeholder reads "Search or enter address", and the list is grouped
-with small headers, in this order:
-
-1. **Clipboard**: "Paste and Go" with the URL, only when the clipboard holds a URL. Selected first when present.
-2. **Recent tabs**: up to four recently viewed tabs with host and relative time ("12 min", "1 h", "Yesterday").
-3. **Actions**: a short list of common verbs ("New Space" with its shortcut).
-
-With nothing on the clipboard the Clipboard group is absent and the first Recent tab is selected. The hint strip
-shows "Open", "Cmd 1-4 Filter" and the right-aligned line "Type a URL, a search, or a command".
-
-## Archived results
-
-Already built (#365) and kept as is: matching archived items show as rows captioned "Restore from Archive", at most
-3, listed after the open tabs; Return restores the item instead of opening a duplicate. The restyle gives them the
-standard row anatomy above and no preview column.
+| State | File | Notes |
+|---|---|---|
+| Empty | `empty-{light,dark}.png` | Paste and Go (only when the clipboard holds an address), Tabs (3 recent), History (3 recent). No Search group. |
+| Typing a search | `search-{light,dark}.png` | query "git": Tabs, History, Search with the literal row and 2 suggestions. |
+| Typing an address | `url-{light,dark}.png` | the Go row on top, the matching tab and history row below, one literal Search row. |
+| Worst case | `worst-{light,dark}.png` | very long titles and URLs, CJK, all groups full: capped at 3 rows each. |
+| No results | `no-results-{light,dark}.png` | only the Search group with the literal row, selected. The panel shrinks to field plus one row. |
+| Smallest window | `small-window-{light,dark}.png` | 640 x 420: panel 592 wide, top 59, list scrolls. |
 
 ## Keyboard
 
+Focus never leaves the field. Typing always edits the text; the list is driven by key events.
+
 | Key | Action |
 |---|---|
-| Up / Down | Move the selection; wraps from the last row to the first. |
-| Tab | Cycle the filter pills forward (All, Tabs, History, Actions, All). Shift-Tab cycles backward. On a site-search row that shows a Tab key cap, and on an empty field, Tab keeps its existing meaning from #322 (scope to that site, or enter action search). See open question 1. |
-| Cmd-1 to Cmd-4 | Select a filter pill directly. |
-| Return | Run the selected row: Switch to Tab, open, search, run the action, Paste and Go or Restore from Archive. |
-| Cmd-Return | Split View with the selected tab or history page. Only on rows that show the preview. |
-| Esc | Clear the query if there is one; close the bar if the query is already empty. The Esc key cap in the field row closes the bar. |
-| Cmd-Shift-V | Paste and Go, from any state. |
-| Cmd-Opt-Delete | Remove the selected suggestion (from #322). |
+| Cmd-T | Open on a new tab. Empty field. Return opens the result in that new tab. |
+| Cmd-L | Open on the current tab. The field holds the current address, fully selected, and the list shows the empty state; typing replaces it. Return opens the result in the current tab. |
+| Up / Down | Move the selection one row, across groups. Wraps from the last row to the first and back on a fresh press; held-key repeat stops at the ends. Ctrl-P and Ctrl-N do the same. |
+| Tab / Shift-Tab | Jump to the first row of the next or previous group. Tab does nothing else (site search is gone). |
+| Return | Run the selected row: Switch to Tab, Open (history), Go, Search, or Paste and Go. |
+| Cmd-Return | Search the web for exactly the typed text, whatever is selected. The escape hatch when a tab or history row outranks what you meant. |
+| Cmd-Shift-V | Paste and Go from any state (unchanged from #322). |
+| Cmd-Opt-Delete | Remove the selected history row from history (unchanged from #322). |
+| Esc | Clear the text if there is any, otherwise close. With the Cmd-L address untouched, Esc closes. |
+| Click a row | Runs it. Click outside the panel closes. |
+| Hover | Shows the hover fill. The keyboard selection does not move until the pointer actually moves. |
 
-Keyboard focus never leaves the query field: the list and the pills are driven by key events, so typing always edits
-the query.
+Text editing keys (arrows in the field, Option-arrows, Cmd-A, undo) belong to the field, as everywhere else.
+
+## Selected row
+
+A neutral fill over the whole row (no tick, no stroke). The trailing area shows the verb in 12 secondary text and the
+Return key cap: "Switch to Tab", "Open", "Go", "Search" (omitted on the Search for row, which already says it).
+Unselected history rows show their time instead. Only the selected row carries a verb, so there is no per-row label
+column to read.
 
 ## Motion
 
+Opening the bar is a keyboard action used many times a day, so it does not animate. This follows the project's motion
+rule (motion with a purpose; none here has one) and Raycast/Spotlight practice.
+
 | Transition | Motion |
 |---|---|
-| Bar appears | Fully laid out on the first frame, fade in only; no scale. |
-| Selection moves | The selected-row fill and tick slide to the new row; retargeted if the key repeats mid-flight. |
-| Widening to 968 | An interruptible spring on the bar's width. The leading edge of the list does not move. Pressing Up or Down in the middle retargets the spring; it never restarts from zero. |
-| Narrowing to 680 | The same spring in reverse. |
-| Preview content | Cross-fades when the selection changes between two rows that both show it. |
-| Dismiss | Fade out, 0.1 s. |
+| Open | Fully laid out on the first frame, scrim included. No fade, no scale. The target is the first frame after the key press. |
+| Close | Immediate, on the same frame as the action. |
+| Typing | The list updates in place on every keystroke, no cross-fade. The top edge stays; height changes instantly. |
+| Selection move | Instant fill change, no slide. |
+| Hover | Instant fill change. |
+| Press on a row | Fill goes to 100 % of its token while the button is down (feedback on pointer-down, action on release). No scale. |
 
-Springs come from `Motion/SpringPreset`; animate transform, opacity and mask bounds, not layout, and resize the live
-view once at rest.
+Reduce Motion: identical, there is nothing to reduce. **Reduce Transparency**: opaque `commandBarSurface`, blur off,
+shadow stays. **Increased Contrast**: the 1 pt inner edge goes to a defined border at full contrast; secondary text
+steps up one level.
 
-**Reduce Motion** (`NSWorkspace.accessibilityDisplayShouldReduceMotion`): the width changes instantly, with no
-spring. The preview content still fades in. The selection fill moves instantly. Dismiss keeps its fade.
+## What keeps it fast and reliable
 
-**Reduce Transparency**: the bar takes an opaque surface fill; the blur is dropped and the shadow stays.
+- The list is filled synchronously from in-memory indexes (open tabs, history) on every keystroke: top 3 per group,
+  no thumbnails, no preview snapshots, no network on the key path.
+- Favicons come from the existing cache and fall back to a letter tile; a missing one never delays a row.
+- Search suggestions are the only async part. They fill rows below the literal row, never above, and are dropped if
+  the text changed (generation check, see #884).
+- Return always has something to do: the Search row exists whenever there is text, and Paste and Go or Go cover the
+  rest.
+- No state to remember between opens: no filter, no preview target, no scope. Each open starts the same way.
+- Bounded work: at most 10 rows laid out, so layout cost is constant.
 
 ## Accessibility
 
-- The bar is a dialog group labelled "Command bar". The query field is the first element and keeps focus.
-- The list is an `AXList`; each row reads "<title>, <host>, <kind>, <k> of <n>", where kind is "open tab",
-  "history", "action", "search suggestion", "clipboard" or "archived". The selected row is announced on every
-  move.
-- The filter pills are a tab group with one selected item each: "<name>, <count> results, selected". Changing the
-  filter announces "<name>, <count> results".
-- The preview column is a group labelled "Preview" with its title, the open-in line and two labelled buttons. It
-  is announced when it appears ("Preview, <title>"); the buttons are reachable with VoiceOver navigation but are not
-  in the Tab order of the query field.
-- Contrast: text on the mustard fill is graphite (the brand pair, above 7:1). Secondary text on the glass surface
-  must meet 4.5:1 in both appearances; check it against the lightest and darkest wallpaper-independent surface
-  fills, not the blurred backdrop.
-- The mustard tick and open-dot are never the only carrier of a state: the selected row also has a fill, and the
-  open state is also spelled out in the "open in" line.
-- Every action is reachable by keyboard.
-
-## Tokens to reuse
-
-- Brand colors and the mustard values: [`design/brand/tokens/brand-tokens.json`](../brand/tokens/brand-tokens.json). Use
-  `mustard` for fills and graphite for text on it.
-- Shell tokens: find them with `grep -rn ShellTokens app/ArktShell/ShellKit/Sources`. The existing command bar
-  tokens (`commandBarSurface`, `commandBarText`, `commandBarSecondaryText`, `commandBarDivider`,
-  `commandBarSelectedRow`, `commandBarBorder`) are the starting point; the light appearance needs token pairs.
-  Reuse `toastSurface`, `toolbarSurface`, `primaryText`, `secondaryText`, `sidebarItemHovered` and `sidebarDivider`
-  where they fit rather than adding colors.
-- New tokens this design needs: a mustard fill for the tick and the primary button, a scrim, the pill capsule fills,
-  and the open-dot green. Add them as pairs and extend `ShellTokensContrastTests`.
-- Metrics: `CommandBarGeometry` holds today's values (766 wide, 50 high rows). This design replaces them with the
-  values in [Layout](#layout); the old numbers were measured, these are Arkt's own.
+- The panel is a dialog group labelled "Command bar". The field is the first element, an `AXTextField` labelled
+  "Search or enter address", and keeps focus.
+- The list is an `AXList`. Group headers are `AXGroup` labels ("Tabs", "History", "Search"). Each row reads
+  "<title>, <host>, <kind>, <k> of <n>" with kind one of "open tab", "history", "search suggestion", "search for
+  what you typed", "go to address", "paste and go". The selected row is announced on every move.
+- After typing settles (150 ms), announce the count once: "<n> results". With only the Search row:
+  "No matches. Return searches the web."
+- Every action is reachable by keyboard; mouse is optional.
+- Selected state is a fill plus the Return key cap and the verb, never color alone.
+- Text on the glass meets 4.5:1 against both appearance fills; check against the opaque Reduce Transparency fill too.
+- Dynamic type is not a macOS concept here; the sizes above are fixed, as for the rest of the chrome.
 
 ## Open questions
 
-1. **Tab key.** Tab cycles the filters, but #322 gives Tab a second job: scope the bar to a site search, or enter
-   action search from the empty field. The rule above resolves it by context (Tab scopes when the selected row shows
-   a Tab key cap, cycles otherwise). Confirm, or move one of the two to another key.
-2. **History without a snapshot.** Is the favicon on a neutral well acceptable for history rows that have no cached
-   thumbnail, or should the preview column be hidden for them?
-3. **Primary action on a history row.** "Open" in the primary slot, with Split View opening a new pane: confirm the
-   wording and the behavior.
-4. **Filter counts.** Do the counts update live while results stream in, or settle once per query?
-5. **Window width.** Below roughly 1000 pt of window width the 968 bar leaves little margin. Assumed: the bar keeps
-   24 pt of side margin and the preview column narrows to a minimum of 240; below that, no preview. Confirm.
-6. **Archived results and the Archived filter.** Archived rows appear under All and Tabs; should they also get a
-   fifth pill?
-
-## Screenshot index
-
-All in [`screens/`](screens/), 2000 x 1250 px (the 1280 x 800 pt prototype), 8-bit palette PNG, each under 400 KB.
-Titles and URLs are synthetic. The rejected directions in [`directions/`](directions/) are history only and are not
-to be built.
-
-| File | State |
-|---|---|
-| `hybrid-tab-dark.png` | A tab row selected: 968 wide with the preview column, dark |
-| `hybrid-search-dark.png` | A site-search row selected: 680 wide, no preview, dark |
-| `hybrid-tab-light.png` | A tab row selected with the preview column, light |
-| `hybrid-empty-dark.png` | Empty query: Clipboard, Recent tabs, Actions, dark |
+1. **Cmd-Return** is proposed as "search the web for exactly this text". Alternative: open the selected result in a
+   new tab. Confirm.
+2. **Tab key** now jumps between groups. If you prefer, make it do nothing and keep Up/Down only.
+3. **Current tab** is excluded from Tabs. Confirm that Cmd-L on the page you are already on should never offer to
+   "switch" to it.
+4. **Extensions and folders as results** (#562) are not in this design. Say if they should return as a fourth group.

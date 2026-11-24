@@ -1,0 +1,90 @@
+/* Shared by the four redesign mocks: tokens, the Arkt window behind the bar, favicon tiles, key caps.
+   1280 x 800 pt canvas, rendered at 2x. System font only (everyday chrome). */
+:root {
+  --porcelain: #FAF9F5; --graphite: #202321; --mustard: #E9B520;
+  --sys: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 1280px; height: 800px; overflow: hidden; }
+body { font-family: var(--sys); -webkit-font-smoothing: antialiased; position: relative; }
+
+/* Theme tokens. dark is the default; body.light overrides. */
+body {
+  --ink: rgb(250 249 245 / .92); --ink-2: rgb(250 249 245 / .6); --ink-3: rgb(250 249 245 / .38);
+  --strong: var(--porcelain); --hair: rgb(255 255 255 / .08); --sel: rgb(255 255 255 / .11);
+  --kbd: rgb(255 255 255 / .08); --well: rgb(255 255 255 / .06);
+  --bar: rgb(40 43 41 / .88); --bar-edge: rgb(255 255 255 / .1);
+  --scrim: rgb(8 9 8 / .34);
+  --shadow: 0 0 0 .5px rgb(0 0 0 / .6), 0 24px 64px -12px rgb(0 0 0 / .65), 0 6px 18px rgb(0 0 0 / .25);
+  background: #1b1d1c;
+}
+body.light {
+  --ink: rgb(32 35 33 / .9); --ink-2: rgb(32 35 33 / .62); --ink-3: rgb(32 35 33 / .42);
+  --strong: var(--graphite); --hair: rgb(32 35 33 / .09); --sel: rgb(32 35 33 / .075);
+  --kbd: rgb(32 35 33 / .06); --well: rgb(32 35 33 / .05);
+  --bar: rgb(252 251 248 / .9); --bar-edge: rgb(255 255 255 / .8);
+  --scrim: rgb(32 35 33 / .12);
+  --shadow: 0 0 0 .5px rgb(32 35 33 / .22), 0 22px 56px -14px rgb(32 35 33 / .38), 0 5px 14px rgb(32 35 33 / .1);
+  background: #e6e1d3;
+}
+
+/* Window */
+.win { position: absolute; inset: 0; background: radial-gradient(120% 90% at 0% 0%, #4a3d22 0%, #3a3120 38%, #2a2820 78%, #24241f 100%); }
+body.light .win { background: radial-gradient(120% 90% at 0% 0%, #eadcb6 0%, #e9e0c8 38%, #e6e1d3 78%, #e3dfd4 100%); }
+.side { position: absolute; left: 0; top: 0; bottom: 0; width: 240px; padding: 14px 10px; }
+.lights { display: flex; gap: 8px; padding: 4px 8px 0; height: 24px; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; background: #ff5f57; }
+.lights i:nth-child(2) { background: #febc2e; } .lights i:nth-child(3) { background: #28c840; }
+.urlpill { position: absolute; left: 10px; top: 46px; width: 220px; height: 34px; border-radius: 9px; background: rgb(255 255 255 / .09);
+  display: flex; align-items: center; padding: 0 11px; gap: 7px; font-size: 13px; color: var(--ink-2); }
+body.light .urlpill { background: rgb(32 35 33 / .06); }
+.urlpill svg { width: 11px; height: 11px; opacity: .6; }
+.pins { position: absolute; left: 10px; right: 10px; top: 92px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.pins div { height: 48px; border-radius: 10px; background: rgb(255 255 255 / .07); display: grid; place-items: center; }
+body.light .pins div { background: rgb(255 255 255 / .45); }
+.tabs { position: absolute; left: 10px; right: 10px; top: 156px; }
+.space { margin: 0 10px 8px; font-size: 12px; font-weight: 600; color: var(--ink-2); }
+.tab { height: 34px; border-radius: 8px; display: flex; align-items: center; gap: 10px; padding: 0 10px; font-size: 13px; color: var(--ink); opacity: .86; white-space: nowrap; overflow: hidden; }
+.tab.on { background: rgb(255 255 255 / .13); opacity: 1; box-shadow: 0 1px 2px rgb(0 0 0 / .25); }
+body.light .tab.on { background: rgb(255 255 255 / .72); box-shadow: 0 1px 2px rgb(32 35 33 / .12); }
+.sep { height: 1px; background: var(--hair); margin: 10px 8px; }
+.newtab { color: var(--ink-3); }
+.fav { width: 16px; height: 16px; border-radius: 4px; flex: none; display: grid; place-items: center; font: 700 9px/1 var(--sys); color: #fff; }
+.f-gh { background: #f0f0ee; color: #202321; border-radius: 50%; }
+body.light .f-gh { background: var(--graphite); color: var(--porcelain); }
+.f-git { background: #e8573a; }
+.f-lin { background: #5e6ad2; } .f-fig { background: #0d0d0d; box-shadow: inset 0 0 0 1px #333; }
+.f-yt { background: #e33; } .f-mail { background: #3b82f6; } .f-doc { background: #2f8f6a; }
+.f-cal { background: #f6f5f0; color: #c33; } .f-blog { background: #8a5cf6; } .f-apple { background: #6b7280; }
+.f-note { background: #d6902b; } .f-map { background: #2f9a6b; }
+
+.page { position: absolute; left: 242px; top: 8px; right: 8px; bottom: 8px; border-radius: 10px; background: #1c1e1d; overflow: hidden;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / .35), 0 2px 10px rgb(0 0 0 / .25); }
+body.light .page { background: #fdfcf9; box-shadow: 0 0 0 1px rgb(32 35 33 / .08), 0 2px 10px rgb(32 35 33 / .08); }
+.docnav { height: 52px; display: flex; align-items: center; padding: 0 40px; gap: 26px; border-bottom: 1px solid var(--hair); font-size: 13px; color: var(--ink-3); }
+.docnav .logo { font: 700 16px/1 Georgia, serif; color: #f0805e; margin-right: auto; }
+body.light .docnav .logo { color: #c4512f; }
+.docbody { padding: 44px 40px; display: grid; grid-template-columns: 190px 1fr; gap: 48px; }
+.toc { font-size: 13px; line-height: 2.1; color: var(--ink-3); } .toc b { display: block; color: var(--ink-2); font-weight: 600; }
+.art { max-width: 640px; }
+.art .crumb { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 12px; }
+.art h1 { font: 600 34px/1.15 Georgia, serif; color: var(--strong); }
+.art p { margin-top: 18px; font: 15px/1.7 Georgia, serif; color: var(--ink-2); }
+.art .figure { margin-top: 26px; height: 140px; border-radius: 8px; background: rgb(255 255 255 / .04); display: flex; align-items: center; justify-content: center; gap: 20px; }
+body.light .art .figure { background: rgb(32 35 33 / .045); }
+.art .figure i { width: 42px; height: 42px; border-radius: 50%; border: 2px solid var(--ink-3); }
+
+.scrim { position: absolute; inset: 0; background: var(--scrim); }
+
+/* Shared atoms */
+.ico { width: 16px; height: 16px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.kbd { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px; padding: 0 5px; border-radius: 5px;
+  font: 500 11px/1 var(--sys); color: var(--ink-2); background: var(--kbd); box-shadow: inset 0 0 0 .5px var(--hair); }
+.caret { width: 2px; height: 1.15em; background: var(--mustard); border-radius: 1px; margin-left: 1px; flex: none; }
+.slot { width: 18px; height: 18px; display: grid; place-items: center; flex: none; color: var(--ink-2); }
+.sb { position: absolute; right: 3px; width: 5px; border-radius: 3px; background: var(--ink-3); opacity: .7; }
+.ft { display: flex; align-items: center; }
+
+/* Smallest window the shell allows: 640 x 420 pt. */
+html.small, html.small body { width: 640px; height: 420px; }
+html.small .toc { display: none; } html.small .docbody { grid-template-columns: 1fr; padding: 32px 28px; }
