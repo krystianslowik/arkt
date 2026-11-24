@@ -1,6 +1,7 @@
 #import "arkt/api/arkt_selftest_embedder.h"
 
 #import <AppKit/AppKit.h>
+#include <Carbon/Carbon.h>
 
 #include <algorithm>
 #include <map>
@@ -1084,6 +1085,45 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
   }
 }
 
+// #954: whether this process holds the system hot key for `shortcut`
+// (Chromium's form), as a global extension shortcut does while handling is not
+// suspended. Asks Carbon for the same hot key on the application target with
+// the key code Chromium's listener uses on a US layout: eventHotKeyExistsErr
+// means the process holds it; noErr means it is free (the probe's own
+// registration is removed at once). Says whether the key is registered, not
+// that a press fires it.
+- (void)logHotKeyHeld:(const std::string&)shortcut {
+  const ui::Accelerator accelerator =
+      ui::Command::StringToAccelerator(shortcut);
+  unichar plain = 0;
+  const int key_code = accelerator.key_code() == ui::VKEY_UNKNOWN
+                           ? -1
+                           : ui::MacKeyCodeForWindowsKeyCode(
+                                 accelerator.key_code(), 0, nullptr, &plain);
+  if (key_code < 0) {
+    LOG(WARNING) << "ARKT selftest hotkey-held " << shortcut << " unknown";
+    return;
+  }
+  UInt32 modifiers = 0;
+  modifiers |= accelerator.IsShiftDown() ? shiftKey : 0;
+  modifiers |= accelerator.IsCtrlDown() ? controlKey : 0;
+  modifiers |= accelerator.IsAltDown() ? optionKey : 0;
+  modifiers |= accelerator.IsCmdDown() ? cmdKey : 0;
+  // 'ArkP': not the creator code Chromium's listener uses.
+  const EventHotKeyID probe_id = {'ArkP', 1};
+  EventHotKeyRef ref = nullptr;
+  const OSStatus status = RegisterEventHotKey(
+      key_code, modifiers, probe_id, GetApplicationEventTarget(), 0, &ref);
+  if (status == noErr && ref) {
+    UnregisterEventHotKey(ref);
+  }
+  LOG(WARNING) << "ARKT selftest hotkey-held " << shortcut << " "
+               << (status == eventHotKeyExistsErr ? "held"
+                   : status == noErr              ? "free"
+                                                  : "error")
+               << " status=" << status;
+}
+
 // #598: a key down for `shortcut` (Chromium's form) in `tab`'s window, made
 // in this process and given only to this process. "page" makes the page the
 // first responder and hands the event to the window's sendEvent: (the page
@@ -1576,6 +1616,13 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
                  << base::SysNSStringToUTF8(change.conflictExtensionID ?: @"-")
                  << " "
                  << base::SysNSStringToUTF8(change.conflictCommandName ?: @"-");
+  } else if (command == "ext-suspend") {
+    // #954: ext-suspend on|off
+    [_engine setExtensionShortcutHandlingSuspended:argument == "on"];
+    LOG(WARNING) << "ARKT selftest ext-suspend " << argument;
+  } else if (command == "hotkey-held") {
+    // #954: hotkey-held <shortcut>
+    [self logHotKeyHeld:argument];
   } else if (command == "ext-key") {
     // ext-key <shortcut> page|sidebar
     [self sendShortcut:argument

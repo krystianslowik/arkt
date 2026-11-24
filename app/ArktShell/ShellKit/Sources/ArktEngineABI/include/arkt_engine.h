@@ -1465,6 +1465,19 @@ NS_SWIFT_UI_ACTOR
                          global:(BOOL)global
               replacingConflict:(BOOL)replacingConflict
     NS_SWIFT_NAME(setExtensionCommandShortcut(_:forCommand:ofExtension:global:replacingConflict:));
+// Suspends (YES) or resumes (NO) extension shortcut handling while the
+// shell's shortcut recorder listens (#954), as Chrome's shortcuts page does
+// (developerPrivate.setShortcutHandlingSuspended), so a key that is already an
+// extension shortcut reaches the recorder: no command runs from a key in any
+// Arkt window, including windows opened meanwhile, and every global shortcut's
+// system hot key is unregistered until resumed. Process-wide, not counted: a
+// second YES changes nothing and one NO resumes. Synchronous and allowed at any
+// time, inside an engine event or a nested run loop too, so a release is never
+// deferred or dropped. setExtensionCommandShortcut works while suspended (a
+// global shortcut set then registers when handling resumes). The engine
+// resumes on its own when the application terminates.
+- (void)setExtensionShortcutHandlingSuspended:(BOOL)suspended
+    NS_SWIFT_NAME(setExtensionShortcutHandlingSuspended(_:));
 
 // Downloads (#132), of the profile the engine started with. The events are
 // DownloadCreated, DownloadUpdated and DownloadRemoved (no tab, no window).

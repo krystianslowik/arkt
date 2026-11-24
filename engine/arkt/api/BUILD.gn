@@ -90,6 +90,7 @@ source_set("embedder") {
   ]
   frameworks = [
     "AppKit.framework",
+    "Carbon.framework",
     "Foundation.framework",
   ]
 }

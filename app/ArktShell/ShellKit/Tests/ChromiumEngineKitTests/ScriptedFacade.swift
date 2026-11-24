@@ -1452,6 +1452,13 @@ final class ScriptedFacade: NSObject, ArktEngine {
     return shortcutAnswer
   }
 
+  /// What each `setExtensionShortcutHandlingSuspended` call received, in order (#954).
+  private(set) var shortcutSuspensionCalls: [Bool] = []
+
+  func setExtensionShortcutHandlingSuspended(_ suspended: Bool) {
+    shortcutSuspensionCalls.append(suspended)
+  }
+
   /// The profile's commands changed (#598): one profile-wide `ExtensionCommandsChanged`, no tab or window.
   func recordExtensionCommandsChanged() {
     record(ScriptedEvent(.extensionCommandsChanged, tab: nil, browser: nil))
