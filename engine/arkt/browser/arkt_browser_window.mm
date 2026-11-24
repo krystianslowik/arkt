@@ -306,6 +306,15 @@ ArktBrowserWindow::ArktBrowserWindow(BrowserWindowInterface* browser,
   autofill_bubble_handler_ =
       std::make_unique<ArktAutofillBubbleHandler>(browser_);
 
+  // Updates are the shell's (#126). Chromium enables IDC_UPGRADE_DIALOG on
+  // every window, and with kFewerUpdateConfirmations it quits and relaunches
+  // the app (#929). BrowserCommandController exists already
+  // (BrowserWindowFeatures::Init runs before the window) and enables the
+  // command only in its constructor, so disabling it here holds for the
+  // window's life: menu validation, key equivalents and chrome::ExecuteCommand
+  // all see it disabled.
+  chrome::UpdateCommandEnabled(browser_, IDC_UPGRADE_DIALOG, false);
+
   browser_->GetTabStripModel()->AddObserver(this);
   BindHost();
   LOG(WARNING) << "ARKT: native window created ("
