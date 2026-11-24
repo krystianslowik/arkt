@@ -132,7 +132,9 @@ letters in both. The menu uses the system's menu material. Increase Contrast add
 
 1. ~~Which direction for pinned actions and for the install sheet?~~ Answered: C for pinned actions, B for install.
 2. ~~Are new extensions pinned by default?~~ Answered 2026-11-05: no; the toast offers Pin.
-3. Does Cmd-E ship (KB-047) or stay deferred? The design is ready either way.
+3. ~~Does Cmd-E ship (KB-047) or stay deferred?~~ Answered 2026-11-24 (#599): it ships. Arkt takes Cmd-E before the
+   page only while at least one extension is pinned; with none pinned the page keeps it. Cmd-E is Arkt's, and
+   active, while an extension is pinned.
 4. ~~Should "Keep Existing" be the default on a shortcut conflict?~~ Answered 2026-11-06 (#590): yes. Return keeps the
    existing shortcut; Use is the secondary (`shortcuts-conflict`).
 5. Docked DevTools: confirm it is a known gap for the first release.

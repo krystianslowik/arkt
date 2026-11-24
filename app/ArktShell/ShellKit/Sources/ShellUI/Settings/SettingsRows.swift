@@ -53,20 +53,23 @@ final class SettingsRowView: SettingsBlockView {
   private var hovering = false
   private var tracking: NSTrackingArea?
   private let hoverable: Bool
+  /// A button over the row's text, under its controls: a click on the row (an extension's details, #600).
+  private var rowButton: NSButton?
 
+  /// `singleLine`: the label and the caption take one line each and truncate (an extension's long name, #600).
   init(label text: String, caption captionText: String? = nil, captionAccessory: NSView? = nil,
        leading: NSView? = nil, leadingSize: NSSize = NSSize(width: 20, height: 20), trailing: [NSView] = [],
-       planned: Bool = false, hoverable: Bool = true) {
+       planned: Bool = false, hoverable: Bool = true, singleLine: Bool = false) {
     isPlanned = planned
     self.leading = leading
     self.leadingSize = leadingSize
     self.captionAccessory = captionAccessory
     self.trailing = trailing
     self.hoverable = hoverable && !planned
-    label = settingsLabel(text, size: 13, weight: .medium)
+    label = settingsLabel(text, size: 13, weight: .medium, wraps: !singleLine)
     var full = captionText ?? ""
     if planned { full = full.isEmpty ? Self.notAvailable : "\(full) \(Self.notAvailable)" }
-    caption = full.isEmpty ? nil : settingsLabel(full, size: 12)
+    caption = full.isEmpty ? nil : settingsLabel(full, size: 12, wraps: !singleLine)
     super.init(frame: .zero)
     wantsLayer = true
     layer?.cornerRadius = SettingsMetrics.rowRadius
@@ -97,6 +100,19 @@ final class SettingsRowView: SettingsBlockView {
     views.forEach(addSubview)
     describeControls()
     applyDimming()
+    needsLayout = true
+  }
+
+  /// Puts `button` over the row's text and under its trailing controls, covering the row: a click anywhere but on a
+  /// control presses it, and it joins the key view loop before the controls.
+  func setRowButton(_ button: NSButton) {
+    rowButton?.removeFromSuperview()
+    rowButton = button
+    if let first = trailing.first, first.superview === self {
+      addSubview(button, positioned: .below, relativeTo: first)
+    } else {
+      addSubview(button)
+    }
     needsLayout = true
   }
 
@@ -216,6 +232,7 @@ final class SettingsRowView: SettingsBlockView {
     super.layout()
     let width = bounds.width
     let height = bounds.height
+    rowButton?.frame = bounds
     if let leading {
       leading.frame = NSRect(x: SettingsMetrics.rowPaddingLeading, y: ((height - leadingSize.height) / 2).rounded(),
                              width: leadingSize.width, height: leadingSize.height)

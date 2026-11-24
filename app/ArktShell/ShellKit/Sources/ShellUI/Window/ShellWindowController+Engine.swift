@@ -335,13 +335,46 @@ extension ShellWindowController {
     guard let extensions = engine as? any EngineExtensions else { return }
     let button = ExtensionsButton()
     let panel = ExtensionsPanelController(extensions: extensions, button: button) { [weak self] in self?.engineWindow }
-    panel.onManage = { [weak self] in self?.onManageExtensions?() }
+    panel.onManage = { [weak self] extensionID in self?.onManageExtensions?(extensionID) }
     panel.onBrowseWebStore = { [weak self] in self?.open(OnboardingController.Options.chromeWebStore, inNewTab: true) }
     panel.onRemove = { [weak panel] action in panel?.presentRemoveSheet(for: action) }    // #720
+    panel.cycleAnchor = { [weak self] in self?.extensionCycleAnchor }                    // #599
+    panel.cycleAllowed = { [weak self] in self?.onboarding == nil }
+    panel.startCycleRouting()
+    (window as? ShellWindow)?.keyEquivalentHandler = { [weak self] event in self?.takeCycleKey(event) ?? false }
     extensionsButton = button
     extensionsPanel = panel
     sidebarController.view.extensionsButton = button
   }
+
+  /// Cmd-E (KB-047, #599): the next pinned extension's popup. Not `NSWindow`'s selector (#373). The View menu's
+  /// hidden item names it for the shortcut recorders but takes no key; the window hands Cmd-E here.
+  @objc public func cyclePinnedExtensions(_ sender: Any?) {
+    extensionsPanel?.cyclePinnedExtensions()
+  }
+
+  /// Cmd-E before the focused page, only while an extension is pinned, no sheet is up and no first run covers the
+  /// window; otherwise the page keeps it (maintainer, #599). The menu is not asked: its item would swallow the key even
+  /// disabled.
+  func takeCycleKey(_ event: NSEvent) -> Bool {
+    guard ExtensionsPanelController.cycleKey.matches(event), let panel = extensionsPanel,
+          panel.canCyclePinnedExtensions else { return false }
+    panel.cyclePinnedExtensions()
+    return true
+  }
+
+  /// The Extensions button while the sidebar shows it, docked or revealed over the page; with the sidebar hidden the
+  /// button is off screen, so the page card.
+  var extensionCycleAnchor: NSView? {
+    let sidebarShows = isSidebarVisible || rootView.sidebarOverlay.isRevealed
+    if sidebarShows, let button = extensionsButton, button.window != nil, !button.isHiddenOrHasHiddenAncestor {
+      return button
+    }
+    return rootView.card
+  }
+
+  /// Opens `url` in a new tab, as Cmd-T would: Settings > Extensions' Open Chrome Web Store (#600).
+  public func openInNewTab(_ url: URL) { open(url, inNewTab: true) }
 
   /// The window's actions changed, or the engine window came or went: the open panel follows.
   func refreshExtensions() {

@@ -237,7 +237,7 @@ final class AppSession {
       return restored.nodeID
     }
     window.onRemoveSpace = { [weak self] id in self?.archive.removeSpace(id) }                 // #206, decision on #86
-    window.onManageExtensions = { [weak self] in self?.showSettings(pane: .extensions) }        // #595
+    window.onManageExtensions = { [weak self] id in self?.showSettings(pane: .extensions, extensionID: id) } // #600
     window.onTabHidden = { [weak self] id in self?.source.markInactive([id], at: .now) }       // decision 10
     window.onFaviconChanged = { [weak self] id, data in self?.faviconWriter?.record(data, for: id) }
     window.isArcImportAvailable = isArcImportAvailable
@@ -494,10 +494,11 @@ final class AppSession {
   private var settingsWindow: SettingsWindowController?
 
   /// Arkt > Settings... (Cmd-,): creates the window on first use, then fronts it, on `pane` or the last one shown.
-  func showSettings(pane: SettingsPane? = nil) {
+  /// `extensionID`: Manage Extension... (#600), Extensions with that extension's details open.
+  func showSettings(pane: SettingsPane? = nil, extensionID: String? = nil) {
     let controller = settingsWindow ?? SettingsWindowController(settings: settings, services: settingsServices())
     settingsWindow = controller
-    controller.show(pane: pane)
+    if let extensionID { controller.show(extensionID: extensionID) } else { controller.show(pane: pane) }
   }
 
   /// What Settings asks the app for: the default browser (LaunchServices; `ARKT_DEFAULT_BROWSER` in Debug runs), the
@@ -506,6 +507,8 @@ final class AppSession {
     var services = SettingsServices()
     services.shortcutEditor = shortcutEditor
     services.extensions = engine as? any EngineExtensions                               // #597
+    services.openInBrowser = { [weak self] url in self?.openInBrowserTab(url) }       // #600
+    services.openWebStore = { [weak self] in self?.openInBrowserTab(OnboardingController.Options.chromeWebStore) }
     services.openLibrary = { [weak self] in self?.showLibrary() }                     // #132
     services.isDefaultBrowser = { DefaultBrowser.isDefault() }
     services.makeDefaultBrowser = { await DefaultBrowser.makeDefault() }
@@ -520,6 +523,14 @@ final class AppSession {
     services.spaces = { [weak self] in self.map { SettingsSpaceSummary.list(from: $0.source) } ?? [] }
     services.archiveRows = archiveSettings.settingsRows                                // #448
     return services
+  }
+
+  /// Settings' links into a browser window (#600): a new tab of the most recent regular window (never a blank or
+  /// incognito one), or of a new window (no blank first tab) when none is open.
+  private func openInBrowserTab(_ url: URL) {
+    let window = windows.primaryRegular ?? windows.openWindow(opensFirstTab: false)
+    window.showWindow(nil)
+    window.openInNewTab(url)
   }
 
   // MARK: - Arc import (E4c)

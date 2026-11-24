@@ -221,12 +221,28 @@ final class ExtensionsPanelTests: XCTestCase {
   }
 
   func testManageExtensionsGoesToSettings() throws {
-    var managed = 0
-    harness.controller.onManageExtensions = { managed += 1 }
+    var managed: [String?] = []
+    harness.controller.onManageExtensions = { managed.append($0) }
     open([action("a")])
     XCTAssertEqual(view.manageButton.title, "Manage Extensions...")
     view.manageButton.performClick(nil)
-    XCTAssertEqual(managed, 1)
+    XCTAssertEqual(managed, [nil], "the footer opens the pane, no extension in particular")
+    XCTAssertFalse(panel.isShown)
+  }
+
+  /// The context menu's Manage Extension... opens Settings on that extension's row (#600).
+  func testManageExtensionFromTheContextMenuNamesTheExtension() throws {
+    var managed: [String?] = []
+    harness.controller.onManageExtensions = { managed.append($0) }
+    open([ExtensionAction(id: "act", name: "A", extensionID: "ext-a"), action("b")])
+    let a = try row("act")
+    let rightClick = try XCTUnwrap(NSEvent.mouseEvent(with: .rightMouseDown, location: .zero, modifierFlags: [],
+                                                      timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0,
+                                                      clickCount: 1, pressure: 1))
+    let menu = try XCTUnwrap(a.menu(for: rightClick))
+    let index = try XCTUnwrap(menu.items.firstIndex { $0.tag == ExtensionContextCommand.manage.rawValue })
+    menu.performActionForItem(at: index)
+    XCTAssertEqual(managed, ["ext-a"], "the extension's id, not the action's")
     XCTAssertFalse(panel.isShown)
   }
 

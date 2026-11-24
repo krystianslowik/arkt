@@ -93,8 +93,9 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   public internal(set) var extensionsButton: ExtensionsButton?
   /// The Extensions panel the button opens (#595); nil with the button.
   public internal(set) var extensionsPanel: ExtensionsPanelController?
-  /// Manage Extensions... in the Extensions panel: the app opens Settings, Extensions.
-  public var onManageExtensions: (@MainActor () -> Void)?
+  /// Manage Extensions... in the Extensions panel (nil) and an action's Manage Extension... (its extension's id): the
+  /// app opens Settings, Extensions, on that extension's row when one is named (#600).
+  public var onManageExtensions: (@MainActor (_ extensionID: String?) -> Void)?
   /// Window > Downloads (Cmd-Shift-J) and Show All History (Cmd-Y) open the Library on a section (#132); set by
   /// `DownloadsCenter.attach(to:)`. While nil the engine's own commands run.
   public var onShowLibrary: (@MainActor (LibrarySection) -> Void)?
@@ -1092,6 +1093,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     onRecoveryWindowClosed?()
     for node in shownNodes { onTabHidden?(node) }
     removePaneMouseMonitor()
+    extensionsPanel?.stopCycleRouting()               // #599: a Cmd-E hold and its monitor die with the window
     javaScriptDialogs.closeAll()
     permissionPrompts.closeAll()
     infobarStrips.closeAll()
@@ -1116,6 +1118,9 @@ extension ShellWindowController: NSMenuItemValidation {
     if let enabled = validateSidebarMenuItem(menuItem) { return enabled }
     if let enabled = validatePinnedMenuItem(menuItem) { return enabled }
     if menuItem.action == #selector(reopenClosedTab(_:)) { return canReopenClosedTab }
+    if menuItem.action == #selector(cyclePinnedExtensions(_:)) {                       // KB-047 (#599)
+      return extensionsPanel?.canCyclePinnedExtensions ?? false
+    }
     if menuItem.action == #selector(clearTodayTabs(_:)) { return canClearToday }       // KB-019 (#110)
     if menuItem.action == #selector(duplicateSelectedTabs(_:)) { return duplicateTargets != nil }   // KB-042
     if menuItem.action == #selector(toggleToolbar(_:)) {

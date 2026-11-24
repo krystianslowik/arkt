@@ -44,7 +44,8 @@ public struct ReservedKeys: Sendable {
   /// Ctrl-Tab and Ctrl-Shift-Tab (#103; `ShellWindow.sendEvent` already hands those to the switcher before any view).
   /// The copy-link keys (KB-013 to KB-016, #118) are here too: a page must not swallow them. Incognito
   /// (Shift-Cmd-N, KB-007) and Blank Window (Ctrl-Cmd-N, KB-006) are reserved with them (#487). Cmd-Z stays the
-  /// page's first (`ReopenUndoRouter`).
+  /// page's first (`ReopenUndoRouter`). Cmd-E (KB-047, #599) is reserved only while an extension is pinned
+  /// (`ShellWindow.keyEquivalentHandler`).
   ///
   /// #489: every main-menu key equivalent without Cmd is reserved too: Space 1 to 9 (Ctrl-1 ... Ctrl-9) and the Split
   /// View items (Ctrl-Shift-=, -, ], [, 1 ... 4). A focused page takes any key equivalent first, and the engine hands

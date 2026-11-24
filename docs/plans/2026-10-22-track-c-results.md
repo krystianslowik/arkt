@@ -3463,7 +3463,7 @@ extras in v1; spec section 5).
 | KB-043 | unbound | per action | Show Archive and Clear Archive (`MainMenu.swift:246-248`), Rename (row menus and Rename Space), Collapse / Expand All Folders (`TabsMenu.swift:48-49`), Collapse / Expand Pinned Section (new, `MainMenu.swift:224`), New Space and Reset Space (`MainMenu.swift:217`, `222`): bound without a key. Cast: #653. Capture Full Page and Pretty Screenshot: #646. Space Manager: #635. Clear Cookies and Refresh, Clear Cache and Refresh, Network Inspector: #630. Share: no Share command for a tab yet (#362 covers the sidebar menus); nothing to bind until it exists |
 | KB-044, KB-045 | Opt-Cmd-N | bound | File > New Little Arkt Window (`MainMenu.swift:111`) and the system-wide hotkey (`AppSession.swift`) |
 | KB-046 | Ctrl-Cmd-J | out of scope | Live Calendars / Join Meeting (OS-06, #124) |
-| KB-047 | Cmd-E | owned | #599 |
+| KB-047 | Cmd-E | bound (new) | the shell window takes Cmd-E before a focused page only while an extension is pinned (`ShellWindow.keyEquivalentHandler`); hidden, keyless View item "Cycle through pinned extensions" (`MainMenu.swift:198`) names the owner for the recorders; later taps and the release through an app event monitor (`ExtensionsPanelController.cyclePinnedExtensions`, #599; real-app check #963) |
 | KB-048 | Ctrl-D | owned | #633 |
 | KB-049 | Opt-Cmd-I and F12 | bound (F12 new) | View > Developer > Developer Tools (`MainMenu.swift:173`); F12 a hidden alias (`MainMenu.swift:174`), reserved before a focused page (`ReservedKeys.swift`) |
 | KB-050 | Opt-Cmd-C / J / U | bound | View > Developer (`MainMenu.swift:172-176`) |
@@ -3595,3 +3595,84 @@ Section stay as built; F12 stays reserved; the recorder rules and the Reset All 
   clearing). Engine answers: `.rejected` and `.unknownCommand` show a notice line, a late `.conflict` opens the notice.
 - Follow-up: "Not set: Arkt uses this shortcut" with the extension's suggested key needs `suggestedShortcut` on
   `ArktExtensionCommand` and `ExtensionCommand` (#922 review); not in this change.
+
+### Cmd-E cycles pinned extensions (#599, KB-047)
+
+- Hold Command and tap E: each tap opens the next pinned extension's popup in pin order, wrapping
+  (`PinnedExtensionCycle`); the release leaves the popup open, and the next hold starts at the first pinned extension.
+  With none pinned nothing happens. A held E (key repeat) steps nothing.
+- Maintainer decision (2026-11-24, #599): Arkt takes Cmd-E before the page only while at least one extension is
+  pinned; with none pinned the page keeps it. A disabled menu item still swallows its key equivalent (found in #948),
+  so the reservation is not a menu item: `ShellWindow.keyEquivalentHandler` asks the controller first, which takes
+  Cmd-E only while an extension is pinned and no sheet is up. The View menu's hidden item has no live key
+  (`allowsKeyEquivalentWhenHidden` off); it only names Cmd-E's owner for both recorders (#597), and validates on the
+  same condition. Cmd-E is not in `ReservedKeys.arkt`.
+- Cmd-E is Arkt's, and active, while an extension is pinned; the recorders keep it protected either way.
+- Later taps: the engine makes the popup the key window and its `HandleKeyboardEvent` keeps nothing, so the later taps,
+  the release, and the first tap of the next hold while the last popup is still open never reach the browser window.
+  An app event monitor (`keyDown`, `flagsChanged`), live for the window's whole life, routes them
+  (`ExtensionsPanelController.handleCycleEvent`); with no hold it takes only a Cmd-E in a window hanging off the
+  browser window, and only while an extension is pinned. No Cmd-E is taken while the first run covers the
+  window. It continues the hold only for an event with no window, the browser window, or a window
+  whose parent chain reaches it (the engine popup); a tap in Little Arkt, Settings or another browser window ends the
+  hold and passes on. The hold also ends on the Command release, on any key without Command (a release missed during
+  menu tracking), when the app resigns active (Cmd-Tab away mid-hold), and when the window closes.
+- Anchor: the Extensions button while the sidebar shows, docked or revealed over the page; with it hidden, the page
+  card.
+- In a Little Arkt window the page keeps Cmd-E.
+- The engine closes the open popup when the next opens (`ShowPopover` resets the current popup); no engine or facade
+  change. The real-app check of the close behaviour (#18) is #963 (status:needs-user).
+- Listed in Settings through the Pinned extensions row, not `ShortcutCatalog.sections` (the item is hidden).
+- No "Use Selection for Find" item exists on `main` (dropped in week 3), so nothing moved off Cmd-E.
+
+### Settings > Extensions (#600)
+
+- The placeholder is replaced by the pane in `design/settings` (`extensions`, `extensions-empty`). The installed list
+  is one row per extension, sorted by name: its 20 pt icon (or the puzzle tile), the name, "Version X. <short
+  description>" ("Turned off." when off, "Installed by your organization." for policy), the pin toggle and the
+  switch. Under it are the note, then Get more extensions (a neutral Open Chrome Web Store) and Developer mode. With no
+  extensions the pane shows the empty state, and its Open Chrome Web Store is the pane's one primary.
+- Details: a click on a row (a clear `SettingsRowButton` over the row, so the keyboard and VoiceOver reach it) opens a
+  block under it with the description, "Version X · <origin>", Options... (with an options page), Keyboard
+  Shortcuts... (with commands; it opens Shortcuts searched for the extension) and Remove... (the #720 sheet; only when
+  the user may remove it, Report abuse only for a Web Store extension). One block is open at a time. These parts are
+  not drawn in the design; the questions are on #600.
+- Developer mode on shows the add row Load Unpacked... (the folder panel). A failed load shows the shared dialog
+  sheet with one answer and the engine's reason; a loaded extension's details open.
+- The pane shows what the engine reports. It rebuilds on `.installedExtensionsChanged`, after its own pin and
+  developer mode calls, and when Settings becomes key, and only when what it shows changed. Keyboard focus stays on
+  the same control. A refused switch snaps back. A failed uninstall leaves the row, and a remove sheet whose
+  extension went away closes.
+- Manage routing: the panel's Manage Extensions... opens the pane; an action's Manage Extension... passes its
+  extension id (`ExtensionsPanelController.onManage`, `ShellWindowController.onManageExtensions`,
+  `AppSession.showSettings(pane:extensionID:)`), and the pane opens with those details shown and scrolled into view.
+  The install toast offers only Pin (design/extensions `toast-pin`), so it has no Manage to route.
+- EngineAPI (the split with #964): `installedExtensions` (`InstalledExtensionInfo`, `ExtensionOrigin`),
+  `setExtensionEnabled(_:enabled:) -> ExtensionEnableResult`, `isExtensionDeveloperModeEnabled` /
+  `setExtensionDeveloperModeEnabled(_:)`, `loadUnpackedExtension(at:) async -> UnpackedExtensionResult`,
+  `openExtensionOptionsPage(_:)` and `EngineExtensionEvent.installedExtensionsChanged`. Each has a default that
+  refuses or does nothing; InMemoryEngine implements them, and `installExtension` / `uninstallExtension` keep the list
+  in step with the windows' actions. ChromiumEngine gets them in #964.
+- From the #966 review: `ExtensionEnableResult.needsPermissionApproval` (Chromium's kNeedsPermissionApproval). The
+  switch stays off and a one-answer sheet says the extension needs new permissions. Turning developer mode off while
+  unpacked extensions are on asks first ("Turn off developer mode?", Turn Off / Cancel), because Chromium turns them
+  off. `loadUnpackedExtension(at:)` takes an absolute file URL only. The doc of `.installedExtensionsChanged` now
+  says one event may carry several changes and a late icon comes as its own event.
+- #969 review and the maintainer's decisions (2026-11-24):
+  - The caption is the design's site-access line, built from `InstalledExtensionInfo.siteAccess`
+    (`InstalledExtensionSiteAccess`: `allSites`, `someSites(count:)`, `onClick`, `noHostAccess`). The short
+    description shows only without site access.
+  - The new-permissions sheet's Review Permissions opens `chrome://extensions/?id=<id>` in a browser window
+    (`SettingsServices.openInBrowser`; a new window when none is open).
+  - The developer-mode-off copy says the extensions come back on, and gives no count.
+  - `canDisable` now means the switch is actionable (false only where the engine says NotAllowed). InMemoryEngine's
+    developer mode matches Chromium: off locks the unpacked extensions it turned off, and on turns them back on with
+    one event. Such a row reads "Turned off while developer mode is off.".
+  - InMemoryEngine's `setExtensionEnabled` removes or restores the extension's actions.
+  - Rows update in place when only their state changed; icons are decoded once per extension and PNG.
+  - A load that finishes after Settings closed is ignored.
+- Re-review: InMemoryEngine locks every unpacked extension while developer mode is off. Ones already off are locked
+  too, and turning it back on unlocks them but leaves them off. Each unpacked load counts its own answer (a token). The
+  icon cache is keyed by id and compares the PNG bytes. A caption that appears or goes rebuilds the row. Settings'
+  browser links go to the most recent regular window (`ShellWindowSet.primaryRegular`).
+- Not in this change: the per-extension incognito allowance (after #558).

@@ -459,13 +459,13 @@ struct InMemoryEngineExtensionTests {
     let recorder = EventRecorder(engine)
     let info = InstalledExtension(id: "b", name: "Beta", iconPNG: Data([7]))
     engine.installExtension(info, pinned: true)
-    #expect(events == [.installed(info)])
+    #expect(events == [.installedExtensionsChanged, .installed(info)], "listed first (#600)")
     #expect(engine.pinnedExtensionIDs == ["b"])
     #expect(recorder.windowEvents == [.extensionActionsChanged(window)])
 
     let other = InstalledExtension(id: "c", name: "Gamma")
     engine.installExtension(other)
-    #expect(events == [.installed(info), .installed(other)])
+    #expect(events == [.installedExtensionsChanged, .installed(info), .installedExtensionsChanged, .installed(other)])
     #expect(engine.pinnedExtensionIDs == ["b"])
     token.cancel()
   }
@@ -499,8 +499,9 @@ struct InMemoryEngineExtensionTests {
     var log: [String] = []
     let windows = engine.observeWindows { if case .extensionActionsChanged = $0 { log.append("actions") } }
     let extensions = engine.observeExtensions { event in
+      guard case .installed(let info) = event else { return }     // the list change before it is not the subject
       log.append("installed")
-      if case .installed(let info) = event { engine.setExtensionPinned(info.id, pinned: true) }
+      engine.setExtensionPinned(info.id, pinned: true)
       log.append("handler done")
     }
     engine.installExtension(InstalledExtension(id: "a", name: "A"))
