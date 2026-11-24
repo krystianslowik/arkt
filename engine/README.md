@@ -379,9 +379,9 @@ Ids in this bundle: see "Product identity" below.
 
 How a maintainer cuts a preview build (v0.1.0-preview.1, tracking issue #481). The preview is an unsigned, ad-hoc
 signed DMG on a GitHub pre-release (window design: `design/install-dmg/`, #983). There is no Developer ID signing,
-no notarization and no update feed; those follow in #125. Nothing here is scripted: run the steps in order, in zsh, with the variables from the top
-of this file (`$REPO`, `$CHROMIUM_ROOT`, `$CR`, `$PIN`). The release is the maintainer's to publish; do not run steps
-5 and 6 without that go-ahead.
+no notarization and no update feed; those follow in #125. Nothing here is scripted: run the steps in order, in zsh,
+with the variables from the top of this file (`$REPO`, `$CHROMIUM_ROOT`, `$CR`, `$PIN`). The release is the
+maintainer's to publish; do not run steps 5 and 6 without that go-ahead.
 
     export REL=$CR/out/Arkt
     export VERSION=0.1.0-preview.1
@@ -467,7 +467,7 @@ write into `/Applications`) and the image mounts at `/Volumes/Arkt`, not `/Volum
 
     D=$REPO/design/install-dmg; W=$OUT/dmg
     [[ -e /Volumes/Arkt ]] && hdiutil detach /Volumes/Arkt
-    rm -rf $W && mkdir -p $W/src/.background
+    rm -rf ${W:?} && mkdir -p $W/src/.background
 
 Stage the contents (`ditto` keeps the bundle's symlinks and metadata), build the volume icon from the app icon set,
 and mount a writable image. `iconutil` warns about the set's `Contents.json`; the warning is harmless:
