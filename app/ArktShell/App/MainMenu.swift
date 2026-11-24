@@ -7,12 +7,13 @@ import ShellUI
 /// `NSApplicationDidFinishLaunchingNotification`, after Chromium's `AppController` handled it.
 ///
 /// Rules from W3-8, which Chromium's menu code depends on:
-/// - App-level items have explicit targets: About, Hide, Hide Others, Show All, Bring All to Front and Quit target
-///   `NSApp`; New Window, Settings, Import from Arc and Show Archive target the composition root's `AppCommands`.
+/// - App-level items have explicit targets: About, Hide, Hide Others, Show All and Bring All to Front target `NSApp`;
+///   Quit, New Window, Settings, Import from Arc and Show Archive target the composition root's `AppCommands`.
 ///   A nil-target app item would reach `AppController` (the engine build's `NSApp.delegate`) and run Chromium's
 ///   behaviour.
-/// - Quit is `terminate:` to `NSApp` with tag `IDC_EXIT`, in the first top-level menu (the confirm-to-quit panel looks
-///   for it there).
+/// - Quit is `AppCommands.quit(_:)` with tag `IDC_EXIT`, in the first top-level menu, so it goes through the shell's
+///   Warn before quitting gate. It must NOT be `terminate:` (#560): Chromium maps a key to `IDC_EXIT` only for a
+///   `terminate:` item, and that brings back its own hold-to-quit panel and skips the gate.
 /// - No top-level `IDC_FILE_MENU`, `IDC_TAB_MENU` or `IDC_HISTORY_MENU` tag (AppController would rewrite Cmd-W and
 ///   Shift-Cmd-W or fill Arkt's menus with Chromium's rows), and a hidden `IDC_BOOKMARKS_MENU` placeholder with an
 ///   empty submenu (without it the first window that becomes main crashes the engine).
@@ -78,7 +79,9 @@ enum MainMenu {
   // MARK: - Menus
 
   private static func appItems(commands: AppCommands, services: NSMenu) -> [NSMenuItem] {
-    let quit = item("Quit Arkt", #selector(NSApplication.terminate(_:)), "q", target: NSApp)   // KB-069
+    // KB-069. Through the commands, not `terminate:` to NSApp: in the Engine build Chromium answers `terminate:` and
+    // cannot be cancelled after it, so "Warn before quitting" asks first (#560).
+    let quit = item("Quit Arkt", #selector(AppCommands.quit(_:)), "q", target: commands)
     quit.tag = Tag.exit
     return [
       item("About Arkt", #selector(NSApplication.orderFrontStandardAboutPanel(_:)), "", [], target: NSApp),

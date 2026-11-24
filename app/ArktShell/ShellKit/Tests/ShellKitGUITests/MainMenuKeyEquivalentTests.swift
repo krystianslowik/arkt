@@ -19,6 +19,7 @@ final class AppCommands: NSObject {
   @objc func showLibrary(_ sender: Any?) {}
   @objc func clearArchive(_ sender: Any?) {}
   @objc func showWelcome(_ sender: Any?) {}
+  @objc func quit(_ sender: Any?) {}
   let undoRouter = ReopenUndoRouter()
   let reopenRouter = ReopenClosedRouter(windows: { nil })
 }
@@ -466,11 +467,12 @@ final class MainMenuInventoryTests: XCTestCase {
 
   // MARK: Targets (step 1)
 
-  func testQuitIsTerminateToNSAppTaggedExitInTheFirstMenu() throws {
+  /// Through the commands, which ask before `terminate:` in the Engine build (#560); still tagged `IDC_EXIT`.
+  func testQuitGoesToTheCommandsTaggedExitInTheFirstMenu() throws {
     let first = try XCTUnwrap(built.menu.items.first?.submenu)
     let quit = try XCTUnwrap(first.items.first { $0.tag == IDC.exit })
-    XCTAssertEqual(quit.action, #selector(NSApplication.terminate(_:)))
-    XCTAssertTrue(quit.target === NSApp)
+    XCTAssertEqual(quit.action, #selector(AppCommands.quit(_:)))
+    XCTAssertTrue(quit.target is AppCommands)
     XCTAssertEqual(quit.keyEquivalent, "q")
     XCTAssertEqual(quit.keyEquivalentModifierMask, .command)
   }

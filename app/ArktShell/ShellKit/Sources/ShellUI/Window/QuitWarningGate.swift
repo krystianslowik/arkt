@@ -33,4 +33,21 @@ public final class QuitWarningGate {
     isAsking = false
     return confirmed ? .proceed : .stop
   }
+
+  /// The Engine build's Quit item (#560). There Chromium's `AppController` answers `terminate:` and nothing after it
+  /// can cancel, so the item asks before it terminates: off, `terminate` runs inside this call; on, `ask` shows the
+  /// alert and passes the answer back, and only Quit terminates. A Cmd-Q while the ask is up shows nothing new.
+  public func requestQuit(warns: Bool, ask: (@escaping @MainActor (Bool) -> Void) -> Void,
+                          terminate: @escaping @MainActor () -> Void) {
+    switch begin(warns: warns) {
+    case .proceed:
+      terminate()
+    case .ask:
+      ask { [weak self] confirmed in
+        if self?.reply(confirmed: confirmed) == .proceed { terminate() }
+      }
+    case .wait, .stop:
+      break
+    }
+  }
 }
