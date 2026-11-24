@@ -8680,7 +8680,7 @@ exited by itself; the key was gone from Local State. The shipped branch does not
 ### Deliberate break
 
 1. `QuitWarningGate.requestQuit` changed to terminate on any answer:
-   `✘ Test requestWithTheWarningOnAsksOnceAndCancelKeepsTheAppRunning() recorded an issue at
+   `Test requestWithTheWarningOnAsksOnceAndCancelKeepsTheAppRunning() recorded an issue at
    QuitWarningGateTests.swift:59:5: Expectation failed: probe.terminated == 0` (and lines 65 and 67). Restored: 4 of 4
    pass.
 2. The Quit item put back to `terminate:` to NSApp, the Engine app rebuilt: with the setting on, one Cmd-Q quit with no
