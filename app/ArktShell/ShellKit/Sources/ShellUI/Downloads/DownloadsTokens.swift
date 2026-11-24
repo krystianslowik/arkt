@@ -24,8 +24,6 @@ enum DownloadsMetrics {
   static let ringLineWidth: CGFloat = 2.2
   static let glyphSize: CGFloat = 16
   static let dotSize: CGFloat = 8
-  /// The pointer rests this long on the button before the popover lists the recent files.
-  static let hoverDelay: TimeInterval = 0.4
   /// The popover stays this long after the pointer left the button and it.
   static let leaveGrace: TimeInterval = 0.25
   static let recentLimit = 6

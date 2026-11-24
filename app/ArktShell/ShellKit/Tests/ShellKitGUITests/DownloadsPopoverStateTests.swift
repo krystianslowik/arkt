@@ -80,8 +80,8 @@ final class DownloadsPopoverStateTests: XCTestCase {
     XCTAssertTrue(first.onEscape?() == true)
     button.performClick(nil)                                    // a click opens, a second click closes
     button.performClick(nil)
-    button.setHovered(true)                                     // a hover opens, leaving closes after the grace
-    popover.firePendingTimer()
+    button.setHovered(true)                                     // a click opens, leaving closes after the grace
+    button.performClick(nil)
     XCTAssertTrue(popover.isShown)
     button.setHovered(false)
     popover.firePendingTimer()
@@ -100,16 +100,22 @@ final class DownloadsPopoverStateTests: XCTestCase {
     popover.hide(keyboard: true)
   }
 
-  func testTheHoverPhasesFollowThePointer() throws {
+  /// A shown popover follows the pointer: it stays while the pointer moves between the button and the panel, and goes
+  /// after the grace once the pointer has left both.
+  func testTheLeavePhasesFollowThePointer() throws {
     let controller = makeWindow()
     let button = try XCTUnwrap(controller.sidebarController.view.libraryButton)
     let popover = try XCTUnwrap(center.popover(of: controller))
     popover.reduceMotion = { true }
     XCTAssertEqual(popover.phaseName, .closed)
     button.setHovered(true)
-    XCTAssertEqual(popover.phaseName, .showPending)
-    popover.firePendingTimer()
+    XCTAssertEqual(popover.phaseName, .closed)
+    button.performClick(nil)
     XCTAssertEqual(popover.phaseName, .open(pointerInside: false))
+    button.setHovered(false)
+    XCTAssertEqual(popover.phaseName, .leavePending)
+    button.setHovered(true)
+    XCTAssertEqual(popover.phaseName, .open(pointerInside: false), "back on the button within the grace keeps it")
     button.setHovered(false)
     XCTAssertEqual(popover.phaseName, .leavePending)
     popover.pointerInPanelChanged(true)
@@ -123,22 +129,17 @@ final class DownloadsPopoverStateTests: XCTestCase {
     XCTAssertNil(popover.panel)
     #if DEBUG
     XCTAssertEqual(popover.transitionLog.map(\.to), [
-      .showPending, .open(pointerInside: false), .leavePending, .open(pointerInside: true),
-      .leavePending, .closed,
+      .open(pointerInside: false), .leavePending, .open(pointerInside: false), .leavePending,
+      .open(pointerInside: true), .leavePending, .closed,
     ])
     #endif
   }
 
-  func testACancelledHoverShowAndAShowWhileOpenDoNothing() throws {
+  func testAShowWhileOpenDoesNothing() throws {
     let controller = makeWindow()
     let button = try XCTUnwrap(controller.sidebarController.view.libraryButton)
     let popover = try XCTUnwrap(center.popover(of: controller))
     popover.reduceMotion = { true }
-    button.setHovered(true)
-    button.setHovered(false)                                    // off the button before the delay
-    XCTAssertEqual(popover.phaseName, .closed)
-    popover.firePendingTimer()
-    XCTAssertEqual(popover.phaseName, .closed, "the cancelled show does not run")
     button.performClick(nil)
     XCTAssertEqual(popover.phaseName, .open(pointerInside: false))
     let panel = try XCTUnwrap(popover.panel)
@@ -147,6 +148,27 @@ final class DownloadsPopoverStateTests: XCTestCase {
     XCTAssertEqual(popover.phaseName, .open(pointerInside: false))
     button.performClick(nil)
     XCTAssertEqual(popover.phaseName, .closed)
+  }
+
+  /// The popover opens on a click only (#987): resting the pointer on the button opens nothing, however long it stays.
+  func testHoveringTheButtonDoesNotOpenThePopover() throws {
+    let controller = makeWindow()
+    let button = try XCTUnwrap(controller.sidebarController.view.libraryButton)
+    let popover = try XCTUnwrap(center.popover(of: controller))
+    popover.reduceMotion = { true }
+    _ = engine.beginDownload(url: URL(string: "https://files.example/a.bin")!, filename: "a.bin", totalBytes: 1_000)
+    button.setHovered(true)
+    XCTAssertEqual(popover.phaseName, .closed, "hovering schedules no show")
+    popover.firePendingTimer()                                  // as if any delay had passed
+    XCTAssertEqual(popover.phaseName, .closed)
+    XCTAssertNil(popover.panel)
+    XCTAssertFalse(popover.isShown)
+    button.setHovered(false)
+    XCTAssertEqual(popover.phaseName, .closed)
+    button.setHovered(true)
+    button.performClick(nil)                                    // a click still opens it
+    XCTAssertTrue(popover.isShown)
+    popover.hide(keyboard: true)
   }
 
   func testShowingDuringTheExitFadeStartsCleanAndLeavesTheFadingPanelItsRows() throws {

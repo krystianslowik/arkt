@@ -16,7 +16,7 @@ progress bar fill. Direction B draws progress in graphite. All data is synthetic
 | | A. Progress row | B. Library button ring | C. Stacked cards |
 |---|---|---|---|
 | Idea | one quiet row where the eye already is | no new row; the Library button is the progress | each download is a small card |
-| Sidebar, active | row 58 pt: tile 28, name 13 medium (middle-truncated), "42 MB of 310 MB / 2 min left" 11.5, 3 pt bar, cancel x 24 | the 28 pt Library button gets a 2.2 pt graphite ring that fills; click or hover opens a 316 pt popover | card radius 12, tile 36, name, "42 of 310 MB", 4 pt bar, "2 min left" and speed, cancel x |
+| Sidebar, active | row 58 pt: tile 28, name 13 medium (middle-truncated), "42 MB of 310 MB / 2 min left" 11.5, 3 pt bar, cancel x 24 | the 28 pt Library button gets a 2.2 pt graphite ring that fills; a click opens a 316 pt popover (click only, #987) | card radius 12, tile 36, name, "42 of 310 MB", 4 pt bar, "2 min left" and speed, cancel x |
 | Several at once | a header row "3 downloads" with one aggregate bar; expands to compact rows (22 pt tile, 3 pt bar) | the ring shows the total; the popover lists every file | the newest card, then a "2 more" stack with one aggregate bar |
 | Finished | row turns into name, "Done, 212 MB", a neutral Open pill (24 pt) and a Show in Finder icon button; x dismisses | ring completes into a check with a dot; the popover shows Show in Finder per file | card with Open and Show in Finder neutral pills side by side |
 | Failed | "Failed, Connection lost" and a Retry pill | popover row with a Retry pill | card with a Retry pill |
@@ -48,10 +48,11 @@ rows); the rows never shrink below the sidebar's width.
 - **Failed or cancelled by the network**: "Failed, <reason>", Retry (restarts from the same URL, resuming if the server
   allows), x removes it. The Library keeps failed items until cleared.
 - **Library**: Cmd-Shift-L opens it, Cmd-Shift-J on Downloads, Cmd-Y on History (KB-065). It reopens on the section used
-  last (BH-181). Hovering the Library button for 0.4 s lists the 6 most recent files in the popover (A and C reuse the B
-  popover for this; BH-180). Rows: Open, Show in Finder on hover or selection, Retry on failed, cancel on active.
-  Return opens the selected file, Cmd-Return shows it in Finder, Delete removes it from the list (not from disk).
-  Clear List removes every finished row from the list and leaves the files.
+  last (BH-181). Clicking the Library button lists the 6 most recent files in the popover (A and C reuse the B popover
+  for this; BH-180). It opens on a click only: hovering the button does nothing beyond its normal hover look (the
+  maintainer's decision in #987, replacing the 0.4 s hover listing). Rows: Open, Show in Finder on hover or selection,
+  Retry on failed, cancel on active. Return opens the selected file, Cmd-Return shows it in Finder, Delete removes it
+  from the list (not from disk). Clear List removes every finished row from the list and leaves the files.
 - **Location (BH-182)**: Settings, General, Downloads: "Ask Where to Save" (the system save panel opens for each
   download) or "Save to Folder" with a pop-up (Downloads, Desktop, Other...) and Choose.... If the folder is missing or not
   writable, the download falls back to Downloads and a toast says so ("Saved to Downloads. The chosen folder is

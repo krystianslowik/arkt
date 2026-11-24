@@ -2,9 +2,10 @@ import AppKit
 import EngineAPI
 
 /// One window's downloads popover (design/downloads, direction B): a panel over the page, above the Library button.
-/// A click on the button toggles it; resting the pointer on the button for 0.4 s shows it too, and it goes when the
-/// pointer has left both for a moment. Esc, a click elsewhere or choosing Show Library closes it and gives focus back to
-/// the button. The panel never takes focus unless it is clicked, so a download that starts never steals the keyboard.
+/// A click on the button toggles it; hovering the button opens nothing (#987). Once shown, it goes when the pointer has
+/// left both the button and the panel for a moment. Esc, a click elsewhere or choosing Show Library closes it and gives
+/// focus back to the button. The panel never takes focus unless it is clicked, so a download that starts never steals
+/// the keyboard.
 ///
 /// The state is one `Phase` (#877, #878). Everything one show creates (the panel, its view and pointer tracker, the
 /// click monitor and the model observation) is a `Session` that lives only in the open phases, and closing tears it
@@ -34,8 +35,6 @@ final class DownloadsPopoverController: NSObject {
 
   enum Phase {
     case closed
-    /// The pointer rests on the button; the timer shows the popover after the hover delay.
-    case showPending(Timer)
     case open(Session, pointerInside: Bool)
     /// The pointer left the button and the panel; the timer closes the popover after the grace.
     case leavePending(Session, Timer)
@@ -52,7 +51,7 @@ final class DownloadsPopoverController: NSObject {
 
   /// The phase without its payload, for tests and the transition log.
   enum PhaseName: Equatable {
-    case closed, showPending, open(pointerInside: Bool), leavePending
+    case closed, open(pointerInside: Bool), leavePending
   }
 
   struct Transition: Equatable {
@@ -86,7 +85,6 @@ final class DownloadsPopoverController: NSObject {
   isolated deinit {
     switch phase {
     case .closed: break
-    case .showPending(let timer): timer.invalidate()
     case .open(let session, _): detach(session)
     case .leavePending(let session, let timer): timer.invalidate(); detach(session)
     }
@@ -98,14 +96,13 @@ final class DownloadsPopoverController: NSObject {
   var session: Session? {
     switch phase {
     case .open(let session, _), .leavePending(let session, _): session
-    case .closed, .showPending: nil
+    case .closed: nil
     }
   }
 
   var phaseName: PhaseName {
     switch phase {
     case .closed: .closed
-    case .showPending: .showPending
     case .open(_, let inside): .open(pointerInside: inside)
     case .leavePending: .leavePending
     }
@@ -127,7 +124,7 @@ final class DownloadsPopoverController: NSObject {
 
   func pointerInPanelChanged(_ inside: Bool) { send(.pointerInPanel(inside)) }
 
-  /// Runs the pending show or close now (tests; the timer calls it too).
+  /// Runs the pending close now (tests; the timer calls it too).
   func firePendingTimer() { send(.timerFired) }
 
   /// A mouse down at `point` in `window`: closes the popover unless it is in the panel or on the button.
@@ -145,27 +142,9 @@ final class DownloadsPopoverController: NSObject {
     let from = phaseName
     #endif
     switch (phase, event) {
-    case (.closed, .buttonHover(true)):
-      phase = .showPending(makeTimer(after: DownloadsMetrics.hoverDelay))
     case (.closed, .buttonPressed):
       open(takesKey: true)
     case (.closed, .show(let takesKey)):
-      open(takesKey: takesKey)
-
-    case (.showPending(let timer), .buttonHover(false)), (.showPending(let timer), .hide):
-      timer.invalidate()
-      phase = .closed
-    case (.showPending(let timer), .timerFired):
-      timer.invalidate()
-      phase = .closed
-      if button?.isHovered == true { open(takesKey: false) }
-    case (.showPending(let timer), .buttonPressed):
-      timer.invalidate()
-      phase = .closed
-      open(takesKey: true)
-    case (.showPending(let timer), .show(let takesKey)):
-      timer.invalidate()
-      phase = .closed
       open(takesKey: takesKey)
 
     case (.open(let session, false), .buttonHover(false)):
@@ -210,7 +189,7 @@ final class DownloadsPopoverController: NSObject {
     #endif
   }
 
-  /// The timer of a pending phase. It fires only while its phase is current; a timer from an earlier phase does
+  /// The timer of the leave grace. It fires only while its phase is current; a timer from an earlier phase does
   /// nothing even if it was not invalidated.
   private func makeTimer(after delay: TimeInterval) -> Timer {
     Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] timer in
@@ -226,7 +205,7 @@ final class DownloadsPopoverController: NSObject {
 
   private var pendingTimer: Timer? {
     switch phase {
-    case .showPending(let timer), .leavePending(_, let timer): timer
+    case .leavePending(_, let timer): timer
     case .closed, .open: nil
     }
   }

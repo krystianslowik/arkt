@@ -438,6 +438,9 @@ rules are in section 5, not here.
 | BH-181 | Given the Library was last on section X, when the user opens it again, then it opens on X. | P B-DL2 (RN23 v1.19.1) | SINGLE-SOURCE |
 | BH-182 | Given the download-location setting, then downloads either prompt for a location or save to a chosen folder. | [S] `arc.promptForDownload`, `arc.folder`, `arc.other` | SINGLE-SOURCE |
 
+> **Deviation from BH-180 (maintainer decision, #987).** Hovering the Library button does not list the recent files.
+> The downloads popover opens on a click only; hovering shows nothing beyond the button's normal hover look.
+
 ### 2.15 Media and Picture in Picture
 
 | ID | Rule | Evidence | Status |

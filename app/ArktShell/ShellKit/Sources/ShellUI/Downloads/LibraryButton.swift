@@ -4,7 +4,7 @@ import QuartzCore
 /// The Library button in the sidebar's bottom bar (design/downloads, direction B): the download glyph, with a graphite
 /// ring that fills while files download. When everything finished it shows a check, and a small dot (also for a failed
 /// or held file) until the Library is opened. Idle it is one quiet glyph, so a browser that never downloads shows
-/// nothing extra. A click toggles the popover; resting the pointer on it for 0.4 s lists the recent files.
+/// nothing extra. A click toggles the popover; hovering it opens nothing (#987).
 @MainActor
 public final class LibraryButton: NSButton {
   static let symbols = (idle: "arrow.down.to.line", done: "checkmark", attention: "exclamationmark")
@@ -14,7 +14,8 @@ public final class LibraryButton: NSButton {
   private(set) public var ringState: DownloadsRingState = .idle
   private var tracking: NSTrackingArea?
   private(set) var isHovered = false
-  /// The pointer entered or left the button.
+  /// The pointer entered or left the button. The popover reads it only to keep a shown list open while the pointer
+  /// moves between the button and the panel; it never opens on hover (#987).
   var onHoverChanged: (@MainActor (Bool) -> Void)?
   var reduceMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion } {
     didSet { ring.reduceMotion = reduceMotion }
