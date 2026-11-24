@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import EngineAPI
 
 /// One window's Extensions panel (#595, design/extensions direction C): a 316 pt panel over the page, its left edge
@@ -30,6 +31,11 @@ public final class ExtensionsPanelController: NSObject {
   public var onRemove: (@MainActor (ExtensionAction) -> Void)?
   /// The remove sheet while it is up.
   public private(set) var removeSheet: ExtensionRemoveSheet?
+  /// Cmd-E (KB-047): the running hold, and the app's event monitor that sees its later taps and the release.
+  private var cycle = PinnedExtensionCycle()
+  private var cycleMonitor: Any?
+  /// The view a Cmd-E popup anchors to. The window sets it: the Extensions button while the sidebar shows.
+  var cycleAnchor: @MainActor () -> NSView? = { nil }
 
   public var isShown: Bool { panel?.isVisible == true }
 
@@ -46,11 +52,55 @@ public final class ExtensionsPanelController: NSObject {
 
   isolated deinit {
     if let monitor { NSEvent.removeMonitor(monitor) }
+    if let cycleMonitor { NSEvent.removeMonitor(cycleMonitor) }
   }
 
   private var actions: [ExtensionAction] {
     guard let extensions, let window = engineWindow() else { return [] }
     return extensions.extensionActions(in: window)
+  }
+
+  // MARK: Cmd-E (KB-047, #599)
+
+  static let cycleKey = ReservedKeys([.init(keyCode: kVK_ANSI_E, character: "e", modifiers: .command)])
+
+  var isCyclingPinnedExtensions: Bool { cycle.isRunning }
+
+  /// A Cmd-E tap: opens the next pinned extension's popup, in pin order, wrapping. The first tap of a hold comes from
+  /// the main menu; once a popup opens, the engine makes it the key window, so the later taps and the Command release
+  /// never reach the browser window. An app-wide monitor sees them until Command goes up. The engine closes the open
+  /// popup when the next one opens; the release leaves the last one open.
+  func cyclePinnedExtensions() {
+    guard let extensions, let window = engineWindow(), let anchor = cycleAnchor() else { return endCycle() }
+    let pinned = extensions.extensionActions(in: window).filter(\.isPinned).map(\.id)
+    guard let id = cycle.next(in: pinned) else { return endCycle() }
+    extensions.runExtensionAction(id, in: window, anchor: anchor)
+    guard cycleMonitor == nil else { return }
+    cycleMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { [weak self] event in
+      let consumed = MainActor.assumeIsolated { self?.handleCycleEvent(event) == true }
+      return consumed ? nil : event
+    }
+  }
+
+  /// True when the event was a tap of the running hold and goes no further. A held E repeats nothing. Another
+  /// browser window being key (Cmd-` while holding) ends this window's hold, and the tap starts that window's.
+  private func handleCycleEvent(_ event: NSEvent) -> Bool {
+    if event.type == .flagsChanged {
+      if !event.modifierFlags.contains(.command) { endCycle() }
+      return false
+    }
+    guard Self.cycleKey.matches(event) else { return false }
+    if let other = event.window as? ShellWindow, other !== button?.window {
+      endCycle()
+      return false
+    }
+    if !event.isARepeat { cyclePinnedExtensions() }
+    return true
+  }
+
+  private func endCycle() {
+    cycle.end()
+    if let cycleMonitor { NSEvent.removeMonitor(cycleMonitor); self.cycleMonitor = nil }
   }
 
   // MARK: Opening

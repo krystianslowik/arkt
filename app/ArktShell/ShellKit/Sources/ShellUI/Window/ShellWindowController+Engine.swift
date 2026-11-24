@@ -338,9 +338,25 @@ extension ShellWindowController {
     panel.onManage = { [weak self] in self?.onManageExtensions?() }
     panel.onBrowseWebStore = { [weak self] in self?.open(OnboardingController.Options.chromeWebStore, inNewTab: true) }
     panel.onRemove = { [weak panel] action in panel?.presentRemoveSheet(for: action) }    // #720
+    panel.cycleAnchor = { [weak self] in self?.extensionCycleAnchor }                    // #599
     extensionsButton = button
     extensionsPanel = panel
     sidebarController.view.extensionsButton = button
+  }
+
+  /// Cmd-E (KB-047, #599): the next pinned extension's popup. Not `NSWindow`'s selector, so the nil-target menu item
+  /// reaches this controller (#373).
+  @objc public func cyclePinnedExtensions(_ sender: Any?) {
+    extensionsPanel?.cyclePinnedExtensions()
+  }
+
+  /// The Extensions button while the sidebar shows it; with the sidebar hidden the button is off screen, so the page
+  /// card.
+  var extensionCycleAnchor: NSView? {
+    if isSidebarVisible, let button = extensionsButton, button.window != nil, !button.isHiddenOrHasHiddenAncestor {
+      return button
+    }
+    return rootView.card
   }
 
   /// The window's actions changed, or the engine window came or went: the open panel follows.

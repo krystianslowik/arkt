@@ -193,6 +193,9 @@ enum MainMenu {
       item("Enter Full Screen", #selector(NSWindow.toggleFullScreen(_:)), "f", [.command, .control]),   // KB-051
       .separator(),
       developer,
+      // KB-047 (#599): hidden, as Settings, Shortcuts lists it in its own row; the item makes Cmd-E Arkt's.
+      hiddenAlias(item(SettingsWindowController.cycleTitle,
+                       #selector(ShellWindowController.cyclePinnedExtensions(_:)), "e")),
     ]
   }
 

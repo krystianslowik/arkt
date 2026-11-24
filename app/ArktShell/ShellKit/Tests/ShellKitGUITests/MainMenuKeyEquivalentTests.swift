@@ -347,6 +347,34 @@ final class MainMenuKeyEquivalentTests: XCTestCase {
     XCTAssertGreaterThan(matched, 0, "some key on this layout reaches a Space or Split View item")
   }
 
+  /// KB-047 (#599): Cmd-E cycles the pinned extensions. The item is hidden, because Settings, Shortcuts lists it in
+  /// its own Pinned extensions row (#597), and live as a key. It reaches the main window's controller (nil target, a
+  /// selector `NSWindow` does not answer), and it makes Cmd-E Arkt's: both recorders now name it as the owner.
+  func testCommandECyclesPinnedExtensionsAndIsArkts() throws {
+    let event = try key(kVK_ANSI_E, .maskCommand)
+    let hits = items(reachedBy: event)
+    XCTAssertEqual(hits.map(\.title), ["Cycle through pinned extensions"])
+    let item = try XCTUnwrap(hits.first)
+    XCTAssertEqual(item.action, #selector(ShellWindowController.cyclePinnedExtensions(_:)))
+    XCTAssertNil(item.target)
+    XCTAssertFalse(NSWindow.instancesRespond(to: #selector(ShellWindowController.cyclePinnedExtensions(_:))))
+    XCTAssertTrue(item.isHidden)
+    XCTAssertTrue(item.allowsKeyEquivalentWhenHidden)
+    XCTAssertTrue(ReservedKeys.arkt.matches(event), "a focused page must not keep Cmd-E")
+    XCTAssertEqual(item.title, SettingsWindowController.cycleTitle, "the conflict notice names the Settings row")
+
+    let menu = MainMenu.make(commands: AppCommands()).menu
+    let cmdE = ShortcutBinding(key: "e", modifiers: .command)
+    XCTAssertFalse(ShortcutCatalog.sections(from: menu).flatMap(\.entries).contains { $0.title == item.title },
+                   "listed once in Settings, by the Pinned extensions row")
+    XCTAssertEqual(ShortcutCatalog.keptOwnerIndex(in: menu, editable: [])[cmdE], [item.title])
+    let editor = ShortcutEditorModel(catalog: ShortcutCatalog.definitions(from: menu),
+                                     defaults: try XCTUnwrap(UserDefaults(suiteName: "dev.arkt.tests.cmdE.\(UUID())")))
+    ShortcutCatalog.bind(model: editor, to: menu)
+    defer { ShortcutCatalog.unbind(from: menu) }
+    XCTAssertEqual(editor.protectedOwners?(cmdE).map(\.title), [item.title], "the app recorder reads it as taken")
+  }
+
   /// Whether `item`'s key equivalent alone takes `event`: a one-item menu with the same key, aimed at a probe.
   static func matches(_ item: NSMenuItem, _ event: NSEvent) -> Bool {
     let probe = KeyProbe()
@@ -574,6 +602,7 @@ final class MainMenuInventoryTests: XCTestCase {
       (kVK_ANSI_D, .maskCommand, "Pin Tab"),                                    // KB-012 (#108)
       (kVK_ANSI_T, [.maskCommand, .maskShift], "Reopen Closed Tab"),            // KB-010 (#346)
       (kVK_ANSI_K, [.maskCommand, .maskShift], "Clear Today Tabs"),             // KB-019 (#110)
+      (kVK_ANSI_E, .maskCommand, "Cycle through pinned extensions"),            // KB-047 (#599)
     ]
     let source = CGEventSource(stateID: .privateState)
     for (keyCode, flags, title) in cases {

@@ -3463,7 +3463,7 @@ extras in v1; spec section 5).
 | KB-043 | unbound | per action | Show Archive and Clear Archive (`MainMenu.swift:246-248`), Rename (row menus and Rename Space), Collapse / Expand All Folders (`TabsMenu.swift:47-48`), Collapse / Expand Pinned Section (new, `MainMenu.swift:224`), New Space and Reset Space (`MainMenu.swift:217`, `222`): bound without a key. Cast: #653. Capture Full Page and Pretty Screenshot: #646. Space Manager: #635. Clear Cookies and Refresh, Clear Cache and Refresh, Network Inspector: #630. Share: no Share command for a tab yet (#362 covers the sidebar menus); nothing to bind until it exists |
 | KB-044, KB-045 | Opt-Cmd-N | bound | File > New Little Arkt Window (`MainMenu.swift:111`) and the system-wide hotkey (`AppSession.swift`) |
 | KB-046 | Ctrl-Cmd-J | out of scope | Live Calendars / Join Meeting (OS-06, #124) |
-| KB-047 | Cmd-E | owned | #599 |
+| KB-047 | Cmd-E | bound (new) | hidden View item "Cycle through pinned extensions" (`MainMenu.swift:197`), reserved before a focused page (`ReservedKeys.swift`); later taps and the Command release through an app event monitor (`ExtensionsPanelController.cyclePinnedExtensions`, #599) |
 | KB-048 | Ctrl-D | owned | #633 |
 | KB-049 | Opt-Cmd-I and F12 | bound (F12 new) | View > Developer > Developer Tools (`MainMenu.swift:173`); F12 a hidden alias (`MainMenu.swift:174`), reserved before a focused page (`ReservedKeys.swift`) |
 | KB-050 | Opt-Cmd-C / J / U | bound | View > Developer (`MainMenu.swift:172-176`) |
@@ -3595,3 +3595,21 @@ Section stay as built; F12 stays reserved; the recorder rules and the Reset All 
   clearing). Engine answers: `.rejected` and `.unknownCommand` show a notice line, a late `.conflict` opens the notice.
 - Follow-up: "Not set: Arkt uses this shortcut" with the extension's suggested key needs `suggestedShortcut` on
   `ArktExtensionCommand` and `ExtensionCommand` (#922 review); not in this change.
+
+### Cmd-E cycles pinned extensions (#599, KB-047)
+
+- Hold Command and tap E: each tap opens the next pinned extension's popup in pin order, wrapping
+  (`PinnedExtensionCycle`); the release leaves the popup open, and the next hold starts at the first pinned extension.
+  With none pinned nothing happens. A held E (key repeat) steps nothing.
+- Route: the first tap is a hidden View menu item (nil target, `ShellWindowController.cyclePinnedExtensions(_:)`,
+  a selector `NSWindow` does not answer, #373). Cmd-E is in `ReservedKeys.arkt`, so it reaches the menu before a
+  focused page or field. The engine makes the popup the key window and its `HandleKeyboardEvent` keeps nothing, so
+  the later taps and the release never reach the browser window: an app event monitor (`keyDown`, `flagsChanged`),
+  installed on the first tap and removed when Command goes up, takes them. A tap while another browser window is key
+  (Cmd-` while holding) ends this window's hold and starts that window's.
+- Anchor: the Extensions button while the sidebar shows; with it hidden, the page card.
+- The engine closes the open popup when the next opens (`ShowPopover` resets the current popup); no engine or facade
+  change. The real-app check of the close behaviour (#18) is a manual check on the pull request.
+- The item makes Cmd-E Arkt's: both recorders (#597) now name "Cycle through pinned extensions" as its owner. It is
+  hidden because the Settings row lists it; `ShortcutCatalog.sections` skips hidden items.
+- No "Use Selection for Find" item exists on `main` (dropped in week 3), so nothing moved off Cmd-E.
