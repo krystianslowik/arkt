@@ -8927,7 +8927,7 @@ Every engine and app run stopped by exact PID with its helpers (`ps` shows none)
 folder and defaults suite, and the screenshot deleted; the app copy and build products unregistered from
 LaunchServices. Nothing touched the Keychain (mock keychain only), `/Applications/Arkt.app` or real browser data.
 
-## #74: Arkt icons in the engine bundle (patch 0017, in progress)
+## #74: Arkt icons in the engine bundle (patch 0017)
 
 ### Gate
 
@@ -8949,7 +8949,39 @@ LaunchServices. Nothing touched the Keychain (mock keychain only), `/Application
 - `engine/arkt/branding/theme/`: the logo PNGs at Chromium's pixel sizes, rendered from the tile with `rsvg-convert`.
 - `engine/README.md`: verified paths, why a patch, the rebuild commands and the build check.
 
+### Patch 0017
+
+- Sync check before the change: 16 `arkt` commits, 16 `.patches` lines, and a fresh `format-patch` of the 16 was
+  byte-identical to `engine/patches/chromium`. Pixel sizes of the nine overlay PNGs match the upstream files they
+  replace (16, 32, 32, 64 scaled; 16, 24, 64, 128, 256 unscaled); all nine are referenced on Mac
+  (`theme_resources.grd`, `chrome_unscaled_resources.grd`).
+- One commit on `arkt`, exported: `0017-Arkt-use-the-Arkt-app-icon-and-product-logos.patch`, 161,815 bytes (two
+  `chrome/BUILD.gn` lines plus nine `GIT binary patch` hunks). Export left 0001-0016 unchanged. The patch applies to
+  `arkt~1` (`git apply --cached --check` on a temporary index).
+- Why a binary patch rather than pointing the grd files at `//arkt`: `chrome_scaled_image` inserts
+  `default_{100,200}_percent/` before the file name, so one grd path cannot reach both scales in the overlay;
+  rewriting it would edit several entries in two grd files and the `product_logo_32.png` copy in `chrome/BUILD.gn`, all
+  text hunks in shared files that every rebase has to carry. The PNGs replace whole files and never conflict
+  unless upstream changes the same logo.
+
+### Build and checks
+
+- `nice -n 15 autoninja -j 4 -C out/Arkt chrome`: incremental, about 20 s (20:28:14 to 20:28:34), `The build has
+  finished successfully.`, 0 `FAILED:`. Swap 9.8 of 10 GB before and after; 23 GiB free on `/`.
+- `gn check out/Arkt "//arkt/*"`: `Header dependency check OK`.
+- `cmp` (README, "Icons (#74)"): `app.icns` and `Assets.car` in `Arkt.app`, `Arkt Helper (Alerts).app` and
+  `Arkt Helper (Aperitif Alerts).app` identical to the overlay; the framework's `product_logo_32.png` identical.
+- `assetutil --info` on the built `Assets.car`: `AppIcon`, `Icon` and the two packed assets.
+- Paks: the bytes of each overlay PNG are found in the pak that carries it (four scaled logos in
+  `chrome_{100,200}_percent.pak`, five unscaled in `resources.pak`).
+- No launch (no GUI run in this task).
+
+### Patch budget
+
+17 patch files (+1), 8 seam and hook patch files (unchanged), 32 upstream files outside 0001-0004 (+10:
+`chrome/BUILD.gn` and nine PNGs). No hot file touched. `.patches` 17 lines, 17 `arkt` commits: in sync. Facade header
+unchanged.
+
 ### Left open
 
-- Patch 0017 (apply on branch `arkt`, Export), the build, `gn check` and the `cmp` checks in the README.
-- Finder, Dock and About visual check; re-verify after re-signing (#12, #22).
+- Finder, Dock and About visual check on a signed copy; re-verify after re-signing (#12, #22).
