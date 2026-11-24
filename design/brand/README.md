@@ -19,6 +19,11 @@ visual overview.
 | `social/social-card.png` | Open Graph card (1200 x 630) |
 | `social/logo-lockup-horizontal-{light,dark}.png` | Icon and wordmark side by side (820 x 290) |
 | `social/logo-lockup-stacked-{light,dark}.png` | Icon above wordmark (530 x 640) |
+| `vector/macOS/<finish>.svg` | Vector app icon master per finish, 1024 x 1024 on the macOS grid (about 824 px tile) |
+| `vector/tile/<finish>.svg` | The icon tile cropped tight, transparent corners |
+| `vector/backdrop/<finish>.svg` | The same crop on an opaque background |
+| `vector/wordmarks/arkt-{graphite,ivory,mustard}.svg` | Outlined `arkt` wordmark |
+| `vector/dock-preview.png`, `vector/reference-review.jpg` | The four finishes with small sizes; vector against the raster originals |
 
 ## Colors
 
@@ -60,9 +65,18 @@ type scale for the first run is in [`docs/design/onboarding.md`](../../docs/desi
 
 ## Source fidelity
 
-The mark is raster artwork. The icon is 456 x 456 px with its rounded plate baked in; the wordmark is 180 x 76 px.
-Larger exports are interpolated and carry no extra detail. A vector or high-resolution master, a small-size variant
-and a monochrome silhouette are not included yet.
+`vector/` holds the vector masters, rebuilt from the raster originals (see `vector/README.md`). Each surface of the
+mark is a named path with its own paint group; there are no embedded rasters. Use them for anything larger than
+456 px. The PNGs in `logos/` and `social/` are the earlier raster artwork (icon 456 x 456 with the plate baked in,
+wordmark 180 x 76) and stay for the existing graphics. A monochrome silhouette is not included yet.
+
+## App icon
+
+The app uses mustard on white. `app/ArktShell/App/Assets.xcassets/AppIcon.appiconset` holds the ten macOS sizes
+(16 to 512 pt, 1x and 2x), taken from the kit's `mustard-on-white.icns`, which was rendered from
+`vector/macOS/mustard-on-white.svg`. To change the finish or refresh the icon, render the new master to an `.icns`,
+then run `iconutil -c iconset <file>.icns -o <dir>.iconset` and copy its PNGs over the ones in the appiconset (the
+file names match `Contents.json`).
 
 ## License
 
