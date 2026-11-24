@@ -135,7 +135,8 @@ final class ShellWindowSetTests: XCTestCase {
   func testAPendingProviderWindowIsMatchedByItsHostNotByOrder() throws {
     let (set, engine, _, world) = try makeSet()
     let first = set.openWindow(opensFirstTab: false)
-    let request = EngineWindowRequest(kind: .startupURL, profile: EngineProfileID("default"))
+    // An extension's window: a link from another app would reuse `first`, which has no engine window yet (#328).
+    let request = EngineWindowRequest(kind: .extension, profile: EngineProfileID("default"))
 
     let pendingHost = set.host(for: request)
     let pending = try XCTUnwrap(set.controllers.first { $0.engineHost === pendingHost })
@@ -159,6 +160,19 @@ final class ShellWindowSetTests: XCTestCase {
 
     let id = try XCTUnwrap(engine.openEngineWindow(EngineWindowRequest(kind: .reopen,
                                                                        profile: EngineProfileID("default"))))
+
+    XCTAssertEqual(set.controllers.count, 1)
+    XCTAssertEqual(shown.engineWindow, id)
+  }
+
+  /// #328: a link from another app reaches Chromium with no engine window and arrives as `.startupURL`; like a Dock
+  /// reopen, it takes the shown window that has no engine window instead of building a second one.
+  func testALinkRequestReusesAShownWindowWithoutAnEngineWindow() throws {
+    let (set, engine, _, _) = try makeSet()
+    let shown = set.openWindow(opensFirstTab: false)
+
+    let id = try XCTUnwrap(engine.openEngineWindow(EngineWindowRequest(
+      kind: .startupURL, profile: EngineProfileID("default"), initialURL: URL(string: "https://example.com/link"))))
 
     XCTAssertEqual(set.controllers.count, 1)
     XCTAssertEqual(shown.engineWindow, id)

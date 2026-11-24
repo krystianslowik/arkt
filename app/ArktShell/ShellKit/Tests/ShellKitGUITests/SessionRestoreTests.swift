@@ -253,7 +253,8 @@ final class SessionRestoreTests: XCTestCase {
     store.save(world.savedState(frame: Self.savedFrame))
     let set = makeSet(world, store: store)
 
-    let popup = set.host(for: EngineWindowRequest(kind: .startupURL, bounds: CGRect(x: 300, y: 200, width: 500, height: 400),
+    // An extension's window: a link from another app (`.startupURL`) owns the session like a Dock reopen (#328).
+    let popup = set.host(for: EngineWindowRequest(kind: .extension, bounds: CGRect(x: 300, y: 200, width: 500, height: 400),
                                                   profile: EngineProfileID("default")))
     XCTAssertEqual(set.controllers.count, 1)
     let window = set.openWindow()

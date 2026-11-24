@@ -132,6 +132,36 @@ bool IsEmptyPage(const GURL& url) {
           (url.host() == "newtab" || url.host() == "new-tab-page"));
 }
 
+// The URL another application asked to open, when the Apple event that does
+// it is being handled (#328): AppController's -application:openURLs: (a get-URL
+// event) and its file opens (an open-documents event) build a missing window
+// with default params inside that handler, so the event is current while the
+// window is built. A Dock reopen, New Window and a page's NEW_WINDOW have no
+// such event. The first URL stands for the batch. Empty when there is none.
+GURL URLFromOtherApplication() {
+  constexpr AEEventClass kGetURLClass = 'GURL';
+  constexpr AEEventID kGetURLID = 'GURL';
+  NSAppleEventDescriptor* event =
+      NSAppleEventManager.sharedAppleEventManager.currentAppleEvent;
+  if (!event) {
+    return GURL();
+  }
+  NSAppleEventDescriptor* direct =
+      [event paramDescriptorForKeyword:keyDirectObject];
+  if (event.eventClass == kGetURLClass && event.eventID == kGetURLID) {
+    NSString* spec = direct.stringValue;
+    return spec ? GURL(base::SysNSStringToUTF8(spec)) : GURL();
+  }
+  if (event.eventClass == kCoreEventClass &&
+      event.eventID == kAEOpenDocuments) {
+    NSAppleEventDescriptor* first =
+        direct.numberOfItems > 0 ? [direct descriptorAtIndex:1] : direct;
+    NSURL* file = first.fileURLValue;
+    return file ? GURL(base::SysNSStringToUTF8(file.absoluteString)) : GURL();
+  }
+  return GURL();
+}
+
 // Every selector of ArktEngineEmbedder. The stand-in Swift class (Task W3-3)
 // does not import the header, so it implements them without declaring the
 // protocol; the hook checks the selectors instead of conformsToProtocol:.
@@ -407,9 +437,10 @@ class Embedder : public FacadeDelegate {
   // restore and desk templates, and chrome.windows.create (it always sets a show
   // state and usually bounds, tabs_api.cc:189-190) from the rest, which have
   // default params: Dock reopen and New Window, a page's NEW_WINDOW
-  // navigation and a URL opened by another application, which cannot be told
-  // apart without a patch (a held window is looked at again at replay,
-  // ReclassifyHeld).
+  // navigation and a URL opened by another application. The last is told
+  // apart by the Apple event being handled (URLFromOtherApplication, #328); a
+  // window held before readiness is looked at again at replay
+  // (ReclassifyHeld).
   RequestFields ClassifyRequest(BrowserWindowInterface* browser) const {
     RequestFields fields;
     const BrowserInitState* init = BrowserInitState::From(browser);
@@ -474,6 +505,12 @@ class Embedder : public FacadeDelegate {
         !params.initial_bounds.IsEmpty()) {
       fields.kind = ArktWindowRequestKindExtension;
       fields.source = "show state or bounds given (chrome.windows.create)";
+    } else if (GURL url = URLFromOtherApplication(); url.is_valid()) {
+      fields.kind = ArktWindowRequestKindStartupURL;
+      fields.url = url;
+      fields.source =
+          "default params inside a get-URL or open-documents Apple event (URL "
+          "from another application)";
     } else {
       fields.kind = ArktWindowRequestKindReopen;
       fields.source = "default params (reopen, New Window, page NEW_WINDOW)";
@@ -548,8 +585,8 @@ class Embedder : public FacadeDelegate {
   // application (AppController's -application:openURLs:, at a cold launch
   // from -applicationDidFinishLaunching:). It reports startupURL, as the
   // W3-4 table expects for that case (#299). After readiness the request is
-  // answered inside construction, before the window has a tab, and stays
-  // reopen.
+  // answered inside construction, before the window has a tab, and the Apple
+  // event tells it apart (#328).
   static RequestFields ReclassifyHeld(RequestFields fields,
                                       BrowserWindowInterface* browser) {
     if (!fields.default_params) {

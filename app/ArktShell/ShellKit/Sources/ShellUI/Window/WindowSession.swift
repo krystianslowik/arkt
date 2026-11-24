@@ -47,13 +47,22 @@ extension WindowSessionState {
   }
 }
 
+extension EngineWindowRequest {
+  /// A Dock reopen, or a link from another app (#328), with no opener: both ask for a window to show, so they reuse
+  /// an empty shell window and may own the session (maintainer decision 2026-11-24, a cold launch with a link
+  /// included). A page's new window without features is a `.reopen` with an opener and does neither.
+  var opensLikeADockReopen: Bool {
+    (kind == .reopen || kind == .startupURL) && openerWindow == nil
+  }
+}
+
 /// Which kind of window is being built, for deciding which one owns the session.
 public enum SessionWindowOrigin: Equatable, Sendable {
   /// The shell opened it (launch, New Window).
   case shell
-  /// The engine asked for it on a Dock click or a menu command, with no opener.
+  /// The engine asked for it on a Dock click, a menu command or a link from another app, with no opener.
   case dockReopen
-  /// Any other engine request: a startup URL, an extension's window, a page's popup or new window.
+  /// Any other engine request: an extension's window, a page's popup or new window.
   case engineRequested
   /// Dragged out of a window's sidebar.
   case dragOut
@@ -63,7 +72,7 @@ public enum SessionWindowOrigin: Equatable, Sendable {
 /// that window has closed. A window the engine builds for its own request never owns it.
 enum SessionWindowPolicy {
   static func origin(for request: EngineWindowRequest) -> SessionWindowOrigin {
-    request.kind == .reopen && request.openerWindow == nil ? .dockReopen : .engineRequested
+    request.opensLikeADockReopen ? .dockReopen : .engineRequested
   }
 
   static func takesSession(_ origin: SessionWindowOrigin, ownerIsAlive: Bool) -> Bool {
