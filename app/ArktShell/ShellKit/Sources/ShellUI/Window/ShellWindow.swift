@@ -136,10 +136,16 @@ public final class ShellWindow: NSWindow {
   /// (`RenderWidgetHostViewCocoa`), so without this a page could swallow Cmd-W or Cmd-Q.
   public var reservedKeys = ReservedKeys.arkt
 
+  /// Asked before the reserved keys and the focused view: true when the controller took the key. Keys reserved only in
+  /// some states go here, because a main-menu item, even disabled, would swallow its key in the others: Cmd-E while
+  /// an extension is pinned (KB-047, #599).
+  public var keyEquivalentHandler: (@MainActor (NSEvent) -> Bool)?
+
   /// A reserved key goes to the main menu first, before the view hierarchy; when the menu has no item for it, it goes
   /// the usual way. This is where Chromium reserves its own keys on macOS (the window's command dispatcher runs before
   /// the first responder), and it covers the FakeEngine build too.
   public override func performKeyEquivalent(with event: NSEvent) -> Bool {
+    if keyEquivalentHandler?(event) == true { return true }
     if (reservedKeys.matches(event) || ShortcutCatalog.reserves(event, in: NSApp.mainMenu)),
        NSApp.mainMenu?.performKeyEquivalent(with: event) == true { return true }
     return super.performKeyEquivalent(with: event)

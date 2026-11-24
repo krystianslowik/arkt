@@ -64,7 +64,7 @@ engine bridge), **out** (deliberately not offered; see section 9).
 | Appearance | Play sound effects | toggle | `playUserInterfaceSoundsDisabled` (inverted) | on | planned (Arkt has no sounds yet) | BH-207 |
 | Shortcuts | Every menu action: view, record, reset | recorder per row | `StorableKeyBindings` (overrides only) | menu defaults | view: exists as menus; rebind: six commands (#119), the rest planned (#946) | BH-198, BH-199, BH-202 |
 | Shortcuts | Arkt first / Website first / Press twice for Arkt | popup per customized row and in the row's context menu | per-binding priority | Arkt first | planned | BH-200, BH-201 |
-| Shortcuts | Extension Shortcuts, first row: Cycle through pinned extensions, Cmd-E | keycaps (read-only) | none | Cmd-E | row exists (#597); the behaviour is #599 | KB-047 |
+| Shortcuts | Extension Shortcuts, first row: Cycle through pinned extensions, Cmd-E | keycaps (read-only) | none | Cmd-E | **exists** (row #597, behaviour #599) | KB-047 |
 | Shortcuts | Extension Shortcuts: one group per extension, record, clear, In Arkt or All Apps | recorder or Set Shortcut pill, scope pop-up per command | Chromium `CommandService` (engine) | the extension's suggestion | **exists** (#597; suspension while recording: engine side #954) | BH-202 |
 | Extensions | Installed list: enable, pin, details (Options..., Keyboard Shortcuts..., Remove...) | toggle, pin button, row click | Chromium extension prefs | n/a | **exists** (#600; engine side #964) | 2.x extensions |
 | Extensions | Developer mode, Load Unpacked... while it is on | toggle, add row | Chromium `extensions.ui.developer_mode` | off | **exists** (#600; engine side #964) | none |

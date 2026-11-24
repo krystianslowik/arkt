@@ -193,6 +193,10 @@ enum MainMenu {
       item("Enter Full Screen", #selector(NSWindow.toggleFullScreen(_:)), "f", [.command, .control]),   // KB-051
       .separator(),
       developer,
+      // KB-047 (#599): hidden, as Settings, Shortcuts lists it in its own row, and keyless (the window takes Cmd-E
+      // only while an extension is pinned); it names Cmd-E's owner for the shortcut recorders.
+      hidden(item(SettingsWindowController.cycleTitle,
+                  #selector(ShellWindowController.cyclePinnedExtensions(_:)), "e")),
     ]
   }
 
@@ -307,6 +311,12 @@ enum MainMenu {
   static func hiddenAlias(_ item: NSMenuItem) -> NSMenuItem {
     item.isHidden = true
     item.allowsKeyEquivalentWhenHidden = true
+    return item
+  }
+
+  /// Hidden and not live as a key: the menu lists its key for the shortcut recorders only.
+  static func hidden(_ item: NSMenuItem) -> NSMenuItem {
+    item.isHidden = true
     return item
   }
 
