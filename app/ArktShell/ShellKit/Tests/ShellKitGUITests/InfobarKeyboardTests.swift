@@ -299,6 +299,64 @@ final class InfobarKeyboardTests: XCTestCase {
     XCTAssertEqual(posted(), ["OK"], "the same control: no second announcement")
   }
 
+  /// A refresh of the focused row's own infobar that gives the focused control another label is a different control to
+  /// VoiceOver: it is told again (#944). The label is part of what the strip remembers it announced.
+  func testRefreshingTheFocusedRowWithAnotherLabelTellsVoiceOverTheNewLabel() throws {
+    let first = try XCTUnwrap(engine.raiseInfobar(in: tab, message: "One"))
+    let posted = try recordFocusChanges()
+    presenter.focusStrip(of: tab, holding: nil)
+    XCTAssertEqual(posted(), ["OK"])
+    let refreshed = Infobar(id: first, tab: tab, message: "One", ok: InfobarButton(title: "Allow"),
+                            cancel: InfobarButton(title: "Cancel"), closeLabel: "Close")
+    presenter.handle(.infobarsChanged(tab, [refreshed]))
+    XCTAssertEqual(try focused(), "Allow")
+    XCTAssertEqual(posted(), ["OK", "Allow"])
+  }
+
+  /// A refresh that changes only titles, tooltips or enabled states keeps the row's buttons (#944): the control the
+  /// keyboard and VoiceOver's cursor sit on is not destroyed. A refresh that changes the set of controls makes them
+  /// again.
+  func testARefreshThatChangesOnlyValuesKeepsTheRowsButtons() throws {
+    let first = try XCTUnwrap(engine.raiseInfobar(in: tab, message: "One"))
+    presenter.focusStrip(of: tab, holding: nil)
+    let row = try XCTUnwrap(try strip().rows.first)
+    let ok = try XCTUnwrap(row.okButton)
+    let cancel = try XCTUnwrap(row.cancelButton)
+    let close = try XCTUnwrap(row.closeButton)
+    let valuesOnly = Infobar(id: first, tab: tab, message: "One", ok: InfobarButton(title: "Allow", tooltip: "Allow it"),
+                             cancel: InfobarButton(title: "Cancel", isEnabled: false), closeLabel: "Dismiss")
+    presenter.handle(.infobarsChanged(tab, [valuesOnly]))
+    XCTAssertTrue(row.okButton === ok)
+    XCTAssertTrue(row.cancelButton === cancel)
+    XCTAssertTrue(row.closeButton === close)
+    XCTAssertEqual(ok.title, "Allow")
+    XCTAssertEqual(ok.toolTip, "Allow it")
+    XCTAssertFalse(cancel.isEnabled)
+    XCTAssertEqual(close.accessibilityLabel(), "Dismiss")
+    XCTAssertEqual(row.keyboardControls.count, 2, "the disabled Cancel is skipped")
+    let fewer = Infobar(id: first, tab: tab, message: "One", ok: InfobarButton(title: "Allow"), closeLabel: "Dismiss")
+    presenter.handle(.infobarsChanged(tab, [fewer]))
+    XCTAssertNil(row.cancelButton, "a control that is gone is removed")
+    XCTAssertFalse(row.okButton === ok, "the set of controls changed: the buttons are made again")
+  }
+
+  /// A kept link button follows its infobar's accessibility label: set, then gone, then the title speaks (#944).
+  func testARefreshThatDropsTheLinksAccessibilityLabelResetsIt() throws {
+    let first = try XCTUnwrap(engine.raiseInfobar(in: tab, message: "One"))
+    func infobar(label: String?) -> Infobar {
+      Infobar(id: first, tab: tab, message: "One", linkTitle: "Learn more", linkAccessibilityLabel: label,
+              ok: InfobarButton(title: "OK"), closeLabel: "Close")
+    }
+    presenter.handle(.infobarsChanged(tab, [infobar(label: "Learn more about this prompt")]))
+    let row = try XCTUnwrap(try strip().rows.first)
+    let link = try XCTUnwrap(row.linkButton)
+    XCTAssertEqual(link.accessibilityLabel(), "Learn more about this prompt")
+    presenter.handle(.infobarsChanged(tab, [infobar(label: nil)]))
+    XCTAssertTrue(row.linkButton === link, "the link button is kept")
+    XCTAssertEqual(link.accessibilityLabel(), "Learn more")
+    XCTAssertEqual(link.cell?.accessibilityLabel(), "Learn more")
+  }
+
   /// Left and Right on a row with one control go around to that same control: nothing new to tell.
   func testLeftAndRightOnAOneControlRowTellVoiceOverNothingAgain() throws {
     engine.raiseInfobar(in: tab, message: "Note", okTitle: nil, cancelTitle: nil)

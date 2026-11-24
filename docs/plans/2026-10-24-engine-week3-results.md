@@ -8025,8 +8025,8 @@ profiles under `profiles/941-20261115/` deleted. Nothing touched the Keychain (m
 ### Review of #943
 
 - The first version told VoiceOver again whenever the focused control's button object changed. A new list refreshes
-  rows with new buttons, so the same control was announced again after another infobar arrived or a row's values
-  changed. Found by a test the review asked for (`testAListChangeThatKeepsTheFocusedControlTellsVoiceOverNothingAgain`,
+  rows with new buttons, so the same control was announced again after a refresh of the focused row's own infobar (a
+  row's values changed; another infobar arriving rebuilt nothing in that row). Found by a test the review asked for (`testAListChangeThatKeepsTheFocusedControlTellsVoiceOverNothingAgain`,
   `[OK, OK]`). The strip now remembers what it announced by infobar, index and label, and posts only when one of them
   changes. `testLeftAndRightOnAOneControlRowTellVoiceOverNothingAgain` covers a key that goes around to the same
   control.
@@ -8295,6 +8295,23 @@ Follow-ups from the review of #937. No engine, facade or patch change.
   that still reports the newest visit, as an unanswered batch does).
 - Possible follow-up: an early cancel for history, cookies and passwords still reads "Imported 0" while extensions now
   read Skipped. Not changed here.
+
+## #944: the infobar strip keeps a row's buttons across a refresh (shell only, no engine change)
+
+Follow-ups from the re-review of #943 (#941). Seam, no patch, no header change.
+
+- `InfobarRowView.update(_:)` made every button again whenever the infobar changed, although its comment said the row
+  stays when only a title or an enabled state changes. A refresh of the focused row's own infobar therefore destroyed
+  the control VoiceOver's cursor sat on. It now keeps the buttons when the set of controls is the same (link, OK, Cancel
+  and close each present or absent as before) and sets their title, tooltip, enabled state and accessibility label in
+  place; it makes them again only when that set changes.
+- The announced-focus key (infobar, index, label) had no test for its label: `testRefreshingTheFocusedRowWithAnotherLabelTellsVoiceOverTheNewLabel`
+  refreshes the focused infobar with `ok: InfobarButton(title: "Allow")` and expects `["OK", "Allow"]`.
+  `testARefreshThatChangesOnlyValuesKeepsTheRowsButtons` checks the same `NSButton` objects survive a values-only
+  refresh and are made again when a control goes.
+- The #941 results entry said a re-announcement came "after another infobar arrived"; only a refresh of the focused
+  row's own infobar rebuilt its buttons. Corrected above.
+- Real VoiceOver on the shell app stays with #932 (needs the user).
 
 ## #964: installed extensions list, enable / disable, developer mode and Load unpacked (seam, no patch)
 
