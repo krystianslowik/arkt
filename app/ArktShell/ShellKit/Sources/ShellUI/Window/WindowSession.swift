@@ -50,7 +50,10 @@ extension WindowSessionState {
 extension EngineWindowRequest {
   /// A Dock reopen, or a link from another app (#328), with no opener: both ask for a window to show, so they reuse
   /// an empty shell window and may own the session (maintainer decision 2026-11-24, a cold launch with a link
-  /// included). A page's new window without features is a `.reopen` with an opener and does neither.
+  /// included). That is every opener-less `.startupURL`: `kStartupCreator` and `kLastAndUrlsStartupPref` windows
+  /// and held windows that `ReclassifyHeld` reclassifies too. The opener only exists on the fake engine, where a
+  /// page's new window without features is a `.reopen` with an opener and does neither; the Chromium facade never
+  /// sets one (`arkt_embedder.mm`).
   var opensLikeADockReopen: Bool {
     (kind == .reopen || kind == .startupURL) && openerWindow == nil
   }

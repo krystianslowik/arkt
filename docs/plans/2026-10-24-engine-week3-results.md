@@ -8855,6 +8855,21 @@ branch `arkt` unchanged (0001-0016).
   link with no window behaves as before, and a cold launch with a link now restores the session frame, Space and
   tabs. Two GUI tests that used `.startupURL` as a generic engine-requested kind now use `.extension`, keeping
   their intent.
+- `opensLikeADockReopen` covers every opener-less `.startupURL`, including `kStartupCreator` and
+  `kLastAndUrlsStartupPref` windows and held windows that `ReclassifyHeld` reclassifies, so the first Dock reopen that
+  takes Chromium's startup path (`ChromiumEngine+NewTabPage.swift`, lines 7-9) now also reuses an empty window (for
+  example onboarding) and can own the session; that is intended. The opener is set only by the fake engine: the
+  Chromium facade never sets one (`arkt_embedder.mm`), so the "a page's new window is a `.reopen` with an opener"
+  rule in `WindowSession.swift` holds for the fake engine only.
+- Review fixes: the get-URL check uses `kInternetEventClass` and `kAEGetURL` instead of hand-written four-character
+  literals; a GUI test, `testALinkWindowBuiltBeforeLaunchTakesTheSession`, covers a cold-launch link window (no
+  bounds, built before the launch window): it gets the saved frame, is the session window, a later shell window does
+  not take it, and its `saveSession` writes its state. Break: `SessionWindowPolicy.origin` put back to `.reopen` only
+  failed it at lines 280, 281, 283, 284 and 288 (`XCTAssertTrue failed - it is the session window`, ...); restored.
+  Rebuilt (`FAILED:` 0, `gn check` OK); get-URL `startupURL`, reopen `reopen`, open-documents `startupURL` again;
+  pure suite 1637, 44, 60, 29, 312, 49, 362, 243, 42; lints 13 + 60; the four related GUI classes 61 tests, 0
+  failures; 20 runs of `ShellWindowSetTests|SessionRestoreTests` (28 tests) under the lock: 20 of 20 (load 6.21, then
+  4.98).
 
 ### Smoke (`out/Arkt/Arkt.app`, self-test embedder, `--no-startup-window`, fresh profiles under `profiles/328-20261124/`, `--use-mock-keychain --mute-audio`, the self-test's window closed through DevTools first (`browsers normal=0`), then one Apple event)
 

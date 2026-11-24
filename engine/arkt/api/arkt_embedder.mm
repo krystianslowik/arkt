@@ -139,8 +139,6 @@ bool IsEmptyPage(const GURL& url) {
 // window is built. A Dock reopen, New Window and a page's NEW_WINDOW have no
 // such event. The first URL stands for the batch. Empty when there is none.
 GURL URLFromOtherApplication() {
-  constexpr AEEventClass kGetURLClass = 'GURL';
-  constexpr AEEventID kGetURLID = 'GURL';
   NSAppleEventDescriptor* event =
       NSAppleEventManager.sharedAppleEventManager.currentAppleEvent;
   if (!event) {
@@ -148,7 +146,7 @@ GURL URLFromOtherApplication() {
   }
   NSAppleEventDescriptor* direct =
       [event paramDescriptorForKeyword:keyDirectObject];
-  if (event.eventClass == kGetURLClass && event.eventID == kGetURLID) {
+  if (event.eventClass == kInternetEventClass && event.eventID == kAEGetURL) {
     NSString* spec = direct.stringValue;
     return spec ? GURL(base::SysNSStringToUTF8(spec)) : GURL();
   }
