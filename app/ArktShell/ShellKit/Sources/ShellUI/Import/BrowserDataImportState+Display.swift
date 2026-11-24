@@ -276,8 +276,7 @@ extension BrowserDataImportState {
         value = BrowserDataNumberFormat.text(imported, locale: locale)
         var notes: [String] = []
         if failed > 0 { notes.append("\(BrowserDataNumberFormat.text(failed, locale: locale)) couldn't be imported") }
-        // The window is `ImportRecording.historyRetention`, which ShellUI cannot see.
-        if tooOld > 0 { notes.append("\(BrowserDataNumberFormat.text(tooOld, locale: locale)) older than 90 days not imported") }
+        if tooOld > 0 { notes.append(tooOldNote(tooOld)) }
         if !notes.isEmpty { detail = ([detail].compactMap { $0 } + notes).joined(separator: ", ") }
         label = (["\(kind.title), \(value), imported"] + notes).joined(separator: ", ")
       case .skipped:
@@ -289,16 +288,27 @@ extension BrowserDataImportState {
       case .notImported(let reason):
         leading = .notImported; value = "Not imported"; dimmed = true
         label = "\(kind.title), not imported"
-        if case .refused(let failed) = reason, failed > 0 {
-          let refused = "\(BrowserDataNumberFormat.text(failed, locale: locale)) couldn't be imported"
-          detail = refused
-          label += ", \(refused)"
+        if case .refused(let failed, let tooOld) = reason {
+          var notes: [String] = []
+          if failed > 0 { notes.append("\(BrowserDataNumberFormat.text(failed, locale: locale)) couldn't be imported") }
+          if tooOld > 0 { notes.append(tooOldNote(tooOld)) }
+          if !notes.isEmpty {
+            let joined = notes.joined(separator: ", ")
+            detail = joined
+            label += ", " + joined
+          }
         }
       }
     }
     return BrowserDataImportRow(kind: kind, title: kind.title, detail: detail, value: value, leading: leading,
                                 isDimmed: dimmed, barFraction: bar, accessibilityLabel: label,
                                 accessibilityDescription: description)
+  }
+
+  /// The window is `ImportRecording.historyRetention` (90 days), which ShellUI cannot see; `BrowserDataImportModelTests`
+  /// checks the two agree.
+  private func tooOldNote(_ count: Int) -> String {
+    "\(BrowserDataNumberFormat.text(count, locale: locale)) older than 90 days not imported"
   }
 
   // MARK: - Progress

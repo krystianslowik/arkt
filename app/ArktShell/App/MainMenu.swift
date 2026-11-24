@@ -62,7 +62,7 @@ enum MainMenu {
     main.addItem(submenu(title: "File", items: fileItems(commands: commands)))
     main.addItem(submenu(title: "Edit", items: editItems(commands: commands)))
     main.addItem(submenu(title: "View", items: viewItems()))
-    main.addItem(submenu(title: "History", items: historyItems()))
+    main.addItem(holder(for: historyMenu()))
     main.addItem(holder(for: spacesMenu()))                                            // #387, built in ShellUI
     main.addItem(submenu(title: TabsMenu.title, items: TabsMenu.items()))               // #103, built in ShellUI
     windowItems(commands: commands).forEach { windows.addItem($0) }
@@ -201,14 +201,20 @@ enum MainMenu {
   }
 
   /// No `IDC_HISTORY_MENU` tag: Chromium's HistoryMenuBridge would fill it with its own rows. Cmd-Left and Cmd-Right
-  /// are not menu keys (a menu item would take them from text fields).
-  private static func historyItems() -> [NSMenuItem] {
+  /// are hidden second keys of Back and Forward (#948); `HistoryMenu` leaves them to editable text.
+  private static func historyMenu() -> HistoryMenu {
+    let menu = HistoryMenu(title: "History")
+    let right = String(UnicodeScalar(NSRightArrowFunctionKey)!)
+    let left = String(UnicodeScalar(NSLeftArrowFunctionKey)!)
     [
       page("Back", .back, "["),                                                            // KB-031
+      hiddenAlias(page("Back", .back, left)),                                              // KB-031: Cmd-Left too
       page("Forward", .forward, "]"),                                                      // KB-032
+      hiddenAlias(page("Forward", .forward, right)),                                       // KB-032: Cmd-Right too
       .separator(),
       page("Show All History", .history, "y"),                                             // KB-065
-    ]
+    ].forEach { menu.addItem($0) }
+    return menu
   }
 
   /// KB-033, KB-034 (Cmd-Opt-Right / Left). The Spaces themselves, with KB-035, BH-041 (Ctrl-1 ... Ctrl-9), are

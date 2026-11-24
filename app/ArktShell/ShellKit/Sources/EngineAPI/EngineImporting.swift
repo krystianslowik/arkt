@@ -83,6 +83,10 @@ public enum ExtensionInstallOutcome: Equatable, Sendable {
   case alreadyInstalled
   /// The reason is a short sentence without the extension's id or name.
   case failed(String)
+
+  /// The reason of an id the engine ended because the batch was cancelled (`cancelExtensionInstalls`), as the facade
+  /// documents it in `arkt_engine.h`. A declined confirmation fails its ids with "not confirmed" instead.
+  public static let cancelledReason = "cancelled"
 }
 
 public struct ExtensionInstallResult: Equatable, Sendable {

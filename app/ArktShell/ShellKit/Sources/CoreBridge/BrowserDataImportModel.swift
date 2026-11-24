@@ -350,7 +350,7 @@ public final class BrowserDataImportModel: BrowserDataImportSource {
     switch outcome {
     case .done(let counts):
       counts.nothingCameOver
-        ? .notImported(.refused(failed: counts.failed))
+        ? .notImported(.refused(failed: counts.failed, tooOld: counts.tooOld))
         : .imported(count: counts.written + counts.skipped, failed: counts.failed, tooOld: counts.tooOld)
     case .skipped: .stopped
     case .failed(let reason): .notImported(Self.reason(reason))

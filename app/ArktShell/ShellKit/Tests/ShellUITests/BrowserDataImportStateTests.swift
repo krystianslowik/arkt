@@ -309,6 +309,14 @@ struct BrowserDataImportStateTests {
     #expect(state.groups[0].notice?.text == "Some of it couldn't be read. Retry tries again.")
   }
 
+  @Test func aRefusedTypeKeepsItsPastTheWindowNote() throws {
+    let state = Self.result([.history: .notImported(.refused(failed: 4, tooOld: 5))], BrowserDataImportResult(canRetry: true))
+    let row = try #require(state.groups[0].rows.first)
+    #expect(row.value == "Not imported")
+    #expect(row.detail == "4 couldn't be imported, 5 older than 90 days not imported")
+    #expect(row.accessibilityLabel == "History, not imported, 4 couldn't be imported, 5 older than 90 days not imported")
+  }
+
   @Test func visitsPastTheHistoryWindowAreANoteNotACount() throws {
     let state = Self.result([.history: .imported(count: 3, failed: 0, tooOld: 5)])
     let row = try #require(state.groups[0].rows.first)
