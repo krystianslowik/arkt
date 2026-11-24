@@ -1107,6 +1107,8 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
                  << " enabled=" << (extension.isEnabled ? "yes" : "no")
                  << " mayChange=" << (extension.mayChangeEnabled ? "yes" : "no")
                  << " source=" << extension.source
+                 << " sites=" << extension.siteAccess << "/"
+                 << extension.siteAccessSiteCount
                  << " options=" << (extension.hasOptionsPage ? "yes" : "no")
                  << " uninstall=" << (extension.canUninstall ? "yes" : "no")
                  << " abuse=" << (extension.canReportAbuse ? "yes" : "no")

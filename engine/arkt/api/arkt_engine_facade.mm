@@ -1144,6 +1144,8 @@ NSArray<id<ArktSitePermission>>* SitePermissionObjects(
 @property(nonatomic, nullable, copy) NSData* iconPNG;
 @property(nonatomic) BOOL isEnabled;
 @property(nonatomic) BOOL mayChangeEnabled;
+@property(nonatomic) ArktExtensionSiteAccessSummary siteAccess;
+@property(nonatomic) NSInteger siteAccessSiteCount;
 @property(nonatomic) ArktExtensionSource source;
 @property(nonatomic) BOOL hasOptionsPage;
 @property(nonatomic) BOOL canUninstall;
@@ -1158,6 +1160,8 @@ NSArray<id<ArktSitePermission>>* SitePermissionObjects(
 @synthesize iconPNG = _iconPNG;
 @synthesize isEnabled = _isEnabled;
 @synthesize mayChangeEnabled = _mayChangeEnabled;
+@synthesize siteAccess = _siteAccess;
+@synthesize siteAccessSiteCount = _siteAccessSiteCount;
 @synthesize source = _source;
 @synthesize hasOptionsPage = _hasOptionsPage;
 @synthesize canUninstall = _canUninstall;
@@ -4868,6 +4872,9 @@ void DeliverImportResult(void (^completion)(id<ArktImportResult>),
     }
     extension.isEnabled = info.enabled;
     extension.mayChangeEnabled = info.may_change_enabled;
+    extension.siteAccess =
+        static_cast<ArktExtensionSiteAccessSummary>(info.site_access);
+    extension.siteAccessSiteCount = info.site_count;
     extension.source = static_cast<ArktExtensionSource>(info.source);
     extension.hasOptionsPage = info.has_options_page;
     // The same answer the uninstall gate applies (#721).

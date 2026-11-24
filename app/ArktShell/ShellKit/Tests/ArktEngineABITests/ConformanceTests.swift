@@ -40,6 +40,8 @@ final class TestInstalledExtension: NSObject, ArktInstalledExtension {
   let iconPNG: Data? = nil
   let isEnabled: Bool
   let mayChangeEnabled: Bool
+  let siteAccess: ArktExtensionSiteAccessSummary = .someSites
+  let siteAccessSiteCount = 2
   let source: ArktExtensionSource
   let hasOptionsPage = false
   let canUninstall = true
@@ -1021,6 +1023,10 @@ struct ConformanceTests {
     #expect(ArktExtensionEnableResult.unknownExtension.rawValue == 1)
     #expect(ArktExtensionEnableResult.notAllowed.rawValue == 2)
     #expect(ArktExtensionEnableResult.needsPermissionApproval.rawValue == 3)
+    #expect(ArktExtensionSiteAccessSummary.none.rawValue == 0)
+    #expect(ArktExtensionSiteAccessSummary.onClick.rawValue == 1)
+    #expect(ArktExtensionSiteAccessSummary.someSites.rawValue == 2)
+    #expect(ArktExtensionSiteAccessSummary.allSites.rawValue == 3)
   }
 
   @Test func installedExtensionsGoThroughTheProtocol() async throws {
@@ -1031,6 +1037,7 @@ struct ConformanceTests {
     let engine: any ArktEngine = facade
     let listed = try #require(engine.installedExtensions.first)
     #expect(listed.version == "1.0" && !listed.isEnabled && listed.mayChangeEnabled && listed.source == .unpacked)
+    #expect(listed.siteAccess == .someSites && listed.siteAccessSiteCount == 2)
     #expect(engine.setExtensionEnabled("probe", enabled: true) == .applied)
     #expect(engine.setExtensionEnabled("gone", enabled: true) == .unknownExtension)
     #expect(facade.enableCalls.map(\.1) == [true, true])

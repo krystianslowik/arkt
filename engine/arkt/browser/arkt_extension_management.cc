@@ -1,6 +1,8 @@
 #include "arkt/browser/arkt_extension_management.h"
 
 #include <algorithm>
+#include <memory>
+#include <set>
 #include <tuple>
 #include <utility>
 
@@ -8,6 +10,7 @@
 #include "base/logging.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/memory/scoped_refptr.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/sequenced_task_runner.h"
 #include "chrome/browser/extensions/extension_management.h"
@@ -25,6 +28,7 @@
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/image_loader.h"
 #include "extensions/browser/management_policy.h"
+#include "extensions/browser/permissions_manager.h"
 #include "extensions/browser/pref_names.h"
 #include "extensions/browser/ui_util.h"
 #include "extensions/browser/unpacked_installer.h"
@@ -34,6 +38,9 @@
 #include "extensions/common/manifest_handlers/description_info.h"
 #include "extensions/common/manifest_handlers/options_page_info.h"
 #include "extensions/common/manifest_handlers/shared_module_info.h"
+#include "extensions/common/permissions/permission_set.h"
+#include "extensions/common/permissions/permissions_data.h"
+#include "extensions/common/url_pattern.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/image/image_skia.h"
@@ -90,6 +97,51 @@ InstalledExtensionSource SourceOf(Profile* profile,
   return InstalledExtensionSource::kOther;
 }
 
+// The distinct hosts of `hosts`, as chrome://extensions lists them (a
+// pattern's host, with its subdomain wildcard).
+int DistinctHostCount(const extensions::URLPatternSet& hosts) {
+  std::set<std::string> distinct;
+  for (const URLPattern& pattern : hosts) {
+    distinct.insert((pattern.match_subdomains() ? "*." : "") + pattern.host());
+  }
+  return static_cast<int>(distinct.size());
+}
+
+// chrome://extensions' host access (ExtensionInfoGenerator's
+// CreateRuntimeHostPermissionsInfo), with kNone for an extension that asks
+// for no host permissions.
+void ReadSiteAccess(Profile* profile,
+                    const extensions::Extension& extension,
+                    InstalledExtensionInfo* info) {
+  const extensions::PermissionsData* data = extension.permissions_data();
+  if (data->active_permissions().effective_hosts().is_empty() &&
+      data->withheld_permissions().effective_hosts().is_empty()) {
+    info->site_access = ExtensionSiteAccessSummary::kNone;
+    return;
+  }
+  extensions::ExtensionPrefs* prefs = extensions::ExtensionPrefs::Get(profile);
+  extensions::PermissionsManager* manager =
+      extensions::PermissionsManager::Get(profile);
+  // HasWithheldHostPermissions only for an extension the user's site access
+  // can affect (not a policy-installed one); the others have what they asked.
+  const bool withheld = manager->CanAffectExtension(extension) &&
+                        manager->HasWithheldHostPermissions(extension);
+  std::unique_ptr<const extensions::PermissionSet> granted =
+      withheld ? prefs->GetRuntimeGrantedPermissions(extension.id())
+               : prefs->GetGrantedPermissions(extension.id());
+  const extensions::PermissionSet& set =
+      granted ? *granted : data->active_permissions();
+  if (set.effective_hosts().is_empty()) {
+    info->site_access = withheld ? ExtensionSiteAccessSummary::kOnClick
+                                 : ExtensionSiteAccessSummary::kNone;
+  } else if (set.ShouldWarnAllHosts(/*include_api_permissions=*/false)) {
+    info->site_access = ExtensionSiteAccessSummary::kAllSites;
+  } else {
+    info->site_access = ExtensionSiteAccessSummary::kSomeSites;
+    info->site_count = DistinctHostCount(set.effective_hosts());
+  }
+}
+
 }  // namespace
 
 InstalledExtensionInfo::InstalledExtensionInfo() = default;
@@ -119,8 +171,9 @@ std::vector<InstalledExtensionInfo> ListInstalledExtensions(Profile* profile) {
     info.description = extensions::DescriptionInfo::GetDescription(*extension);
     info.enabled = IsOn(profile, extension->id());
     info.may_change_enabled =
-        CanChangeExtensionEnabled(profile, *extension, !info.enabled) ==
-        ExtensionEnableResult::kApplied;
+        CanChangeExtensionEnabled(profile, *extension, !info.enabled) !=
+        ExtensionEnableResult::kNotAllowed;
+    ReadSiteAccess(profile, *extension, &info);
     info.source = SourceOf(profile, *extension);
     info.has_options_page =
         extensions::OptionsPageInfo::HasOptionsPage(extension.get());
@@ -499,6 +552,12 @@ void InstalledExtensionsWatcher::OnExtensionPrefsUpdated(
   NotifyChanged("extension prefs", /*force=*/false);
 }
 
+void InstalledExtensionsWatcher::OnExtensionRuntimePermissionsChanged(
+    const extensions::ExtensionId& extension_id) {
+  // Site access granted or withheld.
+  NotifyChanged("runtime permissions", /*force=*/false);
+}
+
 void InstalledExtensionsWatcher::OnExtensionPrefsWillBeDestroyed(
     extensions::ExtensionPrefs* prefs) {
   prefs_observation_.Reset();
@@ -514,6 +573,8 @@ std::string InstalledExtensionsWatcher::Fingerprint() const {
         info.id + " " + info.version + " " + base::UTF16ToUTF8(info.name) +
         " " + (info.enabled ? "1" : "0") +
         (info.may_change_enabled ? "1" : "0") +
+        base::NumberToString(static_cast<int>(info.site_access)) + "/" +
+        base::NumberToString(info.site_count) +
         (GetUninstallAbility(profile_, info.id).can_uninstall ? "1" : "0") +
         "\n";
   }

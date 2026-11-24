@@ -218,16 +218,20 @@ final class ScriptedInstalledExtension: NSObject, ArktInstalledExtension {
   let iconPNG: Data?
   let isEnabled: Bool
   let mayChangeEnabled: Bool
+  let siteAccess: ArktExtensionSiteAccessSummary
+  let siteAccessSiteCount: Int
   let source: ArktExtensionSource
   let hasOptionsPage: Bool
   let canUninstall: Bool
   let canReportAbuse: Bool
   init(extensionID: String, name: String, version: String, shortDescription: String = "", iconPNG: Data? = nil,
-       isEnabled: Bool = true, mayChangeEnabled: Bool = true, source: ArktExtensionSource = .webStore,
-       hasOptionsPage: Bool = false, canUninstall: Bool = true, canReportAbuse: Bool = true) {
+       isEnabled: Bool = true, mayChangeEnabled: Bool = true, siteAccess: ArktExtensionSiteAccessSummary = .none,
+       siteAccessSiteCount: Int = 0, source: ArktExtensionSource = .webStore, hasOptionsPage: Bool = false,
+       canUninstall: Bool = true, canReportAbuse: Bool = true) {
     self.extensionID = extensionID; self.name = name; self.version = version
     self.shortDescription = shortDescription; self.iconPNG = iconPNG; self.isEnabled = isEnabled
-    self.mayChangeEnabled = mayChangeEnabled; self.source = source; self.hasOptionsPage = hasOptionsPage
+    self.mayChangeEnabled = mayChangeEnabled; self.siteAccess = siteAccess
+    self.siteAccessSiteCount = siteAccessSiteCount; self.source = source; self.hasOptionsPage = hasOptionsPage
     self.canUninstall = canUninstall; self.canReportAbuse = canReportAbuse
   }
 }

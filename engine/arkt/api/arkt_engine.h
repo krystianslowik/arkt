@@ -966,6 +966,20 @@ typedef NS_ENUM(NSInteger, ArktExtensionSource) {
   ArktExtensionSourceOther = 3,
 };
 
+// What an installed extension may read and change on sites, independent of
+// any tab (#964): chrome://extensions' host access for it.
+typedef NS_ENUM(NSInteger, ArktExtensionSiteAccessSummary) {
+  // It asks for no host permissions.
+  ArktExtensionSiteAccessSummaryNone = 0,
+  // It asks for some and every one is withheld: it runs on a site only when
+  // the user clicks it.
+  ArktExtensionSiteAccessSummaryOnClick = 1,
+  // Granted on some sites; see siteAccessSiteCount.
+  ArktExtensionSiteAccessSummarySomeSites = 2,
+  // Granted on all sites.
+  ArktExtensionSiteAccessSummaryAllSites = 3,
+};
+
 // One installed extension of the profile (#964), as plain values read when
 // installedExtensions was read.
 NS_SWIFT_UI_ACTOR
@@ -982,12 +996,16 @@ NS_SWIFT_UI_ACTOR
 @property(nonatomic, readonly, nullable, copy) NSData* iconPNG;
 // Enabled, or terminated (a crashed extension is still on).
 @property(nonatomic, readonly) BOOL isEnabled;
-// The user may turn it the other way: setExtensionEnabled would answer
-// Applied for !isEnabled. NO for one the policy keeps in its state, a shared
-// module, an unpacked one while developer mode is off, one with a disable
-// reason the user may not lift (see NotAllowed), and one waiting for
-// permission approval.
+// The toggle is actionable: setExtensionEnabled for !isEnabled would not
+// answer NotAllowed. YES for one waiting for permission approval (its enable
+// answers NeedsPermissionApproval). NO for one the policy keeps in its state,
+// a shared module, an unpacked one while developer mode is off, and one with
+// a disable reason the user may not lift (see NotAllowed).
 @property(nonatomic, readonly) BOOL mayChangeEnabled;
+// Its site access, and for SomeSites the number of distinct hosts granted (0
+// for the others). A change arrives as InstalledExtensionsChanged.
+@property(nonatomic, readonly) ArktExtensionSiteAccessSummary siteAccess;
+@property(nonatomic, readonly) NSInteger siteAccessSiteCount;
 @property(nonatomic, readonly) ArktExtensionSource source;
 // The extension has an options page (openExtensionOptionsPage).
 @property(nonatomic, readonly) BOOL hasOptionsPage;

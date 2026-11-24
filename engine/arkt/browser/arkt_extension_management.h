@@ -46,6 +46,21 @@ enum class InstalledExtensionSource {
   kOther = 3,
 };
 
+// What an extension may read and change on sites, independent of any tab
+// (#964, Settings > Extensions): chrome://extensions' host access. The values
+// are the facade's ArktExtensionSiteAccessSummary.
+enum class ExtensionSiteAccessSummary {
+  // It asks for no host permissions.
+  kNone = 0,
+  // It asks for some, and every one is withheld: it runs on a site only when
+  // the user clicks it.
+  kOnClick = 1,
+  // Granted on some sites (site_count of them).
+  kSomeSites = 2,
+  // Granted on all sites.
+  kAllSites = 3,
+};
+
 // One installed extension as the Settings pane lists it (#964).
 struct InstalledExtensionInfo {
   InstalledExtensionInfo();
@@ -62,8 +77,13 @@ struct InstalledExtensionInfo {
   std::string description;
   // Enabled or terminated (a crashed extension is still on).
   bool enabled = false;
-  // CanChangeExtensionEnabled's answer for the opposite of `enabled`.
+  // The toggle is actionable: CanChangeExtensionEnabled for the opposite of
+  // `enabled` is not kNotAllowed (one waiting for permission approval
+  // counts, and its enable answers kNeedsPermissionApproval).
   bool may_change_enabled = false;
+  ExtensionSiteAccessSummary site_access = ExtensionSiteAccessSummary::kNone;
+  // The distinct hosts granted, for kSomeSites; 0 otherwise.
+  int site_count = 0;
   InstalledExtensionSource source = InstalledExtensionSource::kOther;
   bool has_options_page = false;
 };
@@ -212,6 +232,8 @@ class InstalledExtensionsWatcher : public extensions::ExtensionRegistryObserver,
       const extensions::ExtensionId& extension_id,
       extensions::DisableReasonSet disabled_reasons) override;
   void OnExtensionPrefsUpdated(
+      const extensions::ExtensionId& extension_id) override;
+  void OnExtensionRuntimePermissionsChanged(
       const extensions::ExtensionId& extension_id) override;
   void OnExtensionPrefsWillBeDestroyed(
       extensions::ExtensionPrefs* prefs) override;
