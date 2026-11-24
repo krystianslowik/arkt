@@ -34,6 +34,7 @@ NS_ASSUME_NONNULL_BEGIN
 @protocol ArktExtensionCommand;
 @protocol ArktExtensionShortcutChange;
 @protocol ArktExtensionInstallResult;
+@protocol ArktInstalledExtension;
 @protocol ArktHistoryEntry;
 @protocol ArktImportBookmark;
 @protocol ArktImportCookie;
@@ -255,6 +256,13 @@ typedef NS_ENUM(NSInteger, ArktEngineEventKind) {
   // values; profile-wide, `tab` and `browser` are nil. The changes of one task
   // are merged into one event, sent on a later task.
   ArktEngineEventKindExtensionCommandsChanged = 32,
+  // installedExtensions or extensionDeveloperMode changed (#964): an
+  // extension was installed, updated, uninstalled, enabled, disabled,
+  // terminated or loaded unpacked, developer mode was turned on or off (here,
+  // or by policy), or a listed extension's icon finished loading. No values;
+  // profile-wide, `tab` and `browser` are nil. The changes of one task are
+  // merged into one event, sent on a later task.
+  ArktEngineEventKindInstalledExtensionsChanged = 33,
 };
 
 // Why a tab's page process went away (#577), folded from
@@ -943,6 +951,64 @@ NS_SWIFT_UI_ACTOR
 @property(nonatomic, readonly, nullable, copy) NSString* failureReason;
 @end
 
+// Where an installed extension came from (#964).
+typedef NS_ENUM(NSInteger, ArktExtensionSource) {
+  // Updates from the Chrome Web Store.
+  ArktExtensionSourceWebStore = 0,
+  // Loaded from a folder: Load unpacked, or --load-extension.
+  ArktExtensionSourceUnpacked = 1,
+  // Installed by policy.
+  ArktExtensionSourcePolicy = 2,
+  // Anything else: a .crx from elsewhere, an external (preferences) install.
+  ArktExtensionSourceOther = 3,
+};
+
+// One installed extension of the profile (#964), as plain values read when
+// installedExtensions was read.
+NS_SWIFT_UI_ACTOR
+@protocol ArktInstalledExtension <NSObject>
+@property(nonatomic, readonly, copy) NSString* extensionID;
+// The extension's name as Chromium shows it.
+@property(nonatomic, readonly, copy) NSString* name;
+// The version Chromium shows (the manifest's version_name when it has one).
+@property(nonatomic, readonly, copy) NSString* version;
+// The manifest's description, localized; empty when it has none.
+@property(nonatomic, readonly, copy) NSString* shortDescription;
+// The 32 pt icon at 2x, PNG; nil while it loads (InstalledExtensionsChanged
+// follows when it arrives) and for an extension without an icon.
+@property(nonatomic, readonly, nullable, copy) NSData* iconPNG;
+// Enabled, or terminated (a crashed extension is still on).
+@property(nonatomic, readonly) BOOL isEnabled;
+// The user may turn it the other way: setExtensionEnabled would answer
+// Applied for !isEnabled. NO for one the policy keeps in its state, a shared
+// module, an unpacked one while developer mode is off, and one waiting for
+// permission approval.
+@property(nonatomic, readonly) BOOL mayChangeEnabled;
+@property(nonatomic, readonly) ArktExtensionSource source;
+// The extension has an options page (openExtensionOptionsPage).
+@property(nonatomic, readonly) BOOL hasOptionsPage;
+// As ArktExtensionAction's (#721): the user may uninstall it, and it has a
+// report page on the Web Store.
+@property(nonatomic, readonly) BOOL canUninstall;
+@property(nonatomic, readonly) BOOL canReportAbuse;
+@end
+
+// The answer to setExtensionEnabled (#964).
+typedef NS_ENUM(NSInteger, ArktExtensionEnableResult) {
+  // The extension has that state now (or had it already).
+  ArktExtensionEnableResultApplied = 0,
+  // The profile lists no extension with that id; nothing changed.
+  ArktExtensionEnableResultUnknownExtension = 1,
+  // The management policy keeps it in its current state (installed or
+  // blocked by policy, a component, a shared module, or an unpacked one while
+  // developer mode is off); nothing changed.
+  ArktExtensionEnableResultNotAllowed = 2,
+  // Enabling only: an update asks for more permissions, so Chromium disabled
+  // it. Chrome enables it after its re-enable prompt, which grants them; the
+  // engine does not grant them without one. Nothing changed.
+  ArktExtensionEnableResultNeedsPermissionApproval = 3,
+};
+
 // A user link activation in a tab's main frame (a click or key press on a
 // link, with a user gesture), before Chromium starts the navigation (#313).
 // Script navigations, forms, reloads and history moves are never reported.
@@ -1400,6 +1466,60 @@ NS_SWIFT_UI_ACTOR
                                completion
     NS_SWIFT_NAME(uninstallExtension(_:reportAbuse:in:completion:))
         NS_SWIFT_DISABLE_ASYNC;
+
+// Installed extensions (#964), of the profile the engine started with,
+// independent of any window: enabled, disabled and terminated ones, with or
+// without an action, as chrome://extensions lists them (no component,
+// hidden or theme items; blocklisted and policy-blocked ones are left out),
+// sorted by name. Changes arrive as InstalledExtensionsChanged.
+@property(nonatomic, readonly, copy)
+    NSArray<id<ArktInstalledExtension>>* installedExtensions;
+// Enables or disables a listed extension as the user's choice, with the
+// checks Chrome's extensions page makes (ManagementPolicy), through
+// ExtensionRegistrar (disable reason DISABLE_USER_ACTION). Synchronous: the
+// answer says whether it has that state now. Inside a nested run loop the
+// change itself runs on a later task (Decision 3) and the answer is that of
+// the same checks, made now. InstalledExtensionsChanged follows a change, and
+// so do ExtensionActionsChanged for the windows listing its action and
+// ExtensionCommandsChanged when it has commands.
+- (ArktExtensionEnableResult)setExtensionEnabled:(NSString*)extensionID
+                                         enabled:(BOOL)enabled
+    NS_SWIFT_NAME(setExtensionEnabled(_:enabled:));
+// Developer mode (#964): Chromium's extensions.ui.developer_mode pref of the
+// profile, what chrome://extensions' Developer mode toggle shows. Setting it
+// turns it on or off as that toggle does (inside a nested run loop, on a
+// later task). A set does nothing when the pref is not the user's to change
+// (a policy sets it) or already has that value; otherwise
+// InstalledExtensionsChanged follows. Turning it off disables the extensions
+// loaded with Load unpacked (as Chrome does at the pin), turning it on
+// enables them again; each such change also reaches the sinks.
+@property(nonatomic) BOOL extensionDeveloperMode;
+// Load unpacked (#964): loads the extension in the folder at `path` as
+// chrome://extensions does, without Chromium's error dialog. Only while
+// extensionDeveloperMode is YES. `completion` runs on the main thread, never
+// inside the call, and always arrives except when the engine shuts down
+// first: the loaded extension's id (a folder loaded before keeps its id and is
+// reloaded), or nil with a short sentence: "developer mode is off", "blocked
+// by policy", or Chromium's load error as chrome://extensions shows it (for
+// example "Manifest file is missing or unreadable"). A loaded extension
+// reaches the sinks as InstalledExtensionsChanged before `completion` runs;
+// ExtensionInstalled is not sent for it.
+- (void)loadUnpackedExtensionAtPath:(NSString*)path
+                         completion:
+                             (void (^)(NSString* _Nullable extensionID,
+                                       NSString* _Nullable failureReason))
+                                 completion
+    NS_SWIFT_NAME(loadUnpackedExtension(atPath:completion:))
+        NS_SWIFT_DISABLE_ASYNC;
+// Opens a listed extension's options page as Chrome does
+// (ExtensionTabUtil::OpenOptionsPage: a tab of its own, or Chromium's
+// extensions page showing it for an embedded one), in `browser`, or, when nil
+// or closed, in the profile's last active window. Nothing for an unknown id,
+// an extension without an options page or a disabled one, or when the profile
+// has no window. The tab arrives as an engine tab.
+- (void)openExtensionOptionsPage:(NSString*)extensionID
+                       inBrowser:(nullable id<ArktBrowserHandle>)browser
+    NS_SWIFT_NAME(openExtensionOptionsPage(_:in:));
 
 // Pinned extensions (#593), of the profile the engine started with: Chromium's
 // toolbar pins, stored in the profile (what chrome://extensions shows as "Pin

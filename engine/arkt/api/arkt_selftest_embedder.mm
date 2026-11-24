@@ -922,6 +922,12 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
                      << " browser=" << (event.browser ? "set" : "nil");
         [self logExtensionCommands];
         break;
+      case ArktEngineEventKindInstalledExtensionsChanged:
+        LOG(WARNING) << "ARKT selftest installedExtensionsChanged tab="
+                     << (event.tab ? "set" : "nil")
+                     << " browser=" << (event.browser ? "set" : "nil");
+        [self logInstalledExtensions];
+        break;
     }
   }
   if (windows_changed) {
@@ -1082,6 +1088,29 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
                          ? base::SysNSStringToUTF8(command.shortcut)
                          : std::string("none"))
                  << " global=" << (command.isGlobal ? "yes" : "no");
+  }
+}
+
+// #964: the installed list and developer mode, as the Settings pane reads
+// them. One line per extension: id, version, enabled, may change, source,
+// options page, icon bytes (0 while it loads), then the name.
+- (void)logInstalledExtensions {
+  NSArray<id<ArktInstalledExtension>>* list = _engine.installedExtensions;
+  LOG(WARNING) << "ARKT selftest ext-list count=" << list.count << " devmode="
+               << (_engine.extensionDeveloperMode ? "on" : "off");
+  for (id<ArktInstalledExtension> extension in list) {
+    LOG(WARNING) << "ARKT selftest ext-item "
+                 << base::SysNSStringToUTF8(extension.extensionID)
+                 << " v=" << base::SysNSStringToUTF8(extension.version)
+                 << " enabled=" << (extension.isEnabled ? "yes" : "no")
+                 << " mayChange=" << (extension.mayChangeEnabled ? "yes" : "no")
+                 << " source=" << extension.source
+                 << " options=" << (extension.hasOptionsPage ? "yes" : "no")
+                 << " uninstall=" << (extension.canUninstall ? "yes" : "no")
+                 << " abuse=" << (extension.canReportAbuse ? "yes" : "no")
+                 << " icon=" << extension.iconPNG.length << " \""
+                 << base::SysNSStringToUTF8(extension.name) << "\" desc=\""
+                 << base::SysNSStringToUTF8(extension.shortDescription) << "\"";
   }
 }
 
@@ -1616,6 +1645,44 @@ bool MenuIsIn(NSMenu* menu, NSMenu* root) {
                  << base::SysNSStringToUTF8(change.conflictExtensionID ?: @"-")
                  << " "
                  << base::SysNSStringToUTF8(change.conflictCommandName ?: @"-");
+  } else if (command == "ext-list") {
+    // #964
+    [self logInstalledExtensions];
+  } else if (command == "ext-enable" || command == "ext-disable") {
+    // #964: ext-enable|ext-disable <extension id>
+    const ArktExtensionEnableResult result =
+        [_engine setExtensionEnabled:base::SysUTF8ToNSString(argument)
+                             enabled:command == "ext-enable"];
+    LOG(WARNING) << "ARKT selftest " << command << " " << argument
+                 << " result=" << result;
+  } else if (command == "ext-devmode") {
+    // #964: ext-devmode on|off
+    _engine.extensionDeveloperMode = argument == "on";
+    LOG(WARNING) << "ARKT selftest ext-devmode " << argument
+                 << " now=" << (_engine.extensionDeveloperMode ? "on" : "off");
+  } else if (command == "ext-options") {
+    // #964: ext-options <extension id> [nowin]
+    const bool no_window =
+        std::find(words.begin(), words.end(), "nowin") != words.end();
+    [_engine openExtensionOptionsPage:base::SysUTF8ToNSString(argument)
+                            inBrowser:no_window ? nil : tab.browser];
+  } else if (command == "ext-load") {
+    // #964: ext-load <absolute folder path>
+    __block bool returned = false;
+    [_engine
+        loadUnpackedExtensionAtPath:base::SysUTF8ToNSString(argument)
+                         completion:^(NSString* extensionID, NSString* reason) {
+                           LOG(WARNING)
+                               << "ARKT selftest ext-load answered id="
+                               << (extensionID
+                                       ? base::SysNSStringToUTF8(extensionID)
+                                       : std::string("nil"))
+                               << " reason="
+                               << (reason ? base::SysNSStringToUTF8(reason)
+                                          : std::string("none"))
+                               << " insideCall=" << (returned ? "no" : "yes");
+                         }];
+    returned = true;
   } else if (command == "ext-suspend") {
     // #954: ext-suspend on|off
     [_engine setExtensionShortcutHandlingSuspended:argument == "on"];

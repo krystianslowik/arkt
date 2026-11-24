@@ -85,6 +85,30 @@ public protocol EngineExtensions: AnyObject {
   func uninstallExtension(_ extensionID: String, reportAbuse: Bool, in window: EngineWindowID?)
   /// Profile-wide extension events, through the same FIFO as `observe`. Default: none are delivered.
   func observeExtensions(_ handler: @escaping @MainActor (EngineExtensionEvent) -> Void) -> EngineObservation
+
+  // MARK: Installed list, enable, developer mode, load unpacked (#600; engine side #964)
+
+  /// Every extension the profile has installed, independent of any window: turned off ones and ones without an action
+  /// included, component extensions (part of the engine) left out. Any order; Settings sorts by name. A change
+  /// arrives as `.installedExtensionsChanged`. Default: none.
+  var installedExtensions: [InstalledExtensionInfo] { get }
+  /// Turns the extension on or off (Settings > Extensions). `.applied` also when it already has that state; then
+  /// nothing is reported. A change arrives as `.installedExtensionsChanged`, and as `.extensionActionsChanged` for each
+  /// window whose actions it adds or removes. Default: `.unknownExtension`.
+  func setExtensionEnabled(_ extensionID: String, enabled: Bool) -> ExtensionEnableResult
+  /// Chromium's developer mode (`extensions.ui.developer_mode`), profile-wide. Default: false.
+  var isExtensionDeveloperModeEnabled: Bool { get }
+  /// Turns developer mode on or off. Default: a no-op.
+  func setExtensionDeveloperModeEnabled(_ enabled: Bool)
+  /// Loads the unpacked extension in `folder` (the folder that holds its `manifest.json`), as Chromium's Load
+  /// unpacked does, without the engine's dialogs. Only while developer mode is on; otherwise `.developerModeOff` and
+  /// nothing loads. The answer comes when the load finished or failed; a loaded extension arrives as
+  /// `.installedExtensionsChanged` before the answer (no `.installed`: unpacked extensions report no install). Default:
+  /// `.failed`.
+  func loadUnpackedExtension(at folder: URL) async -> UnpackedExtensionResult
+  /// Opens the extension's options page in a tab of the engine's last active window. A no-op for an unknown id or an
+  /// extension without an options page (`InstalledExtensionInfo.hasOptionsPage`). Default: a no-op.
+  func openExtensionOptionsPage(_ extensionID: String)
 }
 
 extension EngineExtensions {
@@ -106,6 +130,83 @@ extension EngineExtensions {
   public func observeExtensions(_ handler: @escaping @MainActor (EngineExtensionEvent) -> Void) -> EngineObservation {
     EngineObservation {}
   }
+  public var installedExtensions: [InstalledExtensionInfo] { [] }
+  public func setExtensionEnabled(_ extensionID: String, enabled: Bool) -> ExtensionEnableResult { .unknownExtension }
+  public var isExtensionDeveloperModeEnabled: Bool { false }
+  public func setExtensionDeveloperModeEnabled(_ enabled: Bool) {}
+  public func loadUnpackedExtension(at folder: URL) async -> UnpackedExtensionResult {
+    .failed(reason: UnpackedExtensionResult.unsupportedReason)
+  }
+  public func openExtensionOptionsPage(_ extensionID: String) {}
+}
+
+// MARK: - Installed list (#600)
+
+/// Where an installed extension came from (Settings > Extensions' details; `InstalledExtensionInfo.origin`).
+public enum ExtensionOrigin: Equatable, Sendable {
+  /// The Chrome Web Store (Chromium's `from_webstore`): it has a report page there, so the remove sheet offers Report
+  /// abuse.
+  case webStore
+  /// Loaded unpacked from a folder (developer mode, or the command line).
+  case unpacked
+  /// Installed by policy (Chromium's `EXTERNAL_POLICY`, `EXTERNAL_POLICY_DOWNLOAD`): the user may not remove it, and
+  /// usually may not turn it off.
+  case policy
+  /// Anything else the user sees: a .crx file, an external install.
+  case other
+}
+
+/// One installed extension, as Settings > Extensions lists it (#600). Plain values (Decision 10).
+public struct InstalledExtensionInfo: Equatable, Sendable, Identifiable {
+  public var id: String
+  public var name: String
+  /// The manifest's version ("8.11").
+  public var version: String
+  /// The manifest's short description; empty when it has none.
+  public var description: String
+  /// The extension's icon, PNG, at least 40 px square (a 20 pt glyph at 2x); nil when it has none.
+  public var iconPNG: Data?
+  /// On (Chromium: enabled), or turned off by the user or the engine.
+  public var isEnabled: Bool
+  /// The user may turn it on or off (not locked by policy). `setExtensionEnabled` refuses the others anyway.
+  public var canDisable: Bool
+  /// The user may remove it (not installed by policy). `uninstallExtension` refuses the others anyway.
+  public var canUninstall: Bool
+  public var origin: ExtensionOrigin
+  /// The extension has an options page (`openExtensionOptionsPage`).
+  public var hasOptionsPage: Bool
+
+  public init(id: String, name: String, version: String, description: String = "", iconPNG: Data? = nil,
+              isEnabled: Bool = true, canDisable: Bool = true, canUninstall: Bool = true,
+              origin: ExtensionOrigin = .webStore, hasOptionsPage: Bool = false) {
+    self.id = id; self.name = name; self.version = version; self.description = description; self.iconPNG = iconPNG
+    self.isEnabled = isEnabled; self.canDisable = canDisable; self.canUninstall = canUninstall; self.origin = origin
+    self.hasOptionsPage = hasOptionsPage
+  }
+}
+
+/// The answer to `EngineExtensions.setExtensionEnabled`.
+public enum ExtensionEnableResult: Equatable, Sendable {
+  /// The extension has the state now.
+  case applied
+  /// The engine refused (policy, or a blocklisted extension); nothing changed.
+  case refused
+  /// No such extension (it went away).
+  case unknownExtension
+}
+
+/// The answer to `EngineExtensions.loadUnpackedExtension(at:)`.
+public enum UnpackedExtensionResult: Equatable, Sendable {
+  /// The extension loaded (or reloaded, when the folder was loaded before) with this id.
+  case loaded(extensionID: String)
+  /// It did not load. `reason` is one short sentence the shell shows as is (Chromium's load error: "Manifest file is
+  /// missing or unreadable.").
+  case failed(reason: String)
+  /// Developer mode is off; nothing was loaded.
+  case developerModeOff
+
+  /// The default implementation's reason: the engine loads no unpacked extensions.
+  public static let unsupportedReason = "This browser engine can't load unpacked extensions."
 }
 
 // MARK: - Site access and the context menu (#591)
@@ -354,4 +455,7 @@ public enum EngineExtensionEvent: Equatable, Sendable {
   case installed(InstalledExtension)
   /// `extensionCommands` changed: a shortcut or scope set, an extension with commands added or removed.
   case commandsChanged
+  /// `installedExtensions` changed (#600): an install, an uninstall, an extension turned on or off, an unpacked load
+  /// or reload, an update (a new version, name or icon). One event per change; the shell reads the list again.
+  case installedExtensionsChanged
 }

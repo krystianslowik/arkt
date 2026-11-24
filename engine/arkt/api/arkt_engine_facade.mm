@@ -22,6 +22,7 @@
 #include "arkt/browser/arkt_extension_commands.h"
 #include "arkt/browser/arkt_extension_installs.h"
 #include "arkt/browser/arkt_extension_keybinding_registry.h"
+#include "arkt/browser/arkt_extension_management.h"
 #include "arkt/browser/arkt_extension_uninstall.h"
 #include "arkt/browser/arkt_extensions_container.h"
 #include "arkt/browser/arkt_extensions_menu.h"
@@ -420,6 +421,8 @@ const char* KindName(ArktEngineEventKind kind) {
       return "ExtensionInstalled";
     case ArktEngineEventKindExtensionCommandsChanged:
       return "ExtensionCommandsChanged";
+    case ArktEngineEventKindInstalledExtensionsChanged:
+      return "InstalledExtensionsChanged";
   }
   return "unknown";
 }
@@ -1132,6 +1135,35 @@ NSArray<id<ArktSitePermission>>* SitePermissionObjects(
 @synthesize failureReason = _failureReason;
 @end
 
+// One installed extension (#964).
+@interface ArktFacadeInstalledExtension : NSObject <ArktInstalledExtension>
+@property(nonatomic, copy) NSString* extensionID;
+@property(nonatomic, copy) NSString* name;
+@property(nonatomic, copy) NSString* version;
+@property(nonatomic, copy) NSString* shortDescription;
+@property(nonatomic, nullable, copy) NSData* iconPNG;
+@property(nonatomic) BOOL isEnabled;
+@property(nonatomic) BOOL mayChangeEnabled;
+@property(nonatomic) ArktExtensionSource source;
+@property(nonatomic) BOOL hasOptionsPage;
+@property(nonatomic) BOOL canUninstall;
+@property(nonatomic) BOOL canReportAbuse;
+@end
+
+@implementation ArktFacadeInstalledExtension
+@synthesize extensionID = _extensionID;
+@synthesize name = _name;
+@synthesize version = _version;
+@synthesize shortDescription = _shortDescription;
+@synthesize iconPNG = _iconPNG;
+@synthesize isEnabled = _isEnabled;
+@synthesize mayChangeEnabled = _mayChangeEnabled;
+@synthesize source = _source;
+@synthesize hasOptionsPage = _hasOptionsPage;
+@synthesize canUninstall = _canUninstall;
+@synthesize canReportAbuse = _canReportAbuse;
+@end
+
 // One registered event sink.
 @interface ArktFacadeSink : NSObject
 @property(nonatomic, copy) void (^block)(NSArray<id<ArktEngineEvent>>*);
@@ -1339,6 +1371,10 @@ class Facade : public BrowserCollectionObserver,
       extension_commands_ = std::make_unique<ExtensionCommandsWatcher>(
           profile, base::BindRepeating(&Facade::ExtensionCommandsChanged,
                                        base::Unretained(this)));
+      // The installed list and developer mode (#964).
+      installed_extensions_ = std::make_unique<InstalledExtensionsWatcher>(
+          profile, base::BindRepeating(&Facade::InstalledExtensionsChanged,
+                                       base::Unretained(this)));
       // The previous run's exit type is fixed when the profile's service is
       // made (#577); Chromium's own acknowledgement (the first tab of a window
       // made outside the startup flow, which every shell window is) does not
@@ -1359,6 +1395,23 @@ class Facade : public BrowserCollectionObserver,
 
   // The downloads of the embedder profile (#132), or null without one.
   DownloadWatcher* downloads() { return downloads_.get(); }
+
+  // The installed extensions' watcher and icons (#964), or null without an
+  // embedder profile.
+  InstalledExtensionsWatcher* installed_extensions() {
+    return installed_extensions_.get();
+  }
+
+  // Delivers the events recorded so far at once, ahead of the posted delivery
+  // (#964): Load unpacked's answer then follows the InstalledExtensionsChanged
+  // of its load, which the watcher recorded on an earlier task. Never inside a
+  // notification.
+  void DeliverPending() {
+    CheckNotInNotification("DeliverPending");
+    if (posted_) {
+      Deliver();
+    }
+  }
 
   // Page info and per-site permissions (#583).
   PageInfoHub* page_info() { return page_info_.get(); }
@@ -1716,6 +1769,14 @@ class Facade : public BrowserCollectionObserver,
   void ExtensionCommandsChanged() {
     ArktFacadeEvent* event = [[ArktFacadeEvent alloc] init];
     event.kind = ArktEngineEventKindExtensionCommandsChanged;
+    Record(event);
+  }
+
+  // The installed list or developer mode changed (#964), on a task of the
+  // watcher's own: one profile-wide InstalledExtensionsChanged.
+  void InstalledExtensionsChanged() {
+    ArktFacadeEvent* event = [[ArktFacadeEvent alloc] init];
+    event.kind = ArktEngineEventKindInstalledExtensionsChanged;
     Record(event);
   }
 
@@ -2237,6 +2298,7 @@ class Facade : public BrowserCollectionObserver,
   std::unique_ptr<DownloadWatcher> downloads_;
   std::unique_ptr<ExtensionInstallWatcher> extension_installs_;
   std::unique_ptr<ExtensionCommandsWatcher> extension_commands_;
+  std::unique_ptr<InstalledExtensionsWatcher> installed_extensions_;
   std::unique_ptr<PageInfoHub> page_info_;
   bool last_session_crashed_ = false;
   base::FilePath unanswered_marker_;
@@ -4780,6 +4842,153 @@ void DeliverImportResult(void (^completion)(id<ArktImportResult>),
           },
           base::SysNSStringToUTF8(extensionID), reportAbuse == YES, window,
           completion));
+}
+
+// MARK: Installed extensions (#964)
+
+- (NSArray<id<ArktInstalledExtension>>*)installedExtensions {
+  arkt::CheckFacadeEntry();
+  NSMutableArray<id<ArktInstalledExtension>>* list = [NSMutableArray array];
+  arkt::InstalledExtensionsWatcher* watcher =
+      arkt::g_facade->installed_extensions();
+  Profile* profile = arkt::EmbedderProfile();
+  for (const arkt::InstalledExtensionInfo& info :
+       arkt::ListInstalledExtensions(profile)) {
+    ArktFacadeInstalledExtension* extension =
+        [[ArktFacadeInstalledExtension alloc] init];
+    extension.extensionID = base::SysUTF8ToNSString(info.id);
+    extension.name = base::SysUTF16ToNSString(info.name);
+    extension.version = base::SysUTF8ToNSString(info.version);
+    extension.shortDescription = base::SysUTF8ToNSString(info.description);
+    if (watcher) {
+      const gfx::Image icon = watcher->Icon(info.id);
+      extension.iconPNG =
+          icon.IsEmpty() ? nil : arkt::ImageSkiaPNG(*icon.ToImageSkia());
+    }
+    extension.isEnabled = info.enabled;
+    extension.mayChangeEnabled = info.may_change_enabled;
+    extension.source = static_cast<ArktExtensionSource>(info.source);
+    extension.hasOptionsPage = info.has_options_page;
+    // The same answer the uninstall gate applies (#721).
+    const arkt::UninstallAbility ability =
+        arkt::GetUninstallAbility(profile, info.id);
+    extension.canUninstall = ability.can_uninstall;
+    extension.canReportAbuse = ability.can_report_abuse;
+    [list addObject:extension];
+  }
+  return list;
+}
+
+- (ArktExtensionEnableResult)setExtensionEnabled:(NSString*)extensionID
+                                         enabled:(BOOL)enabled {
+  arkt::CheckFacadeEntry();
+  arkt::g_facade->CheckNotInNotification("setExtensionEnabled");
+  const std::string extension_id = base::SysNSStringToUTF8(extensionID);
+  Profile* profile = arkt::EmbedderProfile();
+  // Decision 3: the change waits out a nested run loop (an extension being
+  // unloaded under one could still be on the stack); the answer is the
+  // checks', made now.
+  if (arkt::IsInNestedLoop()) {
+    const arkt::ExtensionEnableResult checked =
+        arkt::CheckSetExtensionEnabled(profile, extension_id, enabled);
+    if (checked == arkt::ExtensionEnableResult::kApplied) {
+      arkt::RunOrDefer(
+          "setExtensionEnabled",
+          base::BindOnce(
+              [](std::string extension_id, bool enabled) {
+                const arkt::ExtensionEnableResult result =
+                    arkt::SetExtensionEnabledForUser(arkt::EmbedderProfile(),
+                                                     extension_id, enabled);
+                LOG(WARNING) << "ARKT: facade setExtensionEnabled (deferred) "
+                             << extension_id << " enabled=" << enabled
+                             << " result=" << static_cast<int>(result);
+              },
+              extension_id, static_cast<bool>(enabled)));
+    }
+    return static_cast<ArktExtensionEnableResult>(checked);
+  }
+  const arkt::ExtensionEnableResult result =
+      arkt::SetExtensionEnabledForUser(profile, extension_id, enabled);
+  LOG(WARNING) << "ARKT: facade setExtensionEnabled " << extension_id
+               << " enabled=" << static_cast<bool>(enabled)
+               << " result=" << static_cast<int>(result);
+  return static_cast<ArktExtensionEnableResult>(result);
+}
+
+- (BOOL)extensionDeveloperMode {
+  arkt::CheckFacadeEntry();
+  return arkt::ExtensionDeveloperMode(arkt::EmbedderProfile());
+}
+
+- (void)setExtensionDeveloperMode:(BOOL)on {
+  arkt::CheckFacadeEntry();
+  arkt::RunOrDefer(
+      "setExtensionDeveloperMode",
+      base::BindOnce(
+          [](bool on) {
+            const bool changed =
+                arkt::SetExtensionDeveloperMode(arkt::EmbedderProfile(), on);
+            LOG(WARNING) << "ARKT: facade setExtensionDeveloperMode on=" << on
+                         << (changed ? " changed" : " unchanged");
+          },
+          static_cast<bool>(on)));
+}
+
+- (void)loadUnpackedExtensionAtPath:(NSString*)path
+                         completion:
+                             (void (^)(NSString* _Nullable extensionID,
+                                       NSString* _Nullable failureReason))
+                                 completion {
+  arkt::CheckFacadeEntry();
+  arkt::RunOrDefer(
+      "loadUnpackedExtension",
+      base::BindOnce(
+          [](base::FilePath path, void (^completion)(NSString*, NSString*)) {
+            // The loader posts its answer, so the completion never runs
+            // inside the call.
+            arkt::LoadUnpackedExtension(
+                arkt::EmbedderProfile(), path,
+                base::BindOnce(
+                    [](void (^completion)(NSString*, NSString*),
+                       const std::string& id, const std::string& error) {
+                      // The watcher's task for the load ran before this
+                      // one (Chromium notifies before it answers), so its
+                      // event goes out first.
+                      if (arkt::g_facade) {
+                        arkt::g_facade->DeliverPending();
+                      }
+                      completion(
+                          id.empty() ? nil : base::SysUTF8ToNSString(id),
+                          id.empty() ? base::SysUTF8ToNSString(error) : nil);
+                    },
+                    completion));
+          },
+          base::FilePath(base::SysNSStringToUTF8(path ?: @"")), completion));
+}
+
+- (void)openExtensionOptionsPage:(NSString*)extensionID
+                       inBrowser:(nullable id<ArktBrowserHandle>)browser {
+  arkt::CheckFacadeEntry();
+  ArktFacadeBrowser* window = [browser isKindOfClass:[ArktFacadeBrowser class]]
+                                  ? static_cast<ArktFacadeBrowser*>(browser)
+                                  : nil;
+  arkt::RunOrDefer("openExtensionOptionsPage",
+                   base::BindOnce(
+                       [](std::string extension_id, ArktFacadeBrowser* window) {
+                         // Read when the work runs: after a deferral the window
+                         // may have closed, and the page then goes to the last
+                         // active one.
+                         BrowserWindowInterface* interface =
+                             window ? window.browserInterface : nullptr;
+                         const bool opened = arkt::OpenExtensionOptionsPage(
+                             arkt::EmbedderProfile(), extension_id, interface);
+                         LOG(WARNING)
+                             << "ARKT: facade openExtensionOptionsPage "
+                             << extension_id
+                             << " window=" << (interface ? window.windowId : -1)
+                             << (opened ? " opened" : " not opened");
+                       },
+                       base::SysNSStringToUTF8(extensionID), window));
 }
 
 // MARK: Downloads (#132)
