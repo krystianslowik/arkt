@@ -423,6 +423,28 @@ final class ExtensionShortcutsSettingsTests: XCTestCase {
     XCTAssertFalse(engine.isExtensionShortcutHandlingSuspended)
   }
 
+  /// Review: when the engine does not clear the extension's shortcut, app-side Use changes nothing and the notice
+  /// stays on screen; keys are not swallowed behind a closed notice.
+  func testAnAppUseTheEngineRefusesKeepsTheNoticeOnScreen() throws {
+    let engine = ClearRefusingExtensions(designEngine())
+    let (controller, editor) = make(engine: engine)
+    controller.show(pane: .shortcuts)
+    let window = try XCTUnwrap(controller.window)
+    let sidebar = ShortcutActionID("toggleSidebarVisibility")
+    try find("settings.shortcuts.record.toggleSidebarVisibility", in: controller, as: NSButton.self).performClick(nil)
+    window.sendEvent(try key("E", [.command, .shift], code: 14, in: window))
+    try find("settings.shortcuts.conflict.use", in: controller, as: NSButton.self).performClick(nil)
+    XCTAssertTrue(editor.hasConflict, "Use was refused")
+    XCTAssertNotNil(Self.view("settings.shortcuts.conflict.keep", in: try XCTUnwrap(window.contentView)),
+                    "the notice stays while the conflict does")
+    XCTAssertEqual(editor.binding(for: sidebar), ShortcutBinding(key: "s", modifiers: .command))
+    XCTAssertEqual(command(engine.inner, read)?.shortcut, shortcut(.letter(.e), [.command, .shift]))
+    window.sendEvent(try key("\u{1B}", [], code: 53, in: window))
+    XCTAssertFalse(editor.hasConflict)
+    XCTAssertNil(Self.view("settings.shortcuts.conflict.keep", in: try XCTUnwrap(window.contentView)))
+    XCTAssertFalse(engine.inner.isExtensionShortcutHandlingSuspended)
+  }
+
   // MARK: - Scope
 
   func testScopeOfAnUnsetCommandAppliesWithItsShortcut() throws {
@@ -567,6 +589,25 @@ private final class CountingExtensions: EngineExtensions {
   func setExtensionCommandShortcut(_ id: ExtensionCommandID, to shortcut: ExtensionShortcut?,
                                    scope: ExtensionCommandScope, replacingConflict: Bool) -> ExtensionShortcutResult {
     inner.setExtensionCommandShortcut(id, to: shortcut, scope: scope, replacingConflict: replacingConflict)
+  }
+  func setExtensionShortcutHandlingSuspended(_ suspended: Bool) { inner.setExtensionShortcutHandlingSuspended(suspended) }
+  func observeExtensions(_ handler: @escaping @MainActor (EngineExtensionEvent) -> Void) -> EngineObservation {
+    inner.observeExtensions(handler)
+  }
+}
+
+/// Forwards to an InMemoryEngine but refuses to clear a command's shortcut, for app-side Use's abort path.
+@MainActor
+private final class ClearRefusingExtensions: EngineExtensions {
+  let inner: InMemoryEngine
+  init(_ inner: InMemoryEngine) { self.inner = inner }
+  var extensionCommands: [ExtensionCommand] { inner.extensionCommands }
+  func extensionActions(in window: EngineWindowID) -> [ExtensionAction] { [] }
+  func runExtensionAction(_ id: String, in window: EngineWindowID, anchor: NSView) {}
+  func setExtensionCommandShortcut(_ id: ExtensionCommandID, to shortcut: ExtensionShortcut?,
+                                   scope: ExtensionCommandScope, replacingConflict: Bool) -> ExtensionShortcutResult {
+    guard shortcut != nil else { return .unknownCommand }
+    return inner.setExtensionCommandShortcut(id, to: shortcut, scope: scope, replacingConflict: replacingConflict)
   }
   func setExtensionShortcutHandlingSuspended(_ suspended: Bool) { inner.setExtensionShortcutHandlingSuspended(suspended) }
   func observeExtensions(_ handler: @escaping @MainActor (EngineExtensionEvent) -> Void) -> EngineObservation {

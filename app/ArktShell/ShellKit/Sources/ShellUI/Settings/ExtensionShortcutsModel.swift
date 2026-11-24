@@ -194,7 +194,7 @@ public final class ExtensionShortcutsModel {
     let status = data.withUnsafeBytes { buffer -> OSStatus in
       guard let layout = buffer.bindMemory(to: UCKeyboardLayout.self).baseAddress else { return OSStatus(paramErr) }
       return UCKeyTranslate(layout, keyCode, UInt16(kUCKeyActionDown), UInt32((shiftKey >> 8) & 0xFF),
-                            UInt32(LMGetKbdType()), OptionBits(kUCKeyTranslateNoDeadKeysBit), &deadKeys,
+                            UInt32(LMGetKbdType()), OptionBits(kUCKeyTranslateNoDeadKeysMask), &deadKeys,
                             characters.count, &length, &characters)
     }
     guard status == noErr, length > 0 else { return usShifted(keyCode) }

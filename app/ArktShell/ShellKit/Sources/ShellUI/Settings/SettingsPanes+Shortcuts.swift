@@ -203,7 +203,8 @@ extension SettingsWindowController {
         guard let self, let editor = self.services.shortcutEditor else { return }
         let id = editor.recordingAction
         editor.useRecordedShortcut()
-        if !editor.protectedConflicts.isEmpty {
+        // Still a conflict: a protected owner, or the engine kept an extension's shortcut. The notice stays.
+        if editor.hasConflict {
           self.showShortcutConflict()
           return
         }
