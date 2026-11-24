@@ -36,10 +36,24 @@ final class LittleArktWindow: NSWindow {
 
   /// Close, minimize and zoom at x 12, 35 and 58, centered in the 40 pt top bar. Only the buttons' host is narrowed to
   /// the buttons, so it never takes clicks from the host label or the controls; the window's top rim spans the window.
+  ///
+  /// The window takes its page's title, which makes AppKit lay the titlebar out again: the title places them again at
+  /// once, and any other relayout of AppKit's own asks for a layout pass, which places them before the next draw (#989).
   func layoutTrafficLights() {
     let metrics = ShellMetrics.standard
-    placeTrafficLights(barHeight: LittleArktLayout.topBarHeight, firstX: metrics.trafficLightOrigin.x,
-                       spacing: metrics.trafficLightSpacing)
+    titlebarRelayout.placing(in: self) {
+      placeTrafficLights(barHeight: LittleArktLayout.topBarHeight, firstX: metrics.trafficLightOrigin.x,
+                         spacing: metrics.trafficLightSpacing)
+    }
+  }
+
+  override var title: String {
+    didSet { layoutTrafficLights() }
+  }
+
+  private lazy var titlebarRelayout = TitlebarRelayoutObserver { [weak self] in
+    guard let self, !self.styleMask.contains(.fullScreen) else { return }
+    self.contentView?.needsLayout = true   // LittleArktRootView.layout() places them
   }
 
   override func selectNextKeyView(_ sender: Any?) {

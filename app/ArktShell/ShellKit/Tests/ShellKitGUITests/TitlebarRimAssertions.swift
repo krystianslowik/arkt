@@ -40,3 +40,55 @@ func centerInWindow(_ view: NSView) -> NSPoint {
   let rect = view.convert(view.bounds, to: nil)
   return NSPoint(x: rect.midX, y: rect.midY)
 }
+
+/// #989: the titlebar geometry the shell sets, in window coordinates: the container, the buttons' host and close,
+/// minimize and zoom, with each button's visibility.
+@MainActor
+func titlebarGeometry(_ window: NSWindow, file: StaticString = #filePath, line: UInt = #line) throws -> [String] {
+  let close = try XCTUnwrap(window.standardWindowButton(.closeButton), file: file, line: line)
+  let titlebar = try XCTUnwrap(close.superview, file: file, line: line)              // NSTitlebarView
+  let container = try XCTUnwrap(titlebar.superview, file: file, line: line)          // NSTitlebarContainerView
+  let buttons = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].compactMap {
+    window.standardWindowButton($0)
+  }
+  XCTAssertEqual(buttons.count, 3, file: file, line: line)
+  return ["container \(container.convert(container.bounds, to: nil))",
+          "host \(titlebar.convert(titlebar.bounds, to: nil))"]
+    + buttons.map { "button \($0.convert($0.bounds, to: nil)) hidden \($0.isHidden)" }
+}
+
+/// #989: each change makes AppKit lay its titlebar out again on its own (the buttons go back to AppKit's own places and
+/// their host to the window's full width). A new title, as the engine sets on every tab switch, leaves the geometry the
+/// window set as it was at once, with no layout pass between; with `relayouts`, every other change and a button moved
+/// from outside leave it as it was after the next layout pass, before anything is drawn.
+@MainActor
+func assertTitlebarStaysPut(_ window: NSWindow, _ label: String, relayouts: Bool = true,
+                            file: StaticString = #filePath, line: UInt = #line) throws {
+  let placed = try titlebarGeometry(window, file: file, line: line)
+  let titles = ["GitHub", "Inbox (3) - a very long page title that a tab switch brings in", "", "Почта - 受信トレイ"]
+  for title in titles {
+    window.title = title
+    XCTAssertEqual(try titlebarGeometry(window, file: file, line: line), placed, "after title \"\(title)\", \(label)",
+                   file: file, line: line)
+  }
+  guard relayouts else { return }
+  let zoom = try XCTUnwrap(window.standardWindowButton(.zoomButton), file: file, line: line)
+  let changes: [(String, () -> Void)] = [
+    ("subtitle", { window.subtitle = "subtitle" }),
+    ("represented URL", { window.representedURL = URL(string: "https://example.com/") }),
+    ("document edited", { window.isDocumentEdited = true }),
+    ("dark appearance", { window.appearance = NSAppearance(named: .darkAqua) }),
+    ("a button moved", { zoom.setFrameOrigin(.zero) }),
+  ]
+  for (change, apply) in changes {
+    apply()
+    window.layoutIfNeeded()
+    XCTAssertEqual(try titlebarGeometry(window, file: file, line: line), placed, "after \(change), \(label)",
+                   file: file, line: line)
+  }
+  window.subtitle = ""
+  window.representedURL = nil
+  window.isDocumentEdited = false
+  window.appearance = nil
+  window.layoutIfNeeded()
+}

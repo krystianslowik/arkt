@@ -37,6 +37,49 @@ final class WindowChromeTests: XCTestCase {
     XCTAssertEqual(topLeft.y, 16, accuracy: 0.5)
   }
 
+  /// #989: the engine titles the window on every tab switch (`ArktBrowserWindow::UpdateTitleBar`), and a new title
+  /// makes AppKit lay the titlebar out again at once. The buttons and their host stay where the shell put them, docked,
+  /// on the hover-revealed overlay (slid and faded) and with the sidebar hidden; AppKit's other relayouts are undone by
+  /// the next layout pass, which runs once and does not ask for another.
+  func testTrafficLightsStayPutWhenTheTitleChanges() throws {
+    NSApp.setActivationPolicy(.accessory)
+    let controller = ShellWindowController(engine: InMemoryEngine(), sidebar: StubSidebar.sample())
+    let window = try XCTUnwrap(controller.window as? ShellWindow)
+    let root = try XCTUnwrap(window.contentView as? ShellRootView)
+    defer { controller.close() }
+    window.setContentSize(NSSize(width: 1200, height: 800))
+    controller.showWindow(nil)
+    window.layoutIfNeeded()
+    try assertTitlebarStaysPut(window, "docked")
+    let (topLeft, _) = try closeButtonTopLeft(window)
+    XCTAssertEqual(topLeft.x, 12, accuracy: 0.5)
+    XCTAssertEqual(topLeft.y, 16, accuracy: 0.5)
+
+    // A layout pass places the buttons for the sidebar as it is, so the overlay's frame is set here and only titles
+    // are changed.
+    window.trafficLightPlacement = .overlay(origin: .zero, slide: -40, alpha: 0.5)
+    window.layoutTrafficLights(sidebarWidth: 190)
+    try assertTitlebarStaysPut(window, "overlay", relayouts: false)
+
+    let previous = root.onLayout
+    var layouts = 0
+    root.onLayout = { previous?(); layouts += 1 }
+    defer { root.onLayout = previous }
+    window.layoutIfNeeded()
+    layouts = 0
+    window.subtitle = "subtitle"
+    window.layoutIfNeeded()
+    window.layoutIfNeeded()
+    XCTAssertEqual(layouts, 1, "one layout pass places the buttons again and asks for no other")
+    window.subtitle = ""
+    window.layoutIfNeeded()
+
+    root.sidebarVisible = false
+    window.layoutIfNeeded()
+    XCTAssertEqual(window.trafficLightPlacement, .hidden)
+    try assertTitlebarStaysPut(window, "hidden")
+  }
+
   func testWindowIsTitlelessFullSizeContent() throws {
     let controller = ShellWindowController(engine: InMemoryEngine(), sidebar: StubSidebar.sample())
     let window = try XCTUnwrap(controller.window)
