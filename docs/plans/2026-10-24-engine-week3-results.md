@@ -8721,6 +8721,54 @@ folders and defaults suites deleted, and the copies and build products unregiste
 outputs stay on the Chromium disk (`embed-560`, `arkt-shell-dd/`) for the next engine tasks. Nothing touched
 the Keychain (mock keychain only), `/Applications/Arkt.app` or real browser data.
 
+## #929: the Chromium update command disabled on Arkt windows (seam, no patch)
+
+Date 2026-11-24. Branch `engine/929-upgrade-command`, stacked on `engine/560-quit-warning` (#973) and merged with
+`main` at `f3652604` (#972, #971). `$CR` branch `arkt` unchanged (0001-0016).
+
+### Gate
+
+- Seam, no patch. `BrowserCommandController` enables `IDC_UPGRADE_DIALOG` once, in `InitCommandState` (its
+  constructor, `browser_command_controller.cc:1989`), which `BrowserWindowFeatures::Init` runs before the window
+  exists. Nothing enables it again.
+- Facade header unchanged. `.patches` unchanged (16 lines, 16 `arkt` commits: in sync). No patch number claimed.
+- Build: `nice -n 15 autoninja -j 4 -C out/Arkt chrome`; Chromium disk 1.9 TB free, swap near full (hence `-j 4`).
+
+### What landed
+
+`ArktBrowserWindow`'s constructor calls `chrome::UpdateCommandEnabled(browser_, IDC_UPGRADE_DIALOG, false)`. Menu
+validation (`IsCommandEnabledInWindow`), key equivalents and `chrome::ExecuteCommand` all read the command updater;
+`BrowserCommandController::ExecuteCommandWithDispositionAndContext` returns before `OpenUpdateChromeDialog` for a
+disabled command. Views windows (DevTools, app windows) do not use `ArktBrowserWindow` and keep Chromium's state.
+
+### Smoke (`out/Arkt/Arkt.app`, `--arkt-facade-selftest --arkt-engine-test-api --remote-debugging-port=9333`, a window with `about:blank`, fresh profiles under `profiles/929-20261124/`, `--use-mock-keychain --mute-audio`, `stub-command upgrade` through the page title)
+
+| Run | Build | Result |
+|---|---|---|
+| 1 | fix | `stub-command upgrade id=40024 supported=yes enabled=no`; `done tab alive=yes`; the process still running, no other process on the profile |
+| break | the call commented out | `enabled=yes`, then `quit started`, `app terminating`; the process exited and a new one (relaunched with the same switches) started on the profile; stopped by its PID |
+| 2, 3 | fix, rebuilt | as run 1 |
+
+`FATAL`, `Check failed`, `DCHECK`: 0 in every run. Builds: 74 s, the break and the restore 77 s each; `FAILED:` 0;
+`gn check out/Arkt "//arkt/*"`: OK. Swift unchanged: `nice -n 20 swift test -j 2 --skip ShellKitGUITests` 1636, 44,
+60, 29, 312, 49, 362, 243, 42; lints 13 + 60.
+
+### Patch budget
+
+Unchanged: 16 patch files, 8 seam and hook patch files, 22 upstream files outside 0001-0004. `.patches` 16 lines, 16
+`arkt` commits: in sync. Facade header unchanged.
+
+### Left open
+
+- `IDC_SET_BROWSER_AS_DEFAULT` and `IDC_OPEN_SAFETY_HUB` are enabled by the same `InitCommandState` lines; nothing in
+  Arkt sends them and this task leaves them alone.
+
+### Cleanup
+
+Every engine run stopped by exact PID, including the process the break relaunched and the helpers left behind (`ps`
+shows none on the profile). Throwaway profiles under `profiles/929-20261124/` deleted. Nothing touched the Keychain
+(mock keychain only), `/Applications/Arkt.app` or real browser data.
+
 ## #934: the engine self-test's quit ends the process (self-test only, no patch)
 
 Date 2026-11-24. Branch `engine/934-selftest-exit` from `main` at `8541b804`. `$CR` branch `arkt` unchanged
