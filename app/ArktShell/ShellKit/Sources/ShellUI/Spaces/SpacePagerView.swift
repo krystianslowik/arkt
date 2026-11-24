@@ -78,6 +78,8 @@ public final class SpacePagerView: NSView {
   private var dragBase = 0
   private var translation: CGFloat = 0
   private var tracker = VelocityTracker()
+  /// The one axis lock for every trackpad gesture in the sidebar: the pager's, its chrome's and each page's scroll
+  /// view's (`routeGestureEvent`, #986).
   private var lock = ScrollAxisLock<NSEvent>()
   private var laidOutWidth: CGFloat = 0
   /// How many presented frames of a motion a pointer move waits between two strip syncs (#295): at 120 Hz this is
@@ -551,16 +553,35 @@ public final class SpacePagerView: NSView {
   }
 
   public override func scrollWheel(with event: NSEvent) {
-    if event.momentumPhase != [] { return }                // the spring owns deceleration
-    guard event.phase != [] else { super.scrollWheel(with: event); return }
+    guard event.phase != [] || event.momentumPhase != [] else { super.scrollWheel(with: event); return }
+    _ = routeGestureEvent(event)                           // vertical over the title: no paging
+  }
+
+  /// Takes one event of a trackpad gesture (a phased or momentum event) that reached the pager or any page's scroll
+  /// view, and returns the events the caller scrolls vertically itself (none while undecided or paging).
+  ///
+  /// The axis is decided once per gesture, here, for every view in the sidebar (#986). AppKit sends each event of a
+  /// gesture to the view under the pointer, not to the view the gesture began on, and a swipe moves the pages under a
+  /// still pointer: the next Space's page is parked in the visible slot, and syncs and layout passes move the strip
+  /// frame, so the rest of the swipe, its end included, lands on another page's scroll view. A lock per scroll view
+  /// held that page's last decision (vertical, if its outline was scrolled), sent the rest of the swipe to the outline
+  /// and never ended the swipe: the strip stayed between two pages.
+  func routeGestureEvent(_ event: NSEvent) -> [NSEvent] {
+    // Momentum of a swipe belongs to the spring, which owns deceleration; momentum of a vertical scroll to the outline.
+    if event.momentumPhase != [] { return lock.axis == .horizontal ? [] : [event] }
     let starts = event.phase.contains(.began) || event.phase.contains(.mayBegin)
     let ends = event.phase.contains(.ended) || event.phase.contains(.cancelled)
-    if starts { gestureMayBegin() }
+    if starts { gestureMayBegin() }                        // freeze a running settle
     let ready = lock.feed(event, dx: event.scrollingDeltaX, dy: event.scrollingDeltaY, starts: starts, ends: ends)
     switch lock.axis {
-    case .horizontal: for e in ready { handleHorizontal(e) }
-    case .vertical: if !ready.isEmpty { gestureEndedWithoutPaging() }   // vertical over the title: no paging
-    case .undecided: break
+    case .horizontal:
+      for e in ready { handleHorizontal(e) }
+      return []
+    case .vertical:
+      if !ready.isEmpty { gestureEndedWithoutPaging() }
+      return ready
+    case .undecided:
+      return []
     }
   }
 

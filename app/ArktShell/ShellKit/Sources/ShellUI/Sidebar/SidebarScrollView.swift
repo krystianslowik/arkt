@@ -1,12 +1,12 @@
 import AppKit
 
 /// Vertical-only scroller for one Space's outline. No background; the theme shows through.
-/// Locks each trackpad gesture to one axis and forwards horizontal ones to the Space pager (BH-035, GS-001).
+/// Trackpad gestures go through the Space pager, which locks each gesture to one axis for every page (BH-035,
+/// GS-001, #986): horizontal ones page the Spaces, vertical ones come back here and scroll the outline.
 @MainActor
 public final class SidebarScrollView: NSScrollView {
-  /// Receives horizontal gestures (the `SpacePagerView`).
+  /// Decides each trackpad gesture's axis and pages horizontal ones (the `SpacePagerView`).
   public weak var horizontalGestureTarget: SpacePagerView?
-  private var lock = ScrollAxisLock<NSEvent>()
   /// A scroll by the user (wheel or trackpad); the overflow pill leaves on it (BH-018).
   var onUserScroll: (@MainActor () -> Void)?
 
@@ -28,25 +28,14 @@ public final class SidebarScrollView: NSScrollView {
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+  /// Legacy mouse wheels have no phases and always scroll. A gesture's events can arrive on any page's scroll view
+  /// as the pages move under the pointer, so the axis is not decided here but by the pager, for the whole gesture.
   public override func scrollWheel(with event: NSEvent) {
     onUserScroll?()
-    guard event.phase != [] else {
-      // Momentum after a horizontal gesture belongs to the pager (it ignores it: the spring owns the
-      // settle). Legacy mouse wheels have no phases and always scroll.
-      if event.momentumPhase != [], lock.axis == .horizontal { route(event, horizontal: true) }
-      else { super.scrollWheel(with: event) }
+    guard let pager = horizontalGestureTarget, event.phase != [] || event.momentumPhase != [] else {
+      super.scrollWheel(with: event)
       return
     }
-    let starts = event.phase.contains(.began) || event.phase.contains(.mayBegin)
-    let ends = event.phase.contains(.ended) || event.phase.contains(.cancelled)
-    if starts { horizontalGestureTarget?.gestureMayBegin() }   // freeze a running Space settle
-    let ready = lock.feed(event, dx: event.scrollingDeltaX, dy: event.scrollingDeltaY, starts: starts, ends: ends)
-    if lock.axis == .vertical, !ready.isEmpty { horizontalGestureTarget?.gestureEndedWithoutPaging() }
-    for e in ready { route(e, horizontal: lock.axis == .horizontal) }
-  }
-
-  private func route(_ event: NSEvent, horizontal: Bool) {
-    if horizontal, let target = horizontalGestureTarget { target.scrollWheel(with: event) }
-    else { super.scrollWheel(with: event) }
+    for e in pager.routeGestureEvent(event) { super.scrollWheel(with: e) }
   }
 }
