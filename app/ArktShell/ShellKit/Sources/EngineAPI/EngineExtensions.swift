@@ -193,8 +193,10 @@ public struct InstalledExtensionInfo: Equatable, Sendable, Identifiable {
   }
 }
 
-/// An installed extension's site access, independent of any tab (`InstalledExtensionInfo.siteAccess`), from
-/// Chromium's granted and withheld host permissions (the content scripts' hosts included).
+/// An installed extension's site access, independent of any tab (`InstalledExtensionInfo.siteAccess`), computed as
+/// chrome://extensions does (`CreateRuntimeHostPermissionsInfo`). One to one with the facade's site access: None,
+/// OnClick, SomeSites (with its distinct granted host count), AllSites. `noHostAccess` is None, named so that it never
+/// reads as `Optional.none`.
 public enum InstalledExtensionSiteAccess: Equatable, Sendable {
   /// Granted all hosts (`<all_urls>`, `*://*/*` or an equivalent pattern): "on all sites".
   case allSites
@@ -482,8 +484,8 @@ public enum EngineExtensionEvent: Equatable, Sendable {
   /// `extensionCommands` changed: a shortcut or scope set, an extension with commands added or removed.
   case commandsChanged
   /// `installedExtensions` changed (#600): an install, an uninstall, an extension turned on or off, an unpacked load
-  /// or reload, an update (a new version, name or icon). One event may carry several changes, and an icon that arrives
-  /// after its extension (Chromium loads icons asynchronously) comes as an event of its own; the shell reads the
-  /// whole list again on each.
+  /// or reload, an update (a new version, name or icon), a change of its site access. One event may carry several
+  /// changes, and an icon that arrives after its extension (Chromium loads icons asynchronously) comes as an event of
+  /// its own; the shell reads the whole list again on each.
   case installedExtensionsChanged
 }
