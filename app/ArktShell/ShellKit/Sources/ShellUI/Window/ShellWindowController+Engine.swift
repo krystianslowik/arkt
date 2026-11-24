@@ -335,7 +335,7 @@ extension ShellWindowController {
     guard let extensions = engine as? any EngineExtensions else { return }
     let button = ExtensionsButton()
     let panel = ExtensionsPanelController(extensions: extensions, button: button) { [weak self] in self?.engineWindow }
-    panel.onManage = { [weak self] in self?.onManageExtensions?() }
+    panel.onManage = { [weak self] extensionID in self?.onManageExtensions?(extensionID) }
     panel.onBrowseWebStore = { [weak self] in self?.open(OnboardingController.Options.chromeWebStore, inNewTab: true) }
     panel.onRemove = { [weak panel] action in panel?.presentRemoveSheet(for: action) }    // #720
     panel.cycleAnchor = { [weak self] in self?.extensionCycleAnchor }                    // #599
@@ -372,6 +372,9 @@ extension ShellWindowController {
     }
     return rootView.card
   }
+
+  /// Opens `url` in a new tab, as Cmd-T would: Settings > Extensions' Open Chrome Web Store (#600).
+  public func openInNewTab(_ url: URL) { open(url, inNewTab: true) }
 
   /// The window's actions changed, or the engine window came or went: the open panel follows.
   func refreshExtensions() {

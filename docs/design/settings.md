@@ -66,8 +66,8 @@ engine bridge), **out** (deliberately not offered; see section 9).
 | Shortcuts | Arkt first / Website first / Press twice for Arkt | popup per customized row and in the row's context menu | per-binding priority | Arkt first | planned | BH-200, BH-201 |
 | Shortcuts | Extension Shortcuts, first row: Cycle through pinned extensions, Cmd-E | keycaps (read-only) | none | Cmd-E | **exists** (row #597, behaviour #599) | KB-047 |
 | Shortcuts | Extension Shortcuts: one group per extension, record, clear, In Arkt or All Apps | recorder or Set Shortcut pill, scope pop-up per command | Chromium `CommandService` (engine) | the extension's suggestion | **exists** (#597; suspension while recording: engine side #954) | BH-202 |
-| Extensions | Installed list: enable, pin, details | toggle, pin button, row click | Chromium extension prefs | n/a | engine, planned (#121) | 2.x extensions |
-| Extensions | Developer mode | toggle | Chromium `extensions.ui.developer_mode` | off | engine, planned | none |
+| Extensions | Installed list: enable, pin, details (Options..., Keyboard Shortcuts..., Remove...) | toggle, pin button, row click | Chromium extension prefs | n/a | **exists** (#600; engine side #964) | 2.x extensions |
+| Extensions | Developer mode, Load Unpacked... while it is on | toggle, add row | Chromium `extensions.ui.developer_mode` | off | **exists** (#600; engine side #964) | none |
 | Privacy | Block third-party cookies | toggle | Chromium cookie controls | on | engine, planned | none (Chromium) |
 | Privacy | Block cookie banners | toggle | not identified in Arc | off | planned | BH-212 |
 | Privacy | Safe Browsing | popup: Enhanced / Standard / No protection | Chromium `safebrowsing.*` | Standard protection | engine, planned | none (Chromium) |
@@ -108,7 +108,8 @@ and translate exceptions (they live in the page's site controls).
 - **Changes apply at once**; there is no Save or Cancel. Every value is observed by every window (the
   `ToolbarSetting` pattern: one shared store, weak observers).
 - **Deep links**: other surfaces open a pane directly: the "Edit the shortcut" toast (BH-195) opens Shortcuts with the
-  row selected; the extensions menu's Manage Extensions opens Extensions; the recovery toast keeps Show Files.
+  row selected; the extensions menu's Manage Extensions opens Extensions, and an action's Manage Extension... opens it
+  with that extension's details (#600); the recovery toast keeps Show Files.
 
 States designed (each is a prototype hash and a screenshot pair):
 

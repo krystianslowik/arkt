@@ -3624,3 +3624,55 @@ Section stay as built; F12 stays reserved; the recorder rules and the Reset All 
   change. The real-app check of the close behaviour (#18) is #963 (status:needs-user).
 - Listed in Settings through the Pinned extensions row, not `ShortcutCatalog.sections` (the item is hidden).
 - No "Use Selection for Find" item exists on `main` (dropped in week 3), so nothing moved off Cmd-E.
+
+### Settings > Extensions (#600)
+
+- The placeholder is replaced by the pane in `design/settings` (`extensions`, `extensions-empty`). The installed list
+  is one row per extension, sorted by name: its 20 pt icon (or the puzzle tile), the name, "Version X. <short
+  description>" ("Turned off." when off, "Installed by your organization." for policy), the pin toggle and the
+  switch. Under it are the note, then Get more extensions (a neutral Open Chrome Web Store) and Developer mode. With no
+  extensions the pane shows the empty state, and its Open Chrome Web Store is the pane's one primary.
+- Details: a click on a row (a clear `SettingsRowButton` over the row, so the keyboard and VoiceOver reach it) opens a
+  block under it with the description, "Version X · <origin>", Options... (with an options page), Keyboard
+  Shortcuts... (with commands; it opens Shortcuts searched for the extension) and Remove... (the #720 sheet; only when
+  the user may remove it, Report abuse only for a Web Store extension). One block is open at a time. These parts are
+  not drawn in the design; the questions are on #600.
+- Developer mode on shows the add row Load Unpacked... (the folder panel). A failed load shows the shared dialog
+  sheet with one answer and the engine's reason; a loaded extension's details open.
+- The pane shows what the engine reports. It rebuilds on `.installedExtensionsChanged`, after its own pin and
+  developer mode calls, and when Settings becomes key, and only when what it shows changed. Keyboard focus stays on
+  the same control. A refused switch snaps back. A failed uninstall leaves the row, and a remove sheet whose
+  extension went away closes.
+- Manage routing: the panel's Manage Extensions... opens the pane; an action's Manage Extension... passes its
+  extension id (`ExtensionsPanelController.onManage`, `ShellWindowController.onManageExtensions`,
+  `AppSession.showSettings(pane:extensionID:)`), and the pane opens with those details shown and scrolled into view.
+  The install toast offers only Pin (design/extensions `toast-pin`), so it has no Manage to route.
+- EngineAPI (the split with #964): `installedExtensions` (`InstalledExtensionInfo`, `ExtensionOrigin`),
+  `setExtensionEnabled(_:enabled:) -> ExtensionEnableResult`, `isExtensionDeveloperModeEnabled` /
+  `setExtensionDeveloperModeEnabled(_:)`, `loadUnpackedExtension(at:) async -> UnpackedExtensionResult`,
+  `openExtensionOptionsPage(_:)` and `EngineExtensionEvent.installedExtensionsChanged`. Each has a default that
+  refuses or does nothing; InMemoryEngine implements them, and `installExtension` / `uninstallExtension` keep the list
+  in step with the windows' actions. ChromiumEngine gets them in #964.
+- From the #966 review: `ExtensionEnableResult.needsPermissionApproval` (Chromium's kNeedsPermissionApproval). The
+  switch stays off and a one-answer sheet says the extension needs new permissions. Turning developer mode off while
+  unpacked extensions are on asks first ("Turn off developer mode?", Turn Off / Cancel), because Chromium turns them
+  off. `loadUnpackedExtension(at:)` takes an absolute file URL only. The doc of `.installedExtensionsChanged` now
+  says one event may carry several changes and a late icon comes as its own event.
+- #969 review and the maintainer's decisions (2026-11-24):
+  - The caption is the design's site-access line, built from `InstalledExtensionInfo.siteAccess`
+    (`InstalledExtensionSiteAccess`: `allSites`, `someSites(count:)`, `onClick`, `noHostAccess`). The short
+    description shows only without site access.
+  - The new-permissions sheet's Review Permissions opens `chrome://extensions/?id=<id>` in a browser window
+    (`SettingsServices.openInBrowser`; a new window when none is open).
+  - The developer-mode-off copy says the extensions come back on, and gives no count.
+  - `canDisable` now means the switch is actionable (false only where the engine says NotAllowed). InMemoryEngine's
+    developer mode matches Chromium: off locks the unpacked extensions it turned off, and on turns them back on with
+    one event. Such a row reads "Turned off while developer mode is off.".
+  - InMemoryEngine's `setExtensionEnabled` removes or restores the extension's actions.
+  - Rows update in place when only their state changed; icons are decoded once per extension and PNG.
+  - A load that finishes after Settings closed is ignored.
+- Re-review: InMemoryEngine locks every unpacked extension while developer mode is off. Ones already off are locked
+  too, and turning it back on unlocks them but leaves them off. Each unpacked load counts its own answer (a token). The
+  icon cache is keyed by id and compares the PNG bytes. A caption that appears or goes rebuilds the row. Settings'
+  browser links go to the most recent regular window (`ShellWindowSet.primaryRegular`).
+- Not in this change: the per-extension incognito allowance (after #558).
