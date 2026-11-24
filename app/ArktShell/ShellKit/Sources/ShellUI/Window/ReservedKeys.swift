@@ -44,7 +44,8 @@ public struct ReservedKeys: Sendable {
   /// Ctrl-Tab and Ctrl-Shift-Tab (#103; `ShellWindow.sendEvent` already hands those to the switcher before any view).
   /// The copy-link keys (KB-013 to KB-016, #118) are here too: a page must not swallow them. Incognito
   /// (Shift-Cmd-N, KB-007) and Blank Window (Ctrl-Cmd-N, KB-006) are reserved with them (#487). Cmd-Z stays the
-  /// page's first (`ReopenUndoRouter`). Cmd-E (KB-047, #599) cycles the pinned extensions with the page focused.
+  /// page's first (`ReopenUndoRouter`). Cmd-E (KB-047, #599) is reserved only while an extension is pinned
+  /// (`ShellWindow.keyEquivalentHandler`).
   ///
   /// #489: every main-menu key equivalent without Cmd is reserved too: Space 1 to 9 (Ctrl-1 ... Ctrl-9) and the Split
   /// View items (Ctrl-Shift-=, -, ], [, 1 ... 4). A focused page takes any key equivalent first, and the engine hands
@@ -66,7 +67,6 @@ public struct ReservedKeys: Sendable {
     Key(keyCode: kVK_ANSI_C, character: "c", modifiers: [.command, .shift, .control]),   // KB-015
     Key(keyCode: kVK_ANSI_V, character: "v", modifiers: [.command, .option]),            // KB-016
     Key(keyCode: kVK_ANSI_K, character: "k", modifiers: [.command, .shift]),             // KB-019 (#110)
-    Key(keyCode: kVK_ANSI_E, character: "e", modifiers: .command),                       // KB-047 (#599)
     Key(keyCode: kVK_RightArrow, character: "", modifiers: [.command, .option]),
     Key(keyCode: kVK_LeftArrow, character: "", modifiers: [.command, .option]),
     Key(keyCode: kVK_Tab, character: "", modifiers: .control),

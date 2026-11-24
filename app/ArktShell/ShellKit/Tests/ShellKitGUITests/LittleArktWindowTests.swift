@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 @testable import CoreBridge
 import EngineAPI
 import EngineAPITestSupport
@@ -222,6 +223,31 @@ final class LittleArktWindowTests: XCTestCase {
     let (little, id, _) = try openPopup(engine, set)
     little.closeTab(nil)
     waitUntil("the window closed") { !engine.windowIDs.contains(id) }
+  }
+
+  /// KB-047 (#599): Cmd-E is the main window's, for its pinned extensions. In a Little Arkt window the page keeps it,
+  /// even with extensions pinned, and the main menu does not swallow it.
+  func testCommandEReachesTheLittleArktPage() throws {
+    let (set, engine, _) = try makeSet()
+    let main = set.openWindow()
+    let mainWindow = try XCTUnwrap(main.engineWindow)
+    engine.setExtensionActions([ExtensionAction(id: "a", name: "A", isPinned: true)], in: mainWindow)
+    let (little, _, _) = try openPopup(engine, set)
+    let saved = NSApp.mainMenu
+    NSApp.mainMenu = MainMenu.make(commands: AppCommands()).menu
+    defer { NSApp.mainMenu = saved }
+    let page = SwallowingPageView(frame: NSRect(x: 0, y: 0, width: 50, height: 50))
+    little.window.contentView?.addSubview(page)
+    XCTAssertTrue(little.window.makeFirstResponder(page))
+    let source = CGEventSource(stateID: .privateState)
+    let cg = try XCTUnwrap(CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(kVK_ANSI_E), keyDown: true))
+    cg.flags = .maskCommand
+    let event = try XCTUnwrap(NSEvent(cgEvent: cg))
+    XCTAssertTrue(little.window.performKeyEquivalent(with: event))
+    XCTAssertEqual(page.keyEquivalents, 1, "the Little Arkt page has Cmd-E")
+    XCTAssertFalse(try XCTUnwrap(NSApp.mainMenu).performKeyEquivalent(with: event), "the menu does not take it")
+    XCTAssertTrue(engine.ranExtensionActions.isEmpty)
+    page.removeFromSuperview()
   }
 
   // MARK: Motion

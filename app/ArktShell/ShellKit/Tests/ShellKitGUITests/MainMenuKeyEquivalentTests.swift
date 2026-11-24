@@ -348,8 +348,9 @@ final class MainMenuKeyEquivalentTests: XCTestCase {
   }
 
   /// KB-047 (#599): Cmd-E cycles the pinned extensions. The item is hidden, because Settings, Shortcuts lists it in
-  /// its own Pinned extensions row (#597), and live as a key. It reaches the main window's controller (nil target, a
-  /// selector `NSWindow` does not answer), and it makes Cmd-E Arkt's: both recorders now name it as the owner.
+  /// its own Pinned extensions row (#597), and it takes no key: the shell window hands Cmd-E to its controller only
+  /// while an extension is pinned, and otherwise the page keeps it (a disabled item would still swallow it). The item
+  /// names a selector `NSWindow` does not answer, and it makes Cmd-E Arkt's: both recorders name it as the owner.
   func testCommandECyclesPinnedExtensionsAndIsArkts() throws {
     let event = try key(kVK_ANSI_E, .maskCommand)
     let hits = items(reachedBy: event)
@@ -359,8 +360,8 @@ final class MainMenuKeyEquivalentTests: XCTestCase {
     XCTAssertNil(item.target)
     XCTAssertFalse(NSWindow.instancesRespond(to: #selector(ShellWindowController.cyclePinnedExtensions(_:))))
     XCTAssertTrue(item.isHidden)
-    XCTAssertTrue(item.allowsKeyEquivalentWhenHidden)
-    XCTAssertTrue(ReservedKeys.arkt.matches(event), "a focused page must not keep Cmd-E")
+    XCTAssertFalse(item.allowsKeyEquivalentWhenHidden, "the menu must not swallow Cmd-E with none pinned")
+    XCTAssertFalse(ReservedKeys.arkt.matches(event), "reserved only while an extension is pinned")
     XCTAssertEqual(item.title, SettingsWindowController.cycleTitle, "the conflict notice names the Settings row")
 
     let menu = MainMenu.make(commands: AppCommands()).menu
@@ -602,7 +603,6 @@ final class MainMenuInventoryTests: XCTestCase {
       (kVK_ANSI_D, .maskCommand, "Pin Tab"),                                    // KB-012 (#108)
       (kVK_ANSI_T, [.maskCommand, .maskShift], "Reopen Closed Tab"),            // KB-010 (#346)
       (kVK_ANSI_K, [.maskCommand, .maskShift], "Clear Today Tabs"),             // KB-019 (#110)
-      (kVK_ANSI_E, .maskCommand, "Cycle through pinned extensions"),            // KB-047 (#599)
     ]
     let source = CGEventSource(stateID: .privateState)
     for (keyCode, flags, title) in cases {

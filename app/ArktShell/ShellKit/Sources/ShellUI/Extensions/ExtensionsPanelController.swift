@@ -34,6 +34,7 @@ public final class ExtensionsPanelController: NSObject {
   /// Cmd-E (KB-047): the running hold, and the app's event monitor that sees its later taps and the release.
   private var cycle = PinnedExtensionCycle()
   private var cycleMonitor: Any?
+  private var cycleResignObserver: (any NSObjectProtocol)?
   /// The view a Cmd-E popup anchors to. The window sets it: the Extensions button while the sidebar shows.
   var cycleAnchor: @MainActor () -> NSView? = { nil }
 
@@ -53,6 +54,7 @@ public final class ExtensionsPanelController: NSObject {
   isolated deinit {
     if let monitor { NSEvent.removeMonitor(monitor) }
     if let cycleMonitor { NSEvent.removeMonitor(cycleMonitor) }
+    if let cycleResignObserver { NotificationCenter.default.removeObserver(cycleResignObserver) }
   }
 
   private var actions: [ExtensionAction] {
@@ -66,12 +68,20 @@ public final class ExtensionsPanelController: NSObject {
 
   var isCyclingPinnedExtensions: Bool { cycle.isRunning }
 
+  /// Cmd-E is Arkt's only while an extension is pinned (maintainer, #599): otherwise the page keeps it. No popup opens
+  /// while a sheet is up on the browser window.
+  var canCyclePinnedExtensions: Bool {
+    button?.window?.attachedSheet == nil && actions.contains { $0.isPinned }
+  }
+
   /// A Cmd-E tap: opens the next pinned extension's popup, in pin order, wrapping. The first tap of a hold comes from
-  /// the main menu; once a popup opens, the engine makes it the key window, so the later taps and the Command release
-  /// never reach the browser window. An app-wide monitor sees them until Command goes up. The engine closes the open
-  /// popup when the next one opens; the release leaves the last one open.
+  /// the browser window (`ShellWindow.keyEquivalentHandler`); once a popup opens, the engine makes it the key window,
+  /// so the later taps and the Command release never reach the browser window. An app-wide monitor sees them until
+  /// Command goes up. The engine closes the open popup when the next one opens; the release leaves the last one open.
   func cyclePinnedExtensions() {
-    guard let extensions, let window = engineWindow(), let anchor = cycleAnchor() else { return endCycle() }
+    guard canCyclePinnedExtensions, let extensions, let window = engineWindow(), let anchor = cycleAnchor() else {
+      return endCycle()
+    }
     let pinned = extensions.extensionActions(in: window).filter(\.isPinned).map(\.id)
     guard let id = cycle.next(in: pinned) else { return endCycle() }
     extensions.runExtensionAction(id, in: window, anchor: anchor)
@@ -80,17 +90,22 @@ public final class ExtensionsPanelController: NSObject {
       let consumed = MainActor.assumeIsolated { self?.handleCycleEvent(event) == true }
       return consumed ? nil : event
     }
+    // Command released while Arkt is not active (Cmd-Tab away mid-hold) is never seen.
+    cycleResignObserver = NotificationCenter.default.addObserver(
+      forName: NSApplication.didResignActiveNotification, object: nil, queue: .main
+    ) { [weak self] _ in MainActor.assumeIsolated { self?.endCycle() } }
   }
 
-  /// True when the event was a tap of the running hold and goes no further. A held E repeats nothing. Another
-  /// browser window being key (Cmd-` while holding) ends this window's hold, and the tap starts that window's.
-  private func handleCycleEvent(_ event: NSEvent) -> Bool {
-    if event.type == .flagsChanged {
-      if !event.modifierFlags.contains(.command) { endCycle() }
+  /// True when the event was a tap of the running hold and goes no further. A held E repeats nothing. A key without
+  /// Command means the release went unseen (menu tracking), and a tap in a window that is not this one or hangs off it
+  /// (Little Arkt, Settings, another browser window) belongs there: both end the hold and pass the event on.
+  func handleCycleEvent(_ event: NSEvent) -> Bool {
+    guard event.modifierFlags.contains(.command) else {
+      endCycle()
       return false
     }
-    guard Self.cycleKey.matches(event) else { return false }
-    if let other = event.window as? ShellWindow, other !== button?.window {
+    guard event.type == .keyDown, Self.cycleKey.matches(event) else { return false }
+    guard isThisWindowOrItsChild(event.window) else {
       endCycle()
       return false
     }
@@ -98,9 +113,26 @@ public final class ExtensionsPanelController: NSObject {
     return true
   }
 
-  private func endCycle() {
+  /// Nil (an event with no window), the browser window, or a window whose parent chain reaches it (the engine's
+  /// popup).
+  private func isThisWindowOrItsChild(_ window: NSWindow?) -> Bool {
+    guard let own = button?.window else { return false }
+    var current = window
+    while let candidate = current {
+      if candidate === own { return true }
+      current = candidate.parent
+    }
+    return window == nil
+  }
+
+  /// Command went up, the window closes, or the hold went stale.
+  func endCycle() {
     cycle.end()
     if let cycleMonitor { NSEvent.removeMonitor(cycleMonitor); self.cycleMonitor = nil }
+    if let cycleResignObserver {
+      NotificationCenter.default.removeObserver(cycleResignObserver)
+      self.cycleResignObserver = nil
+    }
   }
 
   // MARK: Opening

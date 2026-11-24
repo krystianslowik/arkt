@@ -339,21 +339,32 @@ extension ShellWindowController {
     panel.onBrowseWebStore = { [weak self] in self?.open(OnboardingController.Options.chromeWebStore, inNewTab: true) }
     panel.onRemove = { [weak panel] action in panel?.presentRemoveSheet(for: action) }    // #720
     panel.cycleAnchor = { [weak self] in self?.extensionCycleAnchor }                    // #599
+    (window as? ShellWindow)?.keyEquivalentHandler = { [weak self] event in self?.takeCycleKey(event) ?? false }
     extensionsButton = button
     extensionsPanel = panel
     sidebarController.view.extensionsButton = button
   }
 
-  /// Cmd-E (KB-047, #599): the next pinned extension's popup. Not `NSWindow`'s selector, so the nil-target menu item
-  /// reaches this controller (#373).
+  /// Cmd-E (KB-047, #599): the next pinned extension's popup. Not `NSWindow`'s selector (#373). The View menu's
+  /// hidden item names it for the shortcut recorders but takes no key; the window hands Cmd-E here.
   @objc public func cyclePinnedExtensions(_ sender: Any?) {
     extensionsPanel?.cyclePinnedExtensions()
   }
 
-  /// The Extensions button while the sidebar shows it; with the sidebar hidden the button is off screen, so the page
-  /// card.
+  /// Cmd-E before the focused page, only while an extension is pinned and no sheet is up; otherwise the page keeps it
+  /// (maintainer, #599). The menu is not asked: its item would swallow the key even disabled.
+  func takeCycleKey(_ event: NSEvent) -> Bool {
+    guard ExtensionsPanelController.cycleKey.matches(event), let panel = extensionsPanel,
+          panel.canCyclePinnedExtensions else { return false }
+    panel.cyclePinnedExtensions()
+    return true
+  }
+
+  /// The Extensions button while the sidebar shows it, docked or revealed over the page; with the sidebar hidden the
+  /// button is off screen, so the page card.
   var extensionCycleAnchor: NSView? {
-    if isSidebarVisible, let button = extensionsButton, button.window != nil, !button.isHiddenOrHasHiddenAncestor {
+    let sidebarShows = isSidebarVisible || rootView.sidebarOverlay.isRevealed
+    if sidebarShows, let button = extensionsButton, button.window != nil, !button.isHiddenOrHasHiddenAncestor {
       return button
     }
     return rootView.card
