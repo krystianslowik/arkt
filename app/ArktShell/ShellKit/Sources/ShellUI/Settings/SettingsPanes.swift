@@ -31,7 +31,7 @@ extension SettingsWindowController {
     }
   }
 
-  private func toggle(_ pane: SettingsPane, _ setting: String, on: Bool,
+  func toggle(_ pane: SettingsPane, _ setting: String, on: Bool,
                       change: (@MainActor (Bool) -> Void)? = nil) -> SettingsSwitch {
     let control = SettingsSwitch(frame: .zero)
     control.state = on ? .on : .off
@@ -403,27 +403,6 @@ extension SettingsWindowController {
 
   /// The Shortcuts pane, once built (the search field sits in it).
   private var shortcutsPaneIfBuilt: SettingsPaneView? { shortcutsSearch.enclosingPane }
-
-  // MARK: Extensions
-
-  private func extensionsBlocks() -> [SettingsBlockView] {
-    let store = pill(.extensions, "openWebStore", "Open Chrome Web Store", primary: true) {}
-    store.isEnabled = false
-    store.setAccessibilityHelp(SettingsRowView.notAvailable)
-    return [
-      SettingsSectionView(title: "Installed", body: SettingsGroupView([
-        SettingsEmptyStateBlock(
-          symbol: "puzzlepiece.extension", title: "Extensions",
-          detail: "Arkt runs extensions from the Chrome Web Store. Turning them on and off, pinning and their details "
-            + "come here; until then, use the extensions menu in the sidebar. Not available yet.",
-          action: store),
-      ])),
-      section(nil, [
-        row("Developer mode", "Load unpacked extensions from a folder.",
-            [toggle(.extensions, "developerMode", on: false)], planned: true),
-      ]),
-    ]
-  }
 
   // MARK: Privacy and Security
 

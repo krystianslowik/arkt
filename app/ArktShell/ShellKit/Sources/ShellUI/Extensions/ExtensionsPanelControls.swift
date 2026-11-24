@@ -112,6 +112,10 @@ final class ExtensionsPinToggle: NSButton {
   override var wantsUpdateLayer: Bool { true }
   override func updateLayer() { restyleLayer() }
   override func accessibilityValue() -> Any? { isOn }
+  /// The 28 pt circle, for a row that lays out by intrinsic size (Settings > Extensions, #600); the panel sets frames.
+  override var intrinsicContentSize: NSSize {
+    NSSize(width: ExtensionsPanelMetrics.buttonSize, height: ExtensionsPanelMetrics.buttonSize)
+  }
   override func menu(for event: NSEvent) -> NSMenu? { superview?.menu(for: event) }
 
   private func restyle() {

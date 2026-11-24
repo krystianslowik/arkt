@@ -104,6 +104,35 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
   var archiveLittleArktPopUp: SettingsPopUpButton?
   /// The Reset all settings confirmation while it shows (#617).
   var resetSheet: DialogSheet?
+  /// Settings > Extensions (#600): the engine's observation while the window is open, the extension whose details
+  /// show, what the pane shows (it rebuilds only when that changes), the developer mode switch, the remove sheet and
+  /// the load error while they show, and the unpacked load in flight (tests await it).
+  var installedExtensionsObservation: EngineObservation?
+  public internal(set) var expandedExtensionID: String?
+  /// The listed extensions' ids, in the pane's order (by name).
+  public internal(set) var shownExtensionIDs: [String] = []
+  var shownExtensionsState: ExtensionsPaneState?
+  weak var extensionsDeveloperSwitch: SettingsSwitch?
+  var extensionRemoveSheet: ExtensionRemoveSheet?
+  var extensionAlert: DialogSheet?
+  public internal(set) var pendingUnpackedLoad: Task<Void, Never>?
+  /// Closure targets of the Extensions pane's own buttons, replaced on each rebuild.
+  var extensionTargets: [NSObject] = []
+  /// Shows the folder panel for Load Unpacked... and answers the chosen folder, nil when cancelled; tests replace it.
+  var unpackedFolderPicker: @MainActor (NSWindow?, @escaping @MainActor (URL?) -> Void) -> Void = { window, done in
+    let panel = NSOpenPanel()
+    panel.canChooseFiles = false
+    panel.canChooseDirectories = true
+    panel.canCreateDirectories = false
+    panel.allowsMultipleSelection = false
+    panel.message = "Choose the extension\u{2019}s folder, the one with its manifest.json."
+    panel.prompt = "Load"
+    let finish: @MainActor (NSApplication.ModalResponse) -> Void = { response in
+      done(response == .OK ? panel.url : nil)
+    }
+    if let window { panel.beginSheetModal(for: window) { response in MainActor.assumeIsolated { finish(response) } } }
+    else { finish(panel.runModal()) }
+  }
   /// Closure targets of the pills (an action's target is weak).
   var actionTargets: [NSObject] = []
 
@@ -178,10 +207,12 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
     let wasVisible = window.isVisible
     observeShortcutEditor()
     observeExtensionShortcuts()
+    observeInstalledExtensions()
     if !wasVisible {
-      // The Spaces (and the preview's theme) may have changed while the window was closed.
+      // The Spaces (and the preview's theme) may have changed while the window was closed, and so may the extensions.
       paneViews[.spaces] = nil
       paneViews[.appearance] = nil
+      paneViews[.extensions] = nil
       refreshLiveRows()
       install(pane ?? settings.lastPane)
       placeOnFirstOpen(window)
@@ -288,6 +319,16 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
     updateKeyViewLoop()
   }
 
+  /// The pane, when it was built.
+  func builtPane(_ pane: SettingsPane) -> SettingsPaneView? { paneViews[pane] }
+
+  /// The shown pane's content changed height (an extension's details opened): the window follows at once, up to the
+  /// screen's limit.
+  func fitWindowToPane() {
+    layoutPane()
+    setFrame(height: targetHeight(for: selectedPane, on: window?.screen), animated: false)
+  }
+
   /// The pane's height at the window's width.
   public func paneContentHeight(_ pane: SettingsPane) -> CGFloat {
     paneView(pane).fittingHeight(width: SettingsMetrics.windowWidth)
@@ -371,6 +412,7 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
 
   public func windowDidBecomeKey(_ notification: Notification) {
     refreshLiveRows()
+    refreshExtensionsPane()          // a pin or developer mode changed elsewhere (#600)
   }
 
   public func windowDidResize(_ notification: Notification) {
@@ -383,6 +425,7 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
     cancelShortcutRecording()
     extensionCommandsObservation?.cancel()
     extensionCommandsObservation = nil
+    stopObservingInstalledExtensions()                // #600
     if let observer = shortcutObserver { services.shortcutEditor?.removeObserver(observer); shortcutObserver = nil }
     rememberPosition()
   }
