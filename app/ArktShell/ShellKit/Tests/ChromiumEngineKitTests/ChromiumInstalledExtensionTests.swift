@@ -62,7 +62,7 @@ struct ChromiumInstalledExtensionTests {
 
   @Test(arguments: [
     (ArktExtensionEnableResult.applied, ExtensionEnableResult.applied), (.unknownExtension, .unknownExtension),
-    (.notAllowed, .refused), (.needsPermissionApproval, .refused),
+    (.notAllowed, .refused), (.needsPermissionApproval, .needsPermissionApproval),
   ])
   func theFacadesAnswerMapsOntoTheResult(answer: ArktExtensionEnableResult, expected: ExtensionEnableResult) {
     facade.enableAnswer = answer
@@ -107,6 +107,16 @@ struct ChromiumInstalledExtensionTests {
     let result = await engine.loadUnpackedExtension(at: URL(fileURLWithPath: "/tmp/arkt-964/site-probe"))
     #expect(result == .loaded(extensionID: beta))
     #expect(facade.loadUnpackedPaths == ["/tmp/arkt-964/site-probe"])
+  }
+
+  @Test func aURLThatIsNotAnAbsoluteFileURLLoadsNothing() async throws {
+    let engine = makeEngine()
+    engine.setExtensionDeveloperModeEnabled(true)
+    for url in [try #require(URL(string: "https://example.com/probe")),
+                try #require(URL(string: "relative/probe"))] {
+      #expect(await engine.loadUnpackedExtension(at: url) == .failed(reason: "Not a folder."))
+    }
+    #expect(facade.loadUnpackedPaths.isEmpty, "the engine is not asked")
   }
 
   @Test func aFailedLoadCarriesTheEnginesSentence() async {

@@ -17,14 +17,15 @@ extension ChromiumEngine {
     }
   }
 
-  /// The facade applies the checks Chrome's extensions page makes (management policy) and answers synchronously. A
-  /// policy refusal and an extension waiting for permission approval (Chrome's re-enable prompt, which the engine does
-  /// not grant silently) are both `.refused`.
+  /// The facade applies the checks Chrome's extensions page makes (management policy, and enabling only when every
+  /// disable reason is one the user may lift) and answers synchronously. An extension waiting for permission approval
+  /// (Chrome's re-enable prompt, which the engine does not grant silently) is `.needsPermissionApproval`.
   public func setExtensionEnabled(_ extensionID: String, enabled: Bool) -> ExtensionEnableResult {
     switch facade.setExtensionEnabled(extensionID, enabled: enabled) {
     case .applied: .applied
     case .unknownExtension: .unknownExtension
-    case .notAllowed, .needsPermissionApproval: .refused
+    case .needsPermissionApproval: .needsPermissionApproval
+    case .notAllowed: .refused
     @unknown default: .refused
     }
   }
@@ -38,12 +39,16 @@ extension ChromiumEngine {
     facade.extensionDeveloperMode = enabled
   }
 
-  /// The facade's sentence when developer mode is off (`loadUnpackedExtensionAtPath:completion:`).
+  /// The facade's sentences when developer mode is off and for a path that is not absolute
+  /// (`loadUnpackedExtensionAtPath:completion:`).
   static let developerModeOffReason = "Developer mode is off."
+  static let notAFolderReason = "Not a folder."
 
-  /// Asks the facade only while developer mode is on; a facade that finds it off meanwhile answers with its own
-  /// sentence, which maps to `.developerModeOff` too.
+  /// Only an absolute file URL reaches the facade (`.failed` with the facade's own sentence otherwise), and only while
+  /// developer mode is on; a facade that finds it off meanwhile answers with its own sentence, which maps to
+  /// `.developerModeOff` too.
   public func loadUnpackedExtension(at folder: URL) async -> UnpackedExtensionResult {
+    guard folder.isFileURL, folder.path.hasPrefix("/") else { return .failed(reason: Self.notAFolderReason) }
     guard facade.extensionDeveloperMode else { return .developerModeOff }
     return await withCheckedContinuation { continuation in
       facade.loadUnpackedExtension(atPath: folder.path) { extensionID, reason in
