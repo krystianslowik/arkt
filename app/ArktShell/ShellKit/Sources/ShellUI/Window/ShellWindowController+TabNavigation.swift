@@ -129,6 +129,17 @@ extension ShellWindowController {
     focusOutlineKeyboard(on: row, page: page)
   }
 
+  /// Tabs > Reveal Tab in Sidebar (KB-037, #945), unbound: Ctrl-Space's reveal without its focus move. A hidden
+  /// sidebar is shown, the folders holding the current tab open and its row scrolls into view; keyboard focus stays
+  /// where it was. A Favorite needs no scroll. PARITY(NEEDS-RUNTIME-CHECK RT-39).
+  @objc public func revealTabInSidebar(_ sender: Any?) {
+    guard sidebarController.currentPage != nil, let current = currentNode else { return }
+    if !rootView.sidebarVisible { rootView.sidebarVisible = true }
+    rootView.layoutSubtreeIfNeeded()
+    if favoriteTileID(containing: current) != nil { return }
+    _ = revealInSidebar(current)
+  }
+
   /// The top-level Favorite tile holding `node`, through any folders (#343).
   private func favoriteTileID(containing node: NodeID) -> NodeID? {
     var current = node
