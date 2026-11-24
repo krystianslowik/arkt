@@ -141,7 +141,7 @@ replace WebKit's platform and engine tokens with a hand-written copy that drifts
 A self-contained, Arkt-branded, non-component build in its own output directory (`$REL=$CR/out/Arkt`). It shares no
 objects with the component build in `out/Spike`. Branding comes from the GN arg `branding_file_path`, which points at
 `arkt/branding/BRANDING` (no patch): it renames the app (`Arkt.app`), the framework (`Arkt Framework`), the helpers
-(`Arkt Helper*.app`) and the bundle id (`dev.arkt.Arkt`, #73 and #128; helpers and the framework derive theirs from it). Icons and UI strings stay Chromium's.
+(`Arkt Helper*.app`) and the bundle id (`dev.arkt.Arkt`, #73 and #128; helpers and the framework derive theirs from it). UI strings stay Chromium's; the icons are Arkt's (see "Icons" below).
 
 `$REL/args.gn`:
 
@@ -196,6 +196,63 @@ when swap is already above about 6 GB. To pause or stop the build, signal the `s
 (`ps -axo pid,command | grep '[s]iso ninja'`), not the shell PID from `$!`; `siso ps -C out/Arkt -n 1` (in
 `third_party/siso/cipd/`) shows progress when the log is quiet. The result is ad-hoc (linker) signed and launches
 as is; it must be re-signed after every rebuild before it goes into `/Applications` (W2).
+
+### Icons (#74)
+
+`branding_file_path` changes names only. The icons come from `branding_path_component`, a GN arg that stays
+`chromium` (with `google_chrome` it would turn on Google-only paths). Verified on 156.0.8078.48:
+
+| What | Upstream path (`$CR/`) | Used by |
+|---|---|---|
+| App icon, legacy | `chrome/app/theme/chromium/mac/app.icns` | `bundle_data("chrome_app_icon")` in `chrome/BUILD.gn`: `Arkt.app/Contents/Resources`, `Arkt Helper (Alerts).app`, `Arkt Helper (Aperitif Alerts).app` |
+| App and document icon | `chrome/app/theme/chromium/mac/Assets.car` (`AppIcon`, `Icon`) | `bundle_data("chrome_asset_catalog")`, same three bundles |
+| Product logo, scaled | `chrome/app/theme/default_{100,200}_percent/chromium/product_logo_{16,32}.png` | `IDR_PRODUCT_LOGO_16/32` in `theme_resources.grd` (`chrome_{100,200}_percent.pak`); the About page (`chrome://theme/current-channel-logo`); the 100% `product_logo_32.png` is also copied to the framework's `Resources` |
+| Product logo, unscaled | `chrome/app/theme/chromium/product_logo_{16,24,64,128,256}.png` | `IDR_PRODUCT_LOGO_64/128/256` and `IDR_PRODUCT_LOGO_*_SHORTCUTS` in `chrome_unscaled_resources.grd` (`resources.pak`) |
+
+- There is no `document.icns` on 156. Both `app-Info.plist` and `helper-alerts-Info.plist` set
+  `CFBundleIconName = AppIcon` (macOS 11+ takes the icon from `Assets.car`, `app.icns` is the fallback), and the
+  document types badge with `UTTypeIconBadgeName = Icon`, the `Icon` set in the same `Assets.car`.
+- No GN-arg seam reaches `//arkt`: `branding_path_component` is joined at three depths (`chrome/app/theme/$c/`,
+  `chrome/app/theme/default_*_percent/$c/`, `components/vector_icons/$c/`), so one value cannot point at the overlay,
+  and a new value would need every file it names (password manager favicons, vector icons, ...). An `//arkt`
+  `bundle_data` with the same output would collide with Chromium's.
+- So patch 0017 does it: `chrome/BUILD.gn` takes `app.icns` and `Assets.car` from `//arkt/branding/mac/`, and the
+  product logo PNGs above are replaced in place, at the same pixel sizes, from `arkt/branding/theme/`. `out/Spike`
+  shares the overlay and the patches, so it shows the Arkt icons too.
+- Left Chromium's: `components/vector_icons/chromium/product*.icon`, `chromium/product_logo.svg` and
+  `product_logo_animation.svg`, `product_logo_name_22*.png` (the name in Chromium's type) and
+  `product_logo_22_mono.png` (status tray).
+
+The artwork is `macOS/mustard-on-white` (app) and `tile/mustard-on-white.svg` (logos and the document icon) from the
+approved brand kit (#68). Rebuild the derived files (zsh; `$KIT` is the kit folder):
+
+    B=$REPO/engine/arkt/branding; X=$B/mac/Assets.xcassets
+    cp $KIT/macOS/mustard-on-white.icns $B/mac/app.icns
+    iconutil -c iconset -o $TMPDIR/arkt.iconset $B/mac/app.icns && cp $TMPDIR/arkt.iconset/*.png $X/AppIcon.appiconset/
+    for n in 16 24 32 64 128 256 512; do rsvg-convert -w $n -h $n $KIT/tile/mustard-on-white.svg -o $TMPDIR/tile_$n.png; done
+    cp $TMPDIR/tile_256.png $X/Icon.iconset/icon_256x256.png; cp $TMPDIR/tile_512.png $X/Icon.iconset/icon_256x256@2x.png
+    cp $TMPDIR/tile_16.png $B/theme/default_100_percent/product_logo_16.png
+    cp $TMPDIR/tile_32.png $B/theme/default_100_percent/product_logo_32.png
+    cp $TMPDIR/tile_32.png $B/theme/default_200_percent/product_logo_16.png
+    cp $TMPDIR/tile_64.png $B/theme/default_200_percent/product_logo_32.png
+    for n in 16 24 64 128 256; do cp $TMPDIR/tile_$n.png $B/theme/product_logo_$n.png; done
+    xcrun actool --output-format=human-readable-text --notices --warnings --errors --platform=macosx \
+      --target-device=mac --lightweight-asset-runtime-mode=enabled --app-icon=AppIcon \
+      --minimum-deployment-target=13.0 --output-partial-info-plist=$TMPDIR/partial.plist --compile=$TMPDIR $X
+    cp $TMPDIR/Assets.car $B/mac/Assets.car
+    xcrun assetutil --info $B/mac/Assets.car | grep '"Name"' | sort -u   # AppIcon and Icon (plus packed assets) only
+
+The `actool` flags are those of `tools/mac/icons/compile_car.py` without the Icon Composer (`.icon`) input and its
+fallback flags; the deployment target is `mac_deployment_target` in `build/config/mac/mac_sdk.gni`. After changing
+the logo PNGs, re-copy them into the tree on branch `arkt` and amend patch 0017 (Export).
+
+Check a build (expect no output from the `cmp` lines):
+
+    F="$REL/Arkt.app/Contents/Frameworks/Arkt Framework.framework/Versions/Current"
+    for d in $REL/Arkt.app "$F/Helpers/Arkt Helper (Alerts).app" "$F/Helpers/Arkt Helper (Aperitif Alerts).app"; do
+      cmp $CR/arkt/branding/mac/app.icns "$d/Contents/Resources/app.icns"
+      cmp $CR/arkt/branding/mac/Assets.car "$d/Contents/Resources/Assets.car"; done
+    cmp $CR/arkt/branding/theme/default_100_percent/product_logo_32.png "$F/Resources/product_logo_32.png"
 
 ## Sign and install (out/Arkt)
 
