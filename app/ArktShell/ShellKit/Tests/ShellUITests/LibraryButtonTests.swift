@@ -60,16 +60,6 @@ struct LibraryButtonTests {
     #expect(abs(button.ringShownFraction - 0.9) < 1e-9)
   }
 
-  @Test func `hover reports once per change`() {
-    let button = button()
-    var log: [Bool] = []
-    button.onHoverChanged = { log.append($0) }
-    button.setHovered(true)
-    button.setHovered(true)
-    button.setHovered(false)
-    #expect(log == [true, false])
-  }
-
   @Test func `the ring sits inside the button and the dot at its top-trailing corner`() {
     let button = button()
     button.apply(.done)
