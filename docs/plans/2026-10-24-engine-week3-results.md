@@ -8518,3 +8518,25 @@ absolute file URLs only); `ChromiumEngine` maps NeedsPermissionApproval to `.nee
 own sentence for a relative path). `git merge-tree --write-tree HEAD origin/feat/600-settings-extensions`: clean.
 `nice -n 20 swift test -j 2 --skip ShellKitGUITests`: every bundle passes, 1629, 44, 60, 29, 290, 49, 362, 241, 42
 (`ChromiumEngineKitTests` 228 + 13, `ArktEngineABITests` 40 + 2). Lints: 13 + 60 pass.
+
+### #964: site access summary and an actionable toggle (after the #969 review)
+
+- `mayChangeEnabled` means the toggle is actionable: `CanChangeExtensionEnabled(...) != kNotAllowed`, so an
+  extension disabled for new permissions lists YES and its enable answers NeedsPermissionApproval.
+- `ArktInstalledExtension.siteAccess` (`ArktExtensionSiteAccessSummary`: None 0, OnClick 1, SomeSites 2, AllSites 3)
+  and `siteAccessSiteCount` (distinct granted hosts for SomeSites): chrome://extensions' host access
+  (`ExtensionInfoGenerator`'s `CreateRuntimeHostPermissionsInfo`): granted hosts from `GetGrantedPermissions`, or
+  `GetRuntimeGrantedPermissions` while `PermissionsManager::HasWithheldHostPermissions` (only for an extension
+  `CanAffectExtension`); none granted while withheld is OnClick; None when the extension asks for no hosts. Site
+  access is in the listed-state fingerprint, and `OnExtensionRuntimePermissionsChanged` requests a check.
+
+Run 8 (`out/Arkt`, build 84 s, `FAILED:` 0, `gn check` OK; fresh profile; first tab on a loopback page; the probes
+plus `sites-probe` asking for `https://example.com/*` and `https://*.example.org/*`, all with `--load-extension`):
+
+| Step | Result |
+|---|---|
+| `ext-list` | action probe `sites=0/0` (None), site probe `sites=3/0` (AllSites), sites probe `sites=2/2` (SomeSites, 2) |
+| Site probe's context menu, When You Click the Extension (`ext-pick 5`) | `ran`; one event; `sites=1/0` (OnClick) |
+| `DISABLE_PERMISSIONS_INCREASE` on the site probe | `enabled=no mayChange=yes`; `ext-enable` answers `result=3` |
+| `navigate chrome://extensions/?id=<site probe>` in the tab | `urlChanged url=chrome://extensions/?id=jhjn...`; the page has `extensions-manager` and shows its detail view |
+| `FATAL`, `Check failed`, `DCHECK` | 0; no crash report |
