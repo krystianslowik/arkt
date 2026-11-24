@@ -1,0 +1,17 @@
+/* Finder window mock shared by directions a, b, c. Not shipped; only for review renders. */
+:root { --desk: #c8ccd2; --bar: #ececec; --bar-line: #d4d4d4; --title: #4a4a4a; --label: #000; --win-shadow: 0 0 0 .5px rgba(0,0,0,.28), 0 18px 48px rgba(0,0,0,.28); }
+:root[data-mode="dark"] { --desk: #151618; --bar: #2b2b2d; --bar-line: #1b1b1c; --title: #d8d8d8; --label: #000; --win-shadow: 0 0 0 .5px rgba(255,255,255,.22), 0 18px 48px rgba(0,0,0,.6); }
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { width: 732px; height: 520px; background: var(--desk); position: relative; overflow: hidden; font-family: -apple-system, "SF Pro Text", system-ui, sans-serif; }
+.window { position: absolute; left: 36px; top: 36px; width: 660px; height: 448px; border-radius: 14px; overflow: hidden; box-shadow: var(--win-shadow); background: var(--bar); }
+.titlebar { height: 28px; background: var(--bar); border-bottom: .5px solid var(--bar-line); position: relative; }
+.lights { position: absolute; left: 13px; top: 8px; display: flex; gap: 8px; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; display: block; }
+.lights i:nth-child(1) { background: #ff5f57; } .lights i:nth-child(2) { background: #febc2e; } .lights i:nth-child(3) { background: #28c840; }
+.title { position: absolute; inset: 0; text-align: center; line-height: 28px; font-size: 13px; font-weight: 600; color: var(--title); }
+.content { position: relative; width: 660px; height: 420px; }
+.content iframe { position: absolute; inset: 0; width: 660px; height: 420px; border: 0; display: block; }
+.icon { position: absolute; width: 128px; height: 128px; }
+.icon img, .icon svg { width: 128px; height: 128px; display: block; }
+.label { position: absolute; width: 120px; text-align: center; font-size: 12px; line-height: 16px; color: var(--label); }

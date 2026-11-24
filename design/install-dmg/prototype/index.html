@@ -1,0 +1,22 @@
+<!doctype html><meta charset="utf-8"><title>Arkt install DMG background</title>
+<style>html,body{margin:0}body{width:660px;height:420px;position:relative;overflow:hidden;font-family:"Avenir Next","AvenirNext-Regular",-apple-system,sans-serif}
+h1{position:absolute;left:0;width:660px;top:52px;margin:0;text-align:center;font-weight:600;font-size:44px;line-height:46px;letter-spacing:-.055em;color:#202321;text-shadow:0 0 14px #FAF9F5,0 0 28px #FAF9F5}
+p{position:absolute;left:0;width:660px;top:112px;margin:0;text-align:center;font-weight:400;font-size:15px;line-height:20px;color:#202321;opacity:.8;text-shadow:0 0 10px #FAF9F5}
+.hint{position:absolute;right:24px;bottom:16px;font-size:11.5px;line-height:16px;color:#202321;opacity:.6;text-shadow:0 0 6px #FAF9F5,0 0 12px #FAF9F5}
+.dark h1{color:#FAF9F5;text-shadow:0 0 14px #202321,0 0 28px #202321}.dark p{color:#FAF9F5;text-shadow:0 0 10px #202321}.dark .hint{color:#FAF9F5;opacity:.55;text-shadow:0 0 6px #202321,0 0 12px #202321}</style>
+<body><script src="particles.js"></script>
+<script>
+// icons at (200, 262) and (460, 262); labels about 338 to 354
+document.documentElement.className = MODE;
+const labelZ = [[130, 328, 270, 364], [390, 328, 530, 364]];
+const feather = (z, k, e, keep) => [z[0] - e, z[1] - e, z[2] + e, z[3] + e, keep];
+// a calm zone under each label: nearly empty in the middle, thinning out over 24 pt so there is no visible hole
+const calmZ = [...labelZ.map(z => [...z, 0.03]), ...labelZ.map(z => feather(z, 0, 10, 0.3)), ...labelZ.map(z => feather(z, 0, 24, 0.65)), [60, 36, 600, 140, 0.18], [300, 394, 660, 420, 0.03]];
+dust(4300, calmZ);
+// the wave: flat along the bottom on the left, rising to the right, as in Welcome
+const rise = x => 70 * Math.pow(Math.max(0, (x - 300) / 360), 1.5);
+wave(x => 396 - rise(x) + Math.sin(x / 60) * 6, 0, 660, 5400, 15, u => 0.5 + 0.5 * Math.sin(Math.PI * (0.15 + 0.8 * u)), calmZ);
+</script>
+<h1>Drag Arkt to Applications.</h1>
+<p>Then open it from the Applications folder.</p>
+<div class="hint">First open: System Settings &gt; Privacy &amp; Security &gt; Open Anyway</div>

@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128"><title>Stand-in for the Applications folder icon (Finder draws the real one)</title>
+<defs><linearGradient id="b" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#7fd0fb"/><stop offset="1" stop-color="#2f8fe0"/></linearGradient><linearGradient id="f" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#b9e8ff"/><stop offset="1" stop-color="#5db7f2"/></linearGradient></defs>
+<path d="M14 30c0-5 4-9 9-9h26l9 8h47c5 0 9 4 9 9v58c0 5-4 9-9 9H23c-5 0-9-4-9-9z" fill="url(#b)"/>
+<path d="M14 46c0-5 4-9 9-9h82c5 0 9 4 9 9v47c0 5-4 9-9 9H23c-5 0-9-4-9-9z" fill="url(#f)" opacity=".95"/>
+<path d="M64 52l9 22 22 9-22 9-9 22-9-22-22-9 22-9z" fill="#fff" opacity=".85" transform="translate(0 -6) scale(1 .9) translate(0 8)"/></svg>
