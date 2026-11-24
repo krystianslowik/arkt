@@ -8720,3 +8720,61 @@ Every app run ended by its own quit or stopped by exact PID (`ps -p` prints noth
 folders and defaults suites deleted, and the copies and build products unregistered from LaunchServices. The build
 outputs stay on the Chromium disk (`embed-560`, `arkt-shell-dd/`) for the next engine tasks. Nothing touched
 the Keychain (mock keychain only), `/Applications/Arkt.app` or real browser data.
+
+## #934: the engine self-test's quit ends the process (self-test only, no patch)
+
+Date 2026-11-24. Branch `engine/934-selftest-exit` from `main` at `8541b804`. `$CR` branch `arkt` unchanged
+(0001-0016).
+
+### What kept the process alive
+
+A temporary log of `KeepAliveRegistry` after the embedder released its keep-alive (not committed) printed
+`KeepAlives=[REMOTE_DEBUGGING (1), APP_CONTROLLER (1)]`, and 2 s later `KeepAlives=[REMOTE_DEBUGGING (1)]`,
+`IsShuttingDown` 0. The process's main thread sat idle in `-[NSApplication run]` (`sample`). With
+`--no-startup-window` (or `--headless`) and `--remote-debugging-port` (or `--remote-debugging-pipe`),
+`ChromeDevToolsManagerDelegate`'s constructor holds a `REMOTE_DEBUGGING` keep-alive "until explicit close through
+DevTools protocol" (`Browser.close`, `CloseBrowserSoon`), or until a SIGTERM (`chrome_browser_main_posix.cc` calls
+`AllowBrowserToClose`). The self-test's `quit` sends `terminate:`, which never releases it. Without the port, the same
+`quit` already exited with status 0 (the run with the commands from a page's script instead of DevTools, below), so
+the issue's "with and without `--remote-debugging-port`" applies to the port only.
+
+### What landed
+
+The self-test's `quit` command calls `ChromeDevToolsManagerDelegate::AllowBrowserToClose()` before `terminate:`
+(`//arkt/api` now depends on `//chrome/browser/devtools`). Only the self-test embedder runs it (behind
+`--arkt-facade-selftest`); the shell app's quit is unchanged.
+
+### Gate
+
+- Facade header unchanged. `.patches` unchanged (16 lines, 16 `arkt` commits: in sync). No patch number claimed.
+- Build: `nice -n 15 autoninja -j 4 -C out/Arkt chrome`, 74 s, `FAILED:` 0; `gn check out/Arkt "//arkt/*"`: OK.
+
+### Smoke (`out/Arkt/Arkt.app`, `--no-startup-window --arkt-facade-selftest --arkt-engine-test-api`, fresh profiles under `profiles/934-20261124/`, `--use-mock-keychain --mute-audio`; "port": `--remote-debugging-port=9333` and `quit` through the page title over DevTools; "no port": `--arkt-facade-selftest-url` with a `data:` page whose script sets the title to `arkt-selftest quit` after 4 s)
+
+| Runs | Build | Result |
+|---|---|---|
+| port, before | `main` | still running 16 s after `quit` (`app terminating`, `engineWillTerminate`, `keep-alive released (embedder flushed)` logged); stopped by PID |
+| no port, before | `main` + the temporary log | exited, status 0 |
+| port 1-7 | fix | 7 of 7 exited with status 0, gone at the first check after the `quit` line (polled every 0.25 to 0.5 s) |
+| no port 1-5 | fix | 5 of 5 exited with status 0 |
+| break | the call commented out | port: still running 10 s after `quit`, stopped by PID; no port: exited, status 0 |
+
+`FATAL`, `Check failed`, `DCHECK`: 0 in every run. Swift unchanged: `nice -n 20 swift test -j 2 --skip
+ShellKitGUITests` 1636, 44, 60, 29, 312, 49, 362, 243, 42; lints 13 + 60.
+
+### Patch budget
+
+Unchanged: 16 patch files, 8 seam and hook patch files, 22 upstream files outside 0001-0004. `.patches` 16 lines, 16
+`arkt` commits: in sync. Facade header unchanged.
+
+### Left open
+
+- The shell app passes `--no-startup-window` on every launch (`EngineLaunchArguments`), so a shell run started with
+  `--remote-debugging-port` (for example the web identity checks in `engine/README.md`) should outlive Cmd-Q the same
+  way. That follows from the code; it was not run here, and the shell's quit was left unchanged as the issue asks.
+
+### Cleanup
+
+Every engine run exited by itself or was stopped by exact PID, with its helpers (`ps` shows none on the profiles).
+Throwaway profiles under `profiles/934-20261124/` and the `sample` output deleted. Nothing touched the Keychain (mock
+keychain only), `/Applications/Arkt.app` or real browser data.
