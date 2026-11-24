@@ -525,10 +525,10 @@ final class AppSession {
     return services
   }
 
-  /// Settings' links into a browser window (#600): a new tab of the primary window, or of a new window (no blank first
-  /// tab) when none is open.
+  /// Settings' links into a browser window (#600): a new tab of the most recent regular window (never a blank or
+  /// incognito one), or of a new window (no blank first tab) when none is open.
   private func openInBrowserTab(_ url: URL) {
-    let window = windows.primary ?? windows.openWindow(opensFirstTab: false)
+    let window = windows.primaryRegular ?? windows.openWindow(opensFirstTab: false)
     window.showWindow(nil)
     window.openInNewTab(url)
   }

@@ -20,27 +20,40 @@ extension InMemoryEngine {
     return .applied
   }
 
-  /// Off turns off every unpacked extension that is on, as Chromium does, and locks it (`canDisable` false) until
-  /// developer mode is on again, which turns those back on. One `.installedExtensionsChanged` for each change.
+  /// Off locks every unpacked extension (`canDisable` false), as Chromium does: the ones that were on are turned off,
+  /// the ones already off stay off. On unlocks them all and turns back on only the ones it turned off (Chromium keeps
+  /// the user's own disable). One `.installedExtensionsChanged` for each change.
   public func setExtensionDeveloperModeEnabled(_ enabled: Bool) {
     guard enabled != isExtensionDeveloperModeEnabled || !enabled else { return }
     isExtensionDeveloperModeEnabled = enabled
-    var changed: [String] = []
-    for index in installedExtensions.indices {
+    var changed = false
+    var turned: [String] = []
+    for index in installedExtensions.indices where installedExtensions[index].origin == .unpacked {
       let info = installedExtensions[index]
-      if enabled, developerModeDisabledIDs.contains(info.id) {
-        installedExtensions[index].isEnabled = true
+      if enabled, developerModeLockedIDs.contains(info.id) {
         installedExtensions[index].canDisable = true
-        changed.append(info.id)
-      } else if !enabled, info.origin == .unpacked, info.isEnabled {
-        installedExtensions[index].isEnabled = false
+        if developerModeDisabledIDs.contains(info.id) {
+          installedExtensions[index].isEnabled = true
+          turned.append(info.id)
+        }
+        changed = true
+      } else if !enabled, info.canDisable {
         installedExtensions[index].canDisable = false
-        changed.append(info.id)
+        developerModeLockedIDs.insert(info.id)
+        if info.isEnabled {
+          installedExtensions[index].isEnabled = false
+          developerModeDisabledIDs.insert(info.id)
+          turned.append(info.id)
+        }
+        changed = true
       }
     }
-    if enabled { developerModeDisabledIDs = [] } else { developerModeDisabledIDs.formUnion(changed) }
-    guard !changed.isEmpty else { return }
-    moveActions(of: changed, enabled: enabled)
+    if enabled {
+      developerModeLockedIDs = []
+      developerModeDisabledIDs = []
+    }
+    guard changed else { return }
+    moveActions(of: turned, enabled: enabled)
     hub.emit(EngineExtensionEvent.installedExtensionsChanged)
   }
 

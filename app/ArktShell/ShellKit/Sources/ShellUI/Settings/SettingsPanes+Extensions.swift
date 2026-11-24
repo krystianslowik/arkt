@@ -60,6 +60,7 @@ extension SettingsWindowController {
     closeExtensionSheets()
     expandedExtensionID = nil
     pendingUnpackedLoad = nil
+    unpackedLoadTokens = []
   }
 
   private func currentExtensionsPaneState() -> ExtensionsPaneState {
@@ -138,6 +139,8 @@ extension SettingsWindowController {
           old.developerMode == new.developerMode, old.withCommands == new.withCommands else { return false }
     return zip(old.list, new.list).allSatisfy { before, after in
       before.name == after.name && before.iconPNG == after.iconPNG && (after.id != new.expanded || before == after)
+        && (extensionCaption(before, developerMode: new.developerMode) == nil)
+          == (extensionCaption(after, developerMode: new.developerMode) == nil)
     }
   }
 
@@ -158,13 +161,12 @@ extension SettingsWindowController {
     }
   }
 
-  /// The icon's image, decoded once per extension and PNG.
+  /// The icon's image, decoded once per extension and PNG (the bytes compared, not a hash).
   private func extensionIcon(_ info: InstalledExtensionInfo) -> NSImage? {
     guard let png = info.iconPNG else { return nil }
-    let key = "\(info.id)#\(png.hashValue)"
-    if let image = extensionIconCache[key] { return image }
-    let image = NSImage(data: png)
-    extensionIconCache[key] = image
+    if let cached = extensionIconCache[info.id], cached.png == png { return cached.image }
+    guard let image = NSImage(data: png) else { return nil }
+    extensionIconCache[info.id] = (png, image)
     return image
   }
 
@@ -177,7 +179,7 @@ extension SettingsWindowController {
     extensionTargets = []
     extensionRowControls = [:]
     let current = Set(state.list.map(\.id))
-    extensionIconCache = extensionIconCache.filter { current.contains(String($0.key.prefix { $0 != "#" })) }
+    extensionIconCache = extensionIconCache.filter { current.contains($0.key) }
     let engine = services.extensions
     let hasList = !state.list.isEmpty
     let store = pill(.extensions, "openWebStore", Self.openWebStoreTitle, primary: !hasList, small: hasList) {
@@ -218,7 +220,7 @@ extension SettingsWindowController {
   /// and change data on all sites." (on N sites, when you click it); the short description for an extension without
   /// site access; "Turned off." ("Turned off while developer mode is off." for an unpacked one then); "Installed by
   /// your organization." for policy.
-  static func extensionCaption(_ info: InstalledExtensionInfo, developerMode: Bool) -> String {
+  static func extensionCaption(_ info: InstalledExtensionInfo, developerMode: Bool) -> String? {
     let version = info.version.isEmpty ? "" : "Version \(info.version)."
     let detail: String
     if !info.isEnabled {
@@ -233,7 +235,8 @@ extension SettingsWindowController {
       case .noHostAccess: detail = info.description.trimmingCharacters(in: .whitespacesAndNewlines)
       }
     }
-    return [version, detail].filter { !$0.isEmpty }.joined(separator: " ")
+    let caption = [version, detail].filter { !$0.isEmpty }.joined(separator: " ")
+    return caption.isEmpty ? nil : caption
   }
 
   /// "Version 8.11 · From the Chrome Web Store": the details' second line.
@@ -386,7 +389,8 @@ extension SettingsWindowController {
     setShortcutSearch(name)
   }
 
-  /// No count: Chromium also turns off extensions loaded with --load-extension, which the list cannot tell apart.
+  /// No count: extensions loaded with --load-extension are listed as unpacked too but stay on, so a count would
+  /// overcount.
   static var developerModeOffContent: DialogContent {
     DialogContent(title: "Turn off developer mode?",
                   paragraphs: [.init("Unpacked extensions you loaded from a folder will be turned off. They come "
@@ -414,17 +418,19 @@ extension SettingsWindowController {
     guard let engine = services.extensions, window?.attachedSheet == nil else { return }
     unpackedFolderPicker(window) { [weak self] folder in
       guard let self, let folder, folder.isFileURL, folder.path.hasPrefix("/") else { return }
+      let token = UUID()
+      self.unpackedLoadTokens.insert(token)
       self.pendingUnpackedLoad = Task { [weak self] in
         let result = await engine.loadUnpackedExtension(at: folder)
-        self?.finishUnpackedLoad(result)
+        self?.finishUnpackedLoad(result, token: token)
       }
     }
   }
 
-  /// A load that finishes after Settings closed is ignored: the closed window forgot it.
-  private func finishUnpackedLoad(_ result: UnpackedExtensionResult) {
-    guard window?.isVisible == true, pendingUnpackedLoad != nil else { return }
-    pendingUnpackedLoad = nil
+  /// Each load's answer counts once; one that finishes after Settings closed is ignored (the close forgot its token).
+  private func finishUnpackedLoad(_ result: UnpackedExtensionResult, token: UUID) {
+    guard unpackedLoadTokens.remove(token) != nil else { return }
+    if unpackedLoadTokens.isEmpty { pendingUnpackedLoad = nil }
     switch result {
     case .loaded(let id):
       expandedExtensionID = id

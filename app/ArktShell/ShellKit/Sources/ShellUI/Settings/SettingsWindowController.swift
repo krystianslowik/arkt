@@ -120,7 +120,9 @@ public final class SettingsWindowController: NSWindowController, NSWindowDelegat
   var extensionTargets: [NSObject] = []
   /// Each row's controls, for updates in place, and the decoded icons by extension and PNG.
   var extensionRowControls: [String: ExtensionRowControls] = [:]
-  var extensionIconCache: [String: NSImage] = [:]
+  var extensionIconCache: [String: (png: Data, image: NSImage)] = [:]
+  /// The unpacked loads in flight; each answer counts once, and closing the window forgets them.
+  var unpackedLoadTokens: Set<UUID> = []
   /// Shows the folder panel for Load Unpacked... and answers the chosen folder, nil when cancelled; tests replace it.
   var unpackedFolderPicker: @MainActor (NSWindow?, @escaping @MainActor (URL?) -> Void) -> Void = { window, done in
     let panel = NSOpenPanel()

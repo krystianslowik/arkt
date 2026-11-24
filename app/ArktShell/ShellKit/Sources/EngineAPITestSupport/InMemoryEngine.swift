@@ -109,7 +109,9 @@ public final class InMemoryEngine: EngineClient, EngineExtensions, EngineImporti
   public internal(set) var isExtensionDeveloperModeEnabled = false
   /// Extensions whose uninstall fails in the engine: the call is recorded, nothing changes (#600).
   public var failingUninstallIDs: Set<String> = []
-  /// Unpacked extensions developer mode turned off: listed with `canDisable` false until it is on again (#600).
+  /// Unpacked extensions developer mode locked (`canDisable` false until it is on again), and the ones of those it
+  /// turned off, which it turns back on (#600).
+  public internal(set) var developerModeLockedIDs: Set<String> = []
   public internal(set) var developerModeDisabledIDs: Set<String> = []
   /// The actions of turned-off extensions, by extension and window, restored when they are turned on again.
   var turnedOffActions: [String: [EngineWindowID: [ExtensionAction]]] = [:]

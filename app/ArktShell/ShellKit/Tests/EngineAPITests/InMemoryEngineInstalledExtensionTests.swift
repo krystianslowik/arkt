@@ -165,8 +165,24 @@ struct InMemoryEngineInstalledExtensionTests {
     engine.setExtensionDeveloperModeEnabled(false)
     let u = engine.installedExtensions.first { $0.id == "u" }
     #expect(u?.isEnabled == false && u?.canDisable == false, "listed as off and locked while developer mode is off")
-    #expect(engine.installedExtensions.first { $0.id == "v" }?.canDisable == true, "one the user turned off stays theirs")
     #expect(engine.setExtensionEnabled("u", enabled: true) == .refused)
+  }
+
+  /// Chromium locks every unpacked extension while developer mode is off, the ones already off too, and keeps the
+  /// user's own disable when it comes back on.
+  @Test func developerModeOffAlsoLocksTheOnesAlreadyOffAndOnLeavesThemOff() {
+    let engine = InMemoryEngine()
+    engine.setInstalledExtensions([info("v", "Off already", enabled: false, origin: .unpacked)])
+    engine.setExtensionDeveloperModeEnabled(true)
+    engine.setExtensionDeveloperModeEnabled(false)
+    #expect(engine.installedExtensions.first?.canDisable == false)
+    #expect(engine.setExtensionEnabled("v", enabled: true) == .refused)
+    let (token, events) = observe(engine)
+    engine.setExtensionDeveloperModeEnabled(true)
+    let v = engine.installedExtensions.first
+    #expect(v?.canDisable == true && v?.isEnabled == false, "unlocked, still off: the user turned it off")
+    #expect(events() == [.installedExtensionsChanged])
+    token.cancel()
   }
 
   @Test func developerModeOnTurnsThemBackOnWithOneEvent() {

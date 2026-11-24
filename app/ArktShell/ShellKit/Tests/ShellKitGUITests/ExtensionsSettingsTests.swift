@@ -274,6 +274,36 @@ final class ExtensionsSettingsTests: XCTestCase {
     XCTAssertTrue(try pin("ublock", in: controller).isOn)
   }
 
+  /// Icons are decoded once per extension and PNG: a rebuild reuses the image, a new PNG makes a new one.
+  func testIconsAreDecodedOncePerPNG() throws {
+    let info = InstalledExtensionInfo(id: "a", name: "A", version: "1", iconPNG: Self.icon)
+    let engine = engine([info])
+    let controller = open(engine)
+    XCTAssertEqual(controller.extensionIconCache.count, 1)
+    let image = try XCTUnwrap(controller.extensionIconCache["a"]?.image)
+    try clickRow("a", in: controller)                         // the details rebuild the pane
+    XCTAssertEqual(controller.extensionIconCache.count, 1)
+    XCTAssertTrue(controller.extensionIconCache["a"]?.image === image)
+    var updated = info
+    updated.iconPNG = Self.tile("A", .systemRed)
+    engine.setInstalledExtensions([updated])
+    XCTAssertEqual(controller.extensionIconCache.count, 1)
+    XCTAssertFalse(controller.extensionIconCache["a"]?.image === image, "a new PNG, a new image")
+  }
+
+  /// A caption that appears or goes changes the row's height: the pane rebuilds instead of updating in place.
+  func testACaptionThatAppearsRebuildsTheRow() throws {
+    let bare = InstalledExtensionInfo(id: "a", name: "A", version: "")
+    let engine = engine([bare, InstalledExtensionInfo(id: "b", name: "B", version: "1")])
+    let controller = open(engine)
+    let before = try row("a", in: controller)
+    XCTAssertEqual(before.captionText, "")
+    try toggle("a", in: controller).performClick(nil)
+    let after = try row("a", in: controller)
+    XCTAssertFalse(after === before, "rebuilt")
+    XCTAssertEqual(after.captionText, "Turned off.")
+  }
+
   // MARK: Details
 
   func testClickingARowOpensItsDetailsAndASecondClickClosesThem() throws {
@@ -458,6 +488,27 @@ final class ExtensionsSettingsTests: XCTestCase {
     XCTAssertNil(controller.extensionAlert)
   }
 
+  /// Two loads in flight: both answers count, neither drops the other.
+  func testTwoLoadsInFlightBothFinish() async throws {
+    let engine = engine()
+    engine.setExtensionDeveloperModeEnabled(true)
+    let controller = open(engine)
+    var folders = [URL(fileURLWithPath: "/tmp/First", isDirectory: true),
+                   URL(fileURLWithPath: "/tmp/Second", isDirectory: true)]
+    controller.unpackedFolderPicker = { _, done in done(folders.removeFirst()) }
+    try find(id("loadUnpacked"), in: controller, as: NSButton.self).performClick(nil)
+    let first = try XCTUnwrap(controller.pendingUnpackedLoad)
+    try find(id("loadUnpacked"), in: controller, as: NSButton.self).performClick(nil)
+    let second = try XCTUnwrap(controller.pendingUnpackedLoad)
+    await first.value
+    await second.value
+    let loaded = engine.installedExtensions.filter { $0.origin == .unpacked }
+    XCTAssertEqual(loaded.map(\.name).sorted(), ["First", "Second"])
+    XCTAssertEqual(controller.expandedExtensionID, loaded.first { $0.name == "Second" }?.id,
+                   "the second answer was not dropped")
+    XCTAssertNil(controller.pendingUnpackedLoad)
+  }
+
   func testACancelledFolderPanelLoadsNothing() async throws {
     let engine = engine()
     engine.setExtensionDeveloperModeEnabled(true)
@@ -558,6 +609,19 @@ final class ExtensionsSettingsTests: XCTestCase {
       XCTAssertFalse(row.visibleRect.isEmpty)
       controller.window?.close()
     }
+  }
+
+  /// Settings' browser links go to the most recent regular window, never an incognito or blank one.
+  func testBrowserLinksGoToARegularWindow() throws {
+    let set = ShellWindowSet(engine: InMemoryEngine(), sidebar: StubSidebar.sample())
+    let incognito = set.openWindow(kind: .incognito)
+    defer { incognito.close() }
+    XCTAssertNil(set.primaryRegular, "only an incognito window: none")
+    let regular = set.openWindow()
+    defer { regular.close() }
+    let blank = set.openWindow(kind: .blank)
+    defer { blank.close() }
+    XCTAssertTrue(set.primaryRegular === regular)
   }
 
   func testManageForAClosedWindowAndAnUnknownExtension() throws {

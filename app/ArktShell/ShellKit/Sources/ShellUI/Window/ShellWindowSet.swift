@@ -142,6 +142,16 @@ public final class ShellWindowSet {
     return open.first
   }
 
+  /// The most recently main regular window, never a blank or incognito one: where Settings opens a browser link
+  /// (#600). Nil when none is open.
+  public var primaryRegular: ShellWindowController? {
+    let open = controllers.filter { !$0.isPrivateWindow }
+    for id in mainOrder.reversed() {
+      if let controller = open.first(where: { ObjectIdentifier($0) == id }) { return controller }
+    }
+    return open.first
+  }
+
   // Test observation after initial recovery routing, before the caller can change the window.
   var didPresentPendingRecoveryForTesting: ((ShellWindowController) -> Void)?
 
