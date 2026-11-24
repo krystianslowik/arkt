@@ -13,7 +13,8 @@ extension ChromiumEngine {
       InstalledExtensionInfo(id: item.extensionID, name: item.name, version: item.version,
                              description: item.shortDescription, iconPNG: item.iconPNG, isEnabled: item.isEnabled,
                              canDisable: item.mayChangeEnabled, canUninstall: item.canUninstall,
-                             origin: Self.origin(of: item.source), hasOptionsPage: item.hasOptionsPage)
+                             origin: Self.origin(of: item.source), hasOptionsPage: item.hasOptionsPage,
+                             siteAccess: Self.siteAccess(item.siteAccess, count: item.siteAccessSiteCount))
     }
   }
 
@@ -66,6 +67,17 @@ extension ChromiumEngine {
   /// The facade opens it in the profile's last active window.
   public func openExtensionOptionsPage(_ extensionID: String) {
     facade.openExtensionOptionsPage(extensionID, in: nil)
+  }
+
+  /// One to one with the facade's summary; the count belongs to SomeSites only.
+  private static func siteAccess(_ summary: ArktExtensionSiteAccessSummary, count: Int) -> InstalledExtensionSiteAccess {
+    switch summary {
+    case .none: .noHostAccess
+    case .onClick: .onClick
+    case .someSites: .someSites(count: count)
+    case .allSites: .allSites
+    @unknown default: .noHostAccess
+    }
   }
 
   private static func origin(of source: ArktExtensionSource) -> ExtensionOrigin {

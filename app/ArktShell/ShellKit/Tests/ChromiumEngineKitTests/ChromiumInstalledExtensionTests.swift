@@ -23,8 +23,8 @@ struct ChromiumInstalledExtensionTests {
     facade.installedList = [
       ScriptedInstalledExtension(extensionID: alpha, name: "Alpha Clips", version: "8.11",
                                  shortDescription: "Clips pages.", iconPNG: icon, isEnabled: true,
-                                 mayChangeEnabled: true, source: .webStore, hasOptionsPage: true, canUninstall: true,
-                                 canReportAbuse: true),
+                                 mayChangeEnabled: true, siteAccess: .allSites, source: .webStore,
+                                 hasOptionsPage: true, canUninstall: true, canReportAbuse: true),
       ScriptedInstalledExtension(extensionID: beta, name: "Beta Probe", version: "0.9", isEnabled: false,
                                  mayChangeEnabled: false, source: .unpacked, canUninstall: true,
                                  canReportAbuse: false),
@@ -33,10 +33,10 @@ struct ChromiumInstalledExtensionTests {
     #expect(engine.installedExtensions == [
       InstalledExtensionInfo(id: alpha, name: "Alpha Clips", version: "8.11", description: "Clips pages.",
                              iconPNG: icon, isEnabled: true, canDisable: true, canUninstall: true, origin: .webStore,
-                             hasOptionsPage: true),
+                             hasOptionsPage: true, siteAccess: .allSites),
       InstalledExtensionInfo(id: beta, name: "Beta Probe", version: "0.9", description: "", iconPNG: nil,
                              isEnabled: false, canDisable: false, canUninstall: true, origin: .unpacked,
-                             hasOptionsPage: false),
+                             hasOptionsPage: false, siteAccess: .noHostAccess),
     ])
   }
 
@@ -48,6 +48,28 @@ struct ChromiumInstalledExtensionTests {
     facade.installedList = [ScriptedInstalledExtension(extensionID: alpha, name: "A", version: "1", source: source)]
     let listed = try #require(makeEngine().installedExtensions.first)
     #expect(listed.origin == origin)
+  }
+
+  @Test(arguments: [
+    (ArktExtensionSiteAccessSummary.none, 0, InstalledExtensionSiteAccess.noHostAccess),
+    (.onClick, 0, .onClick), (.someSites, 2, .someSites(count: 2)), (.someSites, 7, .someSites(count: 7)),
+    (.allSites, 0, .allSites),
+  ])
+  func everySiteAccessMapsOneToOne(summary: ArktExtensionSiteAccessSummary, count: Int,
+                                   expected: InstalledExtensionSiteAccess) throws {
+    facade.installedList = [ScriptedInstalledExtension(extensionID: alpha, name: "A", version: "1",
+                                                       siteAccess: summary, siteAccessSiteCount: count)]
+    let listed = try #require(makeEngine().installedExtensions.first)
+    #expect(listed.siteAccess == expected)
+  }
+
+  @Test func anExtensionWaitingForNewPermissionsKeepsAnActionableSwitch() throws {
+    facade.installedList = [ScriptedInstalledExtension(extensionID: alpha, name: "A", version: "2", isEnabled: false,
+                                                       mayChangeEnabled: true)]
+    facade.enableAnswer = .needsPermissionApproval
+    let engine = makeEngine()
+    #expect(try #require(engine.installedExtensions.first).canDisable)
+    #expect(engine.setExtensionEnabled(alpha, enabled: true) == .needsPermissionApproval)
   }
 
   @Test func aPolicyExtensionCanNeitherBeTurnedOffNorRemoved() throws {

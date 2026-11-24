@@ -170,21 +170,44 @@ public struct InstalledExtensionInfo: Equatable, Sendable, Identifiable {
   public var iconPNG: Data?
   /// On (Chromium: enabled), or turned off by the user or the engine.
   public var isEnabled: Bool
-  /// The user may turn it on or off (not locked by policy). `setExtensionEnabled` refuses the others anyway.
+  /// The switch is actionable: turning the extension on or off answers `.applied` or `.needsPermissionApproval`
+  /// (so an extension Chromium turned off for new permissions is true). False only where the engine refuses
+  /// (Chromium's `kNotAllowed`: locked by policy, or an unpacked extension while developer mode is off);
+  /// `setExtensionEnabled` answers `.refused` for those.
   public var canDisable: Bool
   /// The user may remove it (not installed by policy). `uninstallExtension` refuses the others anyway.
   public var canUninstall: Bool
   public var origin: ExtensionOrigin
   /// The extension has an options page (`openExtensionOptionsPage`).
   public var hasOptionsPage: Bool
+  /// What it may read and change on sites, independent of any tab (the row's caption).
+  public var siteAccess: InstalledExtensionSiteAccess
 
   public init(id: String, name: String, version: String, description: String = "", iconPNG: Data? = nil,
               isEnabled: Bool = true, canDisable: Bool = true, canUninstall: Bool = true,
-              origin: ExtensionOrigin = .webStore, hasOptionsPage: Bool = false) {
+              origin: ExtensionOrigin = .webStore, hasOptionsPage: Bool = false,
+              siteAccess: InstalledExtensionSiteAccess = .noHostAccess) {
     self.id = id; self.name = name; self.version = version; self.description = description; self.iconPNG = iconPNG
     self.isEnabled = isEnabled; self.canDisable = canDisable; self.canUninstall = canUninstall; self.origin = origin
-    self.hasOptionsPage = hasOptionsPage
+    self.hasOptionsPage = hasOptionsPage; self.siteAccess = siteAccess
   }
+}
+
+/// An installed extension's site access, independent of any tab (`InstalledExtensionInfo.siteAccess`), computed as
+/// chrome://extensions does (`CreateRuntimeHostPermissionsInfo`). One to one with the facade's site access: None,
+/// OnClick, SomeSites (with its distinct granted host count), AllSites. `noHostAccess` is None, named so that it never
+/// reads as `Optional.none`.
+public enum InstalledExtensionSiteAccess: Equatable, Sendable {
+  /// Granted all hosts (`<all_urls>`, `*://*/*` or an equivalent pattern): "on all sites".
+  case allSites
+  /// Granted a fixed set of hosts: `count` distinct sites (at least 1), counting only the hosts granted now (some
+  /// withheld, some granted is this case with the granted count). "On N sites".
+  case someSites(count: Int)
+  /// It asks for host access but the user withheld it (Chromium's runtime host permissions, "On click"): it runs on a
+  /// site only when the user clicks it.
+  case onClick
+  /// It asks for no host access at all (or only for `activeTab`).
+  case noHostAccess
 }
 
 /// The answer to `EngineExtensions.setExtensionEnabled`.
@@ -461,8 +484,8 @@ public enum EngineExtensionEvent: Equatable, Sendable {
   /// `extensionCommands` changed: a shortcut or scope set, an extension with commands added or removed.
   case commandsChanged
   /// `installedExtensions` changed (#600): an install, an uninstall, an extension turned on or off, an unpacked load
-  /// or reload, an update (a new version, name or icon). One event may carry several changes, and an icon that arrives
-  /// after its extension (Chromium loads icons asynchronously) comes as an event of its own; the shell reads the
-  /// whole list again on each.
+  /// or reload, an update (a new version, name or icon), a change of its site access. One event may carry several
+  /// changes, and an icon that arrives after its extension (Chromium loads icons asynchronously) comes as an event of
+  /// its own; the shell reads the whole list again on each.
   case installedExtensionsChanged
 }
