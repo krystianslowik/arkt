@@ -21,8 +21,9 @@ public final class ExtensionsPanelController: NSObject {
   private var monitor: Any?
   /// Reduce Motion, read when the panel opens and for each drag (tests set it).
   var reduceMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
-  /// Manage Extensions... and the context menu's Manage Extension...: Settings, Extensions.
-  public var onManage: (@MainActor () -> Void)?
+  /// Manage Extensions... (nil) and the context menu's Manage Extension... (the extension's id): Settings,
+  /// Extensions, on that extension's row when one is named (#600).
+  public var onManage: (@MainActor (_ extensionID: String?) -> Void)?
   /// Browse the Web Store, the empty state's one action.
   public var onBrowseWebStore: (@MainActor () -> Void)?
   /// The context menu's Remove from Arkt...: the window sets it to `presentRemoveSheet(for:)` (#720). While it is nil
@@ -215,7 +216,7 @@ public final class ExtensionsPanelController: NSObject {
     view.onMove = { [weak self] id, index in self?.extensions?.movePinnedExtension(id, to: index) }
     view.onManage = { [weak self] in
       self?.hide(keyboard: true)
-      self?.onManage?()
+      self?.onManage?(nil)
     }
     view.onBrowseWebStore = { [weak self] in
       self?.hide(keyboard: true)
@@ -225,9 +226,9 @@ public final class ExtensionsPanelController: NSObject {
       guard let self, let extensions = self.extensions, let window = self.engineWindow() else { return nil }
       let menu = ExtensionContextMenu.menu(
         forAction: id, in: window, engine: extensions,
-        onManage: { [weak self] _ in
+        onManage: { [weak self] action in
           self?.hide(keyboard: true)
-          self?.onManage?()
+          self?.onManage?(action.extensionID)
         },
         onRemove: { [weak self] action in self?.onRemove?(action) })
       // Remove from Arkt... needs the remove sheet; until the app provides it the item stays disabled.
