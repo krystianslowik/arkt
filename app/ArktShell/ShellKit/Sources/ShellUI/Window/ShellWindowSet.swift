@@ -322,14 +322,15 @@ public final class ShellWindowSet {
 
   // MARK: Engine-initiated windows
 
-  /// The engine's host provider (`EngineWindowHostProvider`). A Dock reopen reuses an open window that has no engine
-  /// window yet (no tab was shown, so the engine counts no window); every other request gets a new window in the
+  /// The engine's host provider (`EngineWindowHostProvider`). A Dock reopen, and a link from another app (#328), reuse
+  /// an open window that has no engine window yet (no tab was shown, so the engine counts no window); every other
+  /// request gets a new window in the
   /// opener's Space, else the primary window's, with the requested frame. A request for a page of a blank or
   /// incognito window, or one the engine keeps off the record, gets a private window instead (#669).
   public func host(for request: EngineWindowRequest) -> any EngineWindowHosting {
     if let presentation = privatePresentation(for: request) { return makePrivate(presentation, for: request) }
     if LittleArktRouting.opensInLittleArkt(request) { return makeLittleArkt(for: request).engineHost }
-    if request.kind == .reopen, let reusable = controllers.first(where: { candidate in
+    if request.opensLikeADockReopen, let reusable = controllers.first(where: { candidate in
       candidate.engineWindow == nil && !awaitingAdoption.contains { $0 === candidate }
     }) {
       awaitingAdoption.append(reusable)

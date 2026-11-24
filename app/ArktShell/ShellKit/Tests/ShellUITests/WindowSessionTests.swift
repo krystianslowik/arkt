@@ -181,13 +181,23 @@ struct WindowSessionTests {
   }
 
   @Test func engineRequestedWindowsNeverOwnTheSession() {
-    for kind in [EngineWindowRequestKind.extension, .page, .startupURL] {
+    for kind in [EngineWindowRequestKind.extension, .page] {
       let origin = SessionWindowPolicy.origin(for: request(kind, bounds: CGRect(x: 0, y: 0, width: 400, height: 300)))
       #expect(origin == .engineRequested)
       #expect(!SessionWindowPolicy.takesSession(origin, ownerIsAlive: false))
     }
     // A page's new window without features is a reopen request with an opener.
     #expect(SessionWindowPolicy.origin(for: request(.reopen, opener: EngineWindowID())) == .engineRequested)
+    #expect(SessionWindowPolicy.origin(for: request(.startupURL, opener: EngineWindowID())) == .engineRequested)
+  }
+
+  /// #328 (maintainer decision 2026-11-24): a link from another app with no window is reported as `.startupURL`, not
+  /// `.reopen`, and owns the session as a Dock reopen does, at a cold launch too.
+  @Test func aLinkFromAnotherAppWithNoOpenerCanOwnTheSessionLikeADockReopen() {
+    let origin = SessionWindowPolicy.origin(for: request(.startupURL))
+    #expect(origin == .dockReopen)
+    #expect(SessionWindowPolicy.takesSession(origin, ownerIsAlive: false))
+    #expect(!SessionWindowPolicy.takesSession(origin, ownerIsAlive: true))
   }
 
   @Test func theShellsOwnWindowsAndADockReopenCanOwnItWhenNoneDoes() {

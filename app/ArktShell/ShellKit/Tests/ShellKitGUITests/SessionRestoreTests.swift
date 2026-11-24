@@ -253,7 +253,8 @@ final class SessionRestoreTests: XCTestCase {
     store.save(world.savedState(frame: Self.savedFrame))
     let set = makeSet(world, store: store)
 
-    let popup = set.host(for: EngineWindowRequest(kind: .startupURL, bounds: CGRect(x: 300, y: 200, width: 500, height: 400),
+    // An extension's window: a link from another app (`.startupURL`) owns the session like a Dock reopen (#328).
+    let popup = set.host(for: EngineWindowRequest(kind: .extension, bounds: CGRect(x: 300, y: 200, width: 500, height: 400),
                                                   profile: EngineProfileID("default")))
     XCTAssertEqual(set.controllers.count, 1)
     let window = set.openWindow()
@@ -263,6 +264,31 @@ final class SessionRestoreTests: XCTestCase {
     for other in set.controllers where other !== window { other.saveSession() }
     XCTAssertEqual(store.load()?.frame, Self.savedFrame, "the engine's window never saved over the main window")
     window.close()
+  }
+
+  /// #328 (maintainer decision 2026-11-24): a link from another app at a cold launch (`.startupURL`, no opener, no
+  /// bounds) is built before the shell's launch window and owns the session like a Dock reopen.
+  func testALinkWindowBuiltBeforeLaunchTakesTheSession() throws {
+    let world = World()
+    let store = try store()
+    store.save(world.savedState(frame: Self.savedFrame))
+    let set = makeSet(world, store: store)
+
+    let host = set.host(for: EngineWindowRequest(kind: .startupURL, profile: EngineProfileID("default"),
+                                                 initialURL: URL(string: "https://example.com/link")))
+    let link = try XCTUnwrap(set.controllers.first { $0.engineHost === host })
+    XCTAssertEqual(link.window?.frame, Self.savedFrame, "the link's window restores the saved frame")
+    XCTAssertTrue(link.savesSession, "it is the session window")
+    let later = set.openWindow(opensFirstTab: false)
+    XCTAssertFalse(later.savesSession, "a later shell window does not take the session from it")
+    XCTAssertNotEqual(later.window?.frame, Self.savedFrame)
+
+    link.activate(node: world.designReview)
+    link.saveSession()
+    XCTAssertEqual(store.load()?.currentTab, world.designReview, "the link's window saves the session")
+    XCTAssertEqual(store.load()?.space, world.work)
+    later.close()
+    link.close()
   }
 
   func testTheNextShellWindowTakesTheSessionAfterTheOwnerCloses() throws {
