@@ -8511,3 +8511,10 @@ Run 6 (`out/Arkt`, fresh profile `profiles/964-20261124/run6`, same flags; build
 
 Not run: a real blocklisting and a policy change (no Safe Browsing blocklist or policy on this machine); both go
 through the check path the reason-only change above took.
+
+Swift after the review: #969's final `EngineExtensions.swift` taken verbatim (`ExtensionEnableResult.needsPermissionApproval`,
+absolute file URLs only); `ChromiumEngine` maps NeedsPermissionApproval to `.needsPermissionApproval` and answers
+`.failed(reason: "Not a folder.")` for a URL that is not an absolute file URL without asking the engine (the engine's
+own sentence for a relative path). `git merge-tree --write-tree HEAD origin/feat/600-settings-extensions`: clean.
+`nice -n 20 swift test -j 2 --skip ShellKitGUITests`: every bundle passes, 1629, 44, 60, 29, 290, 49, 362, 241, 42
+(`ChromiumEngineKitTests` 228 + 13, `ArktEngineABITests` 40 + 2). Lints: 13 + 60 pass.
