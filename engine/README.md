@@ -377,9 +377,9 @@ Ids in this bundle: see "Product identity" below.
 
 ## Preview release
 
-How a maintainer cuts a preview build (v0.1.0-preview.1, tracking issue #481). The preview is an unsigned,
-ad-hoc signed DMG on a GitHub pre-release (window design: `design/install-dmg/`, #983). There is no Developer ID
-signing, no notarization and no update feed; those follow in #125. Nothing here is scripted: run the steps in order, in zsh, with the variables from the top
+How a maintainer cuts a preview build (v0.1.0-preview.1, tracking issue #481). The preview is an unsigned, ad-hoc
+signed DMG on a GitHub pre-release (window design: `design/install-dmg/`, #983). There is no Developer ID signing,
+no notarization and no update feed; those follow in #125. Nothing here is scripted: run the steps in order, in zsh, with the variables from the top
 of this file (`$REPO`, `$CHROMIUM_ROOT`, `$CR`, `$PIN`). The release is the maintainer's to publish; do not run steps
 5 and 6 without that go-ahead.
 
@@ -458,20 +458,30 @@ no `runtime` in the flags. `spctl --assess` reports `rejected`; that is expected
 ### 4. Package the DMG
 
 The DMG window follows `design/install-dmg/README.md`: the porcelain background, `Arkt.app` and an Applications
-alias at 128 pt, and the app icon as the volume icon. Stage the contents (`ditto` keeps the bundle's symlinks and
-metadata) and make a writable image. `/Volumes/Arkt` must not exist yet:
+alias at 128 pt, and the app icon as the volume icon. This step needs a logged-in desktop session (Finder lays out the
+window, so it cannot run over SSH or in CI) and the Xcode Command Line Tools (`SetFile`, `GetFileInfo`). The command
+blocks carry no comments, so they paste into an interactive zsh as they are.
+
+Start from a clean folder and no mounted `Arkt` volume, so a rerun cannot reuse old files (a second `ln -s` would
+write into `/Applications`) and the image mounts at `/Volumes/Arkt`, not `/Volumes/Arkt 1`:
 
     D=$REPO/design/install-dmg; W=$OUT/dmg
-    mkdir -p $W/src/.background && ditto $OUT/stage/Arkt.app $W/src/Arkt.app && ln -s /Applications $W/src/Applications
+    [[ -e /Volumes/Arkt ]] && hdiutil detach /Volumes/Arkt
+    rm -rf $W && mkdir -p $W/src/.background
+
+Stage the contents (`ditto` keeps the bundle's symlinks and metadata), build the volume icon from the app icon set,
+and mount a writable image. `iconutil` warns about the set's `Contents.json`; the warning is harmless:
+
+    ditto $OUT/stage/Arkt.app $W/src/Arkt.app && ln -s /Applications $W/src/Applications
     tiffutil -cathidpicheck $D/background.png $D/background@2x.png -out $W/src/.background/background.tiff
     cp -R $REPO/app/ArktShell/App/Assets.xcassets/AppIcon.appiconset $W/AppIcon.iconset
-    iconutil -c icns $W/AppIcon.iconset -o $W/src/.VolumeIcon.icns   # warns about Contents.json; harmless
+    iconutil -c icns $W/AppIcon.iconset -o $W/src/.VolumeIcon.icns
     hdiutil create -srcfolder $W/src -volname Arkt -fs HFS+ -format UDRW -size 800m $W/rw.dmg
-    hdiutil attach -readwrite -noverify -noautoopen $W/rw.dmg       # mounts at /Volumes/Arkt
+    hdiutil attach -readwrite -noverify -noautoopen $W/rw.dmg
 
-Lay out the window with Finder (macOS asks once to let the terminal control Finder). The bounds are the 660 x 420 pt
-content plus the 32 pt title bar; positions are icon centers from the content's top-left. Finder applies the view
-only after the window is closed and opened again:
+The last line must print `/Volumes/Arkt`. Lay out the window with Finder (macOS asks once to let the terminal control
+Finder). The bounds are the 660 x 420 pt content plus the 32 pt title bar; positions are icon centers from the
+content's top-left. Finder applies the view only after the window is closed and opened again:
 
     osascript -e 'tell application "Finder" to tell disk "Arkt"' -e 'open' \
       -e 'set current view of container window to icon view' \
@@ -484,21 +494,23 @@ only after the window is closed and opened again:
       -e 'set position of item "Applications" of container window to {460, 262}' \
       -e 'close container window' -e 'open' -e 'delay 2' -e 'close container window' -e 'end tell'
 
-Finder can drop `.VolumeIcon.icns` while it writes the layout, so copy it again, set the volume's custom-icon flag,
-then detach, compress and record the checksum:
+Finder can drop `.VolumeIcon.icns` while it writes the layout, so copy it again and set the volume's custom-icon
+flag. `GetFileInfo` must print a capital `C`. Then detach (if Finder still holds the volume, `hdiutil detach -force
+/Volumes/Arkt`), compress, verify and record the checksum:
 
     cp $W/src/.VolumeIcon.icns /Volumes/Arkt/ && SetFile -a C /Volumes/Arkt
-    GetFileInfo -a /Volumes/Arkt                                   # capital C
+    GetFileInfo -a /Volumes/Arkt
     sync && hdiutil detach /Volumes/Arkt
     hdiutil convert $W/rw.dmg -format UDZO -imagekey zlib-level=9 -o $OUT/Arkt-$VERSION-arm64.dmg
     cd $OUT && hdiutil verify Arkt-$VERSION-arm64.dmg
     shasum -a 256 Arkt-$VERSION-arm64.dmg | tee Arkt-$VERSION-arm64.dmg.sha256
-    ls -l Arkt-$VERSION-arm64.dmg                                  # about 198 MB on 156
+    ls -l Arkt-$VERSION-arm64.dmg
 
-Check it: open the DMG from Finder. The window shows the hero line, both icons at 128 pt with readable labels (Finder
-picks the label color from the background, so they stay dark on porcelain in dark mode too) and the hint at the
-bottom right; the mounted volume shows the Arkt icon; `codesign --verify --deep --strict /Volumes/Arkt/Arkt.app`
-passes. A Finder set to show the path bar covers the hint; that is a per-user setting.
+The DMG is about 198 MB on 156. Check it: open the DMG from Finder. The window shows the hero line, both icons at
+128 pt with readable labels and the hint at the bottom right, and the mounted volume shows the Arkt icon. Finder
+picks the label color from the background picture, so the labels stay dark on porcelain in dark mode too (checked on a
+mounted DMG on macOS 26). `codesign --verify --deep --strict /Volumes/Arkt/Arkt.app` passes. A Finder set to show the
+path bar covers the hint; that is a per-user setting.
 
 ### 5. Draft the release and smoke test the asset
 
@@ -513,8 +525,10 @@ Smoke test the downloaded asset, not the local build, on a fresh macOS user acco
 Groups, a standard user with no Arkt data). Download the DMG from the draft release in Safari, so the file carries the
 quarantine flag a user's download carries. Then, as that user:
 
-    cd ~/Downloads && shasum -a 256 Arkt-$VERSION-arm64.dmg        # equals the .sha256 file
-    open Arkt-$VERSION-arm64.dmg                                   # then drag Arkt to Applications in its window
+    cd ~/Downloads && shasum -a 256 Arkt-$VERSION-arm64.dmg
+    open Arkt-$VERSION-arm64.dmg
+
+The checksum must equal the `.sha256` file. Drag Arkt to Applications in the DMG's window.
 
 Open it as described in the README ("Download the preview"). What to expect on 156 (dry run, quarantine flag set with
 `xattr -w com.apple.quarantine "0081;$(printf %x $(date +%s));Safari;"`): `spctl -a -vv Arkt.app` prints `rejected`,
