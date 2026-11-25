@@ -105,6 +105,8 @@ final class CommandBarCellView: NSTableCellView {
   private var scale: CGFloat = 2
   private var increasedContrast = false
   private var favicon: NSImage?
+  /// The selected row's verb in place of the result's own (Cmd-L's "Reload").
+  private var verbOverride: String?
   /// Whether this row is the selected one: the trailing group shows the verb and the Return key cap.
   var isRowSelected = false {
     didSet { if isRowSelected != oldValue { applyTrailing() } }
@@ -125,6 +127,7 @@ final class CommandBarCellView: NSTableCellView {
     header.lineBreakMode = .byTruncatingTail
     header.cell?.usesSingleLineMode = true
     header.isHidden = true
+    header.setAccessibilityElement(false)                // the controller publishes headers from its model
     [icon, title, subtitle, trailingText, returnKey, header].forEach(addSubview)
   }
 
@@ -146,7 +149,8 @@ final class CommandBarCellView: NSTableCellView {
   /// `increasedContrast`: tertiary text (URL, time, header) takes the secondary color.
   func configure(_ result: CommandBarResults.Result, query: String, position: Int, count: Int, flavor: ThemeFlavor,
                  scale: CGFloat, groupHeader: String?, isFirstRow: Bool, favicon: NSImage?,
-                 increasedContrast: Bool) {
+                 increasedContrast: Bool, verbOverride: String? = nil) {
+    self.verbOverride = verbOverride
     self.result = result
     self.query = query
     self.flavor = flavor
@@ -161,11 +165,10 @@ final class CommandBarCellView: NSTableCellView {
       .font: ShellType.sectionHeader.font, .kern: ShellType.sectionHeader.font.pointSize * 0.02,
       .foregroundColor: tertiaryColor,
     ])
-    header.setAccessibilityLabel(groupHeader)
     subtitle.stringValue = result.secondaryText
     subtitle.textColor = tertiaryColor
-    setAccessibilityLabel(result.accessibilityLabel(position: position, of: count))
-    setAccessibilityValue(result.accessibilityCaption)
+    setAccessibilityLabel(result.commandBarLabel(position: position, of: count))
+    setAccessibilityValue(verbOverride ?? result.accessibilityCaption)
     applyIcon()
     applyTitle()
     applyTrailing()
@@ -210,7 +213,7 @@ final class CommandBarCellView: NSTableCellView {
     case .open, .pasteAndGo:
       break
     default:
-      if let range = CommandBarTitleMatch.range(of: query, in: text) {
+      for range in CommandBarTitleMatch.wordStartRanges(of: query, in: text) {
         attributed.addAttribute(.font, value: bold, range: NSRange(range, in: text))
       }
     }
@@ -221,7 +224,7 @@ final class CommandBarCellView: NSTableCellView {
   private func applyTrailing() {
     guard let result else { return }
     if isRowSelected {
-      trailingText.stringValue = result.verb ?? ""
+      trailingText.stringValue = verbOverride ?? result.verb ?? ""
       trailingText.textColor = ShellTokens.commandBarSecondaryText.resolve(flavor).nsColor()
       returnKey.configure(CommandBarKeyCaps.return, flavor: flavor)
       returnKey.isHidden = false
@@ -282,4 +285,5 @@ final class CommandBarCellView: NSTableCellView {
 @MainActor
 final class CommandBarGroupHeaderLabel: NSTextField {
   override func accessibilityRole() -> NSAccessibility.Role? { .group }
+  override func isAccessibilityElement() -> Bool { accessibilityLabel() != nil && super.isAccessibilityElement() }
 }

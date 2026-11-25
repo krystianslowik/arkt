@@ -131,6 +131,70 @@ final class CommandBarTests: XCTestCase {
     XCTAssertEqual(bar.barView.table.selectedRow, 0)
   }
 
+  /// Cmd-L with rows (the empty state): untouched, Return reloads, and the first row says so ("Reload" and the key cap,
+  /// not "Switch to Tab").
+  func testCmdLUntouchedReturnReloadsAndTheFirstRowSaysReload() async throws {
+    var reloaded = false
+    var switched: NodeID?
+    bar.onReload = { reloaded = true }
+    bar.onSwitch = { switched = $0 }
+    bar.openTabsProvider = { self.tabs(2) }
+    bar.toggle(.currentTab(URL(string: "https://example.com")))
+    XCTAssertEqual(bar.results.map(\.kind.name), ["switch", "switch"])
+    bar.barView.layoutSubtreeIfNeeded()
+    let first = try XCTUnwrap(bar.barView.table.view(atColumn: 0, row: 0, makeIfNecessary: true) as? CommandBarCellView)
+    XCTAssertEqual(first.trailingText.stringValue, "Reload")
+    XCTAssertFalse(first.returnKey.isHidden)
+    XCTAssertEqual(bar.barView.table.axProxyRows.content?(0)?.value, "Reload")
+    bar.commit()
+    XCTAssertTrue(reloaded)
+    XCTAssertNil(switched)
+  }
+
+  /// Cmd-L, then a selection move: Return runs the selected row and does not reload; the rows say what they do again.
+  func testCmdLAfterASelectionMoveReturnRunsTheRow() async throws {
+    var reloaded = false
+    var switched: NodeID?
+    bar.onReload = { reloaded = true }
+    bar.onSwitch = { switched = $0 }
+    let list = tabs(2)
+    bar.openTabsProvider = { list }
+    bar.toggle(.currentTab(URL(string: "https://example.com")))
+    let editor = try XCTUnwrap(bar.barView.field.currentEditor() as? NSTextView)
+    XCTAssertTrue(bar.control(bar.barView.field, textView: editor, doCommandBy: #selector(NSResponder.moveDown(_:))))
+    bar.barView.layoutSubtreeIfNeeded()
+    let second = try XCTUnwrap(bar.barView.table.view(atColumn: 0, row: 1, makeIfNecessary: true) as? CommandBarCellView)
+    XCTAssertEqual(second.trailingText.stringValue, "Switch to Tab")
+    bar.commit()
+    XCTAssertFalse(reloaded)
+    XCTAssertEqual(switched, list[1].node)
+
+    // Moving back to the first row does not arm the reload again; only a new show does.
+    reloaded = false
+    switched = nil
+    bar.toggle(.currentTab(URL(string: "https://example.com")))
+    XCTAssertTrue(bar.control(bar.barView.field, textView: editor, doCommandBy: #selector(NSResponder.moveDown(_:))))
+    XCTAssertTrue(bar.control(bar.barView.field, textView: editor, doCommandBy: #selector(NSResponder.moveUp(_:))))
+    bar.commit()
+    XCTAssertFalse(reloaded)
+    XCTAssertEqual(switched, list[0].node)
+  }
+
+  /// A pointer hover that moves the selection disarms the reload too.
+  func testCmdLAfterAHoverReturnRunsTheRow() async throws {
+    var reloaded = false
+    var switched: NodeID?
+    bar.onReload = { reloaded = true }
+    bar.onSwitch = { switched = $0 }
+    let list = tabs(2)
+    bar.openTabsProvider = { list }
+    bar.toggle(.currentTab(URL(string: "https://example.com")))
+    bar.barView.onHoverRow?(1)
+    bar.commit()
+    XCTAssertFalse(reloaded)
+    XCTAssertEqual(switched, list[1].node)
+  }
+
   func testCmdLPrefillAndUneditedEnterReloads() async throws {
     var reloaded = false
     var opened: URL?
@@ -691,8 +755,8 @@ final class CommandBarTests: XCTestCase {
     XCTAssertFalse(bar.isVisible)
   }
 
-  // [I] A modified Return on an unedited Cmd-L does not reload (KB-004 is plain Return): Opt-Return opens the empty
-  // state's selected row in a new tab, Cmd-Return searches the address text.
+  // [I] A modified Return on an unedited Cmd-L does not reload (KB-004 is plain Return). Cmd-Return has no typed
+  // text to search for there, so nothing opens and the bar stays.
   func testModifiedReturnOnUneditedCmdLDoesNotReload() async throws {
     var reloaded = false
     var result: (URL, CommandBarController.OpenTarget)?
@@ -701,8 +765,8 @@ final class CommandBarTests: XCTestCase {
     bar.toggle(.currentTab(URL(string: "https://example.com")))
     try sendReturn(.command)
     XCTAssertFalse(reloaded)
-    XCTAssertEqual(result?.0, URLInputParser.searchURL(for: "https://example.com"))
-    XCTAssertEqual(result?.1, .currentTab)
+    XCTAssertNil(result)
+    XCTAssertTrue(bar.isVisible)
   }
 
   // [I] A modified Enter on a "Switch to Tab" result still switches: the tab is already open.

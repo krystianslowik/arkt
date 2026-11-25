@@ -61,4 +61,16 @@ struct LittleArktLookupResultsTests {
     #expect(CommandBarSelection.page(from: 18, by: 1, count: 20) == 19)
     #expect(CommandBarSelection.page(from: 3, by: -1, count: 20) == 0)
   }
+
+  /// VoiceOver reads the lookup's rows as before #993: the search row as its query, an address as "address".
+  @Test func rowsReadAsBefore() {
+    func labels(_ rows: [CommandBarResults.Result]) -> [String] {
+      rows.enumerated().map { $0.element.accessibilityLabel(position: $0.offset + 1, of: rows.count) }
+    }
+    let tab = CommandBarResults.OpenTab(node: NodeID(), title: "Notes", url: URL(string: "https://notes.example/page")!)
+    #expect(labels(CommandBarResults.make(query: "notes", openTabs: [tab]))
+      == ["Notes, notes.example, open tab, 1 of 2", "notes, search suggestion, 2 of 2"])
+    #expect(labels(CommandBarResults.make(query: "atlas.example", openTabs: []))
+      == ["atlas.example, atlas.example, address, 1 of 2", "atlas.example, search suggestion, 2 of 2"])
+  }
 }

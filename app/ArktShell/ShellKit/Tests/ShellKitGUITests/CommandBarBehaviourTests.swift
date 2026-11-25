@@ -223,6 +223,50 @@ final class CommandBarBehaviourTests: XCTestCase {
     bar.toggle(.newTab)
     let editor = try XCTUnwrap(bar.barView.field.currentEditor() as? NSTextView)
     XCTAssertEqual(editor.insertionPointColor, BrandTokens.accent.resolve(bar.flavor).nsColor())
+    XCTAssertTrue(editor is CommandBarFieldEditor, "the 2 pt caret's editor")
+    XCTAssertEqual(CommandBarFieldEditor.caretWidth, 2)
+  }
+
+  /// A mouse-down on a row gives it the full fill before the click runs it (feedback on press, action on release).
+  func testAMouseDownSelectsTheRowUnderThePointer() throws {
+    showAllGroups()
+    bar.barView.table.onMouseDownRow?(3)
+    XCTAssertEqual(selected, 3)
+  }
+
+  /// A keystroke that adds a group header changes row heights without animating them.
+  func testRowHeightChangesDoNotAnimate() throws {
+    bar.openTabsProvider = { [.init(node: UUID(), title: "Git tab", url: URL(string: "https://t.example")!)] }
+    bar.toggle(.newTab)
+    bar.setQueryForTesting("git")                          // Tabs, then the Search header appears
+    bar.barView.layoutSubtreeIfNeeded()
+    let table = bar.barView.table
+    XCTAssertEqual(bar.groupHeaders.count, 2)
+    for row in 0..<table.numberOfRows {
+      let view = table.rowView(atRow: row, makeIfNecessary: false)
+      XCTAssertNil(view?.layer?.animationKeys(), "row \(row)")
+      XCTAssertNil(view?.animations["frameSize"] as Any?, "row \(row)")
+    }
+    XCTAssertNil(table.layer?.animationKeys())
+  }
+
+  /// Group headers reach accessibility from the model, for rows scrolled out of view as well.
+  func testGroupHeadersAreAccessibleWithoutACell() throws {
+    showAllGroups()
+    let children = try XCTUnwrap(bar.barView.table.axProxyRows.children)
+    XCTAssertEqual(children(2).first?.accessibilityLabel(), "Folders")
+    XCTAssertEqual(children(2).first?.accessibilityRole(), .group)
+    XCTAssertEqual(children(1), [])
+  }
+
+  /// Cmd-Return on Cmd-L's untouched address has no typed text to search for: nothing opens.
+  func testCommandReturnOnAnUntouchedCmdLOpensNothing() throws {
+    var opened = false
+    bar.onOpen = { _, _ in opened = true }
+    bar.toggle(.currentTab(URL(string: "https://example.com")))
+    try key(36, "\r", [.command])
+    XCTAssertFalse(opened)
+    XCTAssertTrue(bar.isVisible)
   }
 
   // MARK: Return
@@ -525,8 +569,8 @@ final class CommandBarBehaviourTests: XCTestCase {
     XCTAssertFalse(rows.contains { $0.kind == .switchTo(third) }, "the tab on screen is not offered")
   }
 
-  /// The window lists its enabled extension actions with each extension's description, keeps the list between
-  /// keystrokes, takes a new one when the actions change, and Return runs the action as a toolbar click would.
+  /// The window lists its enabled extension actions with each extension's description, takes a new list when the
+  /// installed extensions or the actions change, and Return runs the action as a toolbar click would.
   func testTheWindowsExtensionsAndOpenExtension() throws {
     let engine = InMemoryEngine()
     let window = ShellWindowController(engine: engine, sidebar: StubSidebar.sample())
@@ -546,17 +590,19 @@ final class CommandBarBehaviourTests: XCTestCase {
     XCTAssertEqual(extensions.map(\.title), ["Git Pilot"], "matched on the description; the disabled one is left out")
     XCTAssertEqual(extensions.first?.secondaryText, "Pull request shortcuts")
 
+    // A change of the installed list (a new description) and a change of the actions each take effect on the next
+    // keystroke; an action whose extension the list does not know yet is kept, with no description.
     engine.setInstalledExtensions([
-      InstalledExtensionInfo(id: "pilot", name: "Git Pilot", version: "1", description: "Pull request shortcuts"),
-      InstalledExtensionInfo(id: "new", name: "Shortcuts Plus", version: "1", description: "More"),
+      InstalledExtensionInfo(id: "pilot", name: "Git Pilot", version: "1", description: "Pull request shortcuts, v2"),
     ])
     bar.setQueryForTesting("shortcut")
-    XCTAssertEqual(bar.results.filter { $0.group == .extensions }.count, 1, "kept between keystrokes")
+    XCTAssertEqual(bar.results.first { $0.group == .extensions }?.secondaryText, "Pull request shortcuts, v2")
     engine.setExtensionActions([ExtensionAction(id: "pilot", name: "Git Pilot"),
                                 ExtensionAction(id: "new", name: "Shortcuts Plus")], in: engineWindow)
     bar.setQueryForTesting("shortcuts")
     XCTAssertEqual(bar.results.filter { $0.group == .extensions }.map(\.title), ["Shortcuts Plus", "Git Pilot"],
-                   "a change of the actions takes the new list; a name match ranks first")
+                   "a name match ranks first")
+    XCTAssertEqual(bar.results.first { $0.group == .extensions }?.secondaryText, "")
 
     let row = try XCTUnwrap(bar.results.firstIndex { $0.kind == .extensionAction("pilot") })
     bar.barView.table.selectRowIndexes([row], byExtendingSelection: false)

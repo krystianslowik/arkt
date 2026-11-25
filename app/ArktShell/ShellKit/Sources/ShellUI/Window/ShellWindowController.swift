@@ -49,6 +49,8 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   /// The command bar's extensions, kept between keystrokes so a keystroke never asks the engine; dropped when the
   /// window's extension actions change (`refreshExtensions`).
   var commandBarExtensionsCache: [CommandBarResults.Extension]?
+  /// Drops `commandBarExtensionsCache` when the profile's installed extensions change (a description, an enable).
+  var commandBarExtensionsObservation: EngineObservation?
   /// The focused tab: the shown plain tab, or the focused pane of a shown split (decision 7). The engine's active tab
   /// of this window follows it (week-3 Decision 6: extension `active` flags stay true).
   public internal(set) var currentTab: TabID? {
@@ -788,11 +790,14 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   private func commandBarExtensions() -> [CommandBarResults.Extension] {
     if let commandBarExtensionsCache { return commandBarExtensionsCache }
     guard let extensions = engine as? any EngineExtensions, let engineWindow else { return [] }
-    var descriptions: [String: String] = [:]
-    for info in extensions.installedExtensions where info.isEnabled { descriptions[info.id] = info.description }
+    var installed: [String: InstalledExtensionInfo] = [:]
+    for info in extensions.installedExtensions { installed[info.id] = info }
     let listed = extensions.extensionActions(in: engineWindow).compactMap { action -> CommandBarResults.Extension? in
-      guard action.isEnabled, let description = descriptions[action.extensionID] else { return nil }
-      return CommandBarResults.Extension(id: action.id, name: action.name, description: description,
+      // An extension turned off is left out; one the profile list does not know yet keeps its action, with no
+      // description.
+      guard action.isEnabled, installed[action.extensionID]?.isEnabled ?? true else { return nil }
+      return CommandBarResults.Extension(id: action.id, name: action.name,
+                                         description: installed[action.extensionID]?.description ?? "",
                                          iconPNG: action.iconPNG)
     }
     commandBarExtensionsCache = listed
@@ -1096,6 +1101,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     statusPill.closeAll()
     peek.invalidate()
     commandBar.invalidate()
+    commandBarExtensionsObservation = nil
     rootView.sidebarOverlay.invalidate()
     pager.stopInteraction()        // a closed window's views keep their display links
     onboarding?.windowVisibilityChanged(false)   // a first run closed mid-flow stops its stage's frames

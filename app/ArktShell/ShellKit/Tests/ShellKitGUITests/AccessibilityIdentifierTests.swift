@@ -391,7 +391,7 @@ final class AccessibilityIdentifierTests: XCTestCase {
     XCTAssertEqual(rows.count, bar.results.count)
     XCTAssertGreaterThanOrEqual(rows.count, 2)
     for row in rows { XCTAssertEqual(row.accessibilityRole(), .row) }
-    let expectedLabels = bar.results.enumerated().map { $0.element.accessibilityLabel(position: $0.offset + 1, of: bar.results.count) }
+    let expectedLabels = bar.results.enumerated().map { $0.element.commandBarLabel(position: $0.offset + 1, of: bar.results.count) }
     XCTAssertEqual(rows.map { $0.accessibilityLabel() }, expectedLabels, "title, host, kind, k of n (#371)")
     XCTAssertEqual(rows.first?.accessibilityValue() as? String, "Open")
     XCTAssertEqual(rows.last?.accessibilityValue() as? String, "Search")

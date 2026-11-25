@@ -7,6 +7,9 @@ import AppKit
 @MainActor
 final class CommandBarTableView: NSTableView {
   let axProxyRows: AXProxyRows
+  /// The row under a mouse-down: it takes the full fill while the button is down (README, Motion: feedback on
+  /// pointer-down, action on release).
+  var onMouseDownRow: ((Int) -> Void)?
 
   override init(frame frameRect: NSRect) {
     axProxyRows = AXProxyRows(identifier: AXID.CommandBar.results)
@@ -34,6 +37,12 @@ final class CommandBarTableView: NSTableView {
   /// The rows' contents changed, by a reload or in place: accessibility follows.
   func rowsDidChange() {
     axProxyRows.invalidate()
+  }
+
+  override func mouseDown(with event: NSEvent) {
+    let row = row(at: convert(event.locationInWindow, from: nil))
+    if row >= 0 { onMouseDownRow?(row) }
+    super.mouseDown(with: event)
   }
 
   override func selectRowIndexes(_ indexes: IndexSet, byExtendingSelection extend: Bool) {

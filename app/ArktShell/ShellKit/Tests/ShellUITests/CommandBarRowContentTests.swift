@@ -46,16 +46,16 @@ struct CommandBarRowContentTests {
 
   @Test func `the accessibility label reads title, secondary text, kind and position`() {
     #expect(result(.switchTo(UUID()), title: "Pull requests", subtitle: "github.com/acme")
-      .accessibilityLabel(position: 1, of: 5) == "Pull requests, github.com/acme, open tab, 1 of 5")
-    #expect(result(.suggestion(url), title: "git rebase").accessibilityLabel(position: 2, of: 5)
+      .commandBarLabel(position: 1, of: 5) == "Pull requests, github.com/acme, open tab, 1 of 5")
+    #expect(result(.suggestion(url), title: "git rebase").commandBarLabel(position: 2, of: 5)
       == "git rebase, search suggestion, 2 of 5", "no secondary text, no empty comma")
-    #expect(result(.folder(UUID()), title: "Reading", subtitle: "6 tabs").accessibilityLabel(position: 3, of: 5)
+    #expect(result(.folder(UUID()), title: "Reading", subtitle: "6 tabs").commandBarLabel(position: 3, of: 5)
       == "Reading, 6 tabs, folder, 3 of 5")
-    #expect(result(.extensionAction("x"), title: "Pilot", subtitle: "Shortcuts").accessibilityLabel(position: 4, of: 5)
+    #expect(result(.extensionAction("x"), title: "Pilot", subtitle: "Shortcuts").commandBarLabel(position: 4, of: 5)
       == "Pilot, Shortcuts, extension, 4 of 5")
-    #expect(result(.pasteAndGo(url), title: "Paste and Go", subtitle: "arkt.dev").accessibilityLabel(position: 1, of: 1)
+    #expect(result(.pasteAndGo(url), title: "Paste and Go", subtitle: "arkt.dev").commandBarLabel(position: 1, of: 1)
       == "Paste and Go, arkt.dev, paste and go, 1 of 1")
-    #expect(result(.history(url), title: "Inbox", subtitle: "mail.example").accessibilityLabel(position: 2, of: 2)
+    #expect(result(.history(url), title: "Inbox", subtitle: "mail.example").commandBarLabel(position: 2, of: 2)
       == "Inbox, mail.example, history, 2 of 2")
   }
 
@@ -63,7 +63,7 @@ struct CommandBarRowContentTests {
     let kinds: [CommandBarResults.Kind] = [.open(url), .switchTo(UUID()), .search(url), .suggestion(url),
                                            .pasteAndGo(url), .history(url), .folder(UUID()), .extensionAction("x")]
     for kind in kinds {
-      let label = result(kind, title: "t").accessibilityLabel(position: 1, of: 1)
+      let label = result(kind, title: "t").commandBarLabel(position: 1, of: 1)
       #expect(!label.localizedCaseInsensitiveContains("arc "), "\(label)")
     }
   }
@@ -75,10 +75,22 @@ struct CommandBarRowContentTests {
     #expect(CommandBarTitleMatch.displayURL("example.com") == "example.com")
   }
 
+  /// Each word of the query is bolded where it starts a word, as the matching finds it.
+  @Test func `each query word is bolded at its word start`() {
+    let title = "Git - Branches in a Nutshell"
+    let ranges = CommandBarTitleMatch.wordStartRanges(of: "nut git", in: title).map { String(title[$0]) }
+    #expect(ranges == ["Nut", "Git"])
+    #expect(CommandBarTitleMatch.wordStartRanges(of: "ranch", in: title).isEmpty, "not inside a word")
+    #expect(CommandBarTitleMatch.wordStartRanges(of: "  ", in: title).isEmpty)
+    let cjk = "\u{30EC}\u{30A4}\u{30A2}\u{30A6}\u{30C8}\u{30A8}\u{30F3}\u{30B8}\u{30F3}"
+    #expect(CommandBarTitleMatch.wordStartRanges(of: "\u{30A8}\u{30F3}\u{30B8}\u{30F3}", in: cjk).count == 1)
+  }
+
   @Test func `a title bolds the part that matches the query`() {
-    #expect(CommandBarTitleMatch.range(of: "git", in: "Git - Book") == "Git - Book".startIndex..<"Git - Book".index("Git - Book".startIndex, offsetBy: 3))
-    #expect(CommandBarTitleMatch.range(of: "", in: "Git") == nil)
-    #expect(CommandBarTitleMatch.range(of: "zzz", in: "Git") == nil)
-    #expect(CommandBarTitleMatch.range(of: "BOOK", in: "Git - Book") != nil, "case insensitive")
+    let title = "Git - Book"
+    #expect(CommandBarTitleMatch.wordStartRanges(of: "git", in: title) == [title.startIndex..<title.index(title.startIndex, offsetBy: 3)])
+    #expect(CommandBarTitleMatch.wordStartRanges(of: "", in: "Git").isEmpty)
+    #expect(CommandBarTitleMatch.wordStartRanges(of: "zzz", in: "Git").isEmpty)
+    #expect(CommandBarTitleMatch.wordStartRanges(of: "BOOK", in: title).count == 1, "case insensitive")
   }
 }

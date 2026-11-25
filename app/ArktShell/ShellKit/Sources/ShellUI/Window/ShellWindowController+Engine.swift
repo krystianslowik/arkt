@@ -345,6 +345,9 @@ extension ShellWindowController {
     (window as? ShellWindow)?.keyEquivalentHandler = { [weak self] event in self?.takeCycleKey(event) ?? false }
     extensionsButton = button
     extensionsPanel = panel
+    commandBarExtensionsObservation = extensions.observeExtensions { [weak self] event in
+      if case .installedExtensionsChanged = event { self?.commandBarExtensionsCache = nil }
+    }
     sidebarController.view.extensionsButton = button
   }
 

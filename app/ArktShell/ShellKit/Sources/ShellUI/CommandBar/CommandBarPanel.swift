@@ -1,5 +1,24 @@
 import AppKit
 
+/// The command bar field's editor: its caret is 2 pt wide (README, Look), drawn in the mustard the controller sets.
+@MainActor
+final class CommandBarFieldEditor: NSTextView {
+  static let caretWidth: CGFloat = 2
+
+  override func drawInsertionPoint(in rect: NSRect, color: NSColor, turnedOn flag: Bool) {
+    var caret = rect
+    caret.size.width = Self.caretWidth
+    super.drawInsertionPoint(in: caret, color: color, turnedOn: flag)
+  }
+
+  /// The caret's blink redraws its old rectangle; widen it so the second point is erased too.
+  override func setNeedsDisplay(_ rect: NSRect, avoidAdditionalLayout flag: Bool) {
+    var dirty = rect
+    dirty.size.width += Self.caretWidth - 1
+    super.setNeedsDisplay(dirty, avoidAdditionalLayout: flag)
+  }
+}
+
 /// Borderless floating panel hosting the command bar. Created once and reused (pre-warmed).
 @MainActor
 final class CommandBarPanel: NSPanel {
@@ -58,6 +77,17 @@ final class CommandBarPanel: NSPanel {
   override func sendEvent(_ event: NSEvent) {
     if event.type == .keyDown, let keyDownHandler, keyDownHandler(event) { return }
     super.sendEvent(event)
+  }
+
+  /// The bar's field editor, made once: it draws the 2 pt caret (README, Look).
+  private lazy var commandFieldEditor: CommandBarFieldEditor = {
+    let editor = CommandBarFieldEditor(frame: .zero)
+    editor.isFieldEditor = true
+    return editor
+  }()
+
+  override func fieldEditor(_ createFlag: Bool, for object: Any?) -> NSText? {
+    object is NSTextField ? commandFieldEditor : super.fieldEditor(createFlag, for: object)
   }
 
   override var canBecomeKey: Bool { isPresented }

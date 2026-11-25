@@ -165,9 +165,9 @@ Focus never leaves the field. Typing always edits the text; the list is driven b
 | Cmd-L | Open on the current tab. The field holds the current address, fully selected, and the list shows the empty state; typing replaces it. Return opens the result in the current tab. |
 | Up / Down | Move the selection one row, across groups. Wraps from the last row to the first and back on a fresh press; held-key repeat stops at the ends. Ctrl-P and Ctrl-N do the same. |
 | Tab / Shift-Tab | Jump to the first row of the next or previous group; the literal row counts as a group of its own. Stops at the last and first group (no wrap). Tab does nothing else (site search is gone). |
-| Return | Run the selected row: Switch to Tab, Show Folder, Open (history), Open Extension, Go, Search, or Paste and Go. With the Cmd-L address untouched, Return reloads the page (KB-004, unchanged). |
+| Return | Run the selected row: Switch to Tab, Show Folder, Open (history), Open Extension, Go, Search, or Paste and Go. With the Cmd-L address untouched and the selection not moved since the bar opened, Return reloads the page (KB-004) and the first row shows "Reload" with the key cap; any move, Tab jump, hover that moves the selection, or edit makes Return run the selected row. |
 | Opt-Return | Run the selected row in a new tab (KB-085, unchanged). |
-| Cmd-Return | Search the web for exactly the typed text, whatever is selected, where Return would open it (the new tab, the current tab, the new split pane). The escape hatch when a tab or history row outranks what you meant. |
+| Cmd-Return | Search the web for exactly the typed text, whatever is selected, where Return would open it (the new tab, the current tab, the new split pane). Cmd-L's untouched address is not typed text: nothing happens (a beep). The escape hatch when a tab or history row outranks what you meant. |
 | Cmd-Shift-V | Paste and Go from any state (unchanged from #322). |
 | Cmd-Opt-Delete | Remove the selected history row from history (unchanged from #322). Other rows are not removable, and rows have no hover remove button. |
 | Esc | Clear the text if there is any, otherwise close. With the Cmd-L address untouched, Esc closes. |
@@ -245,6 +245,7 @@ Settled while building, where this document was silent:
 - **Removed with the hybrid.** The search-suggestion privacy notice (BH-113) and its dismissed setting, decided in the
   build for the maintainer to confirm: nothing is sent to a search engine yet. The notice returns with a real
   suggestion fetcher.
+- **Right to left.** The row layout does not mirror yet (#1001); CJK truncates correctly.
 - **History times.** The shell's relative time words, as elsewhere: "Now", "12 min", "3 h", "Yesterday", "3 d". The
   prototype's weekday names ("Monday") are not used.
 

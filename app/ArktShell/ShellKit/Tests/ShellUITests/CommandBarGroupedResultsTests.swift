@@ -249,7 +249,7 @@ struct CommandBarGroupedResultsTests {
     let rows = CommandBarResults.grouped(query: "git-scm.com/book", input: input {
       $0.openTabs = [tab("Git - Book", "https://git-scm.com/book/en/v2")]
     })
-    #expect(rows.map { $0.accessibilityLabel(position: 1, of: 3) } == [
+    #expect(rows.map { $0.commandBarLabel(position: 1, of: 3) } == [
       "git-scm.com/book, go to address, 1 of 3",
       "Git - Book, git-scm.com/book/en/v2, open tab, 1 of 3",
       "Search for \u{201C}git-scm.com/book\u{201D}, search for what you typed, 1 of 3",
