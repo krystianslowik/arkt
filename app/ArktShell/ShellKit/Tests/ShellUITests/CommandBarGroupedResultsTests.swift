@@ -116,10 +116,12 @@ struct CommandBarGroupedResultsTests {
     #expect(groups(rows) == [nil, .tabs, .history])
   }
 
-  /// No clipboard address: no Paste and Go row.
-  @Test func noClipboardAddressNoPasteRow() {
+  /// No clipboard address: no Paste and Go row. No history (the app has no store yet, #631): no History header and no
+  /// gap, the Tabs group is the whole list.
+  @Test func noClipboardAddressNoPasteRowAndNoHistoryNoHeader() {
     let rows = CommandBarResults.grouped(query: "  ", input: input { $0.openTabs = [tab("A", "https://a.example")] })
     #expect(rows.map(\.kind.name) == ["switch"])
+    #expect(CommandBarResults.groupHeaders(of: rows) == [0: "Tabs"])
   }
 
   // MARK: Tabs

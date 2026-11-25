@@ -240,9 +240,10 @@ Settled while building, where this document was silent:
 - **"<n> tabs".** Every tab inside the folder, nested folders included; a Split View counts as one tab, as its row does.
 - **History and suggestions.** There is no history store and no suggestion fetcher yet. Both groups take a provider
   (history in frecency order; suggestions asynchronous, dropped when the text changed or the bar hid, #884); the app
-  passes none today, so History and the suggestion rows stay empty until those land.
-- **Removed with the hybrid.** The search-suggestion privacy notice (BH-113) and its dismissed setting: the layout above
-  has no place for it and nothing is sent to an engine yet. It comes back with the suggestion fetcher if it is needed.
+  passes none today, so History and the suggestion rows stay empty until those land (history store and query: #631).
+  An empty group shows no header and leaves no gap.
+- **Removed with the hybrid.** The search-suggestion privacy notice (BH-113) and its dismissed setting (maintainer's
+  decision on #993): nothing is sent to a search engine yet. The notice returns with a real suggestion fetcher.
 
 ## Decisions
 

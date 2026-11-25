@@ -1,6 +1,6 @@
 import Foundation
 
-/// The time on a recent tab's row: "Now", "12 min", "3 h", "Yesterday", "3 d".
+/// The time on a history row: "Now", "12 min", "3 h", "Yesterday", "3 d".
 public enum CommandBarRelativeTime {
   public static func text(from date: Date, to now: Date, calendar: Calendar = .current) -> String {
     let seconds = now.timeIntervalSince(date)
@@ -11,14 +11,5 @@ public enum CommandBarRelativeTime {
     if calendar.isDate(date, inSameDayAs: calendar.date(byAdding: .day, value: -1, to: now) ?? now) { return "Yesterday" }
     let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: date), to: startOfToday).day ?? 0
     return "\(max(days, 2)) d"
-  }
-
-  /// The preview column's time (#372): the row's wording plus " ago", except "Now" and "Yesterday".
-  public static func preview(from date: Date, to now: Date, calendar: Calendar = .current) -> String {
-    let base = text(from: date, to: now, calendar: calendar)
-    switch base {
-    case "Now", "Yesterday": return base
-    default: return base + " ago"
-    }
   }
 }
