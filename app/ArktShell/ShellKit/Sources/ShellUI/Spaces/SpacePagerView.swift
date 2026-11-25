@@ -66,8 +66,12 @@ public final class SpacePagerView: NSView {
   let strip = NSView(frame: .zero)
   /// Tests: force the Reduce Motion path on (true) or off (false) whatever the system setting; nil follows it.
   var reduceMotionForTesting: Bool?
+  /// Tests: the clock a settle starts from, so frames presented by hand (`tick(at:)`) are measured from a time the
+  /// test chose, not from when the machine got to `animate`. nil reads the media clock.
+  var nowForTesting: (@MainActor () -> CFTimeInterval)?
   /// Internal so GUI tests can present settle frames at chosen times (`tick(at:)`) instead of waiting on the display.
-  private(set) lazy var driver = SpringDriver(reduceMotion: { [weak self] in
+  private(set) lazy var driver = SpringDriver(now: { [weak self] in self?.nowForTesting?() ?? CACurrentMediaTime() },
+                                              reduceMotion: { [weak self] in
     self?.reduceMotionForTesting ?? NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
   })
   private var pointerArea: NSTrackingArea?
@@ -78,6 +82,8 @@ public final class SpacePagerView: NSView {
   private var dragBase = 0
   private var translation: CGFloat = 0
   private var tracker = VelocityTracker()
+  /// The one axis lock for every trackpad gesture in the sidebar: the pager's, its chrome's and each page's scroll
+  /// view's (`routeGestureEvent`, #986).
   private var lock = ScrollAxisLock<NSEvent>()
   private var laidOutWidth: CGFloat = 0
   /// How many presented frames of a motion a pointer move waits between two strip syncs (#295): at 120 Hz this is
@@ -439,10 +445,40 @@ public final class SpacePagerView: NSView {
     if let stats = pacer.end(session: pacerSession) { lastPacing = stats }
   }
 
+  /// Window resign-key and app deactivation observers, while the pager is in a window.
+  private var focusObservers: [NSObjectProtocol] = []
+
+  isolated deinit {
+    for observer in focusObservers { NotificationCenter.default.removeObserver(observer) }
+  }
+
   /// Leaving the window ends any interaction (the pacer's display link would otherwise keep ticking).
   public override func viewDidMoveToWindow() {
     super.viewDidMoveToWindow()
-    if window == nil { stopInteraction() }
+    for observer in focusObservers { NotificationCenter.default.removeObserver(observer) }
+    focusObservers.removeAll()
+    guard let window else { return stopInteraction() }
+    // Focus moving away can swallow the end of a gesture: the strip must not wait for fingers that are gone.
+    let center = NotificationCenter.default
+    for (name, object) in [(NSWindow.didResignKeyNotification, window as AnyObject?),
+                           (NSApplication.didResignActiveNotification, nil)] {
+      focusObservers.append(center.addObserver(forName: name, object: object, queue: .main) { [weak self] _ in
+        MainActor.assumeIsolated { self?.gestureLost() }
+      })
+    }
+  }
+
+  /// The gesture under way will not end normally (focus moved away, or a new gesture began before its end arrived):
+  /// a swipe settles on the page nearest the strip, and a frozen settle finishes.
+  func gestureLost() {
+    if isTracking {
+      isTracking = false
+      guard !pages.isEmpty, position.isFinite else { return }
+      let target = min(max(Int(position.rounded()), 0), pages.count - 1)
+      settle(to: target, velocity: 0)
+    } else if frozenTarget != nil {
+      gestureEndedWithoutPaging()
+    }
   }
 
   /// Ends any swipe, settle and pacing where they are (window closing; the views stay in the window).
@@ -530,8 +566,10 @@ public final class SpacePagerView: NSView {
   /// Target of a settle frozen by fingers touching down; nil when nothing is frozen.
   private(set) var frozenTarget: Int?
 
-  /// Fingers touched the trackpad: freeze a running settle where it is, so a swipe can catch it.
+  /// Fingers touched the trackpad: freeze a running settle where it is, so a swipe can catch it. A swipe still
+  /// tracking here lost its end (#986): it settles on the nearest page first, and the new touch freezes that settle.
   func gestureMayBegin() {
+    if isTracking { gestureLost() }
     guard !isTracking, driver.isRunning else { return }
     let target = targetIndex
     stopSettle()
@@ -551,16 +589,53 @@ public final class SpacePagerView: NSView {
   }
 
   public override func scrollWheel(with event: NSEvent) {
-    if event.momentumPhase != [] { return }                // the spring owns deceleration
-    guard event.phase != [] else { super.scrollWheel(with: event); return }
+    guard event.phase != [] || event.momentumPhase != [] else { super.scrollWheel(with: event); return }
+    routeGestureEvent(event, from: nil)                    // vertical over the title: no outline to scroll
+  }
+
+  /// The scroll view the current gesture began on (nil over the pager's chrome). A vertical gesture scrolls this
+  /// outline to its end, momentum included, wherever its later events land: resuming a frozen settle moves the
+  /// strip under the fingers.
+  private weak var gestureOutline: SidebarScrollView?
+  /// The momentum arriving now is the current gesture's own: set by its `ended`, cleared by the next gesture's start
+  /// and by the momentum's end. Momentum without it (a fling that began outside the sidebar) scrolls nothing.
+  private var momentumFollowsGesture = false
+
+  /// Takes one event of a trackpad gesture (a phased or momentum event) that reached the pager (`from` nil) or a
+  /// page's scroll view. Horizontal gestures page the Spaces; vertical ones scroll the outline they began on.
+  ///
+  /// The axis is decided once per gesture, here, for every view in the sidebar (#986). AppKit sends each event of a
+  /// gesture to the view under the pointer, not to the view the gesture began on, and a swipe moves the pages under a
+  /// still pointer: the next Space's page is parked in the visible slot, and syncs and layout passes move the strip
+  /// frame, so the rest of the swipe, its end included, lands on another page's scroll view. A lock per scroll view
+  /// held that page's last decision (vertical, if its outline was scrolled), sent the rest of the swipe to the outline
+  /// and never ended the swipe: the strip stayed between two pages.
+  func routeGestureEvent(_ event: NSEvent, from outline: SidebarScrollView?) {
+    // Momentum of a swipe belongs to the spring, which owns deceleration; momentum of a vertical scroll to the outline.
+    if event.momentumPhase != [] {
+      guard momentumFollowsGesture else { return }
+      if lock.axis == .vertical { gestureOutline?.scrollOutline(with: event) }
+      if event.momentumPhase.contains(.ended) || event.momentumPhase.contains(.cancelled) {
+        momentumFollowsGesture = false
+      }
+      return
+    }
     let starts = event.phase.contains(.began) || event.phase.contains(.mayBegin)
     let ends = event.phase.contains(.ended) || event.phase.contains(.cancelled)
-    if starts { gestureMayBegin() }
+    momentumFollowsGesture = event.phase.contains(.ended)
+    if starts {
+      gestureOutline = outline
+      gestureMayBegin()                                    // freeze a running settle
+    }
     let ready = lock.feed(event, dx: event.scrollingDeltaX, dy: event.scrollingDeltaY, starts: starts, ends: ends)
     switch lock.axis {
-    case .horizontal: for e in ready { handleHorizontal(e) }
-    case .vertical: if !ready.isEmpty { gestureEndedWithoutPaging() }   // vertical over the title: no paging
-    case .undecided: break
+    case .horizontal:
+      for e in ready { handleHorizontal(e) }
+    case .vertical:
+      if !ready.isEmpty { gestureEndedWithoutPaging() }
+      for e in ready { gestureOutline?.scrollOutline(with: e) }
+    case .undecided:
+      break
     }
   }
 
