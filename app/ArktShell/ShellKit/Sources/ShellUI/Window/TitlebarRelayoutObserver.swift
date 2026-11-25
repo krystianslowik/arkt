@@ -11,7 +11,12 @@ import AppKit
 @MainActor
 final class TitlebarRelayoutObserver: NSObject {
   private let onRelayout: @MainActor () -> Void
-  private var watched: [ObjectIdentifier] = []
+  // The views watched now, held weakly and compared by identity: AppKit may replace them (full screen).
+  private weak var container: NSView?
+  private weak var host: NSView?
+  private weak var close: NSView?
+  private weak var miniaturize: NSView?
+  private weak var zoom: NSView?
   private var isPlacing = false
 
   /// `onRelayout` is called for each frame change of the titlebar container, the buttons' host or a button that the
@@ -30,24 +35,23 @@ final class TitlebarRelayoutObserver: NSObject {
     watch(window)
   }
 
+  /// Runs on every placement (each overlay frame too), so the common case, the same views as before, allocates nothing.
   private func watch(_ window: NSWindow) {
     guard let close = window.standardWindowButton(.closeButton),
           let host = close.superview,                        // NSTitlebarView
           let container = host.superview else { return }     // NSTitlebarContainerView
-    let buttons = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].compactMap {
-      window.standardWindowButton($0)
-    }
-    let views = [container, host] + buttons
-    let ids = views.map(ObjectIdentifier.init)
-    guard ids != watched else { return }
+    let miniaturize = window.standardWindowButton(.miniaturizeButton)
+    let zoom = window.standardWindowButton(.zoomButton)
+    if container === self.container, host === self.host, close === self.close, miniaturize === self.miniaturize,
+       zoom === self.zoom { return }
     let center = NotificationCenter.default
     center.removeObserver(self, name: NSView.frameDidChangeNotification, object: nil)
-    for view in views {
+    for view in [container, host, close, miniaturize, zoom].compactMap({ $0 }) {
       view.postsFrameChangedNotifications = true
       center.addObserver(self, selector: #selector(titlebarFrameDidChange(_:)),
                          name: NSView.frameDidChangeNotification, object: view)
     }
-    watched = ids
+    (self.container, self.host, self.close, self.miniaturize, self.zoom) = (container, host, close, miniaturize, zoom)
   }
 
   @objc private func titlebarFrameDidChange(_ notification: Notification) {
