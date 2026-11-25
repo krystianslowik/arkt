@@ -46,6 +46,9 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   private var openTabsCache: (spaces: [SpaceID], tabs: [CommandBarResults.OpenTab])?
   /// The command bar's folders, dropped with `openTabsCache`.
   private var commandBarFoldersCache: [CommandBarResults.Folder]?
+  /// The command bar's extensions, kept between keystrokes so a keystroke never asks the engine; dropped when the
+  /// window's extension actions change (`refreshExtensions`).
+  var commandBarExtensionsCache: [CommandBarResults.Extension]?
   /// The focused tab: the shown plain tab, or the focused pane of a shown split (decision 7). The engine's active tab
   /// of this window follows it (week-3 Decision 6: extension `active` flags stay true).
   public internal(set) var currentTab: TabID? {
@@ -783,14 +786,17 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
 
   /// BH-104: the window's enabled extension actions, with each extension's short description, for the Extensions group.
   private func commandBarExtensions() -> [CommandBarResults.Extension] {
+    if let commandBarExtensionsCache { return commandBarExtensionsCache }
     guard let extensions = engine as? any EngineExtensions, let engineWindow else { return [] }
     var descriptions: [String: String] = [:]
     for info in extensions.installedExtensions where info.isEnabled { descriptions[info.id] = info.description }
-    return extensions.extensionActions(in: engineWindow).compactMap { action in
+    let listed = extensions.extensionActions(in: engineWindow).compactMap { action -> CommandBarResults.Extension? in
       guard action.isEnabled, let description = descriptions[action.extensionID] else { return nil }
       return CommandBarResults.Extension(id: action.id, name: action.name, description: description,
                                          iconPNG: action.iconPNG)
     }
+    commandBarExtensionsCache = listed
+    return listed
   }
 
   /// Show Folder (BH-104): the folder's Space comes forward, the sidebar shows, the folder and the folders around it

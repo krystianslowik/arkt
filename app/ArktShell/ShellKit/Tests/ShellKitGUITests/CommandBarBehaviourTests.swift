@@ -1,5 +1,6 @@
 import AppKit
 import XCTest
+import EngineAPI
 import EngineAPITestSupport
 @_spi(Smoke) @testable import ShellUI
 
@@ -324,6 +325,19 @@ final class CommandBarBehaviourTests: XCTestCase {
     XCTAssertEqual(reads, 2, "and a fresh one for the next show")
   }
 
+  /// Reduce Transparency: the blur goes and the panel fills with `commandBarSurfaceOpaque`; otherwise the glass tint.
+  func testReduceTransparencyFillsTheOpaqueSurface() throws {
+    var reduced = false
+    bar.barView.reduceTransparency = { reduced }
+    bar.barView.apply(flavor: .light)
+    XCTAssertFalse(bar.barView.effectView.isHidden)
+    XCTAssertEqual(bar.barView.surfaceTint.layer?.backgroundColor, ShellTokens.commandBarSurface.light.cgColor)
+    reduced = true
+    bar.barView.apply(flavor: .dark)
+    XCTAssertTrue(bar.barView.effectView.isHidden)
+    XCTAssertEqual(bar.barView.surfaceTint.layer?.backgroundColor, ShellTokens.commandBarSurfaceOpaque.dark.cgColor)
+  }
+
   // MARK: Motion
 
   /// Open and close do not animate: the bar and the scrim are whole on the first frame and gone on the same frame.
@@ -509,5 +523,45 @@ final class CommandBarBehaviourTests: XCTestCase {
     let rows = shell.commandBar.results.filter { $0.group == .tabs }
     XCTAssertEqual(rows.prefix(2).map(\.kind), [.switchTo(second), .switchTo(elsewhere)])
     XCTAssertFalse(rows.contains { $0.kind == .switchTo(third) }, "the tab on screen is not offered")
+  }
+
+  /// The window lists its enabled extension actions with each extension's description, keeps the list between
+  /// keystrokes, takes a new one when the actions change, and Return runs the action as a toolbar click would.
+  func testTheWindowsExtensionsAndOpenExtension() throws {
+    let engine = InMemoryEngine()
+    let window = ShellWindowController(engine: engine, sidebar: StubSidebar.sample())
+    defer { window.close() }
+    window.showWindow(nil)
+    let engineWindow = try XCTUnwrap(window.engineWindow)
+    engine.setInstalledExtensions([
+      InstalledExtensionInfo(id: "pilot", name: "Git Pilot", version: "1", description: "Pull request shortcuts"),
+      InstalledExtensionInfo(id: "off", name: "Git Off", version: "1", description: "Turned off", isEnabled: false),
+    ])
+    engine.setExtensionActions([ExtensionAction(id: "pilot", name: "Git Pilot"),
+                                ExtensionAction(id: "off", name: "Git Off")], in: engineWindow)
+    let bar = window.commandBar
+    bar.toggle(.newTab)
+    bar.setQueryForTesting("shortcuts")
+    let extensions = bar.results.filter { $0.group == .extensions }
+    XCTAssertEqual(extensions.map(\.title), ["Git Pilot"], "matched on the description; the disabled one is left out")
+    XCTAssertEqual(extensions.first?.secondaryText, "Pull request shortcuts")
+
+    engine.setInstalledExtensions([
+      InstalledExtensionInfo(id: "pilot", name: "Git Pilot", version: "1", description: "Pull request shortcuts"),
+      InstalledExtensionInfo(id: "new", name: "Shortcuts Plus", version: "1", description: "More"),
+    ])
+    bar.setQueryForTesting("shortcut")
+    XCTAssertEqual(bar.results.filter { $0.group == .extensions }.count, 1, "kept between keystrokes")
+    engine.setExtensionActions([ExtensionAction(id: "pilot", name: "Git Pilot"),
+                                ExtensionAction(id: "new", name: "Shortcuts Plus")], in: engineWindow)
+    bar.setQueryForTesting("shortcuts")
+    XCTAssertEqual(bar.results.filter { $0.group == .extensions }.map(\.title), ["Shortcuts Plus", "Git Pilot"],
+                   "a change of the actions takes the new list; a name match ranks first")
+
+    let row = try XCTUnwrap(bar.results.firstIndex { $0.kind == .extensionAction("pilot") })
+    bar.barView.table.selectRowIndexes([row], byExtendingSelection: false)
+    bar.commit()
+    XCTAssertFalse(bar.isVisible)
+    XCTAssertEqual(engine.ranExtensionActions.map(\.0), ["pilot"])
   }
 }

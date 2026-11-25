@@ -786,6 +786,29 @@ final class FolderTests: XCTestCase {
     XCTAssertTrue(outline.outlineView.visibleRect.intersects(outline.outlineView.rect(ofRow: innerRow)))
   }
 
+  /// Show Folder on a folder in another Space switches to that Space first, then opens and reveals the folder there.
+  func testShowFolderInAnotherSpaceSwitchesToIt() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
+    let home = try harness.source.addSpace(title: "Home")
+    let recipes = try harness.source.addFolder(title: "Recipes", in: .pinned(home), at: nil)
+    _ = try harness.source.addTab(url: Self.url("r0"), title: "R0", in: .folder(recipes), at: nil)
+    try harness.show(current: world.today[0])
+    let sidebar = harness.controller.sidebarController
+    XCTAssertEqual(sidebar.currentSpace, world.work)
+    let bar = harness.controller.commandBar
+    bar.toggle(.newTab)
+    bar.setQueryForTesting("Recipes")
+    let row = try XCTUnwrap(bar.results.firstIndex { $0.kind == .folder(recipes) })
+    bar.barView.table.selectRowIndexes([row], byExtendingSelection: false)
+    bar.commit()
+    XCTAssertEqual(sidebar.currentSpace, home)
+    let outline = try XCTUnwrap(sidebar.currentPage?.outlineController)
+    XCTAssertTrue(outline.isFolderOpen(recipes))
+    XCTAssertGreaterThanOrEqual(outline.row(for: recipes), 0)
+  }
+
   /// The folders listed are the Pinned section's; the open folder count says what each holds.
   func testTheWindowListsItsPinnedFolders() throws {
     let world = try Self.makeWorld()

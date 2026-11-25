@@ -105,6 +105,8 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   private var cellScale: CGFloat = 0
   /// The query the cells' title emphasis was drawn for.
   private var cellQuery = ""
+  /// Extension icons decoded once, by their PNG data.
+  private var extensionIcons: [Data: NSImage] = [:]
   /// Test seam: stands in for the parent window's backing scale.
   var backingScaleOverride: CGFloat?
   /// The panel sits over the parent window, so it shares the parent's display. Read from the parent: the panel
@@ -683,6 +685,11 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     let result = results[row]
     var favicon: NSImage?
     if case .switchTo(let node) = result.kind { favicon = faviconProvider(node) }
+    if let png = result.iconPNG {
+      if extensionIcons[png] == nil, extensionIcons.count > 64 { extensionIcons.removeAll() }
+      favicon = extensionIcons[png] ?? NSImage(data: png)
+      extensionIcons[png] = favicon
+    }
     cell.configure(result, query: cellQuery, position: row + 1, count: results.count, flavor: flavor,
                    scale: cellScale, groupHeader: groupHeaders[row], isFirstRow: row == 0, favicon: favicon,
                    increasedContrast: appliedIncreaseContrast ?? false)

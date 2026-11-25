@@ -379,6 +379,7 @@ extension ShellWindowController {
 
   /// The window's actions changed, or the engine window came or went: the open panel follows.
   func refreshExtensions() {
+    commandBarExtensionsCache = nil                   // the command bar asks again on its next keystroke
     extensionsPanel?.refresh()
   }
 }

@@ -53,8 +53,8 @@ final class CommandBarView: NSView {
   let table = CommandBarTableView(frame: .zero)
   /// Layouts so far.
   private(set) var layoutCount = 0
-  private let effectView = NSVisualEffectView()
-  private let surfaceTint = NSView()
+  let effectView = NSVisualEffectView()
+  let surfaceTint = NSView()
   private let innerEdge = CALayer()
 
   /// The appearance the bar draws in, taken from the window behind it when it shows (the panel itself has no
@@ -230,7 +230,7 @@ final class CommandBarView: NSView {
 
     magnifier.frame = NSRect(x: g.inputLeading, y: (g.inputHeight - g.magnifierSize) / 2, width: g.magnifierSize,
                              height: g.magnifierSize)
-    let fieldX = magnifier.frame.maxX + g.magnifierGap
+    let fieldX = magnifier.frame.maxX + g.magnifierGap - g.labelInset
     let fieldHeight = ceil(field.intrinsicContentSize.height)
     field.frame = NSRect(x: fieldX, y: ((g.inputHeight - fieldHeight) / 2).rounded(),
                          width: max(0, bounds.width - g.inputLeading - fieldX), height: fieldHeight)

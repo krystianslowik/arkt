@@ -242,8 +242,11 @@ Settled while building, where this document was silent:
   (history in frecency order; suggestions asynchronous, dropped when the text changed or the bar hid, #884); the app
   passes none today, so History and the suggestion rows stay empty until those land (history store and query: #631).
   An empty group shows no header and leaves no gap.
-- **Removed with the hybrid.** The search-suggestion privacy notice (BH-113) and its dismissed setting (maintainer's
-  decision on #993): nothing is sent to a search engine yet. The notice returns with a real suggestion fetcher.
+- **Removed with the hybrid.** The search-suggestion privacy notice (BH-113) and its dismissed setting, decided in the
+  build for the maintainer to confirm: nothing is sent to a search engine yet. The notice returns with a real
+  suggestion fetcher.
+- **History times.** The shell's relative time words, as elsewhere: "Now", "12 min", "3 h", "Yesterday", "3 d". The
+  prototype's weekday names ("Monday") are not used.
 
 ## Decisions
 

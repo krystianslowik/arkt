@@ -36,6 +36,9 @@ public enum CommandBarGeometry {
   public static let keyCapRadius: CGFloat = 5
   /// A secondary text narrower than this is dropped rather than shown as a stub.
   public static let minimumURLWidth: CGFloat = 48
+  /// The inset `NSTextField` draws its text at; labels are placed this much left so their text sits on the spec's
+  /// x positions.
+  public static let labelInset: CGFloat = 2
   /// The rows a Page Up or Page Down moves.
   public static let pageRows = 5
 

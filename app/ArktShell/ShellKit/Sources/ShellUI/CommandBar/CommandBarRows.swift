@@ -142,7 +142,7 @@ final class CommandBarCellView: NSTableCellView {
     return label
   }
 
-  /// `scale`: pixels per point for symbol bitmaps (the bar's backing scale). `favicon`: the tab's cached favicon.
+  /// `scale`: pixels per point for symbol bitmaps (the bar's backing scale). `favicon`: the tab's cached favicon or the extension's icon.
   /// `increasedContrast`: tertiary text (URL, time, header) takes the secondary color.
   func configure(_ result: CommandBarResults.Result, query: String, position: Int, count: Int, flavor: ThemeFlavor,
                  scale: CGFloat, groupHeader: String?, isFirstRow: Bool, favicon: NSImage?,
@@ -179,9 +179,7 @@ final class CommandBarCellView: NSTableCellView {
   private func applyIcon() {
     guard let result else { return }
     if let favicon {
-      icon.image = favicon
-    } else if let png = result.iconPNG, let image = NSImage(data: png) {
-      icon.image = image
+      icon.image = favicon                            // a tab's favicon, or an extension's icon
     } else if case .switchTo = result.kind {
       icon.image = SidebarGlyphs.letter(for: result.title, url: URL(string: "https://" + result.subtitle),
                                         flavor: flavor, size: Self.iconSize, scale: scale)
@@ -242,8 +240,10 @@ final class CommandBarCellView: NSTableCellView {
     let content = NSRect(x: 0, y: headerHeight, width: bounds.width, height: max(0, bounds.height - headerHeight))
     if !header.isHidden {
       let h = ceil(header.intrinsicContentSize.height)
+      // The header's text starts `above` from the top of the row (10, or 4 for the group that starts the list); the
+      // label's line box carries about 2 pt of leading above the glyphs.
       let above: CGFloat = isFirstRow ? 4 : 10
-      header.frame = NSRect(x: g.rowHorizontalPadding, y: above + (headerHeight - above - h) / 2 - 1,
+      header.frame = NSRect(x: g.rowHorizontalPadding - g.labelInset, y: above - 2,
                             width: max(0, bounds.width - 2 * g.rowHorizontalPadding), height: h)
     }
     var trailing = bounds.width - g.rowHorizontalPadding
@@ -262,7 +262,7 @@ final class CommandBarCellView: NSTableCellView {
     let textLimit = trailing - (hasTrailing ? g.slotGap : 0)
     icon.frame = NSRect(x: g.rowHorizontalPadding + (g.slotWidth - g.iconSize) / 2,
                         y: content.minY + (content.height - g.iconSize) / 2, width: g.iconSize, height: g.iconSize)
-    let textX = g.rowHorizontalPadding + g.slotWidth + g.slotGap
+    let textX = g.rowHorizontalPadding + g.slotWidth + g.slotGap - g.labelInset
     // The title is protected: it takes what it needs; the secondary text gets the rest, or nothing under 48 pt.
     let titleWidth = min(ceil(title.fittingSize.width), max(0, textLimit - textX))
     title.frame = centered(x: textX, width: titleWidth, field: title, in: content)

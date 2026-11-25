@@ -50,9 +50,10 @@ final class CommandBarKeyCapView: NSView {
 
   override var intrinsicContentSize: NSSize { size }
 
-  /// At least square.
+  /// Square for one glyph (the Return cap is 20 x 20); wider for a word.
   var size: NSSize {
     let height = CommandBarGeometry.keyCapHeight
+    guard text.count > 1 else { return NSSize(width: height, height: height) }
     return NSSize(width: max(height, ceil(label.fittingSize.width) + 2 * Self.horizontalPadding), height: height)
   }
 
