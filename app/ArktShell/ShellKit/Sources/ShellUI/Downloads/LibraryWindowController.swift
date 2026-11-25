@@ -39,8 +39,13 @@ final class LibraryRailItem: NSButton {
 
   override var isFlipped: Bool { true }
   override var mouseDownCanMoveWindow: Bool { false }
-  override var wantsUpdateLayer: Bool { true }
-  override func updateLayer() { restyle() }
+  // The glyph and name are drawn in `draw(_:)`, so the item must not opt into `updateLayer()`: AppKit then never calls
+  // `draw(_:)` and the rail shows a blank fill (#997). The fill is a layer property set in `restyle()`.
+  override func viewDidChangeEffectiveAppearance() {
+    super.viewDidChangeEffectiveAppearance()
+    restyle()
+    needsDisplay = true
+  }
 
   override func becomeFirstResponder() -> Bool {
     let became = super.becomeFirstResponder()
