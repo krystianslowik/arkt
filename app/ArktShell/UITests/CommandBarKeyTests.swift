@@ -1,6 +1,7 @@
 import XCTest
 
-/// Command bar arrow wrap, Cmd-Enter, Opt-Enter and Switch to Tab (plan U11).
+/// Command bar arrow wrap, Opt-Enter and Switch to Tab (plan U11). Cmd-Return searches the typed text (#993) and is
+/// covered in process (`CommandBarBehaviourTests`), where the search URL is observed without being loaded.
 ///
 /// KB-085 is NEEDS-RUNTIME-CHECK (RT-08). Tests marked [I] assert Arkt's current default. Every Enter in this class
 /// goes through `Shell.commitSelectedRow()`, which refuses a row whose value is `Search`. The typed text is only a
@@ -11,7 +12,8 @@ import XCTest
 /// sidebar row checks are one combined `waitForOutlineRows` per test.
 final class CommandBarKeyTests: ArktUITestCase {
   private static let pages = ["alpha", "beta", "gamma"]
-  /// Query that matches the three open tabs and adds one search row. Never committed.
+  /// Query that matches the open tabs other than the one on screen (gamma, opened last) and adds one search row.
+  /// Never committed.
   private static let query = "Fixture"
 
   /// PARITY(NEEDS-RUNTIME-CHECK RT-08): Down past the last result wraps to the first, Up from the first wraps to the
@@ -40,25 +42,6 @@ final class CommandBarKeyTests: ArktUITestCase {
       return selected?.label == last.label && (selected?.value as? String) == "Search"
     })
     XCTAssertTrue(Shell.isCommandBarOpen(app), "wrapping onto the search row does not commit it")
-  }
-
-  /// #371: Cmd-2 selects the Tabs pill (the three open tabs, no Search row) and Cmd-1 goes back to All. The query stays.
-  /// Not run in CI on a pull request (section 12); the in-process twin is `CommandBarBehaviourTests`.
-  func test_371_commandDigitsPickTheFilterPills() async throws {
-    let (_, app) = try await launchWithThreeTabs()
-    showFixtureResults(in: app)
-
-    Shell.commandBarField(app).typeKey("2", modifierFlags: .command)
-    XCTAssertTrue(Waits.until("only Switch to Tab rows under Tabs; \(Shell.commandBarRowSummary(app))") {
-      let values = Shell.commandBarRowsInOrder(app).map { $0.value as? String }
-      return values.count == 3 && values.allSatisfy { $0 == "Switch to Tab" }
-    })
-    XCTAssertEqual(Shell.commandBarField(app).value as? String, Self.query, "a filter does not change the query")
-
-    Shell.commandBarField(app).typeKey("1", modifierFlags: .command)
-    XCTAssertTrue(Waits.until("All shows the Search row again; \(Shell.commandBarRowSummary(app))") {
-      Shell.commandBarRowsInOrder(app).count == 4
-    })
   }
 
   /// #371: Esc clears the query first and closes the bar on the second press.
@@ -104,30 +87,11 @@ final class CommandBarKeyTests: ArktUITestCase {
     }
   }
 
-  /// PARITY(NEEDS-RUNTIME-CHECK RT-08): Cmd-Enter opens the selected result in a new tab, including from Cmd-L.
-  /// Arkt's [I] default.
-  func test_KB085_cmdEnterOpensURLInNewTab() async throws {
-    let (server, app) = try await launchWithThreeTabs()
-    try openEditedURLInNewTab(modifiers: .command, server: server, app: app)
-  }
-
   /// PARITY(NEEDS-RUNTIME-CHECK RT-08): Opt-Enter opens the selected result in a new tab, including from Cmd-L.
   /// Arkt's [I] default.
   func test_KB085_optEnterOpensURLInNewTab() async throws {
     let (server, app) = try await launchWithThreeTabs()
     try openEditedURLInNewTab(modifiers: .option, server: server, app: app)
-  }
-
-  /// Cmd-Return on the selected open tab opens that page in a new split pane (#372).
-  func test_372_cmdReturnOpensTheSelectedTabInASplit() async throws {
-    let (_, app) = try await launchWithThreeTabs()
-    showFixtureResults(in: app)
-    XCTAssertEqual(Shell.selectedCommandBarRow(app)?.value as? String, "Switch to Tab")
-    XCTAssertTrue(Shell.commitSelectedRow(app, modifiers: .command))
-    XCTAssertTrue(Shell.waitForCommandBar(app, open: false))
-    XCTAssertTrue(waitForOutlineRows("a split row after Cmd-Return") {
-      app.outlineRows.matching(identifier: AXID.Sidebar.rowSplit).firstMatch.exists
-    })
   }
 
   // MARK: - Setup
@@ -155,19 +119,19 @@ final class CommandBarKeyTests: ArktUITestCase {
     }
   }
 
-  /// Cmd-T, type `Fixture`: the open-tab rows (caption "Switch to Tab") plus one search row.
+  /// Cmd-T, type `Fixture`: the open-tab rows (caption "Switch to Tab") without the tab on screen, plus one search row.
   private func showFixtureResults(in app: XCUIApplication) {
     XCTAssertTrue(Shell.openCommandBar(app, key: "t"))
     Shell.commandBarField(app).typeText(Self.query)
-    XCTAssertTrue(Waits.until("three Switch to Tab rows and one Search row; \(Shell.commandBarRowSummary(app))") {
+    XCTAssertTrue(Waits.until("two Switch to Tab rows and one Search row; \(Shell.commandBarRowSummary(app))") {
       let values = Shell.commandBarRowsInOrder(app).map { $0.value as? String }
-      return values.filter { $0 == "Switch to Tab" }.count == 3 && values.last == "Search"
+      return values.filter { $0 == "Switch to Tab" }.count == Self.pages.count - 1 && values.last == "Search"
     })
   }
 
   private func orderedResults(in app: XCUIApplication) throws -> [XCUIElement] {
     let ordered = Shell.commandBarRowsInOrder(app)
-    XCTAssertEqual(ordered.count, 4, Shell.commandBarRowSummary(app))
+    XCTAssertEqual(ordered.count, Self.pages.count, Shell.commandBarRowSummary(app))
     return ordered
   }
 
@@ -187,7 +151,7 @@ final class CommandBarKeyTests: ArktUITestCase {
   }
 
   /// With the Toolbar on, from gamma: Cmd-L and Return navigate gamma in place to epsilon, so that tab has Back
-  /// history. Cmd-L again (prefilled with epsilon), a new address, then Cmd-Return or Opt-Return. A new tab shows
+  /// history. Cmd-L again (prefilled with epsilon), a new address, then Opt-Return. A new tab shows
   /// delta with Back disabled, where in-place navigation would have left Back enabled; switching back to the
   /// epsilon tab finds its Back history intact and loads nothing again. The sidebar rows are one combined
   /// check at the end.

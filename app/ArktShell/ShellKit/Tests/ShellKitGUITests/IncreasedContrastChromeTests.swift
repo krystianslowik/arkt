@@ -131,16 +131,26 @@ final class IncreasedContrastChromeTests: XCTestCase {
 
   // MARK: Overlays
 
-  func testTheCommandBarSelectionTradesItsHairlineForTheEdge() throws {
-    let indicator = CommandBarSelectionIndicator(frame: NSRect(x: 0, y: 0, width: 300, height: 40))
-    indicator.increaseContrast = { [unowned self] in increased }
-    indicator.flavorForColors = .light
-    let fill = try XCTUnwrap(indicator.layer?.sublayers?.first)
-    XCTAssertEqual(fill.borderWidth, 0.5)
-    XCTAssertEqual(fill.borderColor, ShellTokens.commandBarDivider.light.cgColor)
-    setIncreased(true, redrawing: indicator)
-    assertEdge(fill, .light)
-    XCTAssertEqual(fill.backgroundColor, ShellTokens.commandBarSelectedRow.light.cgColor)
+  /// The command bar (design/command-bar/README.md, Motion and accessibility): the panel trades its 0.5 pt edge for a
+  /// 1 pt `increasedContrastEdge` drawn as a layer border, so nothing changes size, and the placeholder (tertiary text)
+  /// takes the secondary color. The bar reads the setting on every show.
+  func testTheCommandBarPanelGainsTheEdgeAndLiftsTertiaryText() throws {
+    let bar = CommandBarView(frame: NSRect(x: 0, y: 0, width: 600, height: CommandBarGeometry.inputHeight))
+    bar.increaseContrast = { [unowned self] in increased }
+    host(bar, size: bar.frame.size)
+    bar.apply(flavor: .light)
+    let layer = try XCTUnwrap(bar.layer)
+    XCTAssertEqual(layer.borderWidth, 0.5)
+    XCTAssertEqual(layer.borderColor, ShellTokens.commandBarBorder.light.cgColor)
+    func placeholderColor() -> NSColor? {
+      bar.field.placeholderAttributedString?.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor
+    }
+    XCTAssertEqual(placeholderColor(), ShellTokens.commandBarTertiaryText.light.nsColor())
+    increased = true
+    bar.apply(flavor: .light)
+    assertEdge(layer, .light)
+    XCTAssertEqual(bar.frame.size, NSSize(width: 600, height: CommandBarGeometry.inputHeight), "nothing changes size")
+    XCTAssertEqual(placeholderColor(), ShellTokens.commandBarSecondaryText.light.nsColor())
   }
 
   func testTheTabSwitcherHighlightTakesTheEdgeColor() {

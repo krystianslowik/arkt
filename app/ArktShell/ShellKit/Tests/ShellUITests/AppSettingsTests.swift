@@ -200,7 +200,6 @@ struct AppSettingsTests {
     settings.libraryLastSection = .history
     settings.crashReportAskAnswered = true
     suite.defaults.set(Data([1, 2, 3]), forKey: "windowSessions")
-    suite.defaults.set(true, forKey: CommandBarSettings.noticeDismissedDefaultsKey)
     suite.defaults.set(false, forKey: CommandBarSettings.searchSuggestionsDefaultsKey)
 
     settings.resetToDefaults()
@@ -210,7 +209,6 @@ struct AppSettingsTests {
     #expect(settings.libraryLastSection == .history)
     #expect(settings.crashReportAskAnswered)
     #expect(suite.defaults.data(forKey: "windowSessions") == Data([1, 2, 3]))
-    #expect(suite.defaults.object(forKey: CommandBarSettings.noticeDismissedDefaultsKey) as? Bool == true)
     #expect(suite.defaults.object(forKey: CommandBarSettings.searchSuggestionsDefaultsKey) as? Bool == false)
   }
 

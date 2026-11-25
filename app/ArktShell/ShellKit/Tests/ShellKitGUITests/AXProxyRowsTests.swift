@@ -219,7 +219,7 @@ final class AXProxyRowsTests: XCTestCase {
 
     let rows = try childRows(element)
     XCTAssertGreaterThanOrEqual(rows.count, 2)
-    let expectedLabels = bar.results.enumerated().map { $0.element.accessibilityLabel(position: $0.offset + 1, of: bar.results.count) }
+    let expectedLabels = bar.results.enumerated().map { $0.element.commandBarLabel(position: $0.offset + 1, of: bar.results.count) }
     XCTAssertEqual(rows.map { $0.accessibilityLabel() }, expectedLabels, "title, host, kind, k of n (#371)")
     XCTAssertEqual(rows.map { $0.accessibilityValue() as? String }, bar.results.map(\.accessibilityCaption))
     XCTAssertEqual(rows.map { $0.accessibilityIdentifier() }, Array(repeating: AXID.CommandBar.row, count: rows.count))
@@ -233,7 +233,7 @@ final class AXProxyRowsTests: XCTestCase {
 
     bar.setQueryForTesting("example.org/synthetic")
     let requeried = try childRows(element)
-    let requeriedLabels = bar.results.enumerated().map { $0.element.accessibilityLabel(position: $0.offset + 1, of: bar.results.count) }
+    let requeriedLabels = bar.results.enumerated().map { $0.element.commandBarLabel(position: $0.offset + 1, of: bar.results.count) }
     XCTAssertEqual(requeried.map { $0.accessibilityLabel() }, requeriedLabels)
     XCTAssertTrue(requeried.first?.accessibilityLabel()?.hasPrefix("example.org/synthetic, ") == true)
 

@@ -46,8 +46,7 @@ struct ShellTypeTests {
   /// Sizes that fit no role keep their values under their own names in their surfaces.
   @Test @MainActor func namedSizesArePinned() {
     #expect(CommandBarCellView.titleFontSize == 14)
-    #expect(CommandBarPreviewColumn.titleFontSize == 14)
-    #expect(CommandBarPreviewButton.titleFontSize == 12.5)
+    #expect(CommandBarKeyCapView.fontSize == 11)
     #expect(ExtensionsPanelView.emptyTitleFontSize == 14)
     #expect(ExtensionsPanelView.emptyBodyFontSize == 12.5)
     #expect(EmptyStateView.headingFontSize == 22)

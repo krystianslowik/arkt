@@ -4,7 +4,7 @@ import EngineAPI
 import EngineAPITestSupport
 import SidebarModel
 import XCTest
-@testable import ShellUI
+@_spi(Smoke) @testable import ShellUI
 
 /// Folders (#109): the spring that opens and closes a folder (interruptible, with a Reduce Motion variant), rows
 /// peeking out of a closed folder (BH-092, BH-105), Collapse All / Expand All Folders (BH-097), each window's own
@@ -734,5 +734,92 @@ final class FolderTests: XCTestCase {
 
     guard case .folder(_, let title)? = harness.source.node(world.folder) else { return XCTFail("no folder") }
     XCTAssertEqual(title, "Reading")
+  }
+
+  // MARK: Command bar (#993, BH-104, BH-105)
+
+  /// A tab inside a closed folder is found under Tabs in the window's command bar; switching to it shows it peeking
+  /// out under the folder, which stays closed (BH-105).
+  func testACommandBarSwitchToATabInAClosedFolderPeeksIt() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
+    try harness.show(current: world.today[0])
+    let outline = try harness.outline()
+    outline.toggleFolder(world.folder, animated: false)
+    XCTAssertEqual(try harness.row(world.folderTabs[1]), -1)
+    let bar = harness.controller.commandBar
+    bar.clipboardURLProvider = { nil }
+    bar.toggle(.newTab)
+    bar.setQueryForTesting("F1")
+    let row = try XCTUnwrap(bar.results.firstIndex { $0.kind == .switchTo(world.folderTabs[1]) })
+    XCTAssertEqual(bar.results[row].group, .tabs)
+    bar.barView.table.selectRowIndexes([row], byExtendingSelection: false)
+    bar.commit()
+    XCTAssertFalse(outline.isFolderOpen(world.folder), "the folder stays closed")
+    XCTAssertEqual(try harness.row(world.folderTabs[1]), try harness.row(world.folder) + 1, "the tab peeks out")
+  }
+
+  /// Show Folder (BH-104): a folder nested in a closed folder opens with the folders around it, and its row is in
+  /// the sidebar's view.
+  func testShowFolderOpensTheFolderAndRevealsIt() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
+    try harness.show(current: world.today[0])
+    let outline = try harness.outline()
+    outline.toggleFolder(world.inner, animated: false)
+    outline.toggleFolder(world.folder, animated: false)
+    let bar = harness.controller.commandBar
+    bar.toggle(.newTab)
+    bar.setQueryForTesting("Inner")
+    let row = try XCTUnwrap(bar.results.firstIndex { $0.kind == .folder(world.inner) })
+    XCTAssertEqual(bar.results[row].group, .folders)
+    XCTAssertEqual(bar.results[row].secondaryText, "1 tab")
+    bar.barView.table.selectRowIndexes([row], byExtendingSelection: false)
+    bar.commit()
+    XCTAssertFalse(bar.isVisible)
+    XCTAssertTrue(outline.isFolderOpen(world.folder))
+    XCTAssertTrue(outline.isFolderOpen(world.inner))
+    XCTAssertGreaterThanOrEqual(try harness.row(world.innerTab), 0, "the folder's tabs show")
+    let innerRow = try harness.row(world.inner)
+    XCTAssertTrue(outline.outlineView.visibleRect.intersects(outline.outlineView.rect(ofRow: innerRow)))
+  }
+
+  /// Show Folder on a folder in another Space switches to that Space first, then opens and reveals the folder there.
+  func testShowFolderInAnotherSpaceSwitchesToIt() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
+    let home = try harness.source.addSpace(title: "Home")
+    let recipes = try harness.source.addFolder(title: "Recipes", in: .pinned(home), at: nil)
+    _ = try harness.source.addTab(url: Self.url("r0"), title: "R0", in: .folder(recipes), at: nil)
+    try harness.show(current: world.today[0])
+    let sidebar = harness.controller.sidebarController
+    XCTAssertEqual(sidebar.currentSpace, world.work)
+    let bar = harness.controller.commandBar
+    bar.toggle(.newTab)
+    bar.setQueryForTesting("Recipes")
+    let row = try XCTUnwrap(bar.results.firstIndex { $0.kind == .folder(recipes) })
+    bar.barView.table.selectRowIndexes([row], byExtendingSelection: false)
+    bar.commit()
+    XCTAssertEqual(sidebar.currentSpace, home)
+    let outline = try XCTUnwrap(sidebar.currentPage?.outlineController)
+    XCTAssertTrue(outline.isFolderOpen(recipes))
+    XCTAssertGreaterThanOrEqual(outline.row(for: recipes), 0)
+  }
+
+  /// The folders listed are the Pinned section's; the open folder count says what each holds.
+  func testTheWindowListsItsPinnedFolders() throws {
+    let world = try Self.makeWorld()
+    let harness = Harness(world.sidebar)
+    defer { harness.controller.close() }
+    try harness.show(current: world.today[0])
+    let bar = harness.controller.commandBar
+    bar.toggle(.newTab)
+    bar.setQueryForTesting("folder")
+    XCTAssertEqual(bar.results.filter { $0.group == .folders }.map(\.title), ["Folder"])
+    XCTAssertEqual(bar.results.first { $0.group == .folders }?.secondaryText, "3 tabs")
+    bar.hide()
   }
 }

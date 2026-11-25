@@ -1,10 +1,29 @@
 import AppKit
 
+/// The command bar field's editor: its caret is 2 pt wide (README, Look), drawn in the mustard the controller sets.
+@MainActor
+final class CommandBarFieldEditor: NSTextView {
+  static let caretWidth: CGFloat = 2
+
+  override func drawInsertionPoint(in rect: NSRect, color: NSColor, turnedOn flag: Bool) {
+    var caret = rect
+    caret.size.width = Self.caretWidth
+    super.drawInsertionPoint(in: caret, color: color, turnedOn: flag)
+  }
+
+  /// The caret's blink redraws its old rectangle; widen it so the second point is erased too.
+  override func setNeedsDisplay(_ rect: NSRect, avoidAdditionalLayout flag: Bool) {
+    var dirty = rect
+    dirty.size.width += Self.caretWidth - 1
+    super.setNeedsDisplay(dirty, avoidAdditionalLayout: flag)
+  }
+}
+
 /// Borderless floating panel hosting the command bar. Created once and reused (pre-warmed).
 @MainActor
 final class CommandBarPanel: NSPanel {
   init() {
-    super.init(contentRect: NSRect(x: 0, y: 0, width: CommandBarGeometry.preferredWidth,
+    super.init(contentRect: NSRect(x: 0, y: 0, width: CommandBarGeometry.maxWidth,
                                    height: CommandBarGeometry.inputHeight),
                styleMask: [.borderless, .fullSizeContentView], backing: .buffered, defer: false)
     isFloatingPanel = true
@@ -20,13 +39,13 @@ final class CommandBarPanel: NSPanel {
   }
 
   /// The panel stays ordered in once pre-warmed; presenting is alpha plus key status (C7: ordering a
-  /// window in cost one to three extra frames in the window server). While hidden it is inert: clicks pass
-  /// through, it cannot become key, and accessibility does not report it (no "open" / "closed" value: VoiceOver would
-  /// read it, #608; a hidden bar is absent from the tree instead).
+  /// window in cost one to three extra frames in the window server). No fade either way. While hidden it is inert:
+  /// clicks pass through, it cannot become key, and accessibility does not report it (no "open" / "closed" value:
+  /// VoiceOver would read it, #608; a hidden bar is absent from the tree instead).
   var isPresented = false {
     didSet {
       guard isPresented != oldValue else { return }
-      if isPresented { alphaValue = 1 }               // hiding fades out first; the controller then sets alpha 0
+      alphaValue = isPresented ? 1 : 0
       ignoresMouseEvents = !isPresented
     }
   }
@@ -58,6 +77,17 @@ final class CommandBarPanel: NSPanel {
   override func sendEvent(_ event: NSEvent) {
     if event.type == .keyDown, let keyDownHandler, keyDownHandler(event) { return }
     super.sendEvent(event)
+  }
+
+  /// The bar's field editor, made once: it draws the 2 pt caret (README, Look).
+  private lazy var commandFieldEditor: CommandBarFieldEditor = {
+    let editor = CommandBarFieldEditor(frame: .zero)
+    editor.isFieldEditor = true
+    return editor
+  }()
+
+  override func fieldEditor(_ createFlag: Bool, for object: Any?) -> NSText? {
+    object is NSTextField ? commandFieldEditor : super.fieldEditor(createFlag, for: object)
   }
 
   override var canBecomeKey: Bool { isPresented }

@@ -1,11 +1,19 @@
 import AppKit
 
-/// A transparent table row: the fill and tick of the selected row are `CommandBarSelectionIndicator`'s, drawn behind
-/// the rows. The row tells its cell whether it is selected (the trailing key caps change) and speaks for the row to
-/// accessibility.
+/// A table row that draws its own selection: a neutral `commandBarSelectedRow` fill with 8 pt corners over the row's
+/// content (not its group header). No tick, no stroke, no slide. It tells its cell whether it is selected (the trailing
+/// group changes) and speaks for the row to accessibility.
 @MainActor
 final class CommandBarRowView: NSTableRowView {
   static let identifier = NSUserInterfaceItemIdentifier("commandBar.row")
+
+  /// The height of the group header at the top of the row, 0 for a row without one.
+  var headerHeight: CGFloat = 0 {
+    didSet { if headerHeight != oldValue { needsDisplay = true } }
+  }
+  var flavor: ThemeFlavor = .dark {
+    didSet { if flavor != oldValue { needsDisplay = true } }
+  }
 
   override init(frame frameRect: NSRect) {
     super.init(frame: frameRect)
@@ -17,9 +25,13 @@ final class CommandBarRowView: NSTableRowView {
   @available(*, unavailable)
   required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+  override var isFlipped: Bool { true }
+
   override var isSelected: Bool {
     didSet {
-      if isSelected != oldValue { resultCell?.isRowSelected = isSelected }
+      guard isSelected != oldValue else { return }
+      resultCell?.isRowSelected = isSelected
+      needsDisplay = true
       setAccessibilitySelected(isSelected)
     }
   }
@@ -28,6 +40,20 @@ final class CommandBarRowView: NSTableRowView {
     super.didAddSubview(subview)
     (subview as? CommandBarCellView)?.isRowSelected = isSelected
   }
+
+  /// The selected fill's rectangle: the row below its header.
+  var fillRect: NSRect {
+    NSRect(x: 0, y: headerHeight, width: bounds.width, height: max(0, bounds.height - headerHeight))
+  }
+
+  override func drawBackground(in dirtyRect: NSRect) {
+    guard isSelected else { return }
+    ShellTokens.commandBarSelectedRow.resolve(flavor).nsColor().setFill()
+    let radius = CommandBarGeometry.rowRadius
+    NSBezierPath(roundedRect: fillRect, xRadius: radius, yRadius: radius).fill()
+  }
+
+  override func drawSelection(in dirtyRect: NSRect) {}
 
   override func isAccessibilitySelected() -> Bool { isSelected }
 
@@ -50,69 +76,74 @@ final class CommandBarRowView: NSTableRowView {
   override func accessibilityValue() -> Any? {
     resultCell?.accessibilityValue() ?? super.accessibilityValue()
   }
-
-  override func drawBackground(in dirtyRect: NSRect) {}
-  override func drawSelection(in dirtyRect: NSRect) {}
 }
 
-/// One result, by the README's row anatomy: a 20 pt slot with a 16 pt symbol, the title (14) with the query match in
-/// semibold, a secondary URL (13) that truncates first, and a right-aligned trailing group of captions and key caps.
+/// One result, by the README's row anatomy: an 18 pt slot (a 16 pt favicon, letter tile, extension icon or symbol),
+/// the title (14) with the query match in semibold, the secondary text (13) that truncates first and is dropped under
+/// 48 pt, and the trailing group: the selected row's verb and Return key cap, or an unselected history row's time.
+/// A row that starts a group carries the group header above its content.
 @MainActor
 final class CommandBarCellView: NSTableCellView {
-  /// A result's title; the part that matches the query is set semibold.
   static let titleFontSize: CGFloat = 14
   static let identifier = NSUserInterfaceItemIdentifier("commandBar.cell")
   static let iconSize: CGFloat = CommandBarGeometry.iconSize
-  private static let keyCapGap: CGFloat = 5
-  private static let maxKeyCaps = 3
 
   let icon = NSImageView()
   let title = NSTextField(labelWithString: "")
   let subtitle = CommandBarCellView.label(size: 13)
-  let hint = CommandBarCellView.label(size: 12)
-  private var keyCaps: [CommandBarKeyCapView] = (0..<CommandBarCellView.maxKeyCaps).map { _ in
-    CommandBarKeyCapView(frame: .zero)
-  }
-  /// The hovered row's remove button (BH-109); hidden unless the row is removable and hovered.
-  let closeButton = NSButton()
-  /// The group header over the first row of a group (empty state): 11 pt semibold in the top 26 pt of the cell.
-  let header = NSTextField(labelWithString: "")
-  private var groupHeader: String?
+  /// The verb (selected) or the time (an unselected history row).
+  let trailingText = CommandBarCellView.label(size: 12)
+  let returnKey = CommandBarKeyCapView(frame: .zero)
+  /// A history row's remove button, shown while the pointer is over the row (BH-109): removes it from history.
+  let removeButton = NSButton()
+  static let removeButtonSize: CGFloat = 20
+  static let removeGlyphSize: CGFloat = 10
+  static let removeLabel = "Remove from History"
+  /// Removes the row; nil for a row that is not removable.
+  var onRemove: (() -> Void)?
+  private var isHovered = false
+  /// The group header over the first row of a group: 11 pt semibold, tertiary text.
+  let header = CommandBarGroupHeaderLabel(labelWithString: "")
+  private(set) var headerHeight: CGFloat = 0
+  private var isFirstRow = false
 
   private(set) var result: CommandBarResults.Result?
   private var query = ""
   private var flavor: ThemeFlavor = .dark
   private var scale: CGFloat = 2
-  /// Whether this row is the selected one: the trailing group gains a Return key cap and the title the strong color.
+  private var increasedContrast = false
+  private var favicon: NSImage?
+  /// Whether this row is the selected one: the trailing group shows the verb and the Return key cap.
   var isRowSelected = false {
-    didSet { if isRowSelected != oldValue { applyState() } }
+    didSet { if isRowSelected != oldValue { applyTrailing() } }
   }
-  /// Position and count for the accessibility sentence.
-  private var position = 1
-  private var count = 1
 
   override init(frame: NSRect) {
     super.init(frame: frame)
     identifier = Self.identifier
     icon.imageScaling = .scaleProportionallyUpOrDown
+    icon.wantsLayer = true
+    icon.layer?.cornerRadius = CommandBarGeometry.faviconRadius
+    icon.layer?.masksToBounds = true
     title.lineBreakMode = .byTruncatingTail
     title.cell?.usesSingleLineMode = true
-    header.font = ShellType.sectionHeader.font
+    title.setAccessibilityElement(false)
+    subtitle.setAccessibilityElement(false)
+    trailingText.setAccessibilityElement(false)
     header.lineBreakMode = .byTruncatingTail
     header.cell?.usesSingleLineMode = true
     header.isHidden = true
-    header.setAccessibilityElement(false)
-    [icon, title, subtitle, hint, header].forEach(addSubview)
-    keyCaps.forEach(addSubview)
-    closeButton.isBordered = false
-    closeButton.imagePosition = .imageOnly
-    closeButton.toolTip = "Remove Suggestion"
-    closeButton.setAccessibilityLabel("Remove Suggestion")
-    closeButton.setAccessibilityIdentifier(AXID.CommandBar.rowRemove)
-    closeButton.isHidden = true
-    closeButton.target = self
-    closeButton.action = #selector(closeClicked(_:))
-    addSubview(closeButton)
+    header.setAccessibilityElement(false)                // the controller publishes headers from its model
+    [icon, title, subtitle, trailingText, returnKey, header].forEach(addSubview)
+    removeButton.isBordered = false
+    removeButton.imagePosition = .imageOnly
+    removeButton.toolTip = Self.removeLabel
+    removeButton.setAccessibilityLabel(Self.removeLabel)
+    removeButton.setAccessibilityIdentifier(AXID.CommandBar.rowRemove)
+    removeButton.isHidden = true
+    removeButton.target = self
+    removeButton.action = #selector(removeClicked(_:))
+    addSubview(removeButton)
   }
 
   @available(*, unavailable)
@@ -129,128 +160,164 @@ final class CommandBarCellView: NSTableCellView {
     return label
   }
 
-  /// Removal (BH-109): nil for a row that is not removable; the X shows only while the row is hovered.
-  var onRemove: (() -> Void)?
+  @objc private func removeClicked(_ sender: Any?) { onRemove?() }
 
-  @objc private func closeClicked(_ sender: Any?) { onRemove?() }
-
-  func setCloseHovered(_ hovered: Bool) {
-    closeButton.isHidden = !(hovered && onRemove != nil)
+  /// The pointer came onto the row or left it: a removable row shows its remove button meanwhile.
+  func setHovered(_ hovered: Bool) {
+    isHovered = hovered
+    let shows = hovered && onRemove != nil
+    guard shows == removeButton.isHidden else { return }
+    removeButton.isHidden = !shows
     needsLayout = true
   }
 
-  /// `scale`: pixels per point for the icon bitmap (the bar's backing scale, which the cell's own window may
-  /// not report yet while the panel is still on the previous display).
+  /// `scale`: pixels per point for symbol bitmaps (the bar's backing scale). `favicon`: the tab's cached favicon or the extension's icon.
+  /// `increasedContrast`: tertiary text (URL, time, header) takes the secondary color.
   func configure(_ result: CommandBarResults.Result, query: String, position: Int, count: Int, flavor: ThemeFlavor,
-                 scale: CGFloat, groupHeader: String? = nil) {
-    self.groupHeader = groupHeader
-    header.stringValue = groupHeader ?? ""
-    header.isHidden = groupHeader == nil
+                 scale: CGFloat, groupHeader: String?, isFirstRow: Bool, favicon: NSImage?,
+                 increasedContrast: Bool) {
     self.result = result
     self.query = query
-    self.position = position
-    self.count = count
     self.flavor = flavor
     self.scale = scale
-    closeButton.isHidden = true
+    self.favicon = favicon
+    self.increasedContrast = increasedContrast
+    self.isFirstRow = isFirstRow
+    header.isHidden = groupHeader == nil
+    headerHeight = groupHeader == nil ? 0 : (isFirstRow ? CommandBarGeometry.firstGroupHeaderHeight
+                                                       : CommandBarGeometry.groupHeaderHeight)
+    header.attributedStringValue = NSAttributedString(string: groupHeader ?? "", attributes: [
+      .font: ShellType.sectionHeader.font, .kern: ShellType.sectionHeader.font.pointSize * 0.02,
+      .foregroundColor: tertiaryColor,
+    ])
     subtitle.stringValue = result.secondaryText
-    subtitle.isHidden = result.secondaryText.isEmpty
-    setAccessibilityLabel(result.accessibilityLabel(position: position, of: count))
+    subtitle.textColor = tertiaryColor
+    setAccessibilityLabel(result.commandBarLabel(position: position, of: count))
     setAccessibilityValue(result.accessibilityCaption)
-    applyState()
+    removeButton.image = SymbolImageCache.shared.symbol("xmark", box: Self.removeGlyphSize,
+                                                        color: tertiaryToken.resolve(flavor), scale: scale)
+    applyIcon()
+    applyTitle()
+    applyTrailing()
   }
 
-  /// Colors, symbol, title emphasis and trailing group for the current selection state.
-  private func applyState() {
+  private var tertiaryToken: TokenPair {
+    increasedContrast ? ShellTokens.commandBarSecondaryText : ShellTokens.commandBarTertiaryText
+  }
+
+  private var tertiaryColor: NSColor { tertiaryToken.resolve(flavor).nsColor() }
+
+  private func applyIcon() {
     guard let result else { return }
-    icon.image = SymbolImageCache.shared.symbol(result.symbolName, box: Self.iconSize,
-                                                color: ShellTokens.commandBarSecondaryText.resolve(flavor), scale: scale)
-    closeButton.image = SymbolImageCache.shared.symbol("xmark", box: 10,
-                                                       color: ShellTokens.commandBarTertiaryText.resolve(flavor),
-                                                       scale: scale)
-    let strong = ShellTokens.commandBarText.resolve(flavor).nsColor()
-    let rest = (isRowSelected ? strong : ShellTokens.commandBarSecondaryText.resolve(flavor).nsColor())
-    let attributed = NSMutableAttributedString(string: result.title, attributes: [
-      .font: NSFont.systemFont(ofSize: Self.titleFontSize), .foregroundColor: rest,
-    ])
-    if let range = CommandBarTitleMatch.range(of: query, in: result.title) {
-      attributed.addAttributes([.font: NSFont.systemFont(ofSize: Self.titleFontSize, weight: .semibold), .foregroundColor: strong],
-                               range: NSRange(range, in: result.title))
+    if let favicon {
+      icon.image = favicon                            // a tab's favicon, or an extension's icon
+    } else if case .switchTo = result.kind {
+      icon.image = SidebarGlyphs.letter(for: result.title, url: URL(string: "https://" + result.subtitle),
+                                        flavor: flavor, size: Self.iconSize, scale: scale)
+    } else {
+      icon.image = SymbolImageCache.shared.symbol(result.symbolName, box: Self.iconSize,
+                                                  color: ShellTokens.commandBarSecondaryText.resolve(flavor),
+                                                  scale: scale)
+    }
+  }
+
+  /// The title in `commandBarText`; the part that matches the query in semibold. The Search for row bolds what it
+  /// searches for; Go and Paste and Go rows are the user's own text and bold nothing.
+  private func applyTitle() {
+    guard let result else { return }
+    let color = ShellTokens.commandBarText.resolve(flavor).nsColor()
+    let regular = NSFont.systemFont(ofSize: Self.titleFontSize)
+    let bold = NSFont.systemFont(ofSize: Self.titleFontSize, weight: .semibold)
+    let text = result.displayTitle
+    let attributed = NSMutableAttributedString(string: text, attributes: [.font: regular, .foregroundColor: color])
+    let paragraph = NSMutableParagraphStyle()
+    paragraph.lineBreakMode = .byTruncatingTail
+    attributed.addAttribute(.paragraphStyle, value: paragraph, range: NSRange(location: 0, length: attributed.length))
+    switch result.kind {
+    case .search:
+      if let range = text.range(of: "\u{201C}" + result.title + "\u{201D}") {
+        attributed.addAttribute(.font, value: bold, range: NSRange(range, in: text))
+      }
+    case .open, .pasteAndGo:
+      break
+    default:
+      for range in CommandBarTitleMatch.wordStartRanges(of: query, in: text) {
+        attributed.addAttribute(.font, value: bold, range: NSRange(range, in: text))
+      }
     }
     title.attributedStringValue = attributed
-    subtitle.textColor = ShellTokens.commandBarTertiaryText.resolve(flavor).nsColor()
-    header.textColor = ShellTokens.commandBarTertiaryText.resolve(flavor).nsColor()
-
-    let trailing = result.trailing(isSelected: isRowSelected)
-    var caption = ""
-    var caps: [String] = []
-    for item in trailing {
-      switch item {
-      case .text(let text): caption = text
-      case .keyCap(let cap): caps.append(cap)
-      }
-    }
-    hint.stringValue = caption
-    hint.isHidden = caption.isEmpty
-    hint.textColor = (isRowSelected ? ShellTokens.commandBarSecondaryText : ShellTokens.commandBarTertiaryText)
-      .resolve(flavor).nsColor()
-    for (index, view) in keyCaps.enumerated() {
-      if index < caps.count {
-        view.configure(caps[index], flavor: flavor)
-        view.isHidden = false
-      } else {
-        view.isHidden = true
-      }
-    }
     needsLayout = true
   }
 
-  /// The trailing key caps' text, in order (tests).
-  var visibleKeyCaps: [String] { keyCaps.filter { !$0.isHidden }.map(\.text) }
+  private func applyTrailing() {
+    guard let result else { return }
+    if isRowSelected {
+      trailingText.stringValue = result.verb ?? ""
+      trailingText.textColor = ShellTokens.commandBarSecondaryText.resolve(flavor).nsColor()
+      returnKey.configure(CommandBarKeyCaps.return, flavor: flavor)
+      returnKey.isHidden = false
+    } else {
+      trailingText.stringValue = result.group == .history ? (result.timeText ?? "") : ""
+      trailingText.textColor = tertiaryColor
+      returnKey.isHidden = true
+    }
+    trailingText.isHidden = trailingText.stringValue.isEmpty
+    needsLayout = true
+  }
 
   override func layout() {
     super.layout()
     let g = CommandBarGeometry.self
-    // A row that starts a group is taller by its header; the row's own content sits in the bottom `rowHeight`.
-    let headerHeight = groupHeader == nil ? 0 : g.groupHeaderHeight
-    let content = NSRect(x: 0, y: headerHeight, width: bounds.width, height: bounds.height - headerHeight)
-    if headerHeight > 0 {
-      let h = ceil(header.fittingSize.height)
-      header.frame = NSRect(x: g.rowHorizontalPadding, y: g.groupHeaderHeight - 4 - h, width: max(0, bounds.width - 2 * g.rowHorizontalPadding), height: h)
+    let content = NSRect(x: 0, y: headerHeight, width: bounds.width, height: max(0, bounds.height - headerHeight))
+    if !header.isHidden {
+      let h = ceil(header.intrinsicContentSize.height)
+      // The header's text starts `above` from the top of the row (10, or 4 for the group that starts the list); the
+      // label's line box carries about 2 pt of leading above the glyphs.
+      let above: CGFloat = isFirstRow ? 4 : 10
+      header.frame = NSRect(x: g.rowHorizontalPadding - g.labelInset, y: above - 2,
+                            width: max(0, bounds.width - 2 * g.rowHorizontalPadding), height: h)
     }
     var trailing = bounds.width - g.rowHorizontalPadding
-    if !closeButton.isHidden {
-      let closeSize: CGFloat = 20
-      closeButton.frame = NSRect(x: trailing - closeSize, y: content.minY + (content.height - closeSize) / 2,
-                                 width: closeSize, height: closeSize)
-      trailing = closeButton.frame.minX - 8
+    if !removeButton.isHidden {
+      let size = Self.removeButtonSize
+      removeButton.frame = NSRect(x: trailing - size, y: content.minY + (content.height - size) / 2,
+                                  width: size, height: size)
+      trailing = removeButton.frame.minX - 8
     }
-    // The trailing group, right to left: key caps, then the caption.
-    for view in keyCaps.reversed() where !view.isHidden {
-      let size = view.size
-      view.frame = NSRect(x: trailing - size.width, y: content.minY + (content.height - size.height) / 2, width: size.width,
-                          height: size.height)
-      trailing = view.frame.minX - 4
+    if !returnKey.isHidden {
+      let size = returnKey.size
+      returnKey.frame = NSRect(x: trailing - size.width, y: content.minY + (content.height - size.height) / 2,
+                               width: size.width, height: size.height)
+      trailing = returnKey.frame.minX - 8
     }
-    if !hint.isHidden {
-      let width = ceil(hint.fittingSize.width)
-      if keyCaps.contains(where: { !$0.isHidden }) { trailing -= 2 }
-      hint.frame = centered(x: trailing - width, width: width, field: hint, in: content)
-      trailing = hint.frame.minX
+    if !trailingText.isHidden {
+      let width = ceil(trailingText.fittingSize.width)
+      trailingText.frame = centered(x: trailing - width, width: width, field: trailingText, in: content)
+      trailing = trailingText.frame.minX
     }
-    let slotX = g.rowHorizontalPadding
-    icon.frame = NSRect(x: slotX + (g.slotWidth - g.iconSize) / 2, y: content.minY + (content.height - g.iconSize) / 2,
-                        width: g.iconSize, height: g.iconSize)
-    let textX = slotX + g.slotWidth + g.slotGap
-    let textLimit = trailing - (hint.isHidden && !keyCaps.contains(where: { !$0.isHidden }) ? 0 : 12)
+    let hasTrailing = !returnKey.isHidden || !trailingText.isHidden
+    let textLimit = trailing - (hasTrailing ? g.slotGap : 0)
+    icon.frame = NSRect(x: g.rowHorizontalPadding + (g.slotWidth - g.iconSize) / 2,
+                        y: content.minY + (content.height - g.iconSize) / 2, width: g.iconSize, height: g.iconSize)
+    let textX = g.rowHorizontalPadding + g.slotWidth + g.slotGap - g.labelInset
+    // The title is protected: it takes what it needs; the secondary text gets the rest, or nothing under 48 pt.
     let titleWidth = min(ceil(title.fittingSize.width), max(0, textLimit - textX))
     title.frame = centered(x: textX, width: titleWidth, field: title, in: content)
-    let subtitleX = title.frame.maxX + 10
-    subtitle.frame = centered(x: subtitleX, width: max(0, textLimit - subtitleX), field: subtitle, in: content)
+    let subtitleX = title.frame.maxX + g.slotGap
+    let subtitleWidth = textLimit - subtitleX
+    subtitle.isHidden = subtitle.stringValue.isEmpty || subtitleWidth < g.minimumURLWidth
+    subtitle.frame = centered(x: subtitleX, width: max(0, subtitleWidth), field: subtitle, in: content)
   }
 
   private func centered(x: CGFloat, width: CGFloat, field: NSTextField, in content: NSRect) -> NSRect {
     let h = ceil(field.intrinsicContentSize.height)
     return NSRect(x: x, y: (content.minY + (content.height - h) / 2).rounded(), width: width, height: h)
   }
+}
+
+/// A group header ("Tabs", "History"): an accessibility group with the header's text as its label.
+@MainActor
+final class CommandBarGroupHeaderLabel: NSTextField {
+  override func accessibilityRole() -> NSAccessibility.Role? { .group }
+  override func isAccessibilityElement() -> Bool { accessibilityLabel() != nil && super.isAccessibilityElement() }
 }

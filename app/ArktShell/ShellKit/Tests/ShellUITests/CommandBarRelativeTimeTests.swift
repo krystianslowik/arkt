@@ -2,11 +2,13 @@ import Foundation
 import Testing
 @testable import ShellUI
 
-/// "12 min", "1 h", "Yesterday": the time on a recent tab's row.
+/// The time on a history row (design/command-bar/README.md): "12 min", "1 h", "Yesterday", a weekday within the last
+/// week, then a short date.
 struct CommandBarRelativeTimeTests {
   private var calendar: Calendar {
     var calendar = Calendar(identifier: .gregorian)
     calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .current
+    calendar.locale = Locale(identifier: "en_US")
     return calendar
   }
   /// 2026-10-27 15:30:00 UTC.
@@ -38,9 +40,18 @@ struct CommandBarRelativeTimeTests {
     #expect(text(30 * 3600) == "Yesterday")
   }
 
-  @Test func `older days count days`() {
-    #expect(text(3 * 86_400) == "3 d")
-    #expect(text(40 * 86_400) == "40 d")
+  /// 2026-10-27 is a Tuesday: two to six days back read as the weekday.
+  @Test func `days within the last week read as the weekday`() {
+    #expect(text(2 * 86_400) == "Sunday")
+    #expect(text(3 * 86_400) == "Saturday")
+    #expect(text(6 * 86_400) == "Wednesday")
+  }
+
+  /// A week or more back reads as a short date; another year adds the year.
+  @Test func `older visits read as a short date`() {
+    #expect(text(7 * 86_400) == "Oct 20")
+    #expect(text(40 * 86_400) == "Sep 17")
+    #expect(text(400 * 86_400) == "Sep 22, 2025")
   }
 
   @Test func `a time in the future reads as now`() {

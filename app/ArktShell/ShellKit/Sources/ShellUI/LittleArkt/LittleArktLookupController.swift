@@ -116,7 +116,8 @@ public final class LittleArktLookupController: NSObject, NSTextFieldDelegate, NS
     }
   }
 
-  /// Return on the selected result. `.restore`, actions and Spaces are not offered here (no providers), so it only closes the bar.
+  /// Return on the selected result. Folders and extensions are not offered here (no providers), so they only close the
+  /// bar.
   public func commit() {
     commit(row: max(barView.table.selectedRow, 0))
   }
@@ -124,7 +125,7 @@ public final class LittleArktLookupController: NSObject, NSTextFieldDelegate, NS
   private func commit(row: Int) {
     guard row < results.count else { hide(); return }
     switch results[row].kind {
-    case .open(let url), .search(let url), .pasteAndGo(let url), .siteSearch(let url):
+    case .open(let url), .search(let url), .suggestion(let url), .pasteAndGo(let url):
       hide(returningActivation: false)
       onOpen?(url)
     case .switchTo(let node):
@@ -133,7 +134,7 @@ public final class LittleArktLookupController: NSObject, NSTextFieldDelegate, NS
     case .history(let url):
       hide(returningActivation: false)
       onOpen?(url)
-    case .restore, .action, .switchSpace, .noMatch:
+    case .folder, .extensionAction, .reload:
       hide()
     }
   }
