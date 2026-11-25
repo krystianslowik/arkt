@@ -433,6 +433,33 @@ final class DownloadsWindowTests: XCTestCase {
     XCTAssertTrue(history.isCurrent && !downloads.isCurrent)
   }
 
+  /// #997: each rail item draws its glyph and name into its layer in a real window. The item once asked for
+  /// `updateLayer()`, so AppKit never called `draw(_:)` and the rail showed a blank fill.
+  func testTheLibraryRailItemsDrawTheirGlyphAndName() throws {
+    let library = center.library
+    library.show(section: .history)
+    let window = try XCTUnwrap(library.window)
+    let root = try XCTUnwrap(window.contentView)
+    window.display()
+    for name in ["downloads", "history"] {
+      let item = try XCTUnwrap(find(AXID.Downloads.railItem(name), in: root) as? LibraryRailItem)
+      XCTAssertFalse(item.wantsUpdateLayer, "\(name): draw(_:) must run")
+      let rep = try XCTUnwrap(item.bitmapImageRepForCachingDisplay(in: item.bounds))
+      item.cacheDisplay(in: item.bounds, to: rep)
+      let corner = try XCTUnwrap(rep.colorAt(x: 2, y: 2)?.usingColorSpace(.sRGB))
+      var ink = 0
+      for x in stride(from: 0, to: rep.pixelsWide, by: 2) {
+        for y in stride(from: 0, to: rep.pixelsHigh, by: 2) {
+          guard let c = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
+          let delta = abs(c.redComponent - corner.redComponent) + abs(c.greenComponent - corner.greenComponent)
+            + abs(c.blueComponent - corner.blueComponent)
+          if delta > 0.3 { ink += 1 }
+        }
+      }
+      XCTAssertGreaterThan(ink, 20, "\(name): the glyph and name are not drawn")
+    }
+  }
+
   // MARK: The dangerous-file sheet
 
   func testReviewShowsTheSheetAndDeleteIsTheOnlyPrimary() throws {
