@@ -69,7 +69,7 @@ see Parity notes). Settings > Profiles: "Archive Little Arkts after:" with the s
 | Open in split button | 26 pt high, radius 8, 8 pt from the right edge; label 12 pt semibold; 10 pt Space swatch; chevron segment after a 1 pt divider (graphite 18 %) | `BrandTokens.accent`, `accentHighlight` (hover), `accentPressed`, `onAccent`; focus ring `ShellTokens.focusRing`, 3 pt inside the focused segment (the split clips it), in the fill's text tone: graphite on mustard in both appearances, the window's tone on the quiet split (#687) |
 | Card | 10 pt continuous corners, hairline | `ShellMetrics.cardCornerRadius`, `ShellTokens.cardBorder`, `cardShadow` |
 | Inactive window | traffic lights gray; nothing else dims | system behavior |
-| Quick lookup bar | the command bar panel: 766 pt wide (narrower on small screens), 60 pt input, 50 pt rows, radius 12, at 34 % of the screen height; a "Little Arkt" tag before the input | `CommandBarGeometry`, `ShellTokens.commandBar*`; tag uses `accent` and `onAccent` |
+| Quick lookup bar | its own panel, the command bar's look before #993: 766 pt wide (narrower on small screens), 60 pt input, 50 pt rows, radius 12, at 34 % of the screen height; a "Little Arkt" tag before the input | `LittleArktGeometry`, `ShellTokens.lookup*`; tag uses `accent` and `onAccent` |
 
 New tokens: none. The window shadow is the system's. `surfaceBrand` gains a second use (it was for About and first
 run).

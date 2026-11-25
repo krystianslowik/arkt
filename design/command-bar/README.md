@@ -72,7 +72,7 @@ All values in points. Window sizes from 640 x 420 (the shell minimum) up.
 | Element | Value |
 |---|---|
 | Panel width | `min(600, window width - 48)`; 600 in any window 648 or wider |
-| Panel position | horizontally centred; top edge `clamp(48, 14 % of window height, 110)` and fixed, so results grow downward only |
+| Panel position | horizontally centred; top edge `clamp(48, 14 % of window height, 110)`, rounded to a whole point (59 in the 420 pt window), and fixed, so results grow downward only |
 | Panel height | field plus list; at most `window height - top - 24`, then the list scrolls |
 | Panel corners | 14, continuous |
 | Field | 54 high; 20 regular; 20 side inset; magnifier 18, 12 gap to the text; placeholder "Search or enter address" |
@@ -94,7 +94,8 @@ Selection always starts on the first row of the list. Rows keep their position w
 inserts above the selection.
 
 1. **Literal row, no header, only when it applies** (the Go and Paste and Go rows only; the Search for row belongs to the Search group). It sits above the groups and is the selected row.
-   - Empty field and the clipboard holds an address: **Paste and Go**, with the address in the URL slot.
+   - Empty field and the clipboard holds an address: **Paste and Go**, with the address in the URL slot. Only on the
+     Cmd-T bar, like Cmd-Shift-V: Cmd-L and the split pane bar do not offer it.
    - The field parses as an address (scheme, or `host.tld`, with optional path): **Go**, showing the text as typed.
 2. **Tabs.** Open tabs in this window, all Spaces, excluding the current tab. Matches word starts in the title and in
    host and path. Ranked by match quality, then by recency of viewing. Empty field: the 3 most recently viewed. A tab
@@ -163,11 +164,12 @@ Focus never leaves the field. Typing always edits the text; the list is driven b
 | Cmd-T | Open on a new tab. Empty field. Return opens the result in that new tab. |
 | Cmd-L | Open on the current tab. The field holds the current address, fully selected, and the list shows the empty state; typing replaces it. Return opens the result in the current tab. |
 | Up / Down | Move the selection one row, across groups. Wraps from the last row to the first and back on a fresh press; held-key repeat stops at the ends. Ctrl-P and Ctrl-N do the same. |
-| Tab / Shift-Tab | Jump to the first row of the next or previous group. Tab does nothing else (site search is gone). |
-| Return | Run the selected row: Switch to Tab, Show Folder, Open (history), Open Extension, Go, Search, or Paste and Go. |
-| Cmd-Return | Search the web for exactly the typed text, whatever is selected. The escape hatch when a tab or history row outranks what you meant. |
+| Tab / Shift-Tab | Jump to the first row of the next or previous group; the literal row counts as a group of its own. Stops at the last and first group (no wrap). Tab does nothing else (site search is gone). |
+| Return | Run the selected row: Switch to Tab, Show Folder, Open (history), Open Extension, Go, Search, or Paste and Go. With the Cmd-L address untouched, Return reloads the page (KB-004, unchanged). |
+| Opt-Return | Run the selected row in a new tab (KB-085, unchanged). |
+| Cmd-Return | Search the web for exactly the typed text, whatever is selected, where Return would open it (the new tab, the current tab, the new split pane). The escape hatch when a tab or history row outranks what you meant. |
 | Cmd-Shift-V | Paste and Go from any state (unchanged from #322). |
-| Cmd-Opt-Delete | Remove the selected history row from history (unchanged from #322). |
+| Cmd-Opt-Delete | Remove the selected history row from history (unchanged from #322). Other rows are not removable, and rows have no hover remove button. |
 | Esc | Clear the text if there is any, otherwise close. With the Cmd-L address untouched, Esc closes. |
 | Click a row | Runs it. Click outside the panel closes. |
 | Hover | Shows the hover fill. The keyboard selection does not move until the pointer actually moves. |
@@ -217,7 +219,8 @@ headers, placeholder) uses `commandBarSecondaryText`.
 
 - The panel is a dialog group labelled "Command bar". The field is the first element, an `AXTextField` labelled
   "Search or enter address", and keeps focus.
-- The list is an `AXList`. Group headers are `AXGroup` labels ("Tabs", "Folders", "History", "Extensions", "Search"). Each row reads
+- The list is the results table, `AXTable` `commandBar.results` with `AXRow` rows, as the shell's other lists (the UI test harness
+  reads it as a table). Each row that starts a group holds its header as an `AXGroup` label ("Tabs", "Folders", "History", "Extensions", "Search"). Each row reads
   "<title>, <secondary text, if any>, <kind>, <k> of <n>" with kind one of "open tab", "folder", "history", "extension", "search suggestion", "search for
   what you typed", "go to address", "paste and go". The selected row is announced on every move.
 - After typing settles (150 ms), announce the count once: "<n> results". With only the Search row:
@@ -226,6 +229,20 @@ headers, placeholder) uses `commandBarSecondaryText`.
 - Selected state is a fill plus the Return key cap and the verb, never color alone.
 - Text on the glass meets 4.5:1 against both appearance fills; check against the opaque Reduce Transparency fill too.
 - Dynamic type is not a macOS concept here; the sizes above are fixed, as for the rest of the chrome.
+
+## Build notes (#993)
+
+Settled while building, where this document was silent:
+
+- **Matching.** Word starts, ignoring case and diacritics, in the title and in the address as stored (an
+  internationalized host in its `xn--` form). The host as the rows show it is matched ignoring case only, so a
+  look-alike host is never found by folding its accents away (#732).
+- **"<n> tabs".** Every tab inside the folder, nested folders included; a Split View counts as one tab, as its row does.
+- **History and suggestions.** There is no history store and no suggestion fetcher yet. Both groups take a provider
+  (history in frecency order; suggestions asynchronous, dropped when the text changed or the bar hid, #884); the app
+  passes none today, so History and the suggestion rows stay empty until those land.
+- **Removed with the hybrid.** The search-suggestion privacy notice (BH-113) and its dismissed setting: the layout above
+  has no place for it and nothing is sent to an engine yet. It comes back with the suggestion fetcher if it is needed.
 
 ## Decisions
 
