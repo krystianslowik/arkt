@@ -182,6 +182,9 @@ final class WindowLifecycleTests: XCTestCase {
     root.layoutSubtreeIfNeeded()
     XCTAssertFalse(window.styleMask.contains(.fullScreen))
     assertLaidOut(root, "after leaving full screen")
+    // #989: the titlebar views may be new after full screen; a title change still leaves the buttons where they were.
+    window.layoutIfNeeded()
+    try assertTitlebarStaysPut(window, "after full screen")
   }
 
   private func assertLaidOut(_ root: ShellRootView, _ when: String, file: StaticString = #filePath, line: UInt = #line) {
