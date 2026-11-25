@@ -124,9 +124,9 @@ that is also a tab shows both the Go row and the tab; the cap is 3 rows per grou
 headers: a Go row, 3 tabs, 3 folders, 3 history rows, 3 extensions, and the Search for row with 2 suggestions.
 
 Height arithmetic, for that worst case: field 54 + divider 1 + list padding 14 + 16 rows x 36 (576) + headers
-20 + 4 x 26 (124) = 769 pt. (`worst-*.png` shows 15 rows, because "layout" is not an address, so there is no Go row;
+5 x 26 (130, the Go row starts the list, so no header is 20) = 775 pt. (`worst-*.png` shows 15 rows, because "layout" is not an address, so there is no Go row;
 that is 733 pt.) The panel may be at most `window height - top - 24` tall, so the worst case
-fits without scrolling only in a window at least 903 pt high (top 110 + 769 + 24). In the 800 pt prototype window the
+fits without scrolling only in a window at least 909 pt high (top 110 + 775 + 24). In the 800 pt prototype window the
 worst case scrolls (`worst-*.png` shows the overlay scroller). The `url` screens show no suggestions; the search engine often returns none for an address. Typical queries match two or three groups (about
 300 to 520 pt) and fit in any window of 700 pt or more. When it scrolls, moving the selection scrolls the row into view
 with the least movement, and group headers scroll with their rows. The cap of 3 is what keeps the worst case bounded.
