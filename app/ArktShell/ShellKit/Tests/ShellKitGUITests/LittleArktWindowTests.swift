@@ -143,6 +143,19 @@ final class LittleArktWindowTests: XCTestCase {
     }
   }
 
+  /// #989: the window takes its page's title (`titleChanged`, `mount`), and a new title makes AppKit lay the titlebar
+  /// out again at once. The buttons and their host stay where the window put them.
+  func testTrafficLightsStayPutWhenThePageTitleChanges() throws {
+    let (set, engine, _) = try makeSet()
+    _ = set.openWindow()
+    let (little, _, _) = try openPopup(engine, set)
+    little.finishMotion()
+    little.window.layoutIfNeeded()
+    try assertTitlebarStaysPut(little.window, "Little Arkt")
+    let close = try XCTUnwrap(little.window.standardWindowButton(.closeButton))
+    XCTAssertEqual(close.convert(close.bounds, to: nil).minX, ShellMetrics.standard.trafficLightOrigin.x)
+  }
+
   // MARK: Cascade
 
   func testSeveralWindowsCascadeFromTheTopRight() throws {

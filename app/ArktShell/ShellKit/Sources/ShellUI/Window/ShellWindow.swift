@@ -50,8 +50,30 @@ public final class ShellWindow: NSWindow {
   /// Showing, hiding or fading a standard button makes AppKit lay its titlebar out again at once: the host goes back
   /// to the window's full width and the buttons to AppKit's own places (#807). So visibility and opacity are set
   /// first and the geometry last, every call.
+  ///
+  /// A new title does the same, and the engine titles the window on every tab switch (#989): the title places them
+  /// again at once. Any other relayout of AppKit's own (a subtitle, a represented URL, the edited state) asks for a
+  /// layout pass, which places them before the next draw.
   public func layoutTrafficLights(sidebarWidth: CGFloat) {
     guard !styleMask.contains(.fullScreen) else { return }
+    trafficLightSidebarWidth = sidebarWidth
+    titlebarRelayout.placing(in: self) { placeTrafficLights(sidebarWidth: sidebarWidth) }
+  }
+
+  public override var title: String {
+    didSet {
+      if let trafficLightSidebarWidth { layoutTrafficLights(sidebarWidth: trafficLightSidebarWidth) }
+    }
+  }
+
+  /// The sidebar width the buttons were last placed for; nil until they are first placed.
+  private var trafficLightSidebarWidth: CGFloat?
+  private lazy var titlebarRelayout = TitlebarRelayoutObserver { [weak self] in
+    guard let self, !self.styleMask.contains(.fullScreen) else { return }
+    self.contentView?.needsLayout = true   // ShellRootView.layout() places them
+  }
+
+  private func placeTrafficLights(sidebarWidth: CGFloat) {
     let kinds: [NSWindow.ButtonType] = [.closeButton, .miniaturizeButton, .zoomButton]
     guard let close = standardWindowButton(.closeButton),
           let titlebar = close.superview,                    // NSTitlebarView
