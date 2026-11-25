@@ -375,17 +375,21 @@ otherwise), and use `/usr/bin/log`, not zsh's `log` builtin:
 
 Ids in this bundle: see "Product identity" below.
 
-## Preview release
+## Alpha release
 
-How a maintainer cuts a preview build (v0.1.0-preview.1, tracking issue #481). The preview is an unsigned, ad-hoc
-signed DMG on a GitHub pre-release (window design: `design/install-dmg/`, #983). There is no Developer ID signing,
+How a maintainer cuts an alpha build (v0.1.0-alpha.1, "First light", tracking issue #481). Releases are named for
+times of day: First light is Alpha 1, Sunrise the later alphas, Morning the beta, Daylight 1.0. On GitHub the release
+title is the name and the tag carries the version; arkt.dev reads both, shows the first seven `- **Lead** rest`
+bullets of the notes and offers the first `.dmg` asset. An alpha is an unsigned, ad-hoc signed DMG on a GitHub
+pre-release (window design: `design/install-dmg/`, #983). There is no Developer ID signing,
 no notarization and no update feed; those follow in #125. Nothing here is scripted: run the steps in order, in zsh,
 with the variables from the top of this file (`$REPO`, `$CHROMIUM_ROOT`, `$CR`, `$PIN`). The release is the
 maintainer's to publish; do not run steps 5 and 6 without that go-ahead.
 
     export REL=$CR/out/Arkt
-    export VERSION=0.1.0-preview.1
-    export OUT=$CHROMIUM_ROOT/preview-$VERSION     # build and staging folder, outside the repo
+    export VERSION=0.1.0-alpha.1
+    export NAME="First light"                      # the release title on GitHub
+    export OUT=$CHROMIUM_ROOT/release-$VERSION     # build and staging folder, outside the repo
 
 ### 1. Freeze the overlay and build the engine
 
@@ -514,11 +518,12 @@ path bar covers the hint; that is a per-user setting.
 
 ### 5. Draft the release and smoke test the asset
 
-Write the notes from `docs/release/0.1.0-preview.1.md` (copy it to a file outside the repo, and put the checksum in
-it). Create a draft pre-release; a draft is not visible to the public:
+Write the notes from `docs/release/$VERSION.md`: copy it to a file outside the repo, drop the draft line at the top
+and put the checksum in. Keep the highlights as the only `- **Lead** rest` bullets, seven at most, because arkt.dev
+turns exactly those into its release cards. Create a draft pre-release; a draft is not visible to the public:
 
     gh release create v$VERSION --draft --prerelease --target main \
-      --title "Arkt $VERSION" --notes-file <notes file> \
+      --title "$NAME" --notes-file <notes file> \
       $OUT/Arkt-$VERSION-arm64.dmg $OUT/Arkt-$VERSION-arm64.dmg.sha256
 
 Smoke test the downloaded asset, not the local build, on a fresh macOS user account (System Settings > Users &
@@ -530,7 +535,7 @@ quarantine flag a user's download carries. Then, as that user:
 
 The checksum must equal the `.sha256` file. Drag Arkt to Applications in the DMG's window.
 
-Open it as described in the README ("Download the preview"). What to expect on 156 (dry run, quarantine flag set with
+Open it as described in the release notes ("How to open it"). What to expect on 156 (dry run, quarantine flag set with
 `xattr -w com.apple.quarantine "0081;$(printf %x $(date +%s));Safari;"`): `spctl -a -vv Arkt.app` prints `rejected`,
 and launching the executable directly shows the "Arkt Not Opened" dialog ("Apple could not verify ...") with the
 buttons Move to Trash and Done. Choose Done, never Move to Trash. The process sits at `_dyld_start` with no window
