@@ -4,6 +4,8 @@ const ICO = {
   clock: '<svg class="ico" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M8 4.8V8l2.2 1.5"/></svg>',
   go: '<svg class="ico" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M2.4 8h11.2M8 2.2c2 1.7 2.9 3.6 2.9 5.8S10 12.1 8 13.8M8 2.2C6 3.9 5.1 5.8 5.1 8S6 12.1 8 13.8"/></svg>',
   clip: '<svg class="ico" viewBox="0 0 16 16"><rect x="3.5" y="3" width="9" height="10.5" rx="1.8"/><path d="M6 3V2.4h4V3M6 7.5h4M6 10h2.5"/></svg>',
+  folder: '<svg class="ico" viewBox="0 0 16 16"><path d="M2 4.6c0-.9.7-1.6 1.6-1.6h2.6l1.4 1.5h4.8c.9 0 1.6.7 1.6 1.6v5.3c0 .9-.7 1.6-1.6 1.6H3.6c-.9 0-1.6-.7-1.6-1.6z"/></svg>',
+  puzzle: '<svg class="ico" viewBox="0 0 16 16"><path d="M6.2 3.4a1.3 1.3 0 0 1 2.6 0V4.5h2.6c.6 0 1.1.5 1.1 1.1v1.7h-1a1.3 1.3 0 0 0 0 2.6h1v1.8c0 .6-.5 1.1-1.1 1.1H9.3v-1a1.3 1.3 0 0 0-2.6 0v1H4.1c-.6 0-1.1-.5-1.1-1.1V5.6c0-.6.5-1.1 1.1-1.1h2.1z"/></svg>',
   ret: '<svg class="ico" viewBox="0 0 16 16" style="width:12px;height:12px"><path d="M12.5 4v4.5h-9M6 6l-2.5 2.5L6 11"/></svg>',
 };
 const fav = (c, ch) => `<span class="fav ${c}">${ch}</span>`;
@@ -26,6 +28,8 @@ const R = {
   hbook:{ k: 'hist', ic: ICO.clock, t: 'Git - Book', u: 'git-scm.com/book/en/v2', w: 'Yesterday' },
   cheat:{ k: 'hist', ic: ICO.clock, t: 'Git Cheat Sheet', u: 'training.example.com/downloads/git-cheat-sheet.pdf', w: 'Monday' },
   hmaps:{ k: 'hist', ic: ICO.clock, t: 'Trail map · Lake District', u: 'maps.example.com/trails/lake-district', w: 'Sunday' },
+  fold: { k: 'fold', ic: ICO.folder, t: 'Git reading list', u: '6 tabs' },
+  ext:  { k: 'ext', ic: ICO.puzzle, t: 'Git Pilot', u: 'Pull request shortcuts in your toolbar' },
   s1:   { k: 'sugg', ic: ICO.search, t: 'git rebase onto' },
   s2:   { k: 'sugg', ic: ICO.search, t: 'git stash pop' },
   url:  { k: 'url', ic: ICO.go, t: 'git-scm.com', u: 'Go to site' },
@@ -46,6 +50,12 @@ const WORST = [
   W('hist', ICO.clock, 'Flexbox layout cheat sheet', 'flexbox.example.com', 'Monday'),
   W('hist', ICO.clock, 'Masonry layout without JavaScript', 'example.com/blog/masonry', 'Sunday'),
   W('hist', ICO.clock, 'Layout engines compared', 'example.org/wiki/Layout_engine', 'Last week'),
+  W('fold', ICO.folder, 'Layout and typography research, collected for the redesign of the long reading view', '128 tabs'),
+  W('fold', ICO.folder, 'Layout', '9 tabs'),
+  W('fold', ICO.folder, '\u30ec\u30a4\u30a2\u30a6\u30c8\u8cc7\u6599', '14 tabs'),
+  W('ext', ICO.puzzle, 'Layout Inspector Pro with Grid, Flexbox and Baseline Overlays', 'Draws grid and flexbox overlays on any page, measures spacing and exports the result'),
+  W('ext', fav('f-note', 'L'), 'Layout Notes', 'Sticky notes pinned to elements'),
+  W('ext', ICO.puzzle, 'Responsive Layout Tester', 'Resize any page to common widths'),
   W('sugg', ICO.search, 'layout engine internals and how browsers compute style, layout and paint for very large documents'),
   W('sugg', ICO.search, 'layout thrashing'),
   W('sugg', ICO.search, 'layout shift score'),
@@ -63,14 +73,15 @@ const GO = q => ({ k: 'url', ic: ICO.go, t: q });
 const SG = (t) => ({ k: 'sugg', ic: ICO.search, t });
 const STATES = {
   empty:  { q: '', top: [R.paste], g: [['Tabs', [R.lin, R.gh, R.road]], ['History', [R.mail, R.hmaps, R.hbook]]] },
-  search: { q: 'git', top: [], g: [['Tabs', [R.git, R.gh]], ['History', [R.hbook, R.cheat]], ['Search', [LIT('git'), R.s1, R.s2]]] },
+  search: { q: 'git', top: [], g: [['Tabs', [R.git, R.gh]], ['Folders', [R.fold]], ['History', [R.hbook, R.cheat]], ['Extensions', [R.ext]],
+          ['Search', [LIT('git'), R.s1, R.s2]]] },
   url:    { q: 'git-scm.com/book', top: [GO('git-scm.com/book')], g: [['Tabs', [R.git]], ['History', [R.hbook]], ['Search', [LIT('git-scm.com/book')]]] },
-  worst:  { q: 'layout', top: [], g: [['Tabs', WORST.filter(r => r.k === 'tab')], ['History', WORST.filter(r => r.k === 'hist')],
+  worst:  { q: 'layout', top: [], g: [['Tabs', WORST.filter(r => r.k === 'tab')], ['Folders', WORST.filter(r => r.k === 'fold')],
+          ['History', WORST.filter(r => r.k === 'hist')], ['Extensions', WORST.filter(r => r.k === 'ext')],
           ['Search', [LIT('layout'), ...WORST.filter(r => r.k === 'sugg')]]] },
   none:   { q: 'zqxv wplk', top: [], g: [['Search', [LIT('zqxv wplk')]]] },
 };
 STATES.small = STATES.worst;
-STATES.worst.g[2][1][0].t = '\u201clayout\u201d';
 
 /* One row. trail(r, selected) returns the right-hand html. */
 function rowHTML(r, q, sel, trail) {
