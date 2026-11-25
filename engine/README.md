@@ -381,14 +381,14 @@ How a maintainer cuts an alpha build (v0.1.0-alpha.1, "First light", tracking is
 times of day: First light is Alpha 1, Sunrise the later alphas, Morning the beta, Daylight 1.0. On GitHub the release
 title is the name and the tag carries the version; arkt.dev reads both, shows the first seven `- **Lead** rest`
 bullets of the notes and offers the first `.dmg` asset. An alpha is an unsigned, ad-hoc signed DMG on a GitHub
-pre-release (window design: `design/install-dmg/`, #983). There is no Developer ID signing,
-no notarization and no update feed; those follow in #125. Nothing here is scripted: run the steps in order, in zsh,
-with the variables from the top of this file (`$REPO`, `$CHROMIUM_ROOT`, `$CR`, `$PIN`). The release is the
-maintainer's to publish; do not run steps 5 and 6 without that go-ahead.
+pre-release (window design: `design/install-dmg/`, #983). There is no Developer ID signing and no notarization
+(#125), and no update feed (#126). Nothing here is scripted: run the steps in order, in zsh, with the variables from
+the top of this file (`$REPO`, `$CHROMIUM_ROOT`, `$CR`, `$PIN`). The release is the maintainer's to publish; do not
+run steps 5 and 6 without that go-ahead.
 
     export REL=$CR/out/Arkt
     export VERSION=0.1.0-alpha.1
-    export NAME="First light"                      # the release title on GitHub
+    export RELEASE_NAME="First light"              # the release title on GitHub
     export OUT=$CHROMIUM_ROOT/release-$VERSION     # build and staging folder, outside the repo
 
 ### 1. Freeze the overlay and build the engine
@@ -523,7 +523,7 @@ and put the checksum in. Keep the highlights as the only `- **Lead** rest` bulle
 turns exactly those into its release cards. Create a draft pre-release; a draft is not visible to the public:
 
     gh release create v$VERSION --draft --prerelease --target main \
-      --title "$NAME" --notes-file <notes file> \
+      --title "$RELEASE_NAME" --notes-file <notes file> \
       $OUT/Arkt-$VERSION-arm64.dmg $OUT/Arkt-$VERSION-arm64.dmg.sha256
 
 Smoke test the downloaded asset, not the local build, on a fresh macOS user account (System Settings > Users &
