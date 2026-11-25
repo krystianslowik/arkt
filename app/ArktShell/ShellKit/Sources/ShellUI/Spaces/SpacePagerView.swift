@@ -448,6 +448,10 @@ public final class SpacePagerView: NSView {
   /// Window resign-key and app deactivation observers, while the pager is in a window.
   private var focusObservers: [NSObjectProtocol] = []
 
+  isolated deinit {
+    for observer in focusObservers { NotificationCenter.default.removeObserver(observer) }
+  }
+
   /// Leaving the window ends any interaction (the pacer's display link would otherwise keep ticking).
   public override func viewDidMoveToWindow() {
     super.viewDidMoveToWindow()
@@ -593,6 +597,9 @@ public final class SpacePagerView: NSView {
   /// outline to its end, momentum included, wherever its later events land: resuming a frozen settle moves the
   /// strip under the fingers.
   private weak var gestureOutline: SidebarScrollView?
+  /// The momentum arriving now is the current gesture's own: set by its `ended`, cleared by the next gesture's start
+  /// and by the momentum's end. Momentum without it (a fling that began outside the sidebar) scrolls nothing.
+  private var momentumFollowsGesture = false
 
   /// Takes one event of a trackpad gesture (a phased or momentum event) that reached the pager (`from` nil) or a
   /// page's scroll view. Horizontal gestures page the Spaces; vertical ones scroll the outline they began on.
@@ -606,11 +613,16 @@ public final class SpacePagerView: NSView {
   func routeGestureEvent(_ event: NSEvent, from outline: SidebarScrollView?) {
     // Momentum of a swipe belongs to the spring, which owns deceleration; momentum of a vertical scroll to the outline.
     if event.momentumPhase != [] {
+      guard momentumFollowsGesture else { return }
       if lock.axis == .vertical { gestureOutline?.scrollOutline(with: event) }
+      if event.momentumPhase.contains(.ended) || event.momentumPhase.contains(.cancelled) {
+        momentumFollowsGesture = false
+      }
       return
     }
     let starts = event.phase.contains(.began) || event.phase.contains(.mayBegin)
     let ends = event.phase.contains(.ended) || event.phase.contains(.cancelled)
+    momentumFollowsGesture = event.phase.contains(.ended)
     if starts {
       gestureOutline = outline
       gestureMayBegin()                                    // freeze a running settle

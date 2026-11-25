@@ -609,6 +609,21 @@ final class SpacePagerTests: XCTestCase {
     assertRestsOnOnePage(1, "after the swipe")
   }
 
+  /// Momentum with no gesture of its own in the sidebar (a fling that began elsewhere, the pointer moving onto the
+  /// sidebar while it runs) scrolls nothing: not the outline of the last vertical scroll, which ended long before.
+  func testMomentumWithoutAGestureOfItsOwnScrollsNothing() throws {
+    driveSettlesByHand()
+    let first = try outline(0)
+    try scrollVertically(first)
+    try momentum(to: first, dy: -20)                      // that scroll's own fling, to its end
+    try recordingOutlineScrolls { log in
+      try momentum(to: first, dy: -20)
+      try momentum(to: try outline(1), dy: -20)
+      XCTAssertEqual(log.events(of: first), [], "stray momentum does not scroll the last scrolled outline")
+      XCTAssertEqual(log.events(of: try outline(1)), [], "nor the outline it lands on")
+    }
+  }
+
   /// A touch freezes a settle; the gesture turns out vertical and the settle resumes, which moves the strip under
   /// the fingers, so the rest of the scroll lands on the next page's scroll view. The scroll, its end and its momentum
   /// stay with the outline it began on.
