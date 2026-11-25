@@ -227,27 +227,56 @@ final class CommandBarBehaviourTests: XCTestCase {
     XCTAssertEqual(CommandBarFieldEditor.caretWidth, 2)
   }
 
-  /// A mouse-down on a row gives it the full fill before the click runs it (feedback on press, action on release).
+  /// A mouse-down on a row gives it the full fill before the click runs it (feedback on press, action on release): a
+  /// real mouse-down event to the table selects the row under the pointer. The release that runs the row is the
+  /// table's own click action (`rowClicked`).
   func testAMouseDownSelectsTheRowUnderThePointer() throws {
     showAllGroups()
-    bar.barView.table.onMouseDownRow?(3)
-    XCTAssertEqual(selected, 3)
+    bar.barView.layoutSubtreeIfNeeded()
+    bar.barView.displayIfNeeded()
+    let table = bar.barView.table
+    XCTAssertEqual(selected, 0)
+    let rect = table.rect(ofRow: 2)
+    let point = table.convert(NSPoint(x: rect.midX, y: rect.maxY - 10), to: nil)
+    func mouse(_ type: NSEvent.EventType) throws -> NSEvent {
+      try XCTUnwrap(NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: 0,
+                                       windowNumber: bar.panel.windowNumber, context: nil, eventNumber: 0,
+                                       clickCount: 1, pressure: type == .leftMouseDown ? 1 : 0))
+    }
+    // The table tracks the press until the release, so the release is queued first and ends the tracking.
+    NSApp.postEvent(try mouse(.leftMouseUp), atStart: false)
+    table.mouseDown(with: try mouse(.leftMouseDown))
+    XCTAssertEqual(selected, 2, "the pressed row takes the selection fill")
   }
 
-  /// A keystroke that adds a group header changes row heights without animating them.
+  /// A keystroke that adds a group header changes row heights without animating them, even when it lands inside an
+  /// animation group someone else opened (a window or sidebar animation running): NSTableView animates height
+  /// changes made inside one.
   func testRowHeightChangesDoNotAnimate() throws {
-    bar.openTabsProvider = { [.init(node: UUID(), title: "Git tab", url: URL(string: "https://t.example")!)] }
-    bar.toggle(.newTab)
-    bar.setQueryForTesting("git")                          // Tabs, then the Search header appears
+    let rows: [CommandBarResults.OpenTab] = [
+      .init(node: UUID(), title: "Git tab", url: URL(string: "https://t.example")!),
+      .init(node: UUID(), title: "Other", url: URL(string: "https://o.example")!),
+    ]
+    bar.openTabsProvider = { rows }
+    bar.toggle(.newTab)                                    // Tabs: two rows
     bar.barView.layoutSubtreeIfNeeded()
+    bar.barView.displayIfNeeded()
     let table = bar.barView.table
-    XCTAssertEqual(bar.groupHeaders.count, 2)
-    for row in 0..<table.numberOfRows {
-      let view = table.rowView(atRow: row, makeIfNecessary: false)
-      XCTAssertNil(view?.layer?.animationKeys(), "row \(row)")
-      XCTAssertNil(view?.animations["frameSize"] as Any?, "row \(row)")
+    XCTAssertNotNil(table.rowView(atRow: 1, makeIfNecessary: false))
+    NSAnimationContext.runAnimationGroup { context in
+      context.duration = 0.5
+      context.allowsImplicitAnimation = true
+      bar.setQueryForTesting("git")                        // row 1 becomes the Search row, taller by its header
     }
-    XCTAssertNil(table.layer?.animationKeys())
+    XCTAssertEqual(bar.groupHeaders, [0: "Tabs", 1: "Search"])
+    // An animated height change leaves the row view at its old height after layout and moves it over the group's
+    // duration; an instant one puts it at its new height at once.
+    table.layoutSubtreeIfNeeded()
+    for row in 0..<table.numberOfRows {
+      let view = try XCTUnwrap(table.rowView(atRow: row, makeIfNecessary: false), "row \(row)")
+      XCTAssertEqual(view.frame, table.rect(ofRow: row), "row \(row) is at its new frame at once")
+      XCTAssertNil(view.layer?.animationKeys(), "row \(row)")
+    }
   }
 
   /// Group headers reach accessibility from the model, for rows scrolled out of view as well.
