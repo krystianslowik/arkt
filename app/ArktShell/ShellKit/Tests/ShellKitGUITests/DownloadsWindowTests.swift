@@ -135,35 +135,6 @@ final class DownloadsWindowTests: XCTestCase {
     XCTAssertFalse(popover.isShown, "a second click closes it")
   }
 
-  func testHoveringOpensAfterTheDelayAndLeavingClosesAfterTheGrace() throws {
-    let controller = makeWindow()
-    let button = try XCTUnwrap(controller.sidebarController.view.libraryButton)
-    let popover = try XCTUnwrap(center.popover(of: controller))
-    button.setHovered(true)
-    XCTAssertFalse(popover.isShown, "nothing before the pointer has rested")
-    popover.firePendingTimer()
-    XCTAssertTrue(popover.isShown)
-    XCTAssertFalse(popover.panel?.isKeyWindow ?? true, "a hover never takes the keyboard")
-    button.setHovered(false)
-    XCTAssertTrue(popover.isShown, "the grace keeps it for a moment")
-    popover.pointerInPanelChanged(true)
-    popover.firePendingTimer()
-    XCTAssertTrue(popover.isShown, "the pointer is on the popover")
-    popover.pointerInPanelChanged(false)
-    popover.firePendingTimer()
-    XCTAssertFalse(popover.isShown)
-  }
-
-  func testMovingOffAndBackBeforeTheDelayShowsNothing() throws {
-    let controller = makeWindow()
-    let button = try XCTUnwrap(controller.sidebarController.view.libraryButton)
-    let popover = try XCTUnwrap(center.popover(of: controller))
-    button.setHovered(true)
-    button.setHovered(false)
-    popover.firePendingTimer()
-    XCTAssertFalse(popover.isShown)
-  }
-
   func testAClickElsewhereClosesThePopoverButNotOneInsideIt() throws {
     let controller = makeWindow()
     let button = try XCTUnwrap(controller.sidebarController.view.libraryButton)

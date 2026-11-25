@@ -4,7 +4,7 @@ import QuartzCore
 /// The Library button in the sidebar's bottom bar (design/downloads, direction B): the download glyph, with a graphite
 /// ring that fills while files download. When everything finished it shows a check, and a small dot (also for a failed
 /// or held file) until the Library is opened. Idle it is one quiet glyph, so a browser that never downloads shows
-/// nothing extra. A click toggles the popover; resting the pointer on it for 0.4 s lists the recent files.
+/// nothing extra. A click toggles the popover; hovering it opens nothing (#987).
 @MainActor
 public final class LibraryButton: NSButton {
   static let symbols = (idle: "arrow.down.to.line", done: "checkmark", attention: "exclamationmark")
@@ -12,10 +12,6 @@ public final class LibraryButton: NSButton {
   private let ring = ProgressRing()
   private let dot = CALayer()
   private(set) public var ringState: DownloadsRingState = .idle
-  private var tracking: NSTrackingArea?
-  private(set) var isHovered = false
-  /// The pointer entered or left the button.
-  var onHoverChanged: (@MainActor (Bool) -> Void)?
   var reduceMotion: @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion } {
     didSet { ring.reduceMotion = reduceMotion }
   }
@@ -136,24 +132,5 @@ public final class LibraryButton: NSButton {
   override public func viewDidChangeBackingProperties() {
     super.viewDidChangeBackingProperties()
     restyle()
-  }
-
-  override public func updateTrackingAreas() {
-    super.updateTrackingAreas()
-    if let tracking { removeTrackingArea(tracking) }
-    let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
-                              owner: self)
-    addTrackingArea(area)
-    tracking = area
-  }
-
-  override public func mouseEntered(with event: NSEvent) { setHovered(true) }
-  override public func mouseExited(with event: NSEvent) { setHovered(false) }
-
-  /// The pointer is over the button (tests set it directly).
-  func setHovered(_ hovered: Bool) {
-    guard hovered != isHovered else { return }
-    isHovered = hovered
-    onHoverChanged?(hovered)
   }
 }
