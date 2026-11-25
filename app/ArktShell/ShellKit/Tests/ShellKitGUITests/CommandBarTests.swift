@@ -191,14 +191,15 @@ final class CommandBarTests: XCTestCase {
     XCTAssertFalse(bar.isVisible)
   }
 
-  // [I] Cmd-Enter in the split pane bar opens a plain new tab, as from Cmd-T and Cmd-L (KB-085).
-  func testCommandReturnFromNewSplitPaneOpensInANewTab() async throws {
+  /// Cmd-Return searches the web for exactly the typed text (README, Keyboard), in the split pane bar's new pane.
+  func testCommandReturnFromNewSplitPaneSearchesInANewSplitPane() async throws {
     var result: (URL, CommandBarController.OpenTarget)?
     bar.onOpen = { result = ($0, $1) }
     bar.toggle(.newSplitPane)
     bar.setQueryForTesting("example.com")
     try sendReturn(.command)
-    XCTAssertEqual(result?.1, .newTab)
+    XCTAssertEqual(result?.0, URLInputParser.searchURL(for: "example.com"), "the text, not the Go row's address")
+    XCTAssertEqual(result?.1, .newSplitPane)
   }
 
   func testArrowKeysMoveSelectionAndEnterSearches() async throws {
@@ -464,7 +465,7 @@ final class CommandBarTests: XCTestCase {
     bar.toggle(.newTab)
     window.setFrame(NSRect(x: 160, y: 120, width: 700, height: 600), display: true)
     waitUntil("the bar over the resized parent") { barIsOverTheParent() }
-    XCTAssertEqual(bar.panel.frame.width, min(766, window.frame.width - 48), accuracy: 1)
+    XCTAssertEqual(bar.panel.frame.width, min(600, window.frame.width - 48), accuracy: 1)
     bar.toggle(.newTab)
   }
 
@@ -678,20 +679,21 @@ final class CommandBarTests: XCTestCase {
     XCTAssertFalse(bar.isVisible)
   }
 
-  // [I] KB-085: Cmd-Enter opens the selected result in a new tab, also from Cmd-L.
-  func testCommandReturnFromCmdLOpensInANewTab() async throws {
+  /// Cmd-Return from Cmd-L searches the typed text in the current tab, as Return would open there.
+  func testCommandReturnFromCmdLSearchesTheTypedText() async throws {
     var result: (URL, CommandBarController.OpenTarget)?
     bar.onOpen = { result = ($0, $1) }
     bar.toggle(.currentTab(URL(string: "https://example.com")))
     bar.setQueryForTesting("example.org")
     try sendReturn(.command)
-    XCTAssertEqual(result?.0.absoluteString, "https://example.org")
-    XCTAssertEqual(result?.1, .newTab)
+    XCTAssertEqual(result?.0, URLInputParser.searchURL(for: "example.org"))
+    XCTAssertEqual(result?.1, .currentTab)
     XCTAssertFalse(bar.isVisible)
   }
 
-  // [I] A modified Enter on an unedited Cmd-L opens the URL in a new tab instead of reloading (KB-004 is plain Enter).
-  func testModifiedReturnOnUneditedCmdLOpensANewTabInsteadOfReloading() async throws {
+  // [I] A modified Return on an unedited Cmd-L does not reload (KB-004 is plain Return): Opt-Return opens the empty
+  // state's selected row in a new tab, Cmd-Return searches the address text.
+  func testModifiedReturnOnUneditedCmdLDoesNotReload() async throws {
     var reloaded = false
     var result: (URL, CommandBarController.OpenTarget)?
     bar.onReload = { reloaded = true }
@@ -699,8 +701,8 @@ final class CommandBarTests: XCTestCase {
     bar.toggle(.currentTab(URL(string: "https://example.com")))
     try sendReturn(.command)
     XCTAssertFalse(reloaded)
-    XCTAssertEqual(result?.0.absoluteString, "https://example.com")
-    XCTAssertEqual(result?.1, .newTab)
+    XCTAssertEqual(result?.0, URLInputParser.searchURL(for: "https://example.com"))
+    XCTAssertEqual(result?.1, .currentTab)
   }
 
   // [I] A modified Enter on a "Switch to Tab" result still switches: the tab is already open.
@@ -987,24 +989,26 @@ final class CommandBarTests: XCTestCase {
     XCTAssertEqual(CommandBarController.pasteboardURL(pasteboard)?.absoluteString, "https://clip.example/b")
   }
 
-  /// BH-109 / KB-083: Cmd-Opt-Delete removes the selected suggestion; it stays hidden for the session.
-  func testCommandOptionDeleteRemovesTheSelectedSuggestion() async throws {
+  /// BH-109 / KB-083: Cmd-Opt-Delete removes the selected history row; it stays hidden for the session. Other rows
+  /// are not removable.
+  func testCommandOptionDeleteRemovesTheSelectedHistoryRow() async throws {
     var removed: CommandBarResults.Result?
-    let list = tabs(3)
-    bar.openTabsProvider = { list }
+    let visits = (1...3).map { CommandBarResults.HistoryVisit(title: "Page \($0)", url: URL(string: "https://h\($0).example")!,
+                                                               visited: Date(timeIntervalSinceNow: -Double($0) * 60)) }
+    bar.historyProvider = { visits }
     bar.onRemoveSuggestion = { removed = $0 }
     bar.toggle(.newTab)
-    XCTAssertEqual(bar.results.map(\.title), ["Tab 1", "Tab 2", "Tab 3"])
+    XCTAssertEqual(bar.results.map(\.title), ["Page 1", "Page 2", "Page 3"])
     bar.barView.table.selectRowIndexes([1], byExtendingSelection: false)
     try sendKey(51, "\u{7f}", [.command, .option])
-    XCTAssertEqual(removed?.title, "Tab 2")
-    XCTAssertEqual(bar.results.map(\.title), ["Tab 1", "Tab 3"])
-    XCTAssertEqual(bar.barView.table.selectedRow, 1, "the next suggestion takes the removed row's place")
+    XCTAssertEqual(removed?.title, "Page 2")
+    XCTAssertEqual(bar.results.map(\.title), ["Page 1", "Page 3"])
+    XCTAssertEqual(bar.barView.table.selectedRow, 1, "the next row takes the removed row's place")
 
-    bar.setQueryForTesting("Tab")                          // session exclusion survives retypes
-    XCTAssertFalse(bar.results.contains { $0.title == "Tab 2" })
+    bar.setQueryForTesting("Page")                         // session exclusion survives retypes
+    XCTAssertFalse(bar.results.contains { $0.title == "Page 2" })
 
-    bar.setQueryForTesting("example.com")                  // the typed URL row is not removable
+    bar.setQueryForTesting("example.com")                  // the typed address row is not removable
     bar.barView.table.selectRowIndexes([0], byExtendingSelection: false)
     try sendKey(51, "\u{7f}", [.command, .option])
     XCTAssertEqual(bar.results.map(\.kind.name), ["open", "search"])

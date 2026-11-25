@@ -75,11 +75,13 @@ final class CommandBarBehaviourTests: XCTestCase {
 
   /// Every group: two tabs, a folder, two history rows, an extension and the Search group for "git".
   private func showAllGroups() {
-    bar.openTabsProvider = {
-      [.init(node: UUID(), title: "Git - Branches", url: URL(string: "https://git-scm.com/book/branches")!),
-       .init(node: UUID(), title: "acme/git-tools", url: URL(string: "https://github.com/acme/git-tools")!)]
-    }
-    bar.foldersProvider = { [.init(node: UUID(), title: "Git reading list", tabCount: 6)] }
+    let tabs: [CommandBarResults.OpenTab] = [
+      .init(node: UUID(), title: "Git - Branches", url: URL(string: "https://git-scm.com/book/branches")!),
+      .init(node: UUID(), title: "acme/git-tools", url: URL(string: "https://github.com/acme/git-tools")!),
+    ]
+    let folders: [CommandBarResults.Folder] = [.init(node: UUID(), title: "Git reading list", tabCount: 6)]
+    bar.openTabsProvider = { tabs }
+    bar.foldersProvider = { folders }
     bar.historyProvider = {
       [.init(title: "Git - Book", url: URL(string: "https://git-scm.com/book")!,
              visited: Date(timeIntervalSinceNow: -26 * 3600)),
@@ -356,6 +358,7 @@ final class CommandBarBehaviourTests: XCTestCase {
     suggestingByHand()
     showAllGroups()
     down()
+    try await turns(until: { pending.count == 1 }, "the request")
     XCTAssertEqual(pending.map(\.query), ["git"])
     let before = bar.results
     pending.removeFirst().reply.resume(returning: ["git rebase onto", "git stash pop", "git log"])
@@ -370,6 +373,7 @@ final class CommandBarBehaviourTests: XCTestCase {
     suggestingByHand()
     showAllGroups()
     bar.setQueryForTesting("gi")
+    try await turns(until: { pending.count == 2 }, "the requests")
     XCTAssertEqual(pending.map(\.query), ["git", "gi"])
     let count = bar.results.count
     pending.removeFirst().reply.resume(returning: ["git stale"])
@@ -383,11 +387,13 @@ final class CommandBarBehaviourTests: XCTestCase {
   func testAReplyFromAnEarlierShowIsDropped() async throws {
     suggestingByHand()
     showAllGroups()
+    try await turns(until: { pending.count == 1 }, "the request")
     let firstShow = try XCTUnwrap(bar.lifecycle.generation)
     bar.hide()
     XCTAssertNil(bar.lifecycle.generation)
     showAllGroups()
     XCTAssertGreaterThan(try XCTUnwrap(bar.lifecycle.generation), firstShow)
+    try await turns(until: { pending.count == 2 }, "the second show's request")
     let count = bar.results.count
     pending.removeFirst().reply.resume(returning: ["git old"])
     for _ in 0..<50 { await Task.yield() }
@@ -396,10 +402,11 @@ final class CommandBarBehaviourTests: XCTestCase {
   }
 
   /// With "Include search engine suggestions" off, the engine is never asked.
-  func testSuggestionsOffAsksNothing() throws {
+  func testSuggestionsOffAsksNothing() async throws {
     suggestingByHand()
     bar.settings.setSearchSuggestionsEnabled(false)
     showAllGroups()
+    for _ in 0..<50 { await Task.yield() }
     XCTAssertEqual(pending.count, 0)
     XCTAssertTrue(bar.results.contains { $0.kind == .search(URLInputParser.searchURL(for: "git")) })
   }
@@ -429,7 +436,9 @@ final class CommandBarBehaviourTests: XCTestCase {
     bar.historyProvider = {
       (1...5).map { .init(title: "Layout page \($0)", url: URL(string: "https://layout.example/h\($0)")!) }
     }
-    bar.extensionsProvider = { (1...5).map { .init(id: "e\($0)", name: "Layout tool \($0)", description: "") } }
+    bar.extensionsProvider = {
+      (1...5).map { .init(id: "e\($0)", name: "Layout tool \($0)", description: "For layout.example pages") }
+    }
     bar.toggle(.newTab)
     bar.setQueryForTesting("layout.example")
     XCTAssertEqual(bar.results.count, 14, "Go, 3 tabs, 3 folders, 3 history, 3 extensions, Search for")

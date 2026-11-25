@@ -22,11 +22,31 @@ public enum CommandBarResults {
     public let lastViewed: Date?
     /// The Space the tab is open in.
     public let spaceTitle: String?
+    /// What the bar matches besides the title, worked out once: the window keeps its open tabs between keystrokes,
+    /// so a keystroke over 2,000 tabs does no string work per tab beyond the search itself (#606).
+    let matchText: MatchText
     public init(node: NodeID, title: String, url: URL, isSplitPane: Bool = false, lastViewed: Date? = nil,
                 spaceTitle: String? = nil) {
       self.node = node; self.title = title; self.url = url; self.isSplitPane = isSplitPane
       self.lastViewed = lastViewed
       self.spaceTitle = spaceTitle
+      matchText = MatchText(title: title, url: url)
+    }
+  }
+
+  /// A page's title and address as the matching reads them, folded once: the title and the address as stored
+  /// (without the scheme; an internationalized host in its `xn--` form) with case and diacritics folded, and the host as
+  /// the rows show it (`HostDisplay`, #732) with case folded only, when it reads differently.
+  struct MatchText: Sendable, Equatable {
+    let title: WordStartMatch.Text
+    let address: WordStartMatch.Text
+    let shownHost: WordStartMatch.Text?
+    init(title: String, url: URL) {
+      self.title = WordStartMatch.Text(title)
+      address = WordStartMatch.Text(CommandBarTitleMatch.displayURL(url.absoluteString))
+      let raw = url.host()
+      let shown = raw.flatMap { $0.range(of: "xn--", options: .caseInsensitive) != nil ? HostDisplay.host(of: url) : nil }
+      shownHost = shown == raw ? nil : shown.map { WordStartMatch.Text($0, foldsDiacritics: false) }
     }
   }
 
@@ -64,8 +84,10 @@ public enum CommandBarResults {
     public let url: URL
     public let visited: Date?
     public let openTab: NodeID?
+    let matchText: MatchText
     public init(title: String, url: URL, visited: Date? = nil, openTab: NodeID? = nil) {
       self.title = title; self.url = url; self.visited = visited; self.openTab = openTab
+      matchText = MatchText(title: title, url: url)
     }
   }
 
@@ -215,7 +237,7 @@ public enum CommandBarResults {
       isMoreRecent(a.element.lastViewed, b.element.lastViewed, orIndex: a.offset < b.offset)
     }
     for entry in recent { rows.append(tabRow(entry.element)) }
-    let openURLs = Set(input.openTabs.map(\.url))
+    let openURLs = input.history.isEmpty ? [] : Set(input.openTabs.map(\.url))
     let visits = input.history.enumerated()
       .filter { isKeptVisit($0.element, openURLs: openURLs, excluded: input.excluded) }
     for entry in topThree(visits, by: { a, b in
@@ -233,19 +255,19 @@ public enum CommandBarResults {
     }
     let match = WordStartMatch(query)
 
-    // Tabs: match quality, then most recently viewed. Rows are built for the three shown only (#606, #839).
-    var tabs: [(quality: Int, index: Int, tab: OpenTab)] = []
-    for (index, tab) in input.openTabs.enumerated() where tab.node != input.currentTab {
-      if let quality = matchQuality(match, title: tab.title, url: tab.url) {
-        tabs.append((quality, index, tab))
-      }
+    // Tabs: match quality, then most recently viewed. Only the best three are kept, by index, and rows are built for
+    // those alone (#606, #839).
+    var best: [(quality: Int, index: Int)] = []
+    let tabs = input.openTabs
+    for index in tabs.indices {
+      guard let quality = match.quality(tabs[index].matchText), tabs[index].node != input.currentTab else { continue }
+      if best.count == maxRowsPerGroup, let last = best.last,
+         !ranksTab((quality, index), before: last, in: tabs) { continue }
+      let at = best.firstIndex { ranksTab((quality, index), before: $0, in: tabs) } ?? best.count
+      best.insert((quality, index), at: at)
+      if best.count > maxRowsPerGroup { best.removeLast() }
     }
-    for entry in topThree(tabs, by: { a, b in
-      a.quality != b.quality ? a.quality < b.quality
-        : isMoreRecent(a.tab.lastViewed, b.tab.lastViewed, orIndex: a.index < b.index)
-    }) {
-      rows.append(tabRow(entry.tab))
-    }
+    for entry in best { rows.append(tabRow(tabs[entry.index])) }
 
     // Folders: the name only; match quality, then the most recently viewed tab inside.
     var folders: [(quality: Int, index: Int, folder: Folder)] = []
@@ -263,11 +285,11 @@ public enum CommandBarResults {
     }
 
     // History: the provider's order (frecency), pages that are open tabs left out.
-    let openURLs = Set(input.openTabs.map(\.url))
+    let openURLs = input.history.isEmpty ? [] : Set(input.openTabs.map(\.url))
     var history = 0
     for visit in input.history where history < maxRowsPerGroup {
       guard isKeptVisit(visit, openURLs: openURLs, excluded: input.excluded),
-            matchQuality(match, title: visit.title, url: visit.url) != nil
+            match.quality(visit.matchText) != nil
       else { continue }
       rows.append(historyRow(visit, now: input.now))
       history += 1
@@ -310,15 +332,11 @@ public enum CommandBarResults {
     return rows
   }
 
-  /// How a tab or a visit matches: its saved title and its address as stored (an internationalized host in its `xn--`
-  /// form), folding case and diacritics, and the host as the rows show it (`HostDisplay`, #732), folding case only, so a
-  /// host typed in Unicode finds it but "paypal" never finds "p\u{00E0}ypal-login.net". Only a host with an `xn--` label
-  /// reads differently, so every other one costs nothing more.
-  private static func matchQuality(_ match: WordStartMatch, title: String, url: URL) -> Int? {
-    let raw = url.host()
-    let shown = raw.flatMap { $0.range(of: "xn--", options: .caseInsensitive) != nil ? HostDisplay.host(of: url) : nil }
-    return match.quality(title: title, detail: CommandBarTitleMatch.displayURL(url.absoluteString),
-                         strictDetail: shown == raw ? nil : shown)
+  /// Match quality first, then the most recently viewed, then the original order.
+  private static func ranksTab(_ a: (quality: Int, index: Int), before b: (quality: Int, index: Int),
+                               in tabs: [OpenTab]) -> Bool {
+    if a.quality != b.quality { return a.quality < b.quality }
+    return isMoreRecent(tabs[a.index].lastViewed, tabs[b.index].lastViewed, orIndex: a.index < b.index)
   }
 
   /// The first three of `items` by `order`, without sorting them all.
@@ -434,66 +452,117 @@ public enum CommandBarResults {
 /// The command bar's matching (design, "Row order"): every word of the query starts a word of the text, ignoring
 /// case and diacritics. A word starts at the beginning, after a character that is not a letter or digit, or anywhere
 /// in text written without spaces (Han, kana, Hangul). `quality` ranks a match: 0 when the title starts with the
-/// query's first word, 1 when every word is found in the title, 2 when some are found only in `detail` (host and path,
-/// a description) or `strictDetail`, which folds case but not diacritics. Nil when a word is found in none.
+/// query's first word, 1 when every word is found in the title, 2 when some are found only in the detail (host and
+/// path, a description) or in a shown host, which folds case but not diacritics. Nil when a word is found in none.
+///
+/// Texts are folded to UTF-16 once (`Text`), so a keystroke over 2,000 open tabs only compares code units (#606).
 struct WordStartMatch {
-  private let words: [CFString]
-
-  init(_ query: String) {
-    words = query.split(whereSeparator: \.isWhitespace).map { String($0) as CFString }
+  /// A text folded for matching, as UTF-8.
+  struct Text: Sendable, Equatable {
+    let bytes: [UInt8]
+    init(_ string: String, foldsDiacritics: Bool = true) {
+      let options: String.CompareOptions = foldsDiacritics ? [.caseInsensitive, .diacriticInsensitive] : .caseInsensitive
+      bytes = Array(string.folding(options: options, locale: nil).utf8)
+    }
   }
 
-  func quality(title: String, detail: String?, strictDetail: String? = nil) -> Int? {
+  private let words: [[UInt8]]
+  /// The words folded for case only, for a shown host.
+  private let caseWords: [[UInt8]]
+
+  init(_ query: String) {
+    let split = query.split(whereSeparator: \.isWhitespace).map(String.init)
+    words = split.map { Text($0).bytes }
+    caseWords = split.map { Text($0, foldsDiacritics: false).bytes }
+  }
+
+  /// A folder name, or an extension's name and description.
+  func quality(title: String, detail: String?) -> Int? {
+    quality(title: Text(title), detail: detail.map { Text($0) }, shownHost: nil)
+  }
+
+  /// A tab or a history visit.
+  func quality(_ text: CommandBarResults.MatchText) -> Int? {
+    quality(title: text.title, detail: text.address, shownHost: text.shownHost)
+  }
+
+  private func quality(title: Text, detail: Text?, shownHost: Text?) -> Int? {
     guard !words.isEmpty else { return nil }
-    let titleText = title as CFString
-    let detailText = detail.map { $0 as CFString }
-    let strictText = strictDetail.map { $0 as CFString }
     var inTitle = true
-    for word in words {
-      if Self.startsWord(word, in: titleText) { continue }
-      if let detailText, Self.startsWord(word, in: detailText) {
+    for index in words.indices {
+      if Self.startsWord(words[index], in: title.bytes) { continue }
+      if let detail, Self.startsWord(words[index], in: detail.bytes) {
         inTitle = false
-      } else if let strictText, Self.startsWord(word, in: strictText, options: .compareCaseInsensitive) {
+      } else if let shownHost, Self.startsWord(caseWords[index], in: shownHost.bytes) {
         inTitle = false
       } else {
         return nil
       }
     }
     guard inTitle else { return 2 }
-    return Self.hasPrefix(words[0], titleText) ? 0 : 1
+    return Self.hasPrefix(words[0], title.bytes) ? 0 : 1
   }
 
-  private static let options: CFStringCompareFlags = [.compareCaseInsensitive, .compareDiacriticInsensitive]
-
-  private static func hasPrefix(_ word: CFString, _ text: CFString) -> Bool {
-    var found = CFRange()
-    return CFStringFindWithOptions(text, word, CFRange(location: 0, length: CFStringGetLength(text)),
-                                   options.union(.compareAnchored), &found)
-  }
-
-  static func startsWord(_ word: CFString, in text: CFString, options: CFStringCompareFlags = options) -> Bool {
-    let length = CFStringGetLength(text)
-    var start = 0
-    var found = CFRange()
-    while start < length,
-          CFStringFindWithOptions(text, word, CFRange(location: start, length: length - start), options, &found) {
-      if found.location == 0 { return true }
-      let before = CFStringGetCharacterAtIndex(text, found.location - 1)
-      let first = CFStringGetCharacterAtIndex(text, found.location)
-      if !isWordCharacter(before) || isUnspaced(before) || isUnspaced(first) { return true }
-      start = found.location + 1
+  private static func hasPrefix(_ word: [UInt8], _ text: [UInt8]) -> Bool {
+    guard word.count <= text.count else { return false }
+    return text.withUnsafeBytes { text in
+      word.withUnsafeBytes { word in
+        guard let base = text.baseAddress, let needle = word.baseAddress else { return word.isEmpty }
+        return memcmp(base, needle, word.count) == 0
+      }
     }
-    return false
   }
 
-  private static func isWordCharacter(_ unit: UniChar) -> Bool {
-    guard let scalar = Unicode.Scalar(unit) else { return true }   // half of a surrogate pair: inside a word
-    return scalar.properties.isAlphabetic || scalar.properties.numericType != nil
+  /// Whether `word` occurs in `text` at the start of a word. Candidates are found with `memmem`; only a candidate's
+  /// preceding character is looked at.
+  static func startsWord(_ word: [UInt8], in text: [UInt8]) -> Bool {
+    guard !word.isEmpty, word.count <= text.count else { return false }
+    return text.withUnsafeBytes { text in
+      word.withUnsafeBytes { word in
+        guard let base = text.baseAddress, let needle = word.baseAddress else { return false }
+        var offset = 0
+        while offset + word.count <= text.count,
+              let found = memmem(base + offset, text.count - offset, needle, word.count) {
+          let at = base.distance(to: found)
+          if at == 0 || isBoundary(in: text, at: at) { return true }
+          offset = at + 1
+        }
+        return false
+      }
+    }
+  }
+
+  /// Whether a word may start at byte `at`: the character before it is not a letter or digit, or either of them is
+  /// written without spaces between words.
+  private static func isBoundary(in text: UnsafeRawBufferPointer, at: Int) -> Bool {
+    let before = text[at - 1]
+    if before < 0x80 {                                              // ASCII: a letter or digit continues the word
+      let isWord = (0x30...0x39).contains(before) || (0x41...0x5A).contains(before) || (0x61...0x7A).contains(before)
+      if !isWord { return true }
+      guard text[at] >= 0x80, let first = scalar(in: text, at: at) else { return false }
+      return isUnspaced(first)
+    }
+    var start = at - 1
+    while start > 0, text[start] & 0xC0 == 0x80 { start -= 1 }     // back to the previous character's first byte
+    guard let previous = scalar(in: text, at: start) else { return true }
+    if isUnspaced(previous) { return true }
+    if let first = scalar(in: text, at: at), isUnspaced(first) { return true }
+    return !(previous.properties.isAlphabetic || previous.properties.numericType != nil)
+  }
+
+  private static func scalar(in text: UnsafeRawBufferPointer, at index: Int) -> Unicode.Scalar? {
+    let lead = text[index]
+    if lead < 0x80 { return Unicode.Scalar(lead) }
+    let length = lead >= 0xF0 ? 4 : lead >= 0xE0 ? 3 : 2
+    guard index + length <= text.count else { return nil }
+    var value = UInt32(lead) & (length == 2 ? 0x1F : length == 3 ? 0x0F : 0x07)
+    for offset in 1..<length { value = value << 6 | UInt32(text[index + offset] & 0x3F) }
+    return Unicode.Scalar(value)
   }
 
   /// Scripts written without spaces between words: CJK ideographs, kana, Hangul.
-  private static func isUnspaced(_ unit: UniChar) -> Bool {
-    switch unit {
+  private static func isUnspaced(_ scalar: Unicode.Scalar) -> Bool {
+    switch scalar.value {
     case 0x3040...0x30FF, 0x3400...0x4DBF, 0x4E00...0x9FFF, 0xAC00...0xD7AF, 0xF900...0xFAFF, 0xFF66...0xFF9F: true
     default: false
     }
