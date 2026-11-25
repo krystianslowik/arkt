@@ -20,6 +20,7 @@ extension CommandBarResults.Result {
     case .search, .suggestion: "magnifyingglass"
     case .history: "clock"
     case .pasteAndGo: "doc.on.clipboard"
+    case .reload: "arrow.clockwise"
     case .open: "globe"
     case .folder: "folder"
     case .extensionAction: "puzzlepiece.extension"
@@ -30,7 +31,7 @@ extension CommandBarResults.Result {
   /// (extensions). Go, Search for and suggestion rows have none.
   public var secondaryText: String {
     switch kind {
-    case .switchTo, .history, .pasteAndGo, .folder, .extensionAction: subtitle
+    case .switchTo, .history, .pasteAndGo, .reload, .folder, .extensionAction: subtitle
     case .open, .search, .suggestion: ""
     }
   }
@@ -43,6 +44,7 @@ extension CommandBarResults.Result {
     case .history: "Open"
     case .extensionAction: "Open Extension"
     case .open, .pasteAndGo: "Go"
+    case .reload: CommandBarResults.reloadTitle
     case .suggestion: "Search"
     case .search: nil
     }
@@ -62,6 +64,7 @@ extension CommandBarResults.Result {
     case .switchTo: (subtitle, "open tab")
     case .open: (CommandBarTitleMatch.displayURL(subtitle), "address")
     case .pasteAndGo: (CommandBarTitleMatch.displayURL(subtitle), "clipboard")
+    case .reload: (subtitle, "reload")
     case .search, .suggestion: ("", "search suggestion")
     case .history: (subtitle, "history")
     case .folder: (subtitle, "folder")
@@ -80,6 +83,7 @@ extension CommandBarResults.Result {
     case .search: "search for what you typed"
     case .open: "go to address"
     case .pasteAndGo: "paste and go"
+    case .reload: "reload"
     }
   }
 }

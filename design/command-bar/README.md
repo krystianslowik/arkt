@@ -84,7 +84,8 @@ All values in points. Window sizes from 640 x 420 (the shell minimum) up.
 | Row slot | 18 wide: favicon 16 (4 radius) or a 16 symbol (clock for history, magnifier for search, globe for Go, clipboard for Paste and Go, folder for a folder, the extension's own icon or a puzzle piece for an extension) |
 | Row title | 14 regular, text; the part that matches the query 600 weight |
 | Row secondary text | 13 regular, tertiary text: host and path without the scheme (tabs, history), "<n> tabs" (folders), the extension's short description (extensions) |
-| Trailing | 12; history rows show the relative time ("Yesterday") when not selected; the selected row shows its verb and the Return key cap |
+| Trailing | 12; history rows show the relative time when not selected: "12 min" and "3 h" today, "Yesterday", the weekday ("Monday") within the last week, then a short date ("Oct 20"; with the year in another year); the selected row shows its verb and the Return key cap |
+| Remove button | history rows only, while the pointer is over the row: 20 x 20 hit area at the trailing edge, a 10 pt `xmark` in tertiary text (secondary under Increase Contrast), 8 before the verb; no fill of its own. Label "Remove from History" |
 | Return key cap | 20 high, 5 radius, 11 medium |
 | Scrollbar | system overlay scroller, right edge |
 
@@ -93,7 +94,11 @@ All values in points. Window sizes from 640 x 420 (the shell minimum) up.
 Selection always starts on the first row of the list. Rows keep their position while typing: a late result never
 inserts above the selection.
 
-1. **Literal row, no header, only when it applies** (the Go and Paste and Go rows only; the Search for row belongs to the Search group). It sits above the groups and is the selected row.
+1. **Literal row, no header, only when it applies** (the Reload, Go and Paste and Go rows only; the Search for row belongs to the Search group). It sits above the groups and is the selected row.
+   - Cmd-L with the page's address untouched: **Reload**, with the page's host in the URL slot and the
+     `arrow.clockwise` symbol in the slot; verb "Reload". The first move of the selection (arrow, Tab, page, a hover
+     onto another row) or any edit removes it until the bar opens again; the rows below move up one and keep the
+     selection on the row moved to.
    - Empty field and the clipboard holds an address: **Paste and Go**, with the address in the URL slot. Only on the
      Cmd-T bar, like Cmd-Shift-V: Cmd-L and the split pane bar do not offer it.
    - The field parses as an address (scheme, or `host.tld`, with optional path): **Go**, showing the text as typed.
@@ -165,11 +170,12 @@ Focus never leaves the field. Typing always edits the text; the list is driven b
 | Cmd-L | Open on the current tab. The field holds the current address, fully selected, and the list shows the empty state; typing replaces it. Return opens the result in the current tab. |
 | Up / Down | Move the selection one row, across groups. Wraps from the last row to the first and back on a fresh press; held-key repeat stops at the ends. Ctrl-P and Ctrl-N do the same. |
 | Tab / Shift-Tab | Jump to the first row of the next or previous group; the literal row counts as a group of its own. Stops at the last and first group (no wrap). Tab does nothing else (site search is gone). |
-| Return | Run the selected row: Switch to Tab, Show Folder, Open (history), Open Extension, Go, Search, or Paste and Go. With the Cmd-L address untouched and the selection not moved since the bar opened, Return reloads the page (KB-004) and the first row shows "Reload" with the key cap; any move, Tab jump, hover that moves the selection, or edit makes Return run the selected row. |
-| Opt-Return | Run the selected row in a new tab (KB-085, unchanged). |
+| Return | Run the selected row: Reload, Switch to Tab, Show Folder, Open (history), Open Extension, Go, Search, or Paste and Go. On Cmd-L the Reload row is selected first, so an untouched Return reloads the page (KB-004). |
+| Opt-Return | Run the selected row in a new tab (KB-085, unchanged); on the Reload row, open the page again in a new tab. |
 | Cmd-Return | Search the web for exactly the typed text, whatever is selected, where Return would open it (the new tab, the current tab, the new split pane). Cmd-L's untouched address is not typed text: nothing happens (a beep). The escape hatch when a tab or history row outranks what you meant. |
 | Cmd-Shift-V | Paste and Go from any state (unchanged from #322). |
-| Cmd-Opt-Delete | Remove the selected history row from history (unchanged from #322). Other rows are not removable, and rows have no hover remove button. |
+| Cmd-Opt-Delete | Remove the selected history row from history (unchanged from #322). Other rows are not removable. |
+| Click the remove button | Remove that history row from history, as Cmd-Opt-Delete does; the button shows while the pointer is over the row. |
 | Esc | Clear the text if there is any, otherwise close. With the Cmd-L address untouched, Esc closes. |
 | Click a row | Runs it. Click outside the panel closes. |
 | Hover | Shows the hover fill. The keyboard selection does not move until the pointer actually moves. |
@@ -179,10 +185,11 @@ Text editing keys (arrows in the field, Option-arrows, Cmd-A, undo) belong to th
 ## Selected row
 
 A neutral fill over the whole row (no tick, no stroke). The trailing area shows the verb in 12 secondary text and the
-Return key cap: "Switch to Tab" (tab), "Show Folder" (folder), "Open" (history), "Open Extension" (extension), "Go" (Go and
+Return key cap: "Reload" (Reload), "Switch to Tab" (tab), "Show Folder" (folder), "Open" (history), "Open Extension" (extension), "Go" (Go and
 Paste and Go), "Search" (a suggestion). The Search for row shows the key cap only, because its title already says it.
 Unselected history rows show their time instead. Only the selected row carries a verb, so there is no per-row label
-column to read.
+column to read. A history row under the pointer also shows its remove button at the trailing edge (Layout, "Remove
+button"); it is the row's only control besides Return.
 
 ## Motion
 
@@ -222,7 +229,8 @@ headers, placeholder) uses `commandBarSecondaryText`.
 - The list is the results table, `AXTable` `commandBar.results` with `AXRow` rows, as the shell's other lists (the UI test harness
   reads it as a table). Each row that starts a group holds its header as an `AXGroup` label ("Tabs", "Folders", "History", "Extensions", "Search"). Each row reads
   "<title>, <secondary text, if any>, <kind>, <k> of <n>" with kind one of "open tab", "folder", "history", "extension", "search suggestion", "search for
-  what you typed", "go to address", "paste and go". The selected row is announced on every move.
+  what you typed", "go to address", "paste and go", "reload". A hovered history row's remove button is a button inside
+  the row labelled "Remove from History". The selected row is announced on every move.
 - After typing settles (150 ms), announce the count once: "<n> results". With only the Search row:
   "No matches. Return searches the web."
 - Every action is reachable by keyboard; mouse is optional.
@@ -246,8 +254,10 @@ Settled while building, where this document was silent:
   build for the maintainer to confirm: nothing is sent to a search engine yet. The notice returns with a real
   suggestion fetcher.
 - **Right to left.** The row layout does not mirror yet (#1001); CJK truncates correctly.
-- **History times.** The shell's relative time words, as elsewhere: "Now", "12 min", "3 h", "Yesterday", "3 d". The
-  prototype's weekday names ("Monday") are not used.
+- **History times.** "Now", "12 min", "3 h" today, then "Yesterday", the weekday within the last week, then a short date
+  (decided in the review of #1000).
+- **Reload row and remove button** (decided in the review of #1000): Cmd-L leads with a Reload row instead of a hidden
+  reload on Return, and history rows get their remove button back from the hybrid.
 
 ## Decisions
 

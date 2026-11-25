@@ -136,7 +136,9 @@ final class CommandBarView: NSView {
     table.axProxyRows.setParent(self)        // the results reach accessibility as `commandBar.results` (proxy)
 
     // One tracking area for the life of the view (never per show): pointer moves select the row under them.
-    table.addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect],
+    table.addTrackingArea(NSTrackingArea(rect: .zero,
+                                         options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow,
+                                                   .inVisibleRect],
                                          owner: self, userInfo: nil))
 
     scrollView.documentView = table
@@ -220,7 +222,23 @@ final class CommandBarView: NSView {
     let point = table.convert(event.locationInWindow, from: nil)
     guard table.visibleRect.contains(point) else { return }   // a row scrolled out of view is not under the pointer
     let row = table.row(at: point)
-    if row >= 0, row < table.numberOfRows { onHoverRow?(row) }
+    let target = row >= 0 && row < table.numberOfRows ? row : nil
+    if let target { onHoverRow?(target) }
+    setHoveredRow(target)
+  }
+
+  override func mouseExited(with event: NSEvent) { setHoveredRow(nil) }
+
+  /// The row under the pointer; a removable (history) row shows its remove button while it is.
+  private(set) var hoveredRow: Int?
+
+  func setHoveredRow(_ row: Int?) {
+    guard row != hoveredRow else { return }
+    let old = hoveredRow
+    hoveredRow = row
+    for index in [old, row].compactMap({ $0 }) where index < table.numberOfRows {
+      (table.view(atColumn: 0, row: index, makeIfNecessary: false) as? CommandBarCellView)?.setHovered(index == row)
+    }
   }
 
   // MARK: Layout

@@ -120,6 +120,8 @@ public enum CommandBarResults {
     public var searchSuggestionsEnabled = true
     /// BH-108: an address read from the clipboard when the bar opened; nil adds no Paste and Go.
     public var clipboardURL: URL?
+    /// Cmd-L's untouched page (KB-004): the empty field leads with a Reload row for it. Nil adds none.
+    public var reloadURL: URL?
     /// BH-109: removal ids hidden this session (Cmd-Opt-Delete on a history row).
     public var excluded: Set<String> = []
     /// The clock for "Yesterday"; injected so results are deterministic.
@@ -137,6 +139,8 @@ public enum CommandBarResults {
     case suggestion(URL)
     /// BH-108: open the clipboard address (GS-035 names it "Paste and Go").
     case pasteAndGo(URL)
+    /// KB-004: reload the page Cmd-L opened on.
+    case reload(URL)
     /// A history visit (#372). Return opens it.
     case history(URL)
     /// BH-104: show this folder in the sidebar.
@@ -151,6 +155,7 @@ public enum CommandBarResults {
       case .search: "search"
       case .suggestion: "suggestion"
       case .pasteAndGo: "pasteAndGo"
+      case .reload: "reload"
       case .history: "history"
       case .folder: "folder"
       case .extensionAction: "extension"
@@ -186,6 +191,7 @@ public enum CommandBarResults {
       case .switchTo: trailingHint ?? CommandBarResults.switchHint
       case .search, .suggestion: "Search"
       case .pasteAndGo: CommandBarResults.pasteAndGoTitle
+      case .reload: CommandBarResults.reloadTitle
       case .history: "Open"
       case .folder: "Show Folder"
       case .extensionAction: "Open Extension"
@@ -200,6 +206,7 @@ public enum CommandBarResults {
   /// The caption of an open tab that is a split pane (BH-104, [S] string), in Little Arkt's lookup.
   public static let switchToSplitHint = "Switch to Split View"
   public static let pasteAndGoTitle = "Paste and Go"
+  public static let reloadTitle = "Reload"
 
   /// The header text over each row that starts a group; keyed by row index.
   public static func groupHeaders(of results: [Result]) -> [Int: String] {
@@ -228,6 +235,10 @@ public enum CommandBarResults {
 
   private static func emptyField(_ input: Input) -> [Result] {
     var rows: [Result] = []
+    if let url = input.reloadURL {
+      rows.append(Result(kind: .reload(url), title: reloadTitle, subtitle: HostDisplay.hostOrAddress(url),
+                         trailingHint: nil, removalID: nil))
+    }
     if let url = input.clipboardURL {
       rows.append(Result(kind: .pasteAndGo(url), title: pasteAndGoTitle, subtitle: shownURL(url),
                          trailingHint: nil, removalID: nil))

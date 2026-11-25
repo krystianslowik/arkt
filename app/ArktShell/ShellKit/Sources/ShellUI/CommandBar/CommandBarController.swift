@@ -113,11 +113,9 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   /// itself still reports the previous display's scale until its frame moves in show().
   private var backingScale: CGFloat { backingScaleOverride ?? parent?.backingScaleFactor ?? 2 }
   private var prefill: String?
-  /// Cmd-L's Return reloads the page (KB-004) only while the address is untouched and the selection has not moved
-  /// since the show; the first row then says "Reload". Any move, Tab jump, page, hover that moves the selection, or
-  /// edit disarms it until the next show.
+  /// Cmd-L on a page: its untouched address leads the list with a selected Reload row (KB-004). The first move of the
+  /// selection or edit of the text takes the row away until the next show; Return then runs the selected row.
   private(set) var reloadArmed = false
-  static let reloadVerb = "Reload"
   private var showStart: CFTimeInterval = 0
   /// On the parent window (always on screen, so it ticks right away), created once and unpaused per show():
   /// creating a link per show cost up to ~2 ms under load. The link retains its target; invalidate() breaks
@@ -142,16 +140,26 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
       guard let self, results.indices.contains(row) else { return nil }
       return AXProxyRowContent(identifier: AXID.CommandBar.row,
                                label: results[row].commandBarLabel(position: row + 1, of: results.count),
-                               value: caption(row))
+                               value: results[row].accessibilityCaption)
     }
     // A row that starts a group lists its header ("Tabs") as a group inside it, from the model, so a row scrolled out
     // of view (and so without a cell) still has it.
+    // A hovered history row also lists its remove button.
     barView.table.axProxyRows.children = { [weak self] row in
-      guard let self, let title = groupHeaders[row] else { return [] }
-      let header = headerElement(row)
-      header.setAccessibilityLabel(title)
-      header.setAccessibilityParent(barView.table.axProxyRows.rowElement(forRow: row))
-      return [header]
+      guard let self else { return [] }
+      var children: [NSView] = []
+      if let title = groupHeaders[row] {
+        let header = headerElement(row)
+        header.setAccessibilityLabel(title)
+        children.append(header)
+      }
+      if let cell = barView.table.view(atColumn: 0, row: row, makeIfNecessary: false) as? CommandBarCellView,
+         !cell.removeButton.isHidden {
+        children.append(cell.removeButton)
+      }
+      let parent = barView.table.axProxyRows.rowElement(forRow: row)
+      children.forEach { $0.setAccessibilityParent(parent) }
+      return children
     }
     barView.onHoverRow = { [weak self] row in self?.select(row, byKeyboard: false) }
     barView.table.onMouseDownRow = { [weak self] row in self?.select(row, byKeyboard: false) }
@@ -469,11 +477,6 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   /// `forced` nil: the mode decides (Cmd-T new tab, Cmd-L current tab, Ctrl-Shift-= new split pane). `.newTab`:
   /// Opt-Return, which opens in a new tab and never reloads.
   private func commit(forcing forced: OpenTarget?) {
-    if forced == nil, reloadArmed, case .currentTab = mode, let prefill, barView.field.stringValue == prefill {
-      hide()
-      onReload?()
-      return
-    }
     commit(row: max(barView.table.selectedRow, 0), forcing: forced)
   }
 
@@ -487,6 +490,8 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
       onOpen?(url, target)
     // A tab row switches in every mode, the split pane bar included: the tab is already open.
     case .switchTo(let node): onSwitch?(node)
+    // KB-004: Return reloads; Opt-Return opens the page again in a new tab.
+    case .reload(let url): if forced == .newTab { onOpen?(url, .newTab) } else { onReload?() }
     case .folder(let node): onShowFolder?(node)
     case .extensionAction(let id): onOpenExtension?(id)
     }
@@ -589,6 +594,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
       // BH-108: Paste and Go is a new-tab surface, as Cmd-Shift-V is; Cmd-L and the split pane bar never offer it.
       // The pasteboard is read for the empty field only, so a keystroke never pays for it.
       input.clipboardURL = mode == .newTab ? clipboardURLForThisShow() : nil
+      input.reloadURL = reloadArmed ? prefill.flatMap { URL(string: $0) } : nil
     } else {
       input.folders = foldersProvider()
       input.extensions = extensionsProvider()
@@ -608,6 +614,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
       groupHeaders = headers
       cellScale = scale
       cellQuery = query
+      barView.setHoveredRow(nil)                      // the rows moved; no honest hover target until the pointer moves
       refreshRowsInPlace(oldCount: oldCount, oldHeaders: oldHeaders)
     }
     guard !results.isEmpty else { return }
@@ -632,7 +639,12 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
 
   /// Cmd-Opt-Delete: removes the selected history row; the next row takes its place.
   public func removeSelectedSuggestion() {
-    let row = barView.table.selectedRow
+    removeSuggestion(at: barView.table.selectedRow)
+  }
+
+  /// Cmd-Opt-Delete or a history row's remove button: the row stays hidden for this controller's lifetime;
+  /// `onRemoveSuggestion` is the persistence hook.
+  func removeSuggestion(at row: Int) {
     guard results.indices.contains(row), let id = results[row].removalID else { return }
     disarmReload()
     let result = results[row]
@@ -669,8 +681,13 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   /// the row's label (#608). A hover does neither: the row under the pointer is already visible.
   private func select(_ row: Int, byKeyboard: Bool) {
     guard row >= 0, row < results.count else { return }
+    var row = row
+    if barView.table.selectedRow != row, case .reload? = results.first?.kind {
+      // Moving off the Reload row takes it away; the rows below it move up one.
+      disarmReload()
+      row = max(row - 1, 0)
+    }
     let changed = barView.table.selectedRow != row
-    if byKeyboard || changed { disarmReload() }
     if changed { barView.table.selectRowIndexes([row], byExtendingSelection: false) }
     guard byKeyboard else { return }
     barView.table.scrollRowToVisible(row)
@@ -683,12 +700,9 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   private func disarmReload() {
     guard reloadArmed else { return }
     reloadArmed = false
-    guard !results.isEmpty else { return }
-    if let cell = barView.table.view(atColumn: 0, row: 0, makeIfNecessary: false) as? CommandBarCellView {
-      configure(cell, row: 0)
-    }
-    barView.table.rowView(atRow: 0, makeIfNecessary: false)?.setAccessibilityValue(caption(0))
-    barView.table.rowsDidChange()
+    guard case .reload? = results.first?.kind else { return }
+    reloadResults(keepSelection: false)
+    relayout()
   }
 
   /// The accessibility element of `row`'s group header, kept per row (at most five headers).
@@ -699,11 +713,6 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     let header = CommandBarGroupHeaderLabel(labelWithString: "")
     headerElements[row] = header
     return header
-  }
-
-  /// What Return does on `row`: the reload while it is armed (row 0), else the row's own caption.
-  private func caption(_ row: Int) -> String {
-    reloadArmed && row == 0 ? Self.reloadVerb : results[row].accessibilityCaption
   }
 
   // MARK: Table
@@ -726,10 +735,11 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
       favicon = extensionIcons[png] ?? NSImage(data: png)
       extensionIcons[png] = favicon
     }
+    cell.onRemove = result.removalID == nil ? nil : { [weak self] in self?.removeSuggestion(at: row) }
     cell.configure(result, query: cellQuery, position: row + 1, count: results.count, flavor: flavor,
                    scale: cellScale, groupHeader: groupHeaders[row], isFirstRow: row == 0, favicon: favicon,
-                   increasedContrast: appliedIncreaseContrast ?? false,
-                   verbOverride: reloadArmed && row == 0 ? Self.reloadVerb : nil)
+                   increasedContrast: appliedIncreaseContrast ?? false)
+    cell.setHovered(barView.hoveredRow == row)
   }
 
   /// The rows changed: the table grows or shrinks at the end, rows whose header came or went are re-measured, and each
@@ -758,7 +768,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
       if let rowView = rowView as? CommandBarRowView { style(rowView, row: row) }
       if let cell = rowView.view(atColumn: 0) as? CommandBarCellView { configure(cell, row: row) }
       rowView.setAccessibilityLabel(results[row].commandBarLabel(position: row + 1, of: results.count))
-      rowView.setAccessibilityValue(caption(row))
+      rowView.setAccessibilityValue(results[row].accessibilityCaption)
     }
     table.rowsDidChange()
   }
@@ -781,7 +791,7 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
     if results.indices.contains(row) {
       style(rowView, row: row)
       rowView.setAccessibilityLabel(results[row].commandBarLabel(position: row + 1, of: results.count))
-      rowView.setAccessibilityValue(caption(row))
+      rowView.setAccessibilityValue(results[row].accessibilityCaption)
     }
     return rowView
   }

@@ -149,7 +149,8 @@ public enum AXID {
     /// Label: "<title>, <secondary text>, <kind>, <k> of <n>". Selected: selection. Value: what Return does ("Switch to
     /// Tab", "Show Folder", "Open", "Open Extension", "Search", "Paste and Go").
     public static let row = "commandBar.row"
-    /// Little Arkt's lookup: present only while a removable row is hovered (BH-109). Label: tooltip.
+    /// A history row's remove button (command bar; Little Arkt's lookup has its own): present only while that row is
+    /// hovered (BH-109). Label: "Remove from History" (the lookup: its tooltip).
     public static let rowRemove = "commandBar.row.remove"
   }
 

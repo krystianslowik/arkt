@@ -13,7 +13,7 @@ public final class SymbolImageCache {
   static let sidebarSymbols = ["folder", "folder.fill", "rectangle.split.2x1", "questionmark.square"]
   static let bottomBarSymbols = ["archivebox", "plus", ExtensionsButton.symbolName]
   static let commandBarSymbols = ["globe", "square.on.square", "magnifyingglass", "clock", "doc.on.clipboard",
-                                  "folder", "puzzlepiece.extension"]
+                                  "folder", "puzzlepiece.extension", "arrow.clockwise"]
 
   private struct Key: Hashable {
     var name: String

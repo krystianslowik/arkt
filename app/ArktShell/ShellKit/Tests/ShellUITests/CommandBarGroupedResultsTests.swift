@@ -116,6 +116,29 @@ struct CommandBarGroupedResultsTests {
     #expect(groups(rows) == [nil, .tabs, .history])
   }
 
+  /// Cmd-L's untouched address: a Reload row on top, with no header, the page's host in the URL slot, verb Reload.
+  @Test func anUntouchedCmdLAddressGetsTheReloadRowFirst() throws {
+    let page = URL(string: "https://docs.example.com/q4-roadmap")!
+    let rows = CommandBarResults.grouped(query: "", input: input {
+      $0.reloadURL = page
+      $0.openTabs = [tab("A", "https://a.example")]
+    })
+    #expect(rows.map(\.kind.name) == ["reload", "switch"])
+    let reload = try #require(rows.first)
+    #expect(reload.kind == .reload(page))
+    #expect(reload.group == nil)
+    #expect(reload.title == "Reload")
+    #expect(reload.secondaryText == "docs.example.com")
+    #expect(reload.symbolName == "arrow.clockwise")
+    #expect(reload.verb == "Reload")
+    #expect(reload.accessibilityCaption == "Reload")
+    #expect(reload.commandBarLabel(position: 1, of: 2) == "Reload, docs.example.com, reload, 1 of 2")
+    #expect(CommandBarResults.groupHeaders(of: rows) == [1: "Tabs"])
+    #expect(CommandBarResults.grouped(query: "a", input: input { $0.reloadURL = page }).allSatisfy {
+      $0.kind != .reload(page)
+    }, "typed text has no Reload row")
+  }
+
   /// No clipboard address: no Paste and Go row. No history (the app has no store yet, #631): no History header and no
   /// gap, the Tabs group is the whole list.
   @Test func noClipboardAddressNoPasteRowAndNoHistoryNoHeader() {

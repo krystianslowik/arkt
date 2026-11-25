@@ -94,6 +94,14 @@ final class CommandBarCellView: NSTableCellView {
   /// The verb (selected) or the time (an unselected history row).
   let trailingText = CommandBarCellView.label(size: 12)
   let returnKey = CommandBarKeyCapView(frame: .zero)
+  /// A history row's remove button, shown while the pointer is over the row (BH-109): removes it from history.
+  let removeButton = NSButton()
+  static let removeButtonSize: CGFloat = 20
+  static let removeGlyphSize: CGFloat = 10
+  static let removeLabel = "Remove from History"
+  /// Removes the row; nil for a row that is not removable.
+  var onRemove: (() -> Void)?
+  private var isHovered = false
   /// The group header over the first row of a group: 11 pt semibold, tertiary text.
   let header = CommandBarGroupHeaderLabel(labelWithString: "")
   private(set) var headerHeight: CGFloat = 0
@@ -105,8 +113,6 @@ final class CommandBarCellView: NSTableCellView {
   private var scale: CGFloat = 2
   private var increasedContrast = false
   private var favicon: NSImage?
-  /// The selected row's verb in place of the result's own (Cmd-L's "Reload").
-  private var verbOverride: String?
   /// Whether this row is the selected one: the trailing group shows the verb and the Return key cap.
   var isRowSelected = false {
     didSet { if isRowSelected != oldValue { applyTrailing() } }
@@ -129,6 +135,15 @@ final class CommandBarCellView: NSTableCellView {
     header.isHidden = true
     header.setAccessibilityElement(false)                // the controller publishes headers from its model
     [icon, title, subtitle, trailingText, returnKey, header].forEach(addSubview)
+    removeButton.isBordered = false
+    removeButton.imagePosition = .imageOnly
+    removeButton.toolTip = Self.removeLabel
+    removeButton.setAccessibilityLabel(Self.removeLabel)
+    removeButton.setAccessibilityIdentifier(AXID.CommandBar.rowRemove)
+    removeButton.isHidden = true
+    removeButton.target = self
+    removeButton.action = #selector(removeClicked(_:))
+    addSubview(removeButton)
   }
 
   @available(*, unavailable)
@@ -145,12 +160,22 @@ final class CommandBarCellView: NSTableCellView {
     return label
   }
 
+  @objc private func removeClicked(_ sender: Any?) { onRemove?() }
+
+  /// The pointer came onto the row or left it: a removable row shows its remove button meanwhile.
+  func setHovered(_ hovered: Bool) {
+    isHovered = hovered
+    let shows = hovered && onRemove != nil
+    guard shows == removeButton.isHidden else { return }
+    removeButton.isHidden = !shows
+    needsLayout = true
+  }
+
   /// `scale`: pixels per point for symbol bitmaps (the bar's backing scale). `favicon`: the tab's cached favicon or the extension's icon.
   /// `increasedContrast`: tertiary text (URL, time, header) takes the secondary color.
   func configure(_ result: CommandBarResults.Result, query: String, position: Int, count: Int, flavor: ThemeFlavor,
                  scale: CGFloat, groupHeader: String?, isFirstRow: Bool, favicon: NSImage?,
-                 increasedContrast: Bool, verbOverride: String? = nil) {
-    self.verbOverride = verbOverride
+                 increasedContrast: Bool) {
     self.result = result
     self.query = query
     self.flavor = flavor
@@ -168,16 +193,19 @@ final class CommandBarCellView: NSTableCellView {
     subtitle.stringValue = result.secondaryText
     subtitle.textColor = tertiaryColor
     setAccessibilityLabel(result.commandBarLabel(position: position, of: count))
-    setAccessibilityValue(verbOverride ?? result.accessibilityCaption)
+    setAccessibilityValue(result.accessibilityCaption)
+    removeButton.image = SymbolImageCache.shared.symbol("xmark", box: Self.removeGlyphSize,
+                                                        color: tertiaryToken.resolve(flavor), scale: scale)
     applyIcon()
     applyTitle()
     applyTrailing()
   }
 
-  private var tertiaryColor: NSColor {
-    (increasedContrast ? ShellTokens.commandBarSecondaryText : ShellTokens.commandBarTertiaryText)
-      .resolve(flavor).nsColor()
+  private var tertiaryToken: TokenPair {
+    increasedContrast ? ShellTokens.commandBarSecondaryText : ShellTokens.commandBarTertiaryText
   }
+
+  private var tertiaryColor: NSColor { tertiaryToken.resolve(flavor).nsColor() }
 
   private func applyIcon() {
     guard let result else { return }
@@ -224,7 +252,7 @@ final class CommandBarCellView: NSTableCellView {
   private func applyTrailing() {
     guard let result else { return }
     if isRowSelected {
-      trailingText.stringValue = verbOverride ?? result.verb ?? ""
+      trailingText.stringValue = result.verb ?? ""
       trailingText.textColor = ShellTokens.commandBarSecondaryText.resolve(flavor).nsColor()
       returnKey.configure(CommandBarKeyCaps.return, flavor: flavor)
       returnKey.isHidden = false
@@ -250,6 +278,12 @@ final class CommandBarCellView: NSTableCellView {
                             width: max(0, bounds.width - 2 * g.rowHorizontalPadding), height: h)
     }
     var trailing = bounds.width - g.rowHorizontalPadding
+    if !removeButton.isHidden {
+      let size = Self.removeButtonSize
+      removeButton.frame = NSRect(x: trailing - size, y: content.minY + (content.height - size) / 2,
+                                  width: size, height: size)
+      trailing = removeButton.frame.minX - 8
+    }
     if !returnKey.isHidden {
       let size = returnKey.size
       returnKey.frame = NSRect(x: trailing - size.width, y: content.minY + (content.height - size.height) / 2,

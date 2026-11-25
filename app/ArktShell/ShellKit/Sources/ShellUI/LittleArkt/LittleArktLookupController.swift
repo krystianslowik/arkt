@@ -134,7 +134,7 @@ public final class LittleArktLookupController: NSObject, NSTextFieldDelegate, NS
     case .history(let url):
       hide(returningActivation: false)
       onOpen?(url)
-    case .folder, .extensionAction:
+    case .folder, .extensionAction, .reload:
       hide()
     }
   }

@@ -227,6 +227,32 @@ final class CommandBarBehaviourTests: XCTestCase {
     XCTAssertEqual(CommandBarFieldEditor.caretWidth, 2)
   }
 
+  /// A history row under the pointer shows its remove button at the trailing edge; clicking it removes the row, as
+  /// Cmd-Opt-Delete does. Other rows have none.
+  func testAHoveredHistoryRowShowsItsRemoveButton() throws {
+    var removed: CommandBarResults.Result?
+    bar.onRemoveSuggestion = { removed = $0 }
+    showAllGroups()
+    bar.barView.layoutSubtreeIfNeeded()
+    let history = try cell(3)
+    XCTAssertTrue(history.removeButton.isHidden, "only while hovered")
+    bar.barView.setHoveredRow(3)
+    history.layoutSubtreeIfNeeded()
+    XCTAssertFalse(history.removeButton.isHidden)
+    XCTAssertEqual(history.removeButton.accessibilityLabel(), "Remove from History")
+    XCTAssertEqual(history.removeButton.accessibilityIdentifier(), AXID.CommandBar.rowRemove)
+    XCTAssertEqual(history.removeButton.frame.size, NSSize(width: 20, height: 20))
+    XCTAssertEqual(history.removeButton.frame.maxX, history.bounds.width - CommandBarGeometry.rowHorizontalPadding)
+    XCTAssertLessThanOrEqual(history.trailingText.frame.maxX, history.removeButton.frame.minX - 8)
+    XCTAssertTrue(bar.barView.table.axProxyRows.children?(3).contains(history.removeButton) ?? false)
+    bar.barView.setHoveredRow(0)
+    XCTAssertTrue(try cell(0).removeButton.isHidden, "a tab row has none")
+    bar.barView.setHoveredRow(3)
+    history.removeButton.performClick(nil)
+    XCTAssertEqual(removed?.title, "Git - Book")
+    XCTAssertFalse(bar.results.contains { $0.title == "Git - Book" })
+  }
+
   /// A mouse-down on a row gives it the full fill before the click runs it (feedback on press, action on release): a
   /// real mouse-down event to the table selects the row under the pointer. The release that runs the row is the
   /// table's own click action (`rowClicked`).

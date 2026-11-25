@@ -52,41 +52,49 @@ final class CommandBarTests: XCTestCase {
   /// Gate (coordinator decision, "work + earliest frame"):
   /// - show() work p95 under 4 ms, measured as main-thread CPU time so preemption by a loaded machine
   ///   (a Chromium build) does not count against the shell;
-  /// - the panel lands on the earliest possible frame: wall-clock p95 total within wall work p95 + 2 intervals.
-  ///   Asserted only when the 1-minute load average is below the active core count: on a saturated machine the
-  ///   main run loop misses vsyncs after show() returns (measured at load ~300), which is not the shell's work.
-  ///   Under load the numbers are printed and attached, and only that assertion is skipped.
+  /// - show() and the Core Animation commit that carries it land within 4 ms of wall time (p95 of
+  ///   `lastShowCommitDelay`), so work that waits rather than computes is caught too;
+  /// - the panel lands on the earliest possible frame after that commit: wall-clock p95 total within commit p95 +
+  ///   2 intervals (the first vsync after the commit, then the frame it presents; #1000 review: measuring from the
+  ///   end of show() instead missed the commit's own time under load).
+  ///   Both are asserted only when the 1-minute load average is below the active core count: on a saturated machine
+  ///   the main run loop misses vsyncs after show() returns (measured at load ~300), which is not the shell's work.
+  ///   Under load the numbers are printed and attached, and only those assertions are skipped.
   /// The absolute numbers are always printed.
   func testAppearsUnder16ms() async throws {
     var samples: [Double] = []
     var cpu: [Double] = []
     var wall: [Double] = []
+    var commit: [Double] = []
     var interval = 0.0
     for _ in 0..<20 {
       samples.append(try await showAndMeasure())
       cpu.append(bar.lastShowCPUTime)
       wall.append(bar.lastShowWallTime)
+      commit.append(bar.lastShowCommitDelay)
       interval = max(interval, bar.lastFrameInterval)
       print(String(format: "commandbar.sample total=%.2f cpu=%.2f wall=%.2f vsyncWait=%.2f interval=%.2f",
                    samples.last! * 1000, cpu.last! * 1000, wall.last! * 1000, bar.lastShowVsyncWait * 1000,
                    bar.lastFrameInterval * 1000))
     }
     XCTAssertTrue(samples.contains(try XCTUnwrap(bar.lastShowLatency)))
-    samples.sort(); cpu.sort(); wall.sort()
+    samples.sort(); cpu.sort(); wall.sort(); commit.sort()
     let p95Index = Int(Double(samples.count) * 0.95) - 1
     let median = samples[samples.count / 2], p95 = samples[p95Index]
-    let cpuP95 = cpu[p95Index], wallP95 = wall[p95Index]
+    let cpuP95 = cpu[p95Index], wallP95 = wall[p95Index], commitP95 = commit[p95Index]
     print("commandbar.screen maxFPS=\(NSScreen.main?.maximumFramesPerSecond ?? 0) interval.ms=\(interval * 1000)")
     print("commandbar.showcpu.ms median=\(cpu[cpu.count / 2] * 1000) p95=\(cpuP95 * 1000) max=\(cpu.last! * 1000)")
     print("commandbar.showwall.ms median=\(wall[wall.count / 2] * 1000) p95=\(wallP95 * 1000) max=\(wall.last! * 1000)")
+    print("commandbar.showcommit.ms median=\(commit[commit.count / 2] * 1000) p95=\(commitP95 * 1000) max=\(commit.last! * 1000)")
     print("commandbar.latency.ms median=\(median * 1000) p95=\(p95 * 1000) max=\(samples.last! * 1000) "
       + "min=\(samples.first! * 1000)")
     XCTAssertLessThan(cpuP95, 0.004, "show() main-thread CPU time over budget")
 
-    let bound = wallP95 + 2 * interval + 0.0005
+    let bound = commitP95 + 2 * interval + 0.0005
     let notMeasurable = PacingEnvironment.notMeasurableReason()
-    let summary = String(format: "commandbar.earliestframe p95=%.2f bound=%.2f asserted=%@",
-                         p95 * 1000, bound * 1000, notMeasurable.map { "no (NOT-MEASURABLE: \($0))" } ?? "yes")
+    let summary = String(format: "commandbar.earliestframe p95=%.2f bound=%.2f commitP95=%.2f asserted=%@",
+                         p95 * 1000, bound * 1000, commitP95 * 1000,
+                         notMeasurable.map { "no (NOT-MEASURABLE: \($0))" } ?? "yes")
     print(summary)
     let attachment = XCTAttachment(string: summary)
     attachment.name = "commandbar.earliestframe"
@@ -95,6 +103,7 @@ final class CommandBarTests: XCTestCase {
     if let notMeasurable {
       print("commandbar.earliestframe skipped: NOT-MEASURABLE (\(notMeasurable))")
     } else {
+      XCTAssertLessThan(commitP95, 0.004, "show() and its commit over 4 ms of wall time")
       XCTAssertLessThanOrEqual(p95, bound, "panel missed its earliest possible frame")
     }
   }
@@ -131,27 +140,35 @@ final class CommandBarTests: XCTestCase {
     XCTAssertEqual(bar.barView.table.selectedRow, 0)
   }
 
-  /// Cmd-L with rows (the empty state): untouched, Return reloads, and the first row says so ("Reload" and the key cap,
-  /// not "Switch to Tab").
-  func testCmdLUntouchedReturnReloadsAndTheFirstRowSaysReload() async throws {
+  /// Cmd-L with rows (the empty state): the untouched address leads with a selected Reload row (the page's host in the
+  /// URL slot, verb Reload), and Return reloads.
+  func testCmdLUntouchedShowsTheReloadRowAndReturnReloads() async throws {
     var reloaded = false
     var switched: NodeID?
     bar.onReload = { reloaded = true }
     bar.onSwitch = { switched = $0 }
     bar.openTabsProvider = { self.tabs(2) }
-    bar.toggle(.currentTab(URL(string: "https://example.com")))
-    XCTAssertEqual(bar.results.map(\.kind.name), ["switch", "switch"])
+    bar.toggle(.currentTab(URL(string: "https://example.com/page")))
+    XCTAssertEqual(bar.results.map(\.kind.name), ["reload", "switch", "switch"])
+    XCTAssertEqual(bar.groupHeaders, [1: "Tabs"], "the Reload row has no header")
+    XCTAssertEqual(bar.barView.table.selectedRow, 0)
     bar.barView.layoutSubtreeIfNeeded()
     let first = try XCTUnwrap(bar.barView.table.view(atColumn: 0, row: 0, makeIfNecessary: true) as? CommandBarCellView)
+    XCTAssertEqual(first.title.stringValue, "Reload")
+    XCTAssertEqual(first.subtitle.stringValue, "example.com")
     XCTAssertEqual(first.trailingText.stringValue, "Reload")
     XCTAssertFalse(first.returnKey.isHidden)
     XCTAssertEqual(bar.barView.table.axProxyRows.content?(0)?.value, "Reload")
+    let tabRow = try XCTUnwrap(bar.barView.table.view(atColumn: 0, row: 1, makeIfNecessary: true) as? CommandBarCellView)
+    bar.barView.table.selectRowIndexes([1], byExtendingSelection: false)
+    XCTAssertEqual(tabRow.trailingText.stringValue, "Switch to Tab", "the tab rows keep their own verb")
+    bar.barView.table.selectRowIndexes([0], byExtendingSelection: false)
     bar.commit()
     XCTAssertTrue(reloaded)
     XCTAssertNil(switched)
   }
 
-  /// Cmd-L, then a selection move: Return runs the selected row and does not reload; the rows say what they do again.
+  /// Cmd-L, then a selection move: the Reload row goes, the selection stays on the row moved to, and Return runs it.
   func testCmdLAfterASelectionMoveReturnRunsTheRow() async throws {
     var reloaded = false
     var switched: NodeID?
@@ -162,26 +179,26 @@ final class CommandBarTests: XCTestCase {
     bar.toggle(.currentTab(URL(string: "https://example.com")))
     let editor = try XCTUnwrap(bar.barView.field.currentEditor() as? NSTextView)
     XCTAssertTrue(bar.control(bar.barView.field, textView: editor, doCommandBy: #selector(NSResponder.moveDown(_:))))
-    bar.barView.layoutSubtreeIfNeeded()
-    let second = try XCTUnwrap(bar.barView.table.view(atColumn: 0, row: 1, makeIfNecessary: true) as? CommandBarCellView)
-    XCTAssertEqual(second.trailingText.stringValue, "Switch to Tab")
-    bar.commit()
-    XCTAssertFalse(reloaded)
-    XCTAssertEqual(switched, list[1].node)
-
-    // Moving back to the first row does not arm the reload again; only a new show does.
-    reloaded = false
-    switched = nil
-    bar.toggle(.currentTab(URL(string: "https://example.com")))
-    XCTAssertTrue(bar.control(bar.barView.field, textView: editor, doCommandBy: #selector(NSResponder.moveDown(_:))))
-    XCTAssertTrue(bar.control(bar.barView.field, textView: editor, doCommandBy: #selector(NSResponder.moveUp(_:))))
+    XCTAssertEqual(bar.results.map(\.kind.name), ["switch", "switch"], "the Reload row is gone")
+    XCTAssertEqual(bar.barView.table.selectedRow, 0, "the first tab, the row moved to")
     bar.commit()
     XCTAssertFalse(reloaded)
     XCTAssertEqual(switched, list[0].node)
+
+    // Up from the Reload row wraps to the last tab; the Reload row goes and Return runs that tab.
+    reloaded = false
+    switched = nil
+    bar.toggle(.currentTab(URL(string: "https://example.com")))
+    XCTAssertTrue(bar.control(bar.barView.field, textView: editor, doCommandBy: #selector(NSResponder.moveUp(_:))))
+    XCTAssertEqual(bar.results.count, 2)
+    XCTAssertEqual(bar.barView.table.selectedRow, 1)
+    bar.commit()
+    XCTAssertFalse(reloaded)
+    XCTAssertEqual(switched, list[1].node)
   }
 
-  /// A pointer hover that moves the selection disarms the reload too.
-  func testCmdLAfterAHoverReturnRunsTheRow() async throws {
+  /// A pointer hover onto another row takes the Reload row away too; typing does as well.
+  func testCmdLAfterAHoverOrTypingReturnRunsTheRow() async throws {
     var reloaded = false
     var switched: NodeID?
     bar.onReload = { reloaded = true }
@@ -189,10 +206,19 @@ final class CommandBarTests: XCTestCase {
     let list = tabs(2)
     bar.openTabsProvider = { list }
     bar.toggle(.currentTab(URL(string: "https://example.com")))
-    bar.barView.onHoverRow?(1)
+    bar.barView.onHoverRow?(0)
+    XCTAssertEqual(bar.results.first?.kind.name, "reload", "a hover over the Reload row keeps it")
+    bar.barView.onHoverRow?(2)
+    XCTAssertEqual(bar.results.map(\.kind.name), ["switch", "switch"])
+    XCTAssertEqual(bar.barView.table.selectedRow, 1)
     bar.commit()
     XCTAssertFalse(reloaded)
     XCTAssertEqual(switched, list[1].node)
+
+    bar.toggle(.currentTab(URL(string: "https://example.com")))
+    bar.setQueryForTesting("https://example.com/x")
+    bar.setQueryForTesting("https://example.com")              // back to the address: still no Reload row
+    XCTAssertFalse(bar.results.contains { $0.kind.name == "reload" })
   }
 
   func testCmdLPrefillAndUneditedEnterReloads() async throws {
@@ -210,13 +236,13 @@ final class CommandBarTests: XCTestCase {
     XCTAssertFalse(bar.isVisible)
   }
 
-  /// Cmd-L's untouched address shows the empty state (README, Keyboard): no Go or Search row for the address itself.
+  /// Cmd-L's untouched address shows the Reload row and the empty state (README, Keyboard): no Go or Search row.
   func testCmdLOnAURLShowsTheEmptyState() async throws {
     bar.openTabsProvider = { [CommandBarResults.OpenTab(node: UUID(), title: "Notes",
                                                          url: URL(string: "https://notes.example")!)] }
     bar.toggle(.currentTab(URL(string: "https://example.com/a")))
-    XCTAssertEqual(bar.results.map(\.kind.name), ["switch"])
-    XCTAssertEqual(bar.results.first?.group, .tabs)
+    XCTAssertEqual(bar.results.map(\.kind.name), ["reload", "switch"])
+    XCTAssertEqual(bar.results.last?.group, .tabs)
     bar.setQueryForTesting("https://example.com/ab")
     XCTAssertEqual(bar.results.map(\.kind.name), ["open", "search"], "an edited address gets Go, and Search for")
   }
