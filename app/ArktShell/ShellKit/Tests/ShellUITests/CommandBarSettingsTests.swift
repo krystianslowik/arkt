@@ -8,18 +8,8 @@ struct CommandBarSettingsTests {
     try #require(UserDefaults(suiteName: "CommandBarSettingsTests.\(UUID().uuidString)"))
   }
 
-  @Test func defaultsToSuggestionsOnAndNoticeNotDismissed() throws {
-    let settings = CommandBarSettings(defaults: try suite())
-    #expect(settings.searchSuggestionsEnabled)
-    #expect(settings.searchSuggestionNoticeDismissed == false)
-  }
-
-  // BH-113: the notice stays dismissed across launches, under Arc's key.
-  @Test func dismissalPersistsUnderArcsKey() throws {
-    let defaults = try suite()
-    CommandBarSettings(defaults: defaults).dismissSearchSuggestionNotice()
-    #expect(defaults.bool(forKey: "commandBarSearchSuggestionsPrivacyHasBeenExplicitlyDismissed"))
-    #expect(CommandBarSettings(defaults: defaults).searchSuggestionNoticeDismissed)
+  @Test func defaultsToSuggestionsOn() throws {
+    #expect(CommandBarSettings(defaults: try suite()).searchSuggestionsEnabled)
   }
 
   // The suggestions setting persists under Arc's key (`searchSuggestEnabled`, spec settings table).
@@ -33,8 +23,7 @@ struct CommandBarSettingsTests {
   @Test func ephemeralKeepsValuesInMemoryOnly() {
     let settings = CommandBarSettings.ephemeral()
     #expect(settings.searchSuggestionsEnabled)
-    #expect(settings.searchSuggestionNoticeDismissed == false)
-    settings.dismissSearchSuggestionNotice()
-    #expect(settings.searchSuggestionNoticeDismissed)
+    settings.setSearchSuggestionsEnabled(false)
+    #expect(!settings.searchSuggestionsEnabled)
   }
 }

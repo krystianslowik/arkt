@@ -71,13 +71,6 @@ final class TypeRolesScreenshotTests: XCTestCase {
       bar.invalidate()
       shell.close()
     }
-    var clock = 100.0
-    bar.settings.dismissSearchSuggestionNotice()
-    bar.dismissFinisher = { $0() }
-    bar.barView.selectionMotion.drivesFramesItself = false
-    bar.barView.widthMotion.drivesFramesItself = false
-    bar.barView.widthMotion.now = { clock }
-    bar.barView.widthMotion.reduceMotion = { true }
     bar.panel.appearance = appearance(flavor)
     bar.prewarm()
     let viewed = Date(timeIntervalSinceNow: -12 * 60)
@@ -90,9 +83,6 @@ final class TypeRolesScreenshotTests: XCTestCase {
     }
     bar.toggle(.newTab)
     bar.setQueryForTesting("example")
-    clock += 2
-    bar.barView.widthMotion.presentFrame()
-    XCTAssertFalse(bar.barView.previewColumn.isHidden, "the shot shows the preview column")
     try write(bar.panel, name: "command-bar", flavor)
   }
 

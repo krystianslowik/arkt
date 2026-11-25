@@ -3,22 +3,24 @@ import Synchronization
 #endif
 import Foundation
 
-/// Placeholder suggestion provider: URL, matching open tabs and Spaces, Paste and Go, search. Real providers
-/// (Chromium autocomplete, history, archived tabs, extensions) replace parts of `make` later behind the same
-/// `Result` type; the BH-104 sources with no store yet (archived tabs, history, extensions, folders) are
-/// deferred in #112.
+/// The command bar's rows (design/command-bar/README.md, "Row order and what each group searches"): an optional
+/// literal row (Paste and Go, or Go to a typed address), then up to five groups in a fixed order, Tabs, Folders,
+/// History, Extensions and Search, at most three rows each. Filled synchronously from in-memory lists on every
+/// keystroke; search suggestions are the only part that arrives later, and they go at the bottom.
+///
+/// Little Arkt's quick lookup reuses the row type with its own plain list (`make(query:openTabs:)`).
 public enum CommandBarResults {
-  /// An open tab the bar can switch to; `node` is its sidebar node. `isSplitPane`: it is a pane of a split, so its
-  /// result says "Switch to Split View" (BH-104).
+  /// An open tab the bar can switch to; `node` is its sidebar node. `isSplitPane`: it is a pane of a split, so
+  /// Little Arkt's lookup says "Switch to Split View" (BH-104).
   public struct OpenTab: Sendable, Equatable {
     public let node: NodeID
     public let title: String
     public let url: URL
     public let isSplitPane: Bool
-    /// When the tab was last shown in this window; nil when it has not been since the app started. The empty state's
-    /// Recent tabs rows say "12 min" from it. The preview column says "12 min ago".
+    /// When the tab was last shown in this window; nil when it has not been since the app started. Ranks the Tabs
+    /// group and picks the empty field's recent tabs.
     public let lastViewed: Date?
-    /// The Space the tab is open in. The preview's meta line names it.
+    /// The Space the tab is open in.
     public let spaceTitle: String?
     public init(node: NodeID, title: String, url: URL, isSplitPane: Bool = false, lastViewed: Date? = nil,
                 spaceTitle: String? = nil) {
@@ -28,8 +30,35 @@ public enum CommandBarResults {
     }
   }
 
-  /// A page the history provider remembers. There is no history store yet: the app passes none, and tests pass
-  /// synthetic visits. `openTab` is set when that page is already an open tab, so Return switches to it.
+  /// A folder in the Pinned section of the window (nested ones included), for the Folders group (BH-104).
+  public struct Folder: Sendable, Equatable {
+    public let node: NodeID
+    public let title: String
+    /// The tabs inside it, nested folders included: "<n> tabs".
+    public let tabCount: Int
+    /// When a tab in the folder was last shown in this window.
+    public let lastViewed: Date?
+    public init(node: NodeID, title: String, tabCount: Int, lastViewed: Date? = nil) {
+      self.node = node; self.title = title; self.tabCount = tabCount; self.lastViewed = lastViewed
+    }
+  }
+
+  /// An enabled extension with a toolbar action, for the Extensions group (BH-104). `id` is the action's id.
+  public struct Extension: Sendable, Equatable {
+    public let id: String
+    public let name: String
+    /// The manifest's short description; empty when it has none.
+    public let description: String
+    /// The extension's icon, PNG; nil draws the puzzle piece.
+    public let iconPNG: Data?
+    public init(id: String, name: String, description: String, iconPNG: Data? = nil) {
+      self.id = id; self.name = name; self.description = description; self.iconPNG = iconPNG
+    }
+  }
+
+  /// A page the history provider remembers, in the provider's (frecency) order. There is no history store yet: the
+  /// app passes none, and tests pass synthetic visits. `openTab` is set when that page is already an open tab, which
+  /// keeps it out of the History group.
   public struct HistoryVisit: Sendable, Equatable {
     public let title: String
     public let url: URL
@@ -40,110 +69,69 @@ public enum CommandBarResults {
     }
   }
 
-  /// An archived item matching the query (#111, BH-087, BH-104), already worded: its title and "host, Space,
-  /// archived <when>". `id` is the archived root node; Enter restores it.
-  public struct ArchivedMatch: Sendable, Equatable {
-    public let id: UUID
-    public let title: String
-    public let subtitle: String
-    public init(id: UUID, title: String, subtitle: String) {
-      self.id = id; self.title = title; self.subtitle = subtitle
-    }
-  }
-
-  /// A Space the bar can switch to (BH-104).
-  public struct Space: Sendable, Equatable {
-    public let id: SpaceID
-    public let title: String
-    public init(id: SpaceID, title: String) {
-      self.id = id; self.title = title
-    }
-  }
-
-  /// The groups of the empty state, each under a small header (design/command-bar/README.md, Empty state).
-  public enum Group: Sendable, Equatable {
-    case clipboard, recentTabs, actions
+  /// The groups, in the order the list shows them. Each row of a group carries it; the literal row carries none.
+  public enum Group: Sendable, Equatable, CaseIterable {
+    case tabs, folders, history, extensions, search
 
     public var title: String {
       switch self {
-      case .clipboard: "Clipboard"
-      case .recentTabs: "Recent tabs"
-      case .actions: "Actions"
+      case .tabs: "Tabs"
+      case .folders: "Folders"
+      case .history: "History"
+      case .extensions: "Extensions"
+      case .search: "Search"
       }
     }
   }
 
-  /// Which surface `make` fills (BH-106, BH-107); the controller owns the transitions (Tab scopes, Backspace on
-  /// an empty field unscopes [I]).
-  public enum Scope: Sendable, Equatable {
-    case normal
-    /// BH-106: Tab on the empty bar just opened with Cmd-T (KB-081).
-    case actions
-    /// BH-107: an alias typed and Tab pressed (KB-082).
-    case siteSearch(SiteSearchEngine)
-  }
-
-  /// Everything `make` needs beyond the query text.
+  /// Everything the rows are made from besides the query text.
   public struct Input: Sendable, Equatable {
     public var openTabs: [OpenTab] = []
-    public var spaces: [Space] = []
-    public var actions: [CommandBarAction] = []
-    /// BH-108: a URL read from the clipboard when the bar opened; nil adds no "Paste and Go".
-    public var clipboardURL: URL?
-    /// BH-109: removal ids hidden this session.
-    public var excluded: Set<String> = []
-    /// BH-113 (`searchSuggestEnabled`): off means no "Search <engine>" row and no engine round trip.
-    public var searchSuggestionsEnabled = true
-    public var scope: Scope = .normal
-    /// Matches the archive store found for the query, newest first; listed after open tabs (switching to an open
-    /// tab beats restoring a closed one) and before the search row (which restoring beats).
-    public var archived: [ArchivedMatch] = []
-    /// The tabs of the empty state's Recent tabs, most recently viewed first. Empty: the open tabs stand in.
-    public var recentTabs: [OpenTab] = []
-    /// The engines a typed alias or site name offers a Tab-scoped row for (BH-107).
-    public var siteSearchEngines: [SiteSearchEngine] = []
-    /// The clock for "12 min"; injected so results are deterministic.
-    public var now = Date()
-    /// History visits matching is the caller's job only in the sense that the provider already filtered; `make`
-    /// still matches `query` and caps the rows. Empty until a history store exists.
+    /// The tab on screen: never offered under Tabs (Return on it would only close the bar).
+    public var currentTab: NodeID?
+    public var folders: [Folder] = []
     public var history: [HistoryVisit] = []
-    /// An empty query lists the open tabs plainly, without the empty state's groups (Little Arkt's lookup, which has
-    /// no clipboard, recent tabs or actions).
-    public var listsOpenTabsForAnEmptyQuery = false
+    public var extensions: [Extension] = []
+    /// The search engine's suggestions for the query, as they arrived (`CommandBarController`).
+    public var suggestions: [String] = []
+    /// "Include search engine suggestions" (#562): off shows no suggestions. The Search for row stays.
+    public var searchSuggestionsEnabled = true
+    /// BH-108: an address read from the clipboard when the bar opened; nil adds no Paste and Go.
+    public var clipboardURL: URL?
+    /// BH-109: removal ids hidden this session (Cmd-Opt-Delete on a history row).
+    public var excluded: Set<String> = []
+    /// The clock for "Yesterday"; injected so results are deterministic.
+    public var now = Date()
     public init() {}
   }
 
   public enum Kind: Sendable, Equatable {
+    /// Go: the text parses as an address (KB-001). Also Little Arkt's address row.
     case open(URL)
     case switchTo(NodeID)
+    /// Search for "<text>": the exact text with the user's engine.
     case search(URL)
-    /// An archived item; Enter restores it (BH-086) instead of opening a duplicate.
-    case restore(UUID)
-    /// BH-108: open the clipboard URL (GS-035 names it "Paste and Go").
+    /// A search engine suggestion, searched for as it reads.
+    case suggestion(URL)
+    /// BH-108: open the clipboard address (GS-035 names it "Paste and Go").
     case pasteAndGo(URL)
-    /// BH-107: the scoped engine's search URL.
-    case siteSearch(URL)
-    /// BH-106: run the shell action with this id.
-    case action(String)
-    /// BH-104: switch to this Space.
-    case switchSpace(SpaceID)
-    /// A history visit (#372). Return opens it, or switches when `previewFacts` says it is already open.
+    /// A history visit (#372). Return opens it.
     case history(URL)
-    /// A filter that matches nothing: one row that says so (design/command-bar/README.md, Filters). Not actionable.
-    case noMatch
+    /// BH-104: show this folder in the sidebar.
+    case folder(NodeID)
+    /// BH-104: open this extension action's popup, as a toolbar click would.
+    case extensionAction(String)
 
     public var name: String {
       switch self {
       case .open: "open"
       case .switchTo: "switch"
       case .search: "search"
-      case .restore: "restore"
+      case .suggestion: "suggestion"
       case .pasteAndGo: "pasteAndGo"
-      case .siteSearch: "siteSearch"
-      case .action: "action"
-      case .switchSpace: "switchSpace"
       case .history: "history"
-      case .noMatch: "noMatch"
+      case .folder: "folder"
+      case .extensionAction: "extension"
       }
     }
   }
@@ -151,50 +139,45 @@ public enum CommandBarResults {
   public struct Result: Sendable, Equatable {
     public let kind: Kind
     public let title: String
+    /// The secondary text: host and path, "<n> tabs", an extension's description. Little Arkt shows it as is.
     public let subtitle: String
+    /// Little Arkt's caption on a tab row ("Switch to Tab", "Switch to Split View"); nil elsewhere.
     public let trailingHint: String?
-    /// BH-109: identifies a removable suggestion ("tab:<node>", "search:<query>"); nil for the user's own input
-    /// (the typed URL, Paste and Go) and for verbs (actions, Spaces), which removal makes no sense for.
+    /// BH-109: identifies a removable row ("history:<url>"); nil for every other row.
     public let removalID: String?
-    /// Key caps drawn on an action's row: its shortcut ("command", "shift", "N").
-    public var keyCaps: [String] = []
-    /// The empty state's group; nil for every row of a typed query.
+    /// The group the row belongs to; nil for the literal row and for Little Arkt's rows.
     public var group: Group?
-    /// The engine a normal-scope site-search row scopes to on Tab: the row shows a Tab key cap (the smart Tab rule).
-    public var siteSearchEngine: SiteSearchEngine?
-    /// "12 min": when a recent tab was last shown. The caption stays the Switch to Tab hint for accessibility.
+    /// "Yesterday": when a history page was visited. Unselected history rows show it.
     public var timeText: String?
-    /// Preview facts for an open tab or a history row. Nil for every other kind. The column still stays hidden
-    /// on an empty query (`CommandBarPreview.content`).
-    public var previewFacts: CommandBarPreviewFacts?
+    /// An extension's own icon, PNG.
+    public var iconPNG: Data?
 
-    /// Accessibility value for `commandBar.row` ("Switch to Tab", "Switch to Split View", "Open", "Search").
+    public init(kind: Kind, title: String, subtitle: String, trailingHint: String?, removalID: String?) {
+      self.kind = kind; self.title = title; self.subtitle = subtitle; self.trailingHint = trailingHint
+      self.removalID = removalID
+    }
+
+    /// Accessibility value of `commandBar.row`: what Return does.
     public var accessibilityCaption: String {
       switch kind {
       case .open: "Open"
       case .switchTo: trailingHint ?? CommandBarResults.switchHint
-      case .restore: CommandBarResults.restoreHint
-      case .search, .siteSearch: "Search"
-      case .pasteAndGo: "Paste and Go"
-      case .action: "Action"
-      case .switchSpace: "Switch to Space"
-      case .history: previewFacts?.isAlsoOpen == true ? CommandBarResults.switchHint : "Open"
-      case .noMatch: title
+      case .search, .suggestion: "Search"
+      case .pasteAndGo: CommandBarResults.pasteAndGoTitle
+      case .history: "Open"
+      case .folder: "Show Folder"
+      case .extensionAction: "Open Extension"
       }
-    }
-
-    /// Whether Return does anything on the row; the empty row is the only one that does not.
-    public var isActionable: Bool {
-      if case .noMatch = kind { return false }
-      return true
     }
   }
 
-  /// The empty state's caps: four recent tabs and two actions, so Clipboard, Recent tabs and Actions fit the bar.
-  public static let maxRecentTabs = 4
-  public static let maxEmptyStateActions = 2
-  /// Actions a typed query also lists, so the Actions pill has something to count.
-  public static let maxMatchingActions = 3
+  public static let maxRowsPerGroup = 3
+  /// Little Arkt's lookup: at most six open tabs.
+  public static let maxSwitchResults = 6
+  public static let switchHint = "Switch to Tab"
+  /// The caption of an open tab that is a split pane (BH-104, [S] string), in Little Arkt's lookup.
+  public static let switchToSplitHint = "Switch to Split View"
+  public static let pasteAndGoTitle = "Paste and Go"
 
   /// The header text over each row that starts a group; keyed by row index.
   public static func groupHeaders(of results: [Result]) -> [Int: String] {
@@ -207,150 +190,226 @@ public enum CommandBarResults {
     return headers
   }
 
-  public static let maxSwitchResults = 6
-  public static let maxHistoryResults = 6
-  public static let maxSpaceResults = 3
-  public static let switchHint = "Switch to Tab"
-  /// The caption of an open tab that is a split pane (BH-104, [S] string).
-  public static let switchToSplitHint = "Switch to Split View"
-  /// The caption of an archived match (#111).
-  public static let restoreHint = "Restore from Archive"
-  /// Archived matches shown at most (#111, design section 7).
-  public static let maxArchivedResults = 3
-
-  public static let switchToSpaceHint = "Switch to Space"
-  public static let pasteAndGoTitle = "Paste and Go"
-
-  public static func make(query raw: String, input: Input) -> [Result] {
-    makeWithCounts(query: raw, input: input).results
+  /// Said once typing settles (design, Accessibility): "<n> results", or the Search row alone.
+  public static func countAnnouncement(for results: [Result]) -> String {
+    if results.count == 1, case .search = results[0].kind { return "No matches. Return searches the web." }
+    return results.count == 1 ? "1 result" : "\(results.count) results"
   }
 
-  /// The pills' counts: every match for `query`, not just the rows the list shows (its caps lifted). Hidden for an
-  /// empty query, so zeros there.
-  public static func counts(query: String, input: Input) -> [CommandBarFilter: Int] {
-    makeWithCounts(query: query, input: input).counts
-  }
+  // MARK: The command bar
 
-  /// The rows and the pills' counts from one matching pass (#606). A row is built only for a match the list shows;
-  /// the rest are counted. With 2,000 open tabs a second pass that built a row for every match cost 27 ms a keystroke.
-  public static func makeWithCounts(query raw: String,
-                                    input: Input) -> (results: [Result], counts: [CommandBarFilter: Int]) {
+  /// The rows for `query`. An empty (or blank) query is the empty field: Paste and Go, recent tabs, recent history.
+  public static func grouped(query raw: String, input: Input) -> [Result] {
     let query = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-    let rows: [Result]
-    switch input.scope {
-    case .actions:
-      // BH-106: action search lists the shell's actions only.
-      rows = CommandBarActions.filter(input.actions, query: query).map { actionRow($0, group: nil) }
-    case .siteSearch(let engine):
-      // BH-107: one row per query, to the scoped engine.
-      if !query.isEmpty, let url = engine.url(for: query) {
-        rows = [Result(kind: .siteSearch(url), title: "Search \(engine.name) for \(query)",
-                       subtitle: "Search \(engine.name)", trailingHint: nil,
-                       removalID: "sitesearch:\(url.absoluteString)")]
-      } else {
-        rows = []
-      }
-    case .normal:
-      if query.isEmpty { return (emptyState(input), CommandBarFilter.counts(of: [])) }
-      return typed(query: query, input: input)
-    }
-    return (rows, CommandBarFilter.showsCounts(forQuery: query) ? CommandBarFilter.counts(of: rows)
-                                                                 : CommandBarFilter.counts(of: []))
+    return query.isEmpty ? emptyField(input) : typed(query: query, input: input)
   }
 
-  /// A typed query in the normal scope: the rows, capped per kind, and the count of every match of each kind.
-  private static func typed(query: String, input: Input) -> (results: [Result], counts: [CommandBarFilter: Int]) {
-    let isKept = { (removalID: String?) in removalID.map { !input.excluded.contains($0) } ?? true }
-    var results: [Result] = []
+  private static func emptyField(_ input: Input) -> [Result] {
+    var rows: [Result] = []
+    if let url = input.clipboardURL {
+      rows.append(Result(kind: .pasteAndGo(url), title: pasteAndGoTitle, subtitle: shownURL(url),
+                         trailingHint: nil, removalID: nil))
+    }
+    let candidates = input.openTabs.enumerated().filter { $0.element.node != input.currentTab }
+    let recent = topThree(candidates) { a, b in
+      isMoreRecent(a.element.lastViewed, b.element.lastViewed, orIndex: a.offset < b.offset)
+    }
+    for entry in recent { rows.append(tabRow(entry.element)) }
+    let openURLs = Set(input.openTabs.map(\.url))
+    let visits = input.history.enumerated()
+      .filter { isKeptVisit($0.element, openURLs: openURLs, excluded: input.excluded) }
+    for entry in topThree(visits, by: { a, b in
+      isMoreRecent(a.element.visited, b.element.visited, orIndex: a.offset < b.offset)
+    }) {
+      rows.append(historyRow(entry.element, now: input.now))
+    }
+    return rows
+  }
 
+  private static func typed(query: String, input: Input) -> [Result] {
+    var rows: [Result] = []
+    if let url = URLInputParser.url(from: query) {
+      rows.append(Result(kind: .open(url), title: query, subtitle: "", trailingHint: nil, removalID: nil))
+    }
+    let match = WordStartMatch(query)
+
+    // Tabs: match quality, then most recently viewed. Rows are built for the three shown only (#606, #839).
+    var tabs: [(quality: Int, index: Int, tab: OpenTab)] = []
+    for (index, tab) in input.openTabs.enumerated() where tab.node != input.currentTab {
+      if let quality = matchQuality(match, title: tab.title, url: tab.url) {
+        tabs.append((quality, index, tab))
+      }
+    }
+    for entry in topThree(tabs, by: { a, b in
+      a.quality != b.quality ? a.quality < b.quality
+        : isMoreRecent(a.tab.lastViewed, b.tab.lastViewed, orIndex: a.index < b.index)
+    }) {
+      rows.append(tabRow(entry.tab))
+    }
+
+    // Folders: the name only; match quality, then the most recently viewed tab inside.
+    var folders: [(quality: Int, index: Int, folder: Folder)] = []
+    for (index, folder) in input.folders.enumerated() {
+      if let quality = match.quality(title: folder.title, detail: nil) { folders.append((quality, index, folder)) }
+    }
+    for entry in topThree(folders, by: { a, b in
+      a.quality != b.quality ? a.quality < b.quality
+        : isMoreRecent(a.folder.lastViewed, b.folder.lastViewed, orIndex: a.index < b.index)
+    }) {
+      var row = Result(kind: .folder(entry.folder.node), title: entry.folder.title,
+                       subtitle: tabCountText(entry.folder.tabCount), trailingHint: nil, removalID: nil)
+      row.group = .folders
+      rows.append(row)
+    }
+
+    // History: the provider's order (frecency), pages that are open tabs left out.
+    let openURLs = Set(input.openTabs.map(\.url))
+    var history = 0
+    for visit in input.history where history < maxRowsPerGroup {
+      guard isKeptVisit(visit, openURLs: openURLs, excluded: input.excluded),
+            matchQuality(match, title: visit.title, url: visit.url) != nil
+      else { continue }
+      rows.append(historyRow(visit, now: input.now))
+      history += 1
+    }
+
+    // Extensions: name and description; match quality, then name.
+    var extensions: [(quality: Int, index: Int, item: Extension)] = []
+    for (index, item) in input.extensions.enumerated() {
+      if let quality = match.quality(title: item.name, detail: item.description) {
+        extensions.append((quality, index, item))
+      }
+    }
+    for entry in topThree(extensions, by: { a, b in
+      a.quality != b.quality ? a.quality < b.quality
+        : a.item.name.localizedStandardCompare(b.item.name) == .orderedAscending
+    }) {
+      var row = Result(kind: .extensionAction(entry.item.id), title: entry.item.name, subtitle: entry.item.description,
+                       trailingHint: nil, removalID: nil)
+      row.group = .extensions
+      row.iconPNG = entry.item.iconPNG
+      rows.append(row)
+    }
+
+    // Search: the exact text, then up to two suggestions below it.
+    var search = Result(kind: .search(URLInputParser.searchURL(for: query)), title: query,
+                        subtitle: "Search \(CommandBarSettings.searchEngineName)", trailingHint: nil, removalID: nil)
+    search.group = .search
+    rows.append(search)
+    if input.searchSuggestionsEnabled {
+      var seen: Set<String> = [query.lowercased()]
+      for text in input.suggestions where seen.count < maxRowsPerGroup {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, seen.insert(trimmed.lowercased()).inserted else { continue }
+        var row = Result(kind: .suggestion(URLInputParser.searchURL(for: trimmed)), title: trimmed, subtitle: "",
+                         trailingHint: nil, removalID: nil)
+        row.group = .search
+        rows.append(row)
+      }
+    }
+    return rows
+  }
+
+  /// How a tab or a visit matches: its saved title and its address as stored (an internationalized host in its `xn--`
+  /// form), folding case and diacritics, and the host as the rows show it (`HostDisplay`, #732), folding case only, so a
+  /// host typed in Unicode finds it but "paypal" never finds "p\u{00E0}ypal-login.net". Only a host with an `xn--` label
+  /// reads differently, so every other one costs nothing more.
+  private static func matchQuality(_ match: WordStartMatch, title: String, url: URL) -> Int? {
+    let raw = url.host()
+    let shown = raw.flatMap { $0.range(of: "xn--", options: .caseInsensitive) != nil ? HostDisplay.host(of: url) : nil }
+    return match.quality(title: title, detail: CommandBarTitleMatch.displayURL(url.absoluteString),
+                         strictDetail: shown == raw ? nil : shown)
+  }
+
+  /// The first three of `items` by `order`, without sorting them all.
+  private static func topThree<T>(_ items: [T], by order: (T, T) -> Bool) -> [T] {
+    var top: [T] = []
+    for item in items {
+      let at = top.firstIndex { order(item, $0) } ?? top.count
+      if at < maxRowsPerGroup {
+        top.insert(item, at: at)
+        if top.count > maxRowsPerGroup { top.removeLast() }
+      }
+    }
+    return top
+  }
+
+  /// Newer first; a date beats none; otherwise `orIndex` (the original order).
+  private static func isMoreRecent(_ a: Date?, _ b: Date?, orIndex: Bool) -> Bool {
+    switch (a, b) {
+    case let (a?, b?) where a != b: a > b
+    case (_?, nil): true
+    case (nil, _?): false
+    default: orIndex
+    }
+  }
+
+  private static func isKeptVisit(_ visit: HistoryVisit, openURLs: Set<URL>, excluded: Set<String>) -> Bool {
+    visit.openTab == nil && !openURLs.contains(visit.url) && !excluded.contains(historyRemovalID(visit.url))
+  }
+
+  private static func historyRemovalID(_ url: URL) -> String { "history:\(url.absoluteString)" }
+
+  /// "1 tab", "6 tabs".
+  static func tabCountText(_ count: Int) -> String { count == 1 ? "1 tab" : "\(count) tabs" }
+
+  /// Host and path as a row shows them, without the scheme (`HostDisplay` writes the host).
+  static func shownURL(_ url: URL) -> String { CommandBarTitleMatch.displayURL(HostDisplay.address(url)) }
+
+  private static func tabRow(_ tab: OpenTab) -> Result {
+    #if DEBUG
+    tabRowCounter?.count()
+    #endif
+    var row = Result(kind: .switchTo(tab.node), title: HostDisplay.title(tab.title, for: tab.url),
+                     subtitle: shownURL(tab.url), trailingHint: switchHint, removalID: nil)
+    row.group = .tabs
+    return row
+  }
+
+  private static func historyRow(_ visit: HistoryVisit, now: Date) -> Result {
+    var row = Result(kind: .history(visit.url), title: HostDisplay.title(visit.title, for: visit.url),
+                     subtitle: shownURL(visit.url), trailingHint: nil, removalID: historyRemovalID(visit.url))
+    row.group = .history
+    row.timeText = visit.visited.map { CommandBarRelativeTime.text(from: $0, to: now) }
+    return row
+  }
+
+  // MARK: Little Arkt's lookup
+
+  /// Little Arkt's quick lookup (#354): an empty query lists up to six open tabs; text lists the typed address, the
+  /// open tabs whose title or host holds it (up to six) and a search row, which an address with its scheme drops (#96).
+  public static func make(query raw: String, openTabs: [OpenTab]) -> [Result] {
+    let query = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    if query.isEmpty { return openTabs.prefix(maxSwitchResults).map(lookupTabRow) }
+    var results: [Result] = []
     let url = URLInputParser.url(from: query)
     if let url {
-      // The subtitle shows what the input expands to; when the input is that URL already (Cmd-L), it adds nothing.
+      // The subtitle shows what the input expands to; when the input is that URL already, it adds nothing.
       let subtitle = url.absoluteString == query ? "" : HostDisplay.address(url)
       results.append(Result(kind: .open(url), title: query, subtitle: subtitle, trailingHint: nil, removalID: nil))
     }
-
     let match = StandardMatch(query)
-    let matching = input.openTabs.filter { tab in
+    let matching = openTabs.filter { tab in
       match.found(in: tab.title) || match.found(in: tab.url.host() ?? "") // not shown
         || shownHost(of: tab.url, contains: query)
     }
-    for tab in matching.prefix(maxSwitchResults) {
-      results.append(tabRow(tab, group: nil, now: input.now))
-    }
-
-    let history = input.history.filter { visit in
-      match.found(in: visit.title) || match.found(in: visit.url.absoluteString)
-        || shownHost(of: visit.url, contains: query)
-    }
-    for visit in history.prefix(maxHistoryResults) {
-      results.append(historyRow(visit, now: input.now))
-    }
-
-    // Spaces (BH-104): after the tabs, capped.
-    let spaces = input.spaces.filter { match.found(in: $0.title) }
-    for space in spaces.prefix(maxSpaceResults) {
-      results.append(Result(kind: .switchSpace(space.id), title: space.title, subtitle: "Space",
-                            trailingHint: switchToSpaceHint, removalID: nil))
-    }
-
-    for match in input.archived.prefix(maxArchivedResults) {
-      results.append(Result(kind: .restore(match.id), title: match.title, subtitle: match.subtitle,
-                            trailingHint: restoreHint, removalID: nil))
-    }
-
-    // Rows that are never capped and count under All only: the address, the search row and a site alias.
-    var uncappedRows = url == nil ? 0 : 1
-
-    // #96: an explicit http(s) scheme makes the input a URL for certain (Cmd-L prefills one), so a search row
-    // would only repeat it. Chromium keeps a demoted search-what-you-typed row there; Arc unverified [I] (RT-08).
-    // Schemeless input such as `example.com` stays ambiguous and keeps both rows.
-    // BH-113: `searchSuggestEnabled` off drops the row and the engine round trip it stands for.
-    let isExplicitURL = url != nil && URLInputParser.hasExplicitScheme(query)
-    if !isExplicitURL, input.searchSuggestionsEnabled {
-      let removalID = "search:\(query)"
+    results += matching.prefix(maxSwitchResults).map(lookupTabRow)
+    if !(url != nil && URLInputParser.hasExplicitScheme(query)) {
       results.append(Result(kind: .search(URLInputParser.searchURL(for: query)), title: query,
                             subtitle: "Search \(CommandBarSettings.searchEngineName)", trailingHint: nil,
-                            removalID: removalID))
-      if isKept(removalID) { uncappedRows += 1 }
+                            removalID: nil))
     }
-
-    // BH-107: a typed alias or site name offers a row for that site, with a Tab key cap: Tab scopes to it.
-    if let engine = SiteSearchEngines.engine(matching: query, in: input.siteSearchEngines),
-       let searchURL = engine.url(for: query) {
-      let exact = engine.alias.caseInsensitiveCompare(query) == .orderedSame
-      var row = Result(kind: .siteSearch(searchURL), title: exact ? "Search \(engine.name)" : "Search \(engine.name) for \(query)",
-                       subtitle: "Search \(engine.name)", trailingHint: nil, removalID: nil)
-      row.siteSearchEngine = engine
-      // An alias typed whole is the shortcut: its row leads, so Tab scopes at once (#322) and Return, with nothing yet
-      // to search for, scopes too (`CommandBarController.commit`).
-      results.insert(row, at: exact ? 0 : results.count)
-      uncappedRows += 1
-    }
-
-    // Actions whose title matches the query, so the Actions pill counts them.
-    let actions = CommandBarActions.filter(input.actions, query: query)
-    for action in actions.prefix(maxMatchingActions) {
-      results.append(actionRow(action, group: nil))
-    }
-
-    // Counted without building rows: the removal ids are formed only when something was removed.
-    let tabCount = input.excluded.isEmpty ? matching.count
-      : matching.count { isKept("tab:\($0.node.uuidString)") }
-    let historyCount = input.excluded.isEmpty ? history.count
-      : history.count { isKept("history:\($0.url.absoluteString)") }
-    var counts: [CommandBarFilter: Int] = [:]
-    counts[.tabs] = tabCount + input.archived.count
-    counts[.history] = historyCount
-    counts[.actions] = actions.count
-    counts[.all] = uncappedRows + tabCount + historyCount + spaces.count + input.archived.count + actions.count
-    return (results.filter { isKept($0.removalID) }, counts)
+    return results
   }
 
-  /// `localizedStandardContains` with the current locale fetched once per pass: that call bridges `Locale.current`
-  /// for every string, which was most of the cost of matching 2,000 titles (#606). The same search (case- and
-  /// diacritic-insensitive and nonliteral, so decomposed text such as Hangul jamo finds its precomposed form, in the
-  /// current locale) through the CoreFoundation call NSString makes, so the same answers.
+  private static func lookupTabRow(_ tab: OpenTab) -> Result {
+    Result(kind: .switchTo(tab.node), title: HostDisplay.title(tab.title, for: tab.url),
+           subtitle: HostDisplay.hostOrAddress(tab.url), trailingHint: tab.isSplitPane ? switchToSplitHint : switchHint,
+           removalID: nil)
+  }
+
+  /// `localizedStandardContains` with the current locale fetched once per pass (#606): case- and
+  /// diacritic-insensitive and nonliteral, in the current locale. Little Arkt's lookup matching.
   struct StandardMatch {
     private let query: CFString
     private let locale = CFLocaleCopyCurrent()
@@ -364,99 +423,88 @@ public enum CommandBarResults {
   }
 
   /// Whether the host the rows show for `url` (`HostDisplay`, #732) holds `query`, so a host typed in Unicode finds it
-  /// as well as the encoded form the URL itself is matched by. Case is folded, diacritics are not: "paypal" must not
-  /// find "pàypal-login.net" through its shown host. Only a host with an `xn--` label can read differently, so every
-  /// other one costs a substring check; `HostDisplay` keeps the answer per host, so each is decoded once however many
-  /// rows and keystrokes ask. A title saved as the raw host (`HostDisplay.savedTitle(for:)`) is matched as saved.
+  /// as well as the encoded form. Case is folded, diacritics are not. Little Arkt's lookup matching.
   static func shownHost(of url: URL, contains query: String) -> Bool {
-    guard let raw = url.host(), raw.range(of: "xn--", options: .caseInsensitive) != nil, // not shown
+    guard let raw = url.host(), raw.range(of: "xn--", options: .caseInsensitive) != nil,
           let shown = HostDisplay.host(of: url), shown != raw else { return false }
     return shown.range(of: query, options: .caseInsensitive) != nil
   }
+}
 
-  private static func actionRow(_ action: CommandBarAction, group: Group?) -> Result {
-    var row = Result(kind: .action(action.id), title: action.title, subtitle: "Action", trailingHint: nil,
-                     removalID: nil)
-    row.keyCaps = action.keyCaps
-    row.group = group
-    return row
+/// The command bar's matching (design, "Row order"): every word of the query starts a word of the text, ignoring
+/// case and diacritics. A word starts at the beginning, after a character that is not a letter or digit, or anywhere
+/// in text written without spaces (Han, kana, Hangul). `quality` ranks a match: 0 when the title starts with the
+/// query's first word, 1 when every word is found in the title, 2 when some are found only in `detail` (host and path,
+/// a description) or `strictDetail`, which folds case but not diacritics. Nil when a word is found in none.
+struct WordStartMatch {
+  private let words: [CFString]
+
+  init(_ query: String) {
+    words = query.split(whereSeparator: \.isWhitespace).map { String($0) as CFString }
   }
 
-  private static func tabRow(_ tab: OpenTab, group: Group?, now: Date) -> Result {
-    #if DEBUG
-    tabRowCounter?.count()
-    #endif
-    let title = HostDisplay.title(tab.title, for: tab.url)
-    var row = Result(kind: .switchTo(tab.node), title: title,
-                     subtitle: HostDisplay.hostOrAddress(tab.url),
-                     trailingHint: tab.isSplitPane ? switchToSplitHint : switchHint,
-                     removalID: "tab:\(tab.node.uuidString)")
-    row.group = group
-    if group == .recentTabs, let viewed = tab.lastViewed {
-      row.timeText = CommandBarRelativeTime.text(from: viewed, to: now)
+  func quality(title: String, detail: String?, strictDetail: String? = nil) -> Int? {
+    guard !words.isEmpty else { return nil }
+    let titleText = title as CFString
+    let detailText = detail.map { $0 as CFString }
+    let strictText = strictDetail.map { $0 as CFString }
+    var inTitle = true
+    for word in words {
+      if Self.startsWord(word, in: titleText) { continue }
+      if let detailText, Self.startsWord(word, in: detailText) {
+        inTitle = false
+      } else if let strictText, Self.startsWord(word, in: strictText, options: .compareCaseInsensitive) {
+        inTitle = false
+      } else {
+        return nil
+      }
     }
-    row.previewFacts = CommandBarPreviewFacts(
-      rowKind: .openTab, title: title, host: HostDisplay.hostOrAddress(tab.url),
-      spaceTitle: tab.spaceTitle,
-      timeText: tab.lastViewed.map { CommandBarRelativeTime.preview(from: $0, to: now) },
-      isAlsoOpen: false, url: tab.url, node: tab.node)
-    return row
+    guard inTitle else { return 2 }
+    return Self.hasPrefix(words[0], titleText) ? 0 : 1
   }
 
-  private static func historyRow(_ visit: HistoryVisit, now: Date) -> Result {
-    let host = HostDisplay.hostOrAddress(visit.url)
-    let title = HostDisplay.title(visit.title, for: visit.url)
-    var row = Result(kind: .history(visit.url), title: title,
-                     subtitle: CommandBarTitleMatch.displayURL(HostDisplay.address(visit.url)),
-                     trailingHint: nil, removalID: "history:\(visit.url.absoluteString)")
-    if let visited = visit.visited {
-      row.timeText = CommandBarRelativeTime.text(from: visited, to: now)
-    }
-    row.previewFacts = CommandBarPreviewFacts(
-      rowKind: .history, title: title, host: host, spaceTitle: nil,
-      timeText: visit.visited.map { CommandBarRelativeTime.preview(from: $0, to: now) },
-      isAlsoOpen: visit.openTab != nil, url: visit.url, node: visit.openTab)
-    return row
+  private static let options: CFStringCompareFlags = [.compareCaseInsensitive, .compareDiacriticInsensitive]
+
+  private static func hasPrefix(_ word: CFString, _ text: CFString) -> Bool {
+    var found = CFRange()
+    return CFStringFindWithOptions(text, word, CFRange(location: 0, length: CFStringGetLength(text)),
+                                   options.union(.compareAnchored), &found)
   }
 
-  /// The empty query: Clipboard (Paste and Go, only when the clipboard holds a URL), Recent tabs (up to four) and a
-  /// short list of Actions (design/command-bar/README.md, Empty state).
-  private static func emptyState(_ input: Input) -> [Result] {
-    if input.listsOpenTabsForAnEmptyQuery {
-      return input.openTabs.prefix(maxSwitchResults).map { tabRow($0, group: nil, now: input.now) }
-        .filter { result in result.removalID.map { !input.excluded.contains($0) } ?? true }
+  static func startsWord(_ word: CFString, in text: CFString, options: CFStringCompareFlags = options) -> Bool {
+    let length = CFStringGetLength(text)
+    var start = 0
+    var found = CFRange()
+    while start < length,
+          CFStringFindWithOptions(text, word, CFRange(location: start, length: length - start), options, &found) {
+      if found.location == 0 { return true }
+      let before = CFStringGetCharacterAtIndex(text, found.location - 1)
+      let first = CFStringGetCharacterAtIndex(text, found.location)
+      if !isWordCharacter(before) || isUnspaced(before) || isUnspaced(first) { return true }
+      start = found.location + 1
     }
-    var results: [Result] = []
-    // BH-108 / GS-035.
-    if let url = input.clipboardURL {
-      var row = Result(kind: .pasteAndGo(url), title: pasteAndGoTitle, subtitle: HostDisplay.address(url),
-                       trailingHint: nil, removalID: nil)
-      row.group = .clipboard
-      results.append(row)
-    }
-    let recents = input.recentTabs.isEmpty ? input.openTabs : input.recentTabs
-    for tab in recents.prefix(maxRecentTabs) { results.append(tabRow(tab, group: .recentTabs, now: input.now)) }
-    for action in input.actions.prefix(maxEmptyStateActions) { results.append(actionRow(action, group: .actions)) }
-    return results.filter { result in
-      result.removalID.map { !input.excluded.contains($0) } ?? true
-    }
+    return false
   }
 
-  /// The pre-#112 convenience: a plain query over open tabs (no clipboard, Spaces, actions or exclusions) with optional archived matches (#111).
-  public static func make(query raw: String, openTabs: [OpenTab], archived: [ArchivedMatch] = []) -> [Result] {
-    var input = Input()
-    input.openTabs = openTabs
-    input.archived = archived
-    input.listsOpenTabsForAnEmptyQuery = true
-    return make(query: raw, input: input)
+  private static func isWordCharacter(_ unit: UniChar) -> Bool {
+    guard let scalar = Unicode.Scalar(unit) else { return true }   // half of a surrogate pair: inside a word
+    return scalar.properties.isAlphabetic || scalar.properties.numericType != nil
+  }
+
+  /// Scripts written without spaces between words: CJK ideographs, kana, Hangul.
+  private static func isUnspaced(_ unit: UniChar) -> Bool {
+    switch unit {
+    case 0x3040...0x30FF, 0x3400...0x4DBF, 0x4E00...0x9FFF, 0xAC00...0xD7AF, 0xF900...0xFAFF, 0xFF66...0xFF9F: true
+    default: false
+    }
   }
 }
 
 #if DEBUG
 extension CommandBarResults {
-  /// Counts the tab rows `make` builds, for tests that guard a keystroke's work by counting it instead of timing it
-  /// (#839). Bound with `$tabRowCounter.withValue`, so it counts only the work of the code it wraps, on that task:
-  /// other tests calling `make` at the same time are not counted. Debug builds only.
+  /// Counts the tab rows `grouped` builds, for tests that guard a keystroke's work by counting it instead of timing it
+  /// (#839). Bound with `$tabRowCounter.withValue`, so it counts only the work of the code it wraps, on that task.
+  /// Debug builds only.
   final class TabRowCounter: Sendable {
     private let built = Mutex(0)
     init() {}
@@ -497,5 +545,39 @@ extension CommandBarResults {
   @MainActor
   public static func openTabs(in source: any SidebarSource, spaces: [SpaceID]) -> [OpenTab] {
     spaces.flatMap { openTabs(in: source, space: $0) }
+  }
+
+  /// BH-104: the folders of the Pinned section of each Space, nested ones included, depth first, with the tabs each
+  /// holds (a nested folder's tabs count for every folder around it; a split counts as one tab, like the sidebar row).
+  /// `lastViewed` answers when a tab was last shown in this window.
+  @MainActor
+  public static func folders(in source: any SidebarSource, spaces: [SpaceID],
+                             lastViewed: (NodeID) -> Date? = { _ in nil }) -> [Folder] {
+    var folders: [Folder] = []
+    func walk(_ id: NodeID, depth: Int) -> (tabs: Int, viewed: Date?) {
+      guard depth < 64, let info = source.node(id) else { return (0, nil) }   // depth guard against a malformed source
+      switch info {
+      case .tab(let node, _, _):
+        return (1, lastViewed(node))
+      case .split:
+        return (1, source.firstTab(at: id).flatMap(lastViewed))
+      case .folder(let folder, let title):
+        let slot = folders.count
+        folders.append(Folder(node: folder, title: title, tabCount: 0))
+        var tabs = 0
+        var viewed: Date?
+        for child in source.children(of: .folder(folder)) {
+          let inner = walk(child, depth: depth + 1)
+          tabs += inner.tabs
+          if let date = inner.viewed { viewed = max(viewed ?? date, date) }
+        }
+        folders[slot] = Folder(node: folder, title: title, tabCount: tabs, lastViewed: viewed)
+        return (tabs, viewed)
+      }
+    }
+    for space in spaces {
+      for id in source.children(of: .pinned(space)) { _ = walk(id, depth: 0) }
+    }
+    return folders
   }
 }

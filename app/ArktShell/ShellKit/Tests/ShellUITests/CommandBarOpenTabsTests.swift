@@ -62,3 +62,32 @@ struct CommandBarOpenTabsTests {
     #expect(CommandBarResults.openTabs(in: sidebar, spaces: [work, home]).map(\.node) == [a, b])
   }
 }
+
+@MainActor
+struct CommandBarFoldersTests {
+  /// BH-104: the Pinned section's folders, nested ones included, depth first, with the tabs each holds (a nested
+  /// folder's tabs count for the folder around it, a split counts as one) and the latest view inside. Today's folders
+  /// are not listed.
+  @Test func collectsPinnedFoldersWithTheirTabs() throws {
+    let sidebar = StubSidebar()
+    let space = sidebar.addSpace(title: "S", theme: SpaceThemeInfo(baseColors: [], isDark: false))
+    func url(_ s: String) -> URL { URL(string: s)! }
+    let trips = sidebar.addFolder(title: "Trips", in: .pinned(space))
+    let lisbon = sidebar.addTab(url: url("https://lisbon.dev"), title: "Lisbon", in: .folder(trips))
+    let inner = sidebar.addFolder(title: "Inner", in: .folder(trips))
+    let flights = sidebar.addTab(url: url("https://flights.dev"), title: "Flights", in: .folder(inner))
+    let split = sidebar.addSplit(in: .folder(inner))
+    _ = sidebar.addTab(url: url("https://left.dev"), title: "Left", in: .split(split))
+    _ = sidebar.addTab(url: url("https://right.dev"), title: "Right", in: .split(split))
+    _ = sidebar.addFolder(title: "Today folder", in: .today(space))
+    let early = Date(timeIntervalSince1970: 100)
+    let late = Date(timeIntervalSince1970: 200)
+    let viewed = [lisbon: early, flights: late]
+
+    let folders = CommandBarResults.folders(in: sidebar, spaces: [space]) { viewed[$0] }
+    #expect(folders.map(\.title) == ["Trips", "Inner"])
+    #expect(folders.map(\.node) == [trips, inner])
+    #expect(folders.map(\.tabCount) == [3, 2])
+    #expect(folders.map(\.lastViewed) == [late, late])
+  }
+}

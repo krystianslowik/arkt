@@ -301,10 +301,10 @@ struct ShellTokensContrastTests {
 
   // MARK: Command bar (#371, design/command-bar/README.md, Accessibility)
 
-  /// The fills a command bar text sits on, over the opaque surface: bare, the selected row, a key cap, the pill well.
+  /// The fills a command bar text sits on, over the opaque surface: bare, the selected row, the key cap.
   private static func commandBarFills(_ flavor: ThemeFlavor) -> [RGBA] {
     let surface = ShellTokens.commandBarSurfaceOpaque.resolve(flavor)
-    let layers = [ShellTokens.commandBarSelectedRow, ShellTokens.commandBarKeyCap, ShellTokens.commandBarPillWell]
+    let layers = [ShellTokens.commandBarSelectedRow, ShellTokens.commandBarKeyCap]
     return [surface] + layers.map { ShellContrastProbe.over($0.resolve(flavor), surface) }
   }
 
@@ -319,28 +319,9 @@ struct ShellTokensContrastTests {
     }
   }
 
-  @Test(arguments: flavors)
-  func theSelectedPillReadsInTheCapsule(flavor: ThemeFlavor) {
-    let surface = ShellTokens.commandBarSurfaceOpaque.resolve(flavor)
-    let well = ShellContrastProbe.over(ShellTokens.commandBarPillWell.resolve(flavor), surface)
-    let on = ShellContrastProbe.over(ShellTokens.commandBarPillOn.resolve(flavor), well)
-    let text = ShellContrastProbe.ratio(ShellTokens.commandBarPillOnText.resolve(flavor), onOpaque: on)
-    #expect(text >= Contrast.minimumText, "selected pill text \(flavor): \(text)")
-    let count = ShellContrastProbe.over(CommandBarFilterPills.selectedCountColor(flavor), on)
-    #expect(ShellContrastProbe.ratio(count, on) >= Contrast.minimumText, "selected pill count \(flavor)")
-  }
-
-  /// Text on a mustard fill is graphite (the brand pair), above 7:1.
-  @Test func graphiteOnMustardIsAbove7() {
-    let ratio = ShellContrastProbe.ratio(BrandTokens.onAccent.dark, onOpaque: ShellTokens.commandBarTick.dark)
-    #expect(ratio >= 7, "graphite on mustard: \(ratio)")
-  }
-
   /// Mustard is a fill only: no command bar text token is the accent.
   @Test func mustardIsOnlyAFillInTheCommandBar() {
-    #expect(ShellTokens.commandBarTick == BrandTokens.accent)
-    let text = [ShellTokens.commandBarText, ShellTokens.commandBarSecondaryText, ShellTokens.commandBarTertiaryText,
-                ShellTokens.commandBarPillOnText]
+    let text = [ShellTokens.commandBarText, ShellTokens.commandBarSecondaryText, ShellTokens.commandBarTertiaryText]
     for token in text {
       #expect(token.light != BrandTokens.Palette.mustard && token.dark != BrandTokens.Palette.mustard)
     }

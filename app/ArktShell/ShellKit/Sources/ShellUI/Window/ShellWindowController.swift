@@ -39,11 +39,13 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   private var commandBarPrewarmed = false
   /// When each tab was last shown in this window, for the command bar's "12 min" (not persisted).
   private var viewedAt: [NodeID: Date] = [:] {
-    didSet { openTabsCache = nil }
+    didSet { openTabsCache = nil; commandBarFoldersCache = nil }
   }
   /// The command bar's open tabs for a Space order, kept between keystrokes (#606): with 2,000 tabs the walk cost
   /// 3 ms of every keystroke. Any sidebar change and any newly viewed tab drop it.
   private var openTabsCache: (spaces: [SpaceID], tabs: [CommandBarResults.OpenTab])?
+  /// The command bar's folders, dropped with `openTabsCache`.
+  private var commandBarFoldersCache: [CommandBarResults.Folder]?
   /// The focused tab: the shown plain tab, or the focused pane of a shown split (decision 7). The engine's active tab
   /// of this window follows it (week-3 Decision 6: extension `active` flags stay true).
   public internal(set) var currentTab: TabID? {
@@ -121,9 +123,6 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
   var nodeToReshow: NodeID?
   /// Engine tabs are created lazily, when a sidebar node is first shown (`openEngineTab(for:)`).
   var tabsByNode: [NodeID: TabID] = [:]
-  /// Page thumbnails for the command bar's preview (#372, #370). The app assigns this after the window exists;
-  /// the preview closures below read it when a row is selected.
-  public var pageThumbnails: PageThumbnails?
   var nodeByTab: [TabID: NodeID] = [:]
   /// A blank or incognito window (#487): its pages have no sidebar rows, so nothing it opens reaches the shared
   /// sidebar.
@@ -327,35 +326,16 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       self.engine.reload(tab)
     }
     commandBar.onSwitch = { [weak self] node in self?.activate(node: node) }
-    commandBar.thumbnailForPreview = { [weak self] thumbnail in
-      guard let self, let thumbnails = self.pageThumbnails else { return nil }
-      switch thumbnail {
-      case .liveTab(let node):
-        guard let tab = self.tabsByNode[node] else { return nil }
-        return await thumbnails.thumbnail(of: tab)
-      case .cachedPage(let url):
-        return await thumbnails.thumbnail(for: url)
-      }
-    }
-    commandBar.faviconForPreview = { [weak self] thumbnail in
-      guard let self, case .liveTab(let node) = thumbnail else { return nil }
-      return self.sidebarController.favicons[node]
-    }
+    commandBar.onShowFolder = { [weak self] node in self?.showFolderFromCommandBar(node) }          // BH-104
+    commandBar.onOpenExtension = { [weak self] id in self?.openExtensionFromCommandBar(id) }         // BH-104
+    commandBar.faviconProvider = { [weak self] node in self?.sidebarController.favicons[node] }
     commandBar.openTabsProvider = { [weak self] in self?.openTabs() ?? [] }
-    commandBar.recentTabsProvider = { [weak self] in self?.recentTabs() ?? [] }
-    // #112: settings, Paste and Go (BH-108, GS-035), Spaces as results (BH-104), action search (BH-106),
-    // site-search aliases (BH-107) and the Space-switch refresh (BH-111).
+    commandBar.currentTabProvider = { [weak self] in self?.currentNode }
+    commandBar.foldersProvider = { [weak self] in self?.commandBarFolders() ?? [] }
+    commandBar.extensionsProvider = { [weak self] in self?.commandBarExtensions() ?? [] }
+    // #993: "Include search engine suggestions", Paste and Go (BH-108, GS-035) and the Space-switch refresh (BH-111).
     commandBar.settings = commandBarSettings
     commandBar.clipboardURLProvider = { CommandBarController.pasteboardURL(NSPasteboard.general) }
-    commandBar.spacesProvider = { [weak self] in
-      guard let self else { return [] }
-      return self.sidebarController.spaces.compactMap { id in
-        self.sidebar.space(id).map { CommandBarResults.Space(id: id, title: $0.title) }
-      }
-    }
-    commandBar.onSwitchSpace = { [weak self] id in self?.sidebarController.showSpace(id) }
-    commandBar.actionsProvider = { [weak self] in self?.commandBarActions() ?? [] }
-    commandBar.onAction = { [weak self] id in self?.runCommandBarAction(id) }
     sidebarController.onCurrentSpaceChanged = { [weak self] _ in self?.commandBar.refreshSuggestions() }
     sidebarController.clipboardURLProvider = { CommandBarController.pasteboardURL(NSPasteboard.general) }
     sidebarController.onPasteAndGo = { [weak self] url in self?.open(url, inNewTab: true) }
@@ -367,6 +347,7 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     // A removed Space's nodes emit no structure change, so `.spaceRemoved` checks too.
     sidebarObservation = sidebar.observe { [weak self] change in
       self?.openTabsCache = nil                     // a title, an order or a Space changed what the bar lists
+      self?.commandBarFoldersCache = nil
       switch change {
       case .structure, .spaceRemoved:
         self?.closeEngineTabsOfRemovedNodes()
@@ -768,21 +749,6 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     }
   }
 
-  /// The command bar's Recent tabs (#371): the tabs shown in this window most recently first, across Spaces, without the
-  /// tab on screen (Return on it would only close the bar), then the tabs not shown since the app started, current
-  /// Space first like the suggestions (BH-111). Forgets the time of a tab that is gone.
-  private func recentTabs() -> [CommandBarResults.OpenTab] {
-    let open = openTabs()
-    let openNodes = Set(open.map(\.node))
-    if viewedAt.keys.contains(where: { !openNodes.contains($0) }) {
-      viewedAt = viewedAt.filter { openNodes.contains($0.key) }
-    }
-    let candidates = open.filter { $0.node != currentNode }
-    let viewed = candidates.filter { $0.lastViewed != nil }
-      .sorted { ($0.lastViewed ?? .distantPast) > ($1.lastViewed ?? .distantPast) }
-    return viewed + candidates.filter { $0.lastViewed == nil }
-  }
-
   /// BH-104: open tabs of every Space of this profile, the current Space first (so the BH-111 refresh reorders).
   private func openTabs() -> [CommandBarResults.OpenTab] {
     let spaces = sidebarController.spaces
@@ -793,7 +759,12 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
       ordered = spaces
     }
     if let cache = openTabsCache, cache.spaces == ordered { return cache.tabs }
-    let tabs = CommandBarResults.openTabs(in: sidebar, spaces: ordered).map { tab in
+    let open = CommandBarResults.openTabs(in: sidebar, spaces: ordered)
+    let nodes = Set(open.map(\.node))
+    if viewedAt.keys.contains(where: { !nodes.contains($0) }) {
+      viewedAt = viewedAt.filter { nodes.contains($0.key) }            // forgets the time of a tab that is gone
+    }
+    let tabs = open.map { tab in
       CommandBarResults.OpenTab(node: tab.node, title: tab.title, url: tab.url, isSplitPane: tab.isSplitPane,
                                 lastViewed: viewedAt[tab.node], spaceTitle: tab.spaceTitle)
     }
@@ -801,25 +772,44 @@ public final class ShellWindowController: NSWindowController, NSWindowDelegate {
     return tabs
   }
 
-  /// The action search's verbs (BH-106); ids are handled in `runCommandBarAction`.
-  private func commandBarActions() -> [CommandBarAction] {
-    [
-      CommandBarAction(id: "newSpace", title: "New Space"),
-      CommandBarAction(id: "nextSpace", title: "Next Space"),
-      CommandBarAction(id: "previousSpace", title: "Previous Space"),
-      CommandBarAction(id: "toggleToolbar", title: ToolbarSetting.menuTitle(isVisible: toolbarSetting.isVisible)),
-    ] + favoriteCommandBarActions()
+  /// BH-104: the folders of every Space's Pinned section, nested ones included, for the command bar's Folders group.
+  /// Kept between keystrokes like the open tabs; any sidebar change and any newly viewed tab drop it.
+  private func commandBarFolders() -> [CommandBarResults.Folder] {
+    if let commandBarFoldersCache { return commandBarFoldersCache }
+    let folders = CommandBarResults.folders(in: sidebar, spaces: sidebarController.spaces) { [viewedAt] in viewedAt[$0] }
+    commandBarFoldersCache = folders
+    return folders
   }
 
-  private func runCommandBarAction(_ id: String) {
-    switch id {
-    case "newSpace": newSpace(nil)
-    case "nextSpace": sidebarController.nextSpace()
-    case "previousSpace": sidebarController.previousSpace()
-    case "toggleToolbar": toggleToolbar(nil)
-    case Self.favoriteTabActionID, Self.moveToFavoritesActionID: favoriteCurrentTab()
-    default: break
+  /// BH-104: the window's enabled extension actions, with each extension's short description, for the Extensions group.
+  private func commandBarExtensions() -> [CommandBarResults.Extension] {
+    guard let extensions = engine as? any EngineExtensions, let engineWindow else { return [] }
+    var descriptions: [String: String] = [:]
+    for info in extensions.installedExtensions where info.isEnabled { descriptions[info.id] = info.description }
+    return extensions.extensionActions(in: engineWindow).compactMap { action in
+      guard action.isEnabled, let description = descriptions[action.extensionID] else { return nil }
+      return CommandBarResults.Extension(id: action.id, name: action.name, description: description,
+                                         iconPNG: action.iconPNG)
     }
+  }
+
+  /// Show Folder (BH-104): the folder's Space comes forward, the sidebar shows, the folder and the folders around it
+  /// open, and its row scrolls into view.
+  func showFolderFromCommandBar(_ folder: NodeID) {
+    guard case .folder? = sidebar.node(folder), let space = sidebar.spaceID(containing: folder),
+          sidebarController.spaces.contains(space) else { return }
+    if !rootView.sidebarVisible { rootView.sidebarVisible = true }
+    if sidebarController.currentSpace != space { sidebarController.showSpace(space) }
+    guard let outline = sidebarController.currentPage?.outlineController else { return }
+    if !outline.isFolderOpen(folder) { outline.toggleFolder(folder, animated: false) }
+    revealInSidebar(folder)
+  }
+
+  /// Open Extension (BH-104): the action runs as a click on its toolbar button would, its popup anchored there.
+  func openExtensionFromCommandBar(_ id: String) {
+    guard let extensions = engine as? any EngineExtensions, let engineWindow, let anchor = extensionCycleAnchor,
+          extensions.extensionActions(in: engineWindow).contains(where: { $0.id == id && $0.isEnabled }) else { return }
+    extensions.runExtensionAction(id, in: engineWindow, anchor: anchor)
   }
 
   /// Shows `node` in the content area: a pane shows its whole split (`showSplit`), anything else the single card.

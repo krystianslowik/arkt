@@ -24,10 +24,6 @@ final class CommandBarKeystrokeCountTests: XCTestCase {
     shell.showWindow(nil)
     shell.activate(node: first)
     bar.clipboardURLProvider = { nil }                 // never reads the system pasteboard
-    bar.settings.dismissSearchSuggestionNotice()
-    bar.dismissFinisher = { $0() }
-    bar.barView.selectionMotion.drivesFramesItself = false
-    bar.barView.widthMotion.drivesFramesItself = false
     window.contentView?.layoutSubtreeIfNeeded()
   }
 
@@ -61,15 +57,14 @@ final class CommandBarKeystrokeCountTests: XCTestCase {
     XCTAssertTrue(bar.isVisible)
   }
 
-  /// A row is built only for a tab the list shows; the other matches are counted, not built. A second pass that built
+  /// A row is built only for a tab the list shows (three); the other matches are ranked, not built. A pass that built
   /// a row for every match cost 27 ms a keystroke (#606).
   func testAKeystrokeBuildsOnlyTheTabRowsTheListShows() {
     openTheBar()
     for length in 1...query.count {
       let text = String(query.prefix(length))
       let built = tabRowsBuilt { type(text) }
-      XCTAssertEqual(built, CommandBarResults.maxSwitchResults, "keystroke \(length), \"\(text)\"")
-      XCTAssertEqual(bar.barView.pills.counts[.tabs], bar.openTabsProvider().count, "the Tabs pill counts every match")
+      XCTAssertEqual(built, CommandBarResults.maxRowsPerGroup, "keystroke \(length), \"\(text)\"")
     }
   }
 
@@ -88,6 +83,6 @@ final class CommandBarKeystrokeCountTests: XCTestCase {
       type(String(query.prefix(length)))
       XCTAssertEqual(table.reloadDataCount - afterFirst, 0, "keystroke \(length) reloaded the table")
     }
-    XCTAssertEqual(bar.results.filter { $0.rowKind == .openTab }.count, CommandBarResults.maxSwitchResults)
+    XCTAssertEqual(bar.results.filter { $0.group == .tabs }.count, CommandBarResults.maxRowsPerGroup)
   }
 }

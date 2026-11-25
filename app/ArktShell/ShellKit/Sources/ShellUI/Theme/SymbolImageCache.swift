@@ -12,8 +12,8 @@ public final class SymbolImageCache {
   /// Symbols the shell shows, prewarmed per flavor at launch.
   static let sidebarSymbols = ["folder", "folder.fill", "rectangle.split.2x1", "questionmark.square"]
   static let bottomBarSymbols = ["archivebox", "plus", ExtensionsButton.symbolName]
-  static let commandBarSymbols = ["globe", "square.on.square", "magnifyingglass", "clock", "bolt", "archivebox",
-                                  "doc.on.clipboard", "square.grid.2x2", "xmark"]
+  static let commandBarSymbols = ["globe", "square.on.square", "magnifyingglass", "clock", "doc.on.clipboard",
+                                  "folder", "puzzlepiece.extension"]
 
   private struct Key: Hashable {
     var name: String

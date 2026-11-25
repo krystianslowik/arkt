@@ -20,7 +20,7 @@ final class CommandBarKeystrokeBudgetTests: XCTestCase {
   static let spaceCount = 10
   /// Open tabs listed per Space. A split lists its first pane only, so each Space also holds the split's second pane.
   static let tabsPerSpace = 200
-  /// Every title contains it, so every prefix matches all 2,000 tabs and the pills count every one.
+  /// Every title contains it, so every prefix matches all 2,000 tabs.
   static let query = "quarterly pl"
   static let measuredPasses = 6
   static let budget = 0.008
@@ -40,10 +40,6 @@ final class CommandBarKeystrokeBudgetTests: XCTestCase {
     shell.showWindow(nil)
     shell.activate(node: first)
     bar.clipboardURLProvider = { nil }                 // never reads the system pasteboard
-    bar.settings.dismissSearchSuggestionNotice()
-    bar.dismissFinisher = { $0() }
-    bar.barView.selectionMotion.drivesFramesItself = false
-    bar.barView.widthMotion.drivesFramesItself = false
     window.contentView?.layoutSubtreeIfNeeded()
   }
 
@@ -143,8 +139,7 @@ final class CommandBarKeystrokeBudgetTests: XCTestCase {
         if pass > 0 { samples[length - 1].append(spent) }
       }
       assertRowsShowTheResults()
-      XCTAssertEqual(bar.barView.pills.counts[.tabs], openTabs.count, "the Tabs pill counts every match")
-      XCTAssertEqual(bar.results.filter { $0.rowKind == .openTab }.count, CommandBarResults.maxSwitchResults)
+      XCTAssertEqual(bar.results.filter { $0.group == .tabs }.count, CommandBarResults.maxRowsPerGroup)
     }
 
     let medians = samples.map { values in values.sorted()[values.count / 2] }
@@ -172,7 +167,7 @@ final class CommandBarKeystrokeBudgetTests: XCTestCase {
   // MARK: The open tabs kept between keystrokes
 
   private func firstTabRow() throws -> (node: NodeID, title: String) {
-    let row = try XCTUnwrap(bar.results.first { $0.rowKind == .openTab })
+    let row = try XCTUnwrap(bar.results.first { $0.group == .tabs })
     guard case .switchTo(let node) = row.kind else { throw XCTSkip("not a tab row") }
     return (node, row.title)
   }
@@ -183,7 +178,8 @@ final class CommandBarKeystrokeBudgetTests: XCTestCase {
     let first = try firstTabRow()
     source.updateTab(first.node, url: nil, title: "Quarterly review, renamed while the bar is open")
     type("qua")
-    XCTAssertEqual(try firstTabRow().title, "Quarterly review, renamed while the bar is open")
+    XCTAssertEqual(bar.results.first { $0.kind == .switchTo(first.node) }?.title,
+                   "Quarterly review, renamed while the bar is open")
   }
 
   func testATabViewedSinceTheLastShowLeadsTheRecentTabs() throws {
@@ -191,11 +187,11 @@ final class CommandBarKeystrokeBudgetTests: XCTestCase {
     shell.activate(node: tabs[5])
     shell.activate(node: tabs[9])
     bar.toggle(.newTab)
-    XCTAssertEqual(bar.results.first { $0.group == .recentTabs }?.kind, .switchTo(tabs[5]))
+    XCTAssertEqual(bar.results.first { $0.group == .tabs }?.kind, .switchTo(tabs[5]))
     bar.hide()
     shell.activate(node: tabs[12])
     bar.toggle(.newTab)
-    XCTAssertEqual(bar.results.first { $0.group == .recentTabs }?.kind, .switchTo(tabs[9]),
+    XCTAssertEqual(bar.results.first { $0.group == .tabs }?.kind, .switchTo(tabs[9]),
                    "the tab left last leads, not the one the earlier show listed")
   }
 }

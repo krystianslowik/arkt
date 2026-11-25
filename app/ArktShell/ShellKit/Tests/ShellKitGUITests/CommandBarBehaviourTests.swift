@@ -3,9 +3,10 @@ import XCTest
 import EngineAPITestSupport
 @_spi(Smoke) @testable import ShellUI
 
-/// The hybrid command bar's behaviour (#371, design/command-bar/README.md): filters (Cmd-1 to Cmd-4, Tab, Shift-Tab),
-/// the smart Tab rule, Esc clearing before closing, Cmd-Shift-V, the empty state's groups, the selection slide and
-/// the fades. Motion is stepped on injected clocks and finishers; nothing here waits on a clock.
+/// The grouped command bar's behaviour (#993, design/command-bar/README.md): the keyboard (wrap and repeat, Tab
+/// between groups, Cmd-Return, Esc, Cmd-Shift-V), the selected row's verb, no motion on open and close, search
+/// suggestions arriving late (#884), the announcements, and the layout in the worst case and the smallest window.
+/// Nothing here waits on a clock: the count announcement and the suggestion replies are run by hand.
 @MainActor
 final class CommandBarBehaviourTests: XCTestCase {
   var shell: ShellWindowController!
@@ -13,6 +14,12 @@ final class CommandBarBehaviourTests: XCTestCase {
   var window: NSWindow!
   var announcements: [String] = []
   var priorities: [NSAccessibilityPriorityLevel] = []
+  /// The count announcements waiting for typing to settle, in order.
+  var settled: [@MainActor () -> Void] = []
+  /// What the injected key-repeat check answers.
+  var repeating = false
+  /// Suggestion requests waiting for a reply.
+  var pending: [(query: String, reply: CheckedContinuation<[String], Never>)] = []
 
   override func setUp() async throws {
     _ = NSApplication.shared
@@ -23,14 +30,12 @@ final class CommandBarBehaviourTests: XCTestCase {
     shell.showWindow(nil)
     window.makeKeyAndOrderFront(nil)
     bar = CommandBarController(parent: window)
-    bar.settings.dismissSearchSuggestionNotice()
     bar.announce = { [unowned self] text, priority in
       announcements.append(text)
       priorities.append(priority)
     }
-    bar.dismissFinisher = { _ in }            // the fade is ended by hand where a test looks at it
-    bar.barView.selectionMotion.drivesFramesItself = false   // no display link: tests step the slide by hand
-    bar.barView.widthMotion.drivesFramesItself = false
+    bar.afterTypingSettles = { [unowned self] work in settled.append(work) }
+    bar.isRepeatKey = { [unowned self] in repeating }
     bar.prewarm()
     announcements = []
     priorities = []
@@ -38,6 +43,8 @@ final class CommandBarBehaviourTests: XCTestCase {
 
   // XCTest keeps each test case object until the run ends: release the windows too, not only hide them (#805).
   override func tearDown() async throws {
+    for request in pending { request.reply.resume(returning: []) }
+    pending = []
     bar.invalidate()
     shell.close()
     bar = nil
@@ -47,10 +54,6 @@ final class CommandBarBehaviourTests: XCTestCase {
 
   // MARK: Helpers
 
-  private func tabs(_ count: Int) -> [CommandBarResults.OpenTab] {
-    (1...count).map { .init(node: UUID(), title: "Tab \($0)", url: URL(string: "https://t\($0).example")!) }
-  }
-
   private func key(_ code: UInt16, _ characters: String, _ flags: NSEvent.ModifierFlags = []) throws {
     let event = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: 0,
                                                windowNumber: bar.panel.windowNumber, context: nil,
@@ -59,368 +62,228 @@ final class CommandBarBehaviourTests: XCTestCase {
     bar.panel.sendEvent(event)
   }
 
-  private func command(_ digit: Int) throws {
-    let codes: [Int: UInt16] = [1: 18, 2: 19, 3: 20, 4: 21]
-    try key(try XCTUnwrap(codes[digit]), String(digit), [.command])
-  }
-
   private func selector(_ action: Selector) -> Bool {
     bar.control(bar.barView.field, textView: NSTextView(), doCommandBy: action)
   }
 
+  private func down() { XCTAssertTrue(selector(#selector(NSResponder.moveDown(_:)))) }
+  private func up() { XCTAssertTrue(selector(#selector(NSResponder.moveUp(_:)))) }
   private func tab() -> Bool { selector(#selector(NSResponder.insertTab(_:))) }
   private func backtab() -> Bool { selector(#selector(NSResponder.insertBacktab(_:))) }
   private func escape() -> Bool { selector(#selector(NSResponder.cancelOperation(_:))) }
+  private var selected: Int { bar.barView.table.selectedRow }
 
-  /// Three tabs, an action and a search that all match "Tab".
-  private func showMixed(query: String = "Tab") {
-    bar.openTabsProvider = { [self] in tabs(3) }
-    bar.actionsProvider = { [CommandBarAction(id: "tabAction", title: "Tab Action")] }
+  /// Every group: two tabs, a folder, two history rows, an extension and the Search group for "git".
+  private func showAllGroups() {
+    bar.openTabsProvider = {
+      [.init(node: UUID(), title: "Git - Branches", url: URL(string: "https://git-scm.com/book/branches")!),
+       .init(node: UUID(), title: "acme/git-tools", url: URL(string: "https://github.com/acme/git-tools")!)]
+    }
+    bar.foldersProvider = { [.init(node: UUID(), title: "Git reading list", tabCount: 6)] }
+    bar.historyProvider = {
+      [.init(title: "Git - Book", url: URL(string: "https://git-scm.com/book")!,
+             visited: Date(timeIntervalSinceNow: -26 * 3600)),
+       .init(title: "Git cheat sheet", url: URL(string: "https://training.example/git")!)]
+    }
+    bar.extensionsProvider = { [.init(id: "pilot", name: "Git Pilot", description: "Pull request shortcuts")] }
     bar.toggle(.newTab)
-    if !query.isEmpty { bar.setQueryForTesting(query) }
+    bar.setQueryForTesting("git")
   }
 
-  private func kinds() -> [String] { bar.results.map(\.kind.name) }
-
-  // MARK: Filters
-
-  func testCommandDigitsPickThePillsAndFilterTheRows() throws {
-    showMixed()
-    XCTAssertEqual(kinds(), ["switch", "switch", "switch", "search", "action"])
-    try command(2)
-    XCTAssertEqual(bar.filter, .tabs)
-    XCTAssertEqual(kinds(), ["switch", "switch", "switch"])
-    XCTAssertEqual(bar.barView.pills.selected, .tabs)
-    try command(4)
-    XCTAssertEqual(kinds(), ["action"])
-    try command(3)
-    XCTAssertEqual(kinds(), ["noMatch"], "History has no source yet: the empty row")
-    XCTAssertEqual(bar.results.first?.title, "No History match Tab")
-    try command(1)
-    XCTAssertEqual(kinds(), ["switch", "switch", "switch", "search", "action"])
+  private func cell(_ row: Int) throws -> CommandBarCellView {
+    bar.barView.layoutSubtreeIfNeeded()
+    let cell = try XCTUnwrap(bar.barView.table.view(atColumn: 0, row: row, makeIfNecessary: true) as? CommandBarCellView)
+    cell.layoutSubtreeIfNeeded()
+    return cell
   }
 
-  func testTheQueryAndTheCountsSurviveAFilterChange() throws {
-    showMixed()
-    try command(2)
-    XCTAssertEqual(bar.barView.field.stringValue, "Tab")
-    XCTAssertEqual(bar.barView.pills.counts[.all], 5, "counts are of the unfiltered rows")
-    XCTAssertEqual(bar.barView.pills.counts[.tabs], 3)
-    XCTAssertEqual(bar.barView.pills.counts[.actions], 1)
+  /// Bounded main-actor turns until `condition` holds (no wall clock).
+  private func turns(until condition: () -> Bool, _ label: String) async throws {
+    for _ in 0..<10_000 {
+      if condition() { return }
+      await Task.yield()
+    }
+    XCTAssertTrue(condition(), "\(label) did not happen")
   }
 
-  /// Up / Down and Page Up / Page Down keep focus in the field, so VoiceOver hears the newly selected row's label
-  /// (#608). It interrupts the previous one: holding Down speaks the row it lands on, not every row passed.
+  private func suggestingByHand() {
+    bar.suggestionsProvider = { [unowned self] query in
+      await withCheckedContinuation { pending.append((query, $0)) }
+    }
+  }
+
+  // MARK: Groups and selection
+
+  func testTheGroupsComeInOrderAndTheFirstRowIsSelected() throws {
+    showAllGroups()
+    XCTAssertEqual(bar.results.map(\.group), [.tabs, .tabs, .folders, .history, .history, .extensions, .search])
+    XCTAssertEqual(bar.groupHeaders, [0: "Tabs", 2: "Folders", 3: "History", 5: "Extensions", 6: "Search"])
+    XCTAssertEqual(selected, 0)
+  }
+
+  /// Up and Down wrap on a fresh press; a held key's repeat stops at the ends.
+  func testArrowsWrapOnAPressAndStopAtTheEndsOnRepeat() throws {
+    showAllGroups()
+    let last = bar.results.count - 1
+    up()
+    XCTAssertEqual(selected, last, "a fresh Up on the first row wraps")
+    down()
+    XCTAssertEqual(selected, 0, "a fresh Down on the last row wraps")
+    repeating = true
+    up()
+    XCTAssertEqual(selected, 0, "a repeat stops at the first row")
+    for _ in 0..<20 { down() }
+    XCTAssertEqual(selected, last, "a repeat stops at the last row")
+  }
+
+  /// Tab and Shift-Tab jump to the first row of the next or previous group and do nothing else.
+  func testTabJumpsBetweenGroups() throws {
+    showAllGroups()
+    XCTAssertTrue(tab())
+    XCTAssertEqual(selected, 2, "Folders")
+    XCTAssertTrue(tab())
+    XCTAssertEqual(selected, 3, "History")
+    down()
+    XCTAssertTrue(backtab())
+    XCTAssertEqual(selected, 2, "Shift-Tab from inside History goes to the start of Folders")
+    for _ in 0..<6 { XCTAssertTrue(tab()) }
+    XCTAssertEqual(selected, 6, "stops on the last group")
+    XCTAssertEqual(bar.barView.field.stringValue, "git", "Tab never edits the text")
+  }
+
+  /// A keyboard move speaks the row's label at high priority; a hover selects without speaking.
   func testArrowMovesAnnounceTheSelectedRowAndHoverDoesNot() throws {
-    showMixed()
+    showAllGroups()
     announcements = []
-    priorities = []
-    XCTAssertTrue(selector(#selector(NSResponder.moveDown(_:))))
-    XCTAssertEqual(announcements.last, bar.results[1].accessibilityLabel(position: 2, of: 5))
-    XCTAssertEqual(announcements.last, "Tab 2, t2.example, open tab, 2 of 5")
+    down()
+    XCTAssertEqual(announcements.last, "acme/git-tools, github.com/acme/git-tools, open tab, 2 of 7")
     XCTAssertEqual(priorities.last, .high)
-    XCTAssertTrue(selector(#selector(NSResponder.moveUp(_:))))
-    XCTAssertEqual(announcements.last, bar.results[0].accessibilityLabel(position: 1, of: 5))
-    XCTAssertTrue(selector(#selector(NSResponder.moveUp(_:))))
-    XCTAssertEqual(announcements.last, bar.results[4].accessibilityLabel(position: 5, of: 5), "wraps to the last row")
-    XCTAssertTrue(selector(#selector(NSResponder.pageUp(_:))))
-    XCTAssertEqual(announcements.last, bar.results[0].accessibilityLabel(position: 1, of: 5))
-
     let spoken = announcements.count
-    bar.barView.onHoverRow?(2)
-    XCTAssertEqual(bar.barView.table.selectedRow, 2)
+    bar.barView.onHoverRow?(4)
+    XCTAssertEqual(selected, 4)
     XCTAssertEqual(announcements.count, spoken, "a pointer hover selects without speaking")
   }
 
-  /// A move that does not change the row (one result) says nothing new.
-  func testAMoveOnASingleRowAnnouncesNothing() throws {
-    showMixed()
-    try command(4)
-    XCTAssertEqual(bar.results.count, 1)
-    announcements = []
-    XCTAssertTrue(selector(#selector(NSResponder.moveDown(_:))))
-    XCTAssertEqual(announcements, [])
-  }
-
-  func testTheFilterAnnouncesItsNameAndCount() throws {
-    showMixed()
-    try command(2)
-    try command(3)
-    // The first matching tab opens the preview, which announces once. The filter changes follow.
-    XCTAssertEqual(announcements, ["Preview, Tab 1", "Tabs, 3 results", "History, 0 results"])
-    try command(4)
-    XCTAssertEqual(announcements.last, "Actions, 1 result")
-  }
-
-  func testTheSelectedPillSaysSoToVoiceOver() throws {
-    showMixed()
-    try command(2)
-    let labels = bar.barView.pills.subviews.map { $0.accessibilityLabel() ?? "" }
-    XCTAssertEqual(labels[1], "Tabs, 3 results, selected")
-    XCTAssertEqual(labels[0], "All, 5 results")
-  }
-
-  func testAFilterResetsToAllOnEveryOpen() throws {
-    showMixed()
-    try command(2)
-    bar.hide()
+  /// Once typing settles, the count is said once; an earlier keystroke's announcement is dropped.
+  func testTheCountIsAnnouncedOnceTypingSettles() throws {
     bar.toggle(.newTab)
-    XCTAssertEqual(bar.filter, .all)
-    XCTAssertEqual(bar.barView.pills.selected, .all)
+    bar.setQueryForTesting("zq")
+    bar.setQueryForTesting("zqx")
+    XCTAssertEqual(settled.count, 2)
+    settled[0]()
+    XCTAssertEqual(announcements, [], "a later keystroke replaced it")
+    settled[1]()
+    XCTAssertEqual(announcements, ["No matches. Return searches the web."])
+    bar.setQueryForTesting("t1.example")
+    settled[2]()
+    XCTAssertEqual(announcements.last, "2 results")
   }
 
-  func testTabCyclesTheFiltersWhenNothingScopes() throws {
-    showMixed()
-    XCTAssertTrue(tab())
-    XCTAssertEqual(bar.filter, .tabs)
-    XCTAssertTrue(tab())
-    XCTAssertEqual(bar.filter, .history)
-    XCTAssertTrue(tab())
-    XCTAssertEqual(bar.filter, .actions)
-    XCTAssertTrue(tab())
-    XCTAssertEqual(bar.filter, .all, "wraps")
-    XCTAssertEqual(bar.scope, .normal)
+  // MARK: The selected row
+
+  /// The selected row shows its verb and the Return key cap; the Search for row shows the key cap only; an unselected
+  /// history row shows its time.
+  func testTheSelectedRowShowsItsVerbAndTheKeyCap() throws {
+    showAllGroups()
+    let first = try cell(0)
+    XCTAssertEqual(first.trailingText.stringValue, "Switch to Tab")
+    XCTAssertFalse(first.returnKey.isHidden)
+    XCTAssertEqual(first.returnKey.text, CommandBarKeyCaps.return)
+    let history = try cell(3)
+    XCTAssertEqual(history.trailingText.stringValue, "Yesterday")
+    XCTAssertTrue(history.returnKey.isHidden)
+    bar.barView.table.selectRowIndexes([3], byExtendingSelection: false)
+    XCTAssertEqual(history.trailingText.stringValue, "Open")
+    XCTAssertTrue(first.returnKey.isHidden, "only the selected row carries a verb")
+    for (row, verb) in [(2, "Show Folder"), (5, "Open Extension")] {
+      bar.barView.table.selectRowIndexes([row], byExtendingSelection: false)
+      XCTAssertEqual(try cell(row).trailingText.stringValue, verb)
+    }
+    bar.barView.table.selectRowIndexes([6], byExtendingSelection: false)
+    let search = try cell(6)
+    XCTAssertEqual(search.title.stringValue, "Search for \u{201C}git\u{201D}")
+    XCTAssertTrue(search.trailingText.isHidden, "the Search for row has no verb")
+    XCTAssertFalse(search.returnKey.isHidden)
   }
 
-  func testShiftTabGoesBack() throws {
-    showMixed()
-    XCTAssertTrue(backtab())
-    XCTAssertEqual(bar.filter, .actions, "wraps backward from All")
-    XCTAssertTrue(backtab())
-    XCTAssertEqual(bar.filter, .history)
-  }
-
-  func testEnteringAScopeResetsTheFilter() throws {
-    bar.actionsProvider = { [CommandBarAction(id: "a", title: "A")] }
-    bar.toggle(.newTab)
-    try command(3)
-    XCTAssertTrue(tab())                                   // empty new-tab bar: a Tab key cap shows, action search
-    XCTAssertEqual(bar.scope, .actions)
-    XCTAssertEqual(bar.filter, .all)
-    XCTAssertEqual(bar.barView.pills.selected, .all)
-  }
-
-  func testClickingAPillPicksIt() throws {
-    showMixed()
-    bar.barView.pills.onSelect?(.actions)
-    XCTAssertEqual(bar.filter, .actions)
-    let pill = try XCTUnwrap(bar.barView.pills.subviews.first { $0.accessibilityIdentifier() == "commandBar.filter.tabs" })
-    XCTAssertTrue(pill.accessibilityPerformPress(), "VoiceOver can press it")
-    XCTAssertEqual(bar.filter, .tabs)
-  }
-
-  func testNoFilterKeyWorksInsideAScope() throws {
-    bar.actionsProvider = { [CommandBarAction(id: "a", title: "A")] }
-    bar.toggle(.newTab)
-    XCTAssertTrue(tab())                                   // empty new-tab bar: action search
-    XCTAssertEqual(bar.scope, .actions)
-    XCTAssertTrue(tab())
-    XCTAssertTrue(backtab())
-    try command(2)
-    XCTAssertEqual(bar.filter, .all)
-    XCTAssertEqual(bar.scope, .actions)
-  }
-
-  func testTheEmptyRowIsNotSelected() throws {
-    showMixed()
-    try command(3)
-    XCTAssertEqual(bar.barView.table.selectedRow, -1)
-    XCTAssertTrue(bar.barView.selectionIndicator.isHidden, "no fill or tick on a row that does nothing")
-  }
-
-  func testTheEmptyRowDoesNothingOnReturn() throws {
-    var opened = false
-    bar.onOpen = { _, _ in opened = true }
-    showMixed()
-    try command(3)
-    bar.commit()
-    XCTAssertTrue(bar.isVisible, "nothing to run: the bar stays")
-    XCTAssertFalse(opened)
-  }
-
-  func testAFilterRowCountFitsThePanel() throws {
-    showMixed()
-    try command(3)
-    XCTAssertEqual(bar.panel.frame.height, CommandBarGeometry.contentHeight(rowCount: 1))
-  }
-
-  // MARK: The smart Tab rule
-
-  func testTabOnTheEmptyNewTabBarEntersActionSearch() throws {
-    bar.actionsProvider = { [CommandBarAction(id: "newSpace", title: "New Space")] }
-    bar.toggle(.newTab)
-    XCTAssertTrue(tab())
-    XCTAssertEqual(bar.scope, .actions)
-    XCTAssertEqual(bar.filter, .all)
-  }
-
-  func testTabOnAnEmptyCmdLBarCyclesTheFilters() throws {
-    bar.actionsProvider = { [CommandBarAction(id: "newSpace", title: "New Space")] }
-    bar.toggle(.currentTab(nil))
-    XCTAssertTrue(tab())
-    XCTAssertEqual(bar.scope, .normal)
-    XCTAssertEqual(bar.filter, .tabs)
-  }
-
-  func testTabOnATypedAliasScopesToTheSiteBecauseItsRowShowsTheTabKeyCap() throws {
-    bar.toggle(.newTab)
-    bar.setQueryForTesting("yt")
-    XCTAssertEqual(bar.results.first?.rowKind, .siteSearch, "the alias row leads")
-    XCTAssertTrue(bar.results[0].showsTabKeyCap)
-    XCTAssertEqual(bar.barView.hintStrip.hints.items.last, CommandBarHints.Item(keyCaps: ["tab"], caption: "Search site"))
-    XCTAssertTrue(tab())
-    XCTAssertEqual(bar.scope, .siteSearch(SiteSearchEngines.seeded[0]))
-    XCTAssertEqual(bar.barView.field.stringValue, "")
-    XCTAssertEqual(bar.filter, .all, "Tab scoped; it did not cycle")
-  }
-
-  func testTabOnASiteNameRowScopesOnlyWhileThatRowIsSelected() throws {
-    bar.toggle(.newTab)
-    bar.setQueryForTesting("git")                          // matches GitHub by name; the search row leads
-    let siteRow = try XCTUnwrap(bar.results.firstIndex { $0.rowKind == .siteSearch })
-    XCTAssertGreaterThan(siteRow, 0)
-    XCTAssertEqual(bar.results[siteRow].title, "Search GitHub for git")
-    XCTAssertTrue(tab(), "the selected row is the search row: no Tab key cap, so Tab cycles")
-    XCTAssertEqual(bar.filter, .tabs)
-    bar.setFilter(.all)
-    try key(125, "\u{F701}")                              // Down, once per row above the site row
-    for _ in 1..<siteRow { try key(125, "\u{F701}") }
-    XCTAssertEqual(bar.barView.table.selectedRow, siteRow)
-    XCTAssertTrue(tab())
-    XCTAssertEqual(bar.scope, .siteSearch(SiteSearchEngines.seeded[2]))
-  }
-
-  func testReturnOnAWholeAliasScopesLikeTab() throws {
-    var opened: URL?
-    bar.onOpen = { url, _ in opened = url }
-    bar.toggle(.newTab)
-    bar.setQueryForTesting("yt")
-    bar.commit()
-    XCTAssertEqual(bar.scope, .siteSearch(SiteSearchEngines.seeded[0]))
-    XCTAssertNil(opened, "nothing to search for yet")
-    XCTAssertTrue(bar.isVisible)
-  }
-
-  func testReturnOnASiteNameRowSearchesTheSite() throws {
-    var opened: URL?
-    bar.onOpen = { url, _ in opened = url }
-    bar.toggle(.newTab)
-    bar.setQueryForTesting("git")
-    let siteRow = try XCTUnwrap(bar.results.firstIndex { $0.rowKind == .siteSearch })
-    for _ in 0..<siteRow { try key(125, "\u{F701}") }
-    bar.commit()
-    XCTAssertEqual(opened?.absoluteString, "https://github.com/search?q=git")
+  /// The selection is a neutral fill drawn by the row itself, below its group header.
+  func testTheSelectionIsANeutralFillBelowTheHeader() throws {
+    showAllGroups()
+    bar.barView.layoutSubtreeIfNeeded()
+    let row = try XCTUnwrap(bar.barView.table.rowView(atRow: 0, makeIfNecessary: true) as? CommandBarRowView)
+    XCTAssertTrue(row.isSelected)
+    XCTAssertEqual(row.fillRect.minY, CommandBarGeometry.firstGroupHeaderHeight)
+    XCTAssertEqual(row.fillRect.height, CommandBarGeometry.rowHeight)
   }
 
   func testTheCaretIsMustard() throws {
     bar.toggle(.newTab)
     let editor = try XCTUnwrap(bar.barView.field.currentEditor() as? NSTextView)
-    XCTAssertEqual(editor.insertionPointColor, ShellTokens.commandBarTick.resolve(bar.flavor).nsColor())
+    XCTAssertEqual(editor.insertionPointColor, BrandTokens.accent.resolve(bar.flavor).nsColor())
   }
 
-  func testTheHintStripOnAnEmptyNewTabBarAdvertisesActionSearch() throws {
-    bar.actionsProvider = { [CommandBarAction(id: "a", title: "A")] }
-    bar.toggle(.newTab)
-    XCTAssertEqual(bar.barView.hintStrip.hints.items.last,
-                   CommandBarHints.Item(keyCaps: ["tab"], caption: "Actions"))
-    bar.setQueryForTesting("zzz")
-    XCTAssertFalse(bar.barView.hintStrip.hints.items.contains { $0.keyCaps == ["tab"] }, "Tab cycles: no Tab item")
+  // MARK: Return
+
+  func testReturnRunsEachKindOfRow() throws {
+    var folder: NodeID?
+    var extensionID: String?
+    var opened: [URL] = []
+    bar.onShowFolder = { folder = $0 }
+    bar.onOpenExtension = { extensionID = $0 }
+    bar.onOpen = { url, _ in opened.append(url) }
+    showAllGroups()
+    bar.barView.table.selectRowIndexes([2], byExtendingSelection: false)
+    bar.commit()
+    XCTAssertNotNil(folder)
+    XCTAssertFalse(bar.isVisible, "the bar closes")
+    showAllGroups()
+    bar.barView.table.selectRowIndexes([5], byExtendingSelection: false)
+    bar.commit()
+    XCTAssertEqual(extensionID, "pilot")
+    showAllGroups()
+    bar.barView.table.selectRowIndexes([3], byExtendingSelection: false)
+    bar.commit()
+    XCTAssertEqual(opened.last?.absoluteString, "https://git-scm.com/book")
   }
 
-  func testTheHintStripShowsFilterAndPasteAndGo() throws {
-    showMixed()
-    let hints = bar.barView.hintStrip.hints
-    XCTAssertEqual(hints.items.map(\.caption), ["Move", "Filter"])
-    XCTAssertEqual(hints.items[1].keyCaps, [CommandBarKeyCaps.command, "1\u{2013}4"])
-    XCTAssertEqual(hints.trailing?.text, "Paste and Go")
-    XCTAssertEqual(hints.trailing?.keyCaps, [CommandBarKeyCaps.command, CommandBarKeyCaps.shift, "V"])
+  /// Cmd-Return searches the web for exactly the typed text, whatever is selected.
+  func testCommandReturnSearchesTheTypedText() throws {
+    var opened: (URL, CommandBarController.OpenTarget)?
+    bar.onOpen = { opened = ($0, $1) }
+    var switched = false
+    bar.onSwitch = { _ in switched = true }
+    showAllGroups()
+    XCTAssertEqual(selected, 0, "a tab row is selected")
+    try key(36, "\r", [.command])
+    XCTAssertFalse(switched)
+    XCTAssertEqual(opened?.0, URLInputParser.searchURL(for: "git"))
+    XCTAssertEqual(opened?.1, .newTab)
+    XCTAssertFalse(bar.isVisible)
   }
 
-  func testTheHintStripShowsItsRightHandLineWholeInTheEmptyStateAndInSearch() throws {
-    bar.actionsProvider = { [CommandBarAction(id: "a", title: "A")] }
-    bar.toggle(.newTab)                                    // Move, Open, Filter, Tab, and the long empty-state line
-    bar.barView.layoutSubtreeIfNeeded()
-    XCTAssertTrue(bar.barView.hintStrip.trailingLineFits, "the empty-state line is not cut off")
-    bar.setQueryForTesting("git")
-    bar.barView.layoutSubtreeIfNeeded()
-    XCTAssertTrue(bar.barView.hintStrip.trailingLineFits)
-  }
+  // MARK: Esc and Cmd-Shift-V
 
-  func testTheClipboardIsReadOnceForAShowNotOnEveryReload() throws {
-    var reads = 0
-    bar.clipboardURLProvider = { reads += 1; return URL(string: "https://clip.example") }
-    showMixed(query: "")
-    try command(2)
-    try command(1)
-    XCTAssertTrue(escape())
-    bar.setQueryForTesting("x")
-    bar.setQueryForTesting("")
-    XCTAssertEqual(reads, 1, "one pasteboard read for the whole show")
-    bar.hide()
-    bar.toggle(.newTab)
-    XCTAssertEqual(reads, 2, "and a fresh one for the next show")
-  }
-
-  func testThePillCountsCoverEveryMatchNotJustTheRowsShown() throws {
-    bar.openTabsProvider = { [self] in tabs(9) }
-    bar.toggle(.newTab)
-    bar.setQueryForTesting("Tab")
-    XCTAssertEqual(bar.results.filter { $0.rowKind == .openTab }.count, 6)
-    XCTAssertEqual(bar.barView.pills.counts[.tabs], 9)
-    XCTAssertEqual(bar.barView.pills.counts[.all], 10)
-  }
-
-  func testANarrowWindowKeepsTheQueryFieldWideAndHidesThePills() throws {
-    window.minSize = NSSize(width: 320, height: 200)       // the shell's own minimum would hold the window wider
-    window.setFrame(NSRect(x: 100, y: 100, width: 420, height: 700), display: true)
-    showMixed()
-    bar.barView.layoutSubtreeIfNeeded()
-    XCTAssertGreaterThanOrEqual(bar.barView.field.frame.width, CommandBarView.minimumFieldWidth)
-    XCTAssertTrue(bar.barView.pills.isHidden, "the pills give way; Cmd-1 to Cmd-4 still filter")
-    try command(2)
-    XCTAssertEqual(bar.filter, .tabs)
-    window.setFrame(NSRect(x: 100, y: 100, width: 1280, height: 800), display: true)
-    bar.hide()
-    showMixed()
-    bar.barView.layoutSubtreeIfNeeded()
-    XCTAssertFalse(bar.barView.pills.isHidden)
-  }
-
-  // MARK: Esc
-
-  func testEscClearsTheQueryFirstAndClosesOnTheSecondPress() throws {
-    showMixed()
+  func testEscClearsTheTextFirstAndClosesOnTheSecondPress() throws {
+    showAllGroups()
     XCTAssertTrue(escape())
     XCTAssertTrue(bar.isVisible, "the first Esc only clears")
     XCTAssertEqual(bar.barView.field.stringValue, "")
-    XCTAssertEqual(bar.barView.field.currentEditor()?.string, "")
-    XCTAssertEqual(bar.results.first?.group, .recentTabs, "the empty state is back")
+    XCTAssertEqual(bar.results.first?.group, .tabs, "the empty state is back")
     XCTAssertTrue(escape())
     XCTAssertFalse(bar.isVisible)
   }
 
-  func testEscOnAnEmptyScopedFieldCloses() throws {
-    bar.actionsProvider = { [CommandBarAction(id: "a", title: "A")] }
-    bar.toggle(.newTab)
-    XCTAssertTrue(tab())
+  func testEscOnTheUntouchedCmdLAddressCloses() throws {
+    bar.toggle(.currentTab(URL(string: "https://example.com")))
     XCTAssertTrue(escape())
     XCTAssertFalse(bar.isVisible)
   }
-
-  func testEscKeepsTheSelectedFilterWhileClearing() throws {
-    showMixed()
-    try command(2)
-    XCTAssertTrue(escape())
-    XCTAssertEqual(bar.filter, .tabs)
-  }
-
-  // MARK: Cmd-Shift-V
 
   func testCommandShiftVOpensTheClipboardURLFromAnyState() throws {
     var opened: (URL, CommandBarController.OpenTarget)?
     bar.clipboardURLProvider = { URL(string: "https://clip.example/x") }
     bar.onOpen = { opened = ($0, $1) }
-    showMixed()                                            // a typed query: the Paste and Go row is not showing
+    showAllGroups()                                        // a typed query: the Paste and Go row is not showing
     try key(9, "v", [.command, .shift])
     XCTAssertEqual(opened?.0.absoluteString, "https://clip.example/x")
     XCTAssertEqual(opened?.1, .newTab)
@@ -430,97 +293,198 @@ final class CommandBarBehaviourTests: XCTestCase {
   func testCommandShiftVWithNothingOnTheClipboardKeepsTheBar() throws {
     var opened = false
     bar.onOpen = { _, _ in opened = true }
-    showMixed()
+    showAllGroups()
     try key(9, "v", [.command, .shift])
     XCTAssertFalse(opened)
     XCTAssertTrue(bar.isVisible)
   }
 
-  func testCmdLLeavesPasteAndGoOutOfTheHintStrip() throws {
-    bar.toggle(.currentTab(URL(string: "https://example.com")))
-    XCTAssertNil(bar.barView.hintStrip.hints.trailing)
-  }
-
-  func testCommandShiftVIsNotOfferedFromCmdL() throws {
+  func testCmdLOffersNoPasteAndGo() throws {
     var opened = false
     bar.clipboardURLProvider = { URL(string: "https://clip.example/x") }
     bar.onOpen = { _, _ in opened = true }
     bar.toggle(.currentTab(nil))
+    XCTAssertFalse(bar.results.contains { $0.kind.name == "pasteAndGo" })
     try key(9, "v", [.command, .shift])
     XCTAssertFalse(opened)
   }
 
-  // MARK: Empty state
-
-  func testTheEmptyStateGroupsClipboardRecentTabsAndActions() throws {
-    let all = tabs(6)
-    bar.clipboardURLProvider = { URL(string: "https://arkt.dev/changelog") }
-    bar.recentTabsProvider = { all }
-    bar.openTabsProvider = { all }
-    bar.actionsProvider = { [CommandBarAction(id: "newSpace", title: "New Space"),
-                             CommandBarAction(id: "b", title: "B"), CommandBarAction(id: "c", title: "C")] }
+  func testTheClipboardIsReadOnceForAShowNotOnEveryReload() throws {
+    var reads = 0
+    bar.clipboardURLProvider = { reads += 1; return URL(string: "https://clip.example") }
     bar.toggle(.newTab)
-    XCTAssertEqual(bar.results.map(\.group),
-                   [.clipboard] + Array(repeating: .recentTabs, count: 4) + [.actions, .actions])
-    XCTAssertEqual(bar.barView.table.selectedRow, 0, "Paste and Go is selected first")
-    XCTAssertEqual(bar.barView.groupHeaders, [0: "Clipboard", 1: "Recent tabs", 5: "Actions"])
-    XCTAssertEqual(bar.panel.frame.height,
-                   CommandBarGeometry.contentHeight(rowCount: 7, headerCount: 3,
-                                                    maxRows: CommandBarGeometry.maxEmptyStateRows))
+    XCTAssertEqual(bar.results.first?.kind.name, "pasteAndGo")
+    bar.setQueryForTesting("x")
+    bar.setQueryForTesting("")
+    XCTAssertEqual(reads, 1, "one pasteboard read for the whole show")
+    bar.hide()
+    bar.toggle(.newTab)
+    XCTAssertEqual(reads, 2, "and a fresh one for the next show")
   }
 
-  func testGroupHeadersMakeTheirRowsTallerAndTheIndicatorSkipsThem() throws {
-    let all = tabs(2)
-    bar.recentTabsProvider = { all }
-    bar.openTabsProvider = { all }
+  // MARK: Motion
+
+  /// Open and close do not animate: the bar and the scrim are whole on the first frame and gone on the same frame.
+  func testOpenAndCloseDoNotAnimate() throws {
     bar.toggle(.newTab)
-    let table = bar.barView.table
-    XCTAssertEqual(table.rect(ofRow: 0).height, 40 + 26)
-    XCTAssertEqual(table.rect(ofRow: 1).height, 40)
-    let indicator = bar.barView.selectionIndicator
-    XCTAssertEqual(indicator.frame.height, 40, "the fill covers the row, not its header")
-    XCTAssertEqual(indicator.frame.minY, table.rect(ofRow: 0).minY + 26)
-    table.selectRowIndexes([1], byExtendingSelection: false)
-    XCTAssertEqual(indicator.frame, table.rect(ofRow: 1))
+    XCTAssertEqual(bar.panel.alphaValue, 1)
+    XCTAssertTrue(bar.scrim.isPresented)
+    XCTAssertNil(bar.barView.layer?.animationKeys(), "no fade, no scale")
+    XCTAssertNil(bar.scrim.layer?.animationKeys())
+    XCTAssertEqual(bar.lifecycle.phase, .showing)
+    bar.toggle(.newTab)
+    XCTAssertEqual(bar.panel.alphaValue, 0, "hidden at once; the panel stays ordered in")
+    XCTAssertFalse(bar.scrim.isPresented)
+    XCTAssertEqual(bar.lifecycle.phase, .hidden)
+    XCTAssertNil(bar.barView.layer?.animationKeys())
   }
 
-  func testTheHeaderIsDrawnInTheFirstRowOfAGroupAndNoOtherRow() throws {
-    let all = tabs(2)
-    bar.recentTabsProvider = { all }
-    bar.openTabsProvider = { all }
-    bar.toggle(.newTab)
+  /// A selection move is an instant fill change: nothing animates.
+  func testASelectionMoveIsInstant() throws {
+    showAllGroups()
     bar.barView.layoutSubtreeIfNeeded()
-    let first = try XCTUnwrap(bar.barView.table.view(atColumn: 0, row: 0, makeIfNecessary: true) as? CommandBarCellView)
-    let second = try XCTUnwrap(bar.barView.table.view(atColumn: 0, row: 1, makeIfNecessary: true) as? CommandBarCellView)
-    XCTAssertEqual(first.header.stringValue, "Recent tabs")
-    XCTAssertFalse(first.header.isHidden)
-    XCTAssertTrue(second.header.isHidden)
-    first.layoutSubtreeIfNeeded()
-    XCTAssertLessThanOrEqual(first.header.frame.maxY, 26, "the header sits in the top 26 pt")
-    XCTAssertGreaterThanOrEqual(first.title.frame.minY, 26, "the row's content is below it")
+    down()
+    let row = try XCTUnwrap(bar.barView.table.rowView(atRow: 1, makeIfNecessary: false) as? CommandBarRowView)
+    XCTAssertTrue(row.isSelected)
+    XCTAssertNil(row.layer?.animationKeys())
   }
 
-  func testWithNothingOnTheClipboardTheFirstRecentTabLeads() throws {
-    let all = tabs(2)
-    bar.recentTabsProvider = { all }
+  // MARK: Suggestions (#562, #884)
+
+  /// Suggestions fill rows below the Search for row; the selection keeps its row.
+  func testSuggestionsFillBelowTheSearchRowWithoutMovingTheSelection() async throws {
+    suggestingByHand()
+    showAllGroups()
+    down()
+    XCTAssertEqual(pending.map(\.query), ["git"])
+    let before = bar.results
+    pending.removeFirst().reply.resume(returning: ["git rebase onto", "git stash pop", "git log"])
+    try await turns(until: { bar.results.count == before.count + 2 }, "the suggestions")
+    XCTAssertEqual(Array(bar.results.prefix(before.count)), before, "nothing above them moved")
+    XCTAssertEqual(bar.results.suffix(2).map(\.title), ["git rebase onto", "git stash pop"])
+    XCTAssertEqual(selected, 1, "the selection stays")
+  }
+
+  /// A reply for text the field no longer holds is dropped.
+  func testAStaleSuggestionReplyIsDropped() async throws {
+    suggestingByHand()
+    showAllGroups()
+    bar.setQueryForTesting("gi")
+    XCTAssertEqual(pending.map(\.query), ["git", "gi"])
+    let count = bar.results.count
+    pending.removeFirst().reply.resume(returning: ["git stale"])
+    for _ in 0..<50 { await Task.yield() }
+    XCTAssertEqual(bar.results.count, count)
+    XCTAssertFalse(bar.results.contains { $0.title == "git stale" })
+  }
+
+  /// #884: a reply that lands after the bar hid and opened again on the same text is from an earlier show and is
+  /// dropped; the hide cancelled its request.
+  func testAReplyFromAnEarlierShowIsDropped() async throws {
+    suggestingByHand()
+    showAllGroups()
+    let firstShow = try XCTUnwrap(bar.lifecycle.generation)
+    bar.hide()
+    XCTAssertNil(bar.lifecycle.generation)
+    showAllGroups()
+    XCTAssertGreaterThan(try XCTUnwrap(bar.lifecycle.generation), firstShow)
+    let count = bar.results.count
+    pending.removeFirst().reply.resume(returning: ["git old"])
+    for _ in 0..<50 { await Task.yield() }
+    XCTAssertFalse(bar.results.contains { $0.title == "git old" })
+    XCTAssertEqual(bar.results.count, count)
+  }
+
+  /// With "Include search engine suggestions" off, the engine is never asked.
+  func testSuggestionsOffAsksNothing() throws {
+    suggestingByHand()
+    bar.settings.setSearchSuggestionsEnabled(false)
+    showAllGroups()
+    XCTAssertEqual(pending.count, 0)
+    XCTAssertTrue(bar.results.contains { $0.kind == .search(URLInputParser.searchURL(for: "git")) })
+  }
+
+  // MARK: Layout
+
+  /// A row that starts a group is taller by its header: 20 at the top of the list, 26 elsewhere; the panel is the
+  /// spec's sum.
+  func testGroupHeadersMakeTheirRowsTaller() throws {
+    showAllGroups()
+    let table = bar.barView.table
+    XCTAssertEqual(table.rect(ofRow: 0).height, 36 + 20)
+    XCTAssertEqual(table.rect(ofRow: 1).height, 36)
+    XCTAssertEqual(table.rect(ofRow: 2).height, 36 + 26)
+    let spec: CGFloat = 54 + 1 + 6 + 8 + 7 * 36 + 20 + 4 * 26
+    XCTAssertEqual(bar.panel.frame.height, spec)
+  }
+
+  /// A Go row and every group full; in an 800 pt window the panel stops 24 above the bottom and the list scrolls, and
+  /// a move to the last row scrolls it into view.
+  func testTheWorstCaseScrollsAndTheSelectionFollows() throws {
+    let parent = window.frame
+    bar.openTabsProvider = {
+      (1...5).map { .init(node: UUID(), title: "Layout \($0)", url: URL(string: "https://layout.example/t\($0)")!) }
+    }
+    bar.foldersProvider = { (1...5).map { .init(node: UUID(), title: "layout.example \($0)", tabCount: $0) } }
+    bar.historyProvider = {
+      (1...5).map { .init(title: "Layout page \($0)", url: URL(string: "https://layout.example/h\($0)")!) }
+    }
+    bar.extensionsProvider = { (1...5).map { .init(id: "e\($0)", name: "Layout tool \($0)", description: "") } }
     bar.toggle(.newTab)
-    XCTAssertEqual(bar.results.first?.group, .recentTabs)
-    XCTAssertEqual(bar.barView.table.selectedRow, 0)
+    bar.setQueryForTesting("layout.example")
+    XCTAssertEqual(bar.results.count, 14, "Go, 3 tabs, 3 folders, 3 history, 3 extensions, Search for")
+    let natural = CommandBarGeometry.contentHeight(rowCount: 14, headerCount: 5, firstRowHasHeader: false)
+    let limit = parent.height - CommandBarGeometry.top(windowHeight: parent.height) - 24
+    XCTAssertEqual(bar.panel.frame.height, min(natural, limit), accuracy: 0.5)
+    bar.barView.layoutSubtreeIfNeeded()
+    let table = bar.barView.table
+    let last = bar.results.count - 1
+    if natural > limit {
+      XCTAssertFalse(table.visibleRect.contains(table.rect(ofRow: last)), "the last row starts out of view")
+    }
+    up()
+    XCTAssertEqual(selected, last)
+    XCTAssertTrue(table.visibleRect.contains(table.rect(ofRow: last)), "the selection scrolled into view")
   }
 
-  func testARecentTabSaysWhenItWasViewed() throws {
-    let viewed = Date().addingTimeInterval(-12 * 60)
-    let all = [CommandBarResults.OpenTab(node: UUID(), title: "Tab", url: URL(string: "https://t.example")!,
-                                         lastViewed: viewed)]
-    bar.recentTabsProvider = { all }
+  /// The smallest window, 640 x 420: the panel is 592 wide with its top at 59, and nothing reaches past the window.
+  func testTheSmallestWindow() throws {
+    window.setFrame(NSRect(x: 100, y: 100, width: 640, height: 420), display: true)
+    let parent = window.frame
+    showAllGroups()
+    let frame = bar.panel.frame
+    XCTAssertEqual(frame.width, min(600, parent.width - 48), accuracy: 0.5)
+    XCTAssertEqual(frame.maxY, parent.maxY - CommandBarGeometry.top(windowHeight: parent.height), accuracy: 1)
+    XCTAssertGreaterThanOrEqual(frame.minY, parent.minY + 24 - 1)
+    XCTAssertGreaterThanOrEqual(frame.minX, parent.minX)
+    XCTAssertLessThanOrEqual(frame.maxX, parent.maxX)
+  }
+
+  /// A long title truncates with a tail ellipsis and keeps its place; the URL truncates first and is dropped under
+  /// 48 pt; the field never wraps.
+  func testTitlesTruncateAndTheURLGoesFirst() throws {
+    let long = String(repeating: "A very long page title that keeps going ", count: 6)
+    let longURL = URL(string: "https://long.example/" + String(repeating: "path/", count: 30))!
+    let shortURL = URL(string: "https://short.example/" + String(repeating: "p/", count: 60))!
+    let rows: [CommandBarResults.OpenTab] = [.init(node: UUID(), title: long, url: longURL),
+                                             .init(node: UUID(), title: "Short", url: shortURL)]
+    bar.openTabsProvider = { rows }
     bar.toggle(.newTab)
-    XCTAssertEqual(bar.results.first?.timeText, "12 min")
-    let cell = try XCTUnwrap(bar.barView.table.view(atColumn: 0, row: 0, makeIfNecessary: true) as? CommandBarCellView)
-    XCTAssertEqual(cell.hint.stringValue, "12 min")
-    XCTAssertEqual(bar.results.first?.accessibilityCaption, "Switch to Tab", "VoiceOver still hears the action")
+    let first = try cell(0)
+    XCTAssertLessThan(first.title.frame.width, first.title.fittingSize.width, "the title is cut")
+    XCTAssertTrue(first.subtitle.isHidden, "no room for 48 pt of URL: it is dropped")
+    XCTAssertLessThanOrEqual(first.title.frame.maxX, first.trailingText.frame.minX)
+    let second = try cell(1)
+    XCTAssertEqual(second.title.frame.width, second.title.fittingSize.width, accuracy: 0.5, "a short title is whole")
+    XCTAssertFalse(second.subtitle.isHidden)
+    XCTAssertLessThan(second.subtitle.frame.width, second.subtitle.fittingSize.width, "the URL is cut")
+    XCTAssertFalse(bar.barView.field.cell?.wraps ?? true)
   }
 
-  func testTheWindowsRecentTabsAreTheViewedOnesNewestFirstWithoutTheTabOnScreen() throws {
+  // MARK: The window's providers
+
+  /// The window's empty state: the tabs viewed in this window, newest first, without the tab on screen.
+  func testTheWindowsEmptyStateListsViewedTabsNewestFirstWithoutTheTabOnScreen() throws {
     let sidebar = shell.sidebar
     let current = try XCTUnwrap(shell.sidebarController.currentSpace)
     let other = try sidebar.addSpace(title: "Other")
@@ -530,261 +494,11 @@ final class CommandBarBehaviourTests: XCTestCase {
     shell.activate(node: elsewhere)                        // viewed in another Space
     shell.activate(node: second)
     shell.activate(node: third)                            // the tab on screen
-
-    let recents = shell.commandBar.recentTabsProvider()
-    XCTAssertFalse(recents.contains { $0.node == third }, "the tab on screen is not offered")
-    XCTAssertEqual(recents.prefix(2).map(\.node), [second, elsewhere], "viewed tabs, newest first, across Spaces")
-    XCTAssertNotNil(recents.first?.lastViewed)
-    let firstUnviewed = recents.firstIndex { $0.lastViewed == nil } ?? recents.count
-    XCTAssertTrue(recents[firstUnviewed...].allSatisfy { $0.lastViewed == nil }, "then the ones never shown")
-    let times = recents[..<firstUnviewed].compactMap(\.lastViewed)
-    XCTAssertEqual(times, times.sorted(by: >), "viewed tabs are newest first")
-  }
-
-  // MARK: Screenshots
-
-  /// The pull request's screenshots: the empty state with its groups, and a query with a site-search row showing the
-  /// Tab key cap, each in both appearances, with synthetic titles. Only with `ARKT_COMMAND_BAR_SNAPSHOT_DIR` set.
-  func testRenderTheStatesForTheScreenshots() throws {
-    try XCTSkipUnless(ProcessInfo.processInfo.environment["ARKT_COMMAND_BAR_SNAPSHOT_DIR"] != nil)
-    let now = Date()
-    let pages: [(String, String, TimeInterval)] = [
-      ("krystianslowik/arkt - Pull requests", "https://github.com/krystianslowik/arkt/pulls", 12 * 60),
-      ("Cycle 42 - Linear", "https://linear.app/cycle-42", 3600),
-      ("Q4 roadmap", "https://docs.example.com/q4", 3 * 3600),
-      ("WWDC session: AppKit 120Hz", "https://youtube.com/watch?v=synthetic", 30 * 3600),
-    ]
-    let all = pages.map { page in
-      CommandBarResults.OpenTab(node: UUID(), title: page.0, url: URL(string: page.1)!,
-                                lastViewed: now.addingTimeInterval(-page.2))
-    }
-    bar.recentTabsProvider = { all }
-    bar.openTabsProvider = { all }
-    bar.clipboardURLProvider = { URL(string: "https://arkt.dev/changelog") }
-    bar.actionsProvider = { [CommandBarAction(id: "newSpace", title: "New Space",
-                                              keyCaps: [CommandBarKeyCaps.command, CommandBarKeyCaps.shift, "N"]),
-                             CommandBarAction(id: "copyURL", title: "Copy URL",
-                                              keyCaps: [CommandBarKeyCaps.command, CommandBarKeyCaps.shift, "C"])] }
-    for (name, flavor) in [(NSAppearance.Name.darkAqua, "dark"), (.aqua, "light")] {
-      window.appearance = NSAppearance(named: name)
-      for (state, query, filter) in [("empty", "", CommandBarFilter.all), ("site", "git", .all), ("tabs", "linear", .tabs)] {
-        bar.toggle(.newTab)
-        if !query.isEmpty { bar.setQueryForTesting(query) }
-        if filter != .all { bar.setFilter(filter) }
-        if state == "site" {                                // the site row selected, its Tab key cap showing
-          let row = try XCTUnwrap(bar.results.firstIndex { $0.rowKind == .siteSearch })
-          bar.barView.table.selectRowIndexes([row], byExtendingSelection: false)
-        }
-        bar.barView.selectionMotion.settleNow()
-        bar.barView.layoutSubtreeIfNeeded()
-        bar.barView.displayIfNeeded()
-        let rep = try XCTUnwrap(bar.barView.bitmapImageRepForCachingDisplay(in: bar.barView.bounds))
-        bar.barView.cacheDisplay(in: bar.barView.bounds, to: rep)
-        if let dir = ProcessInfo.processInfo.environment["ARKT_COMMAND_BAR_SNAPSHOT_DIR"],
-           let data = rep.representation(using: .png, properties: [:]) {
-          try data.write(to: URL(fileURLWithPath: dir).appendingPathComponent("\(state)-\(flavor).png"))
-        }
-        bar.hide()
-      }
-    }
-  }
-
-  // MARK: Selection slide
-
-  func testMovingTheSelectionSlidesTheFillByATransformAndSettles() throws {
-    let all = tabs(4)
-    bar.openTabsProvider = { all }
-    var clock = 100.0
-    bar.barView.selectionMotion.now = { clock }
-    bar.barView.selectionMotion.drivesFramesItself = false
-    bar.barView.selectionMotion.reduceMotion = { false }
-    bar.toggle(.newTab)
-    let indicator = bar.barView.selectionIndicator
-    XCTAssertEqual(indicator.layer?.transform.m42, 0, "at rest on row 0")
-    bar.barView.table.selectRowIndexes([2], byExtendingSelection: false)
-    XCTAssertEqual(indicator.frame, bar.barView.table.rect(ofRow: 2), "the frame is the target row at once")
-    let start = try XCTUnwrap(indicator.layer?.transform.m42)
-    XCTAssertEqual(abs(start), 80, accuracy: 0.5, "drawn two rows behind it")
-    clock += 0.05
-    bar.barView.selectionMotion.presentFrame()
-    let mid = try XCTUnwrap(indicator.layer?.transform.m42)
-    XCTAssertLessThan(abs(mid), abs(start))
-    XCTAssertGreaterThan(abs(mid), 0)
-    clock += 2
-    bar.barView.selectionMotion.presentFrame()
-    XCTAssertEqual(indicator.layer?.transform.m42, 0, "settled on its row")
-    XCTAssertFalse(bar.barView.selectionMotion.isRunning)
-  }
-
-  /// The fill is drawn behind the target while it slides: at the start of a move down it is still on the old row,
-  /// and it ends on the new one. Rendered, so the direction of the transform is checked, not assumed.
-  func testTheSlideRendersTheFillOnTheOldRowFirstAndTheNewRowAtTheEnd() throws {
-    let all = tabs(4)
-    bar.openTabsProvider = { all }
-    var clock = 100.0
-    bar.barView.selectionMotion.now = { clock }
-    bar.barView.selectionMotion.drivesFramesItself = false
-    bar.barView.selectionMotion.reduceMotion = { false }
-    window.appearance = NSAppearance(named: .darkAqua)
-    bar.toggle(.newTab)
-    let view = bar.barView
-    let table = view.table
-
-    func pixel(row: Int) throws -> NSColor {
-      view.layoutSubtreeIfNeeded()
-      view.displayIfNeeded()
-      let rep = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
-      view.cacheDisplay(in: view.bounds, to: rep)
-      let rect = view.convert(view.selectionRect(ofRow: row), from: table)
-      let scale = CGFloat(rep.pixelsWide) / view.bounds.width
-      // Mid-row, left of the trailing group and right of the text: bare fill or bare surface.
-      return try XCTUnwrap(rep.colorAt(x: Int((rect.midX + 40) * scale), y: Int(rect.midY * scale))?.usingColorSpace(.sRGB))
-    }
-    func differ(_ a: NSColor, _ b: NSColor) -> Bool {
-      abs(a.redComponent - b.redComponent) + abs(a.greenComponent - b.greenComponent) > 0.02
-    }
-
-    let fill = try pixel(row: 0)                           // at rest on row 0: the selected fill
-    table.selectRowIndexes([2], byExtendingSelection: false)
-    XCTAssertFalse(differ(try pixel(row: 0), fill), "the fill is still on the old row at the start of the move")
-    XCTAssertTrue(differ(try pixel(row: 2), fill), "and not yet on the new one")
-    clock += 2
-    bar.barView.selectionMotion.presentFrame()
-    XCTAssertFalse(differ(try pixel(row: 2), fill), "settled on the new row")
-    XCTAssertTrue(differ(try pixel(row: 0), fill))
-  }
-
-  func testAKeyRepeatMidFlightRetargetsFromWhereTheFillIs() throws {
-    let all = tabs(5)
-    bar.openTabsProvider = { all }
-    var clock = 100.0
-    bar.barView.selectionMotion.now = { clock }
-    bar.barView.selectionMotion.drivesFramesItself = false
-    bar.barView.selectionMotion.reduceMotion = { false }
-    bar.toggle(.newTab)
-    let table = bar.barView.table
-    let indicator = bar.barView.selectionIndicator
-    table.selectRowIndexes([1], byExtendingSelection: false)
-    clock += 0.04
-    bar.barView.selectionMotion.presentFrame()
-    let drawnY = indicator.frame.minY + (indicator.layer?.transform.m42 ?? 0)
-    table.selectRowIndexes([2], byExtendingSelection: false)
-    let after = indicator.frame.minY + (indicator.layer?.transform.m42 ?? 0)
-    XCTAssertEqual(after, drawnY, accuracy: 0.5, "no jump: the next move starts where the fill was")
-    XCTAssertGreaterThan(drawnY, table.rect(ofRow: 0).minY)
-    XCTAssertLessThan(drawnY, table.rect(ofRow: 1).minY)
-  }
-
-  func testReduceMotionMovesTheFillInstantly() throws {
-    let all = tabs(4)
-    bar.openTabsProvider = { all }
-    bar.barView.selectionMotion.reduceMotion = { true }
-    bar.toggle(.newTab)
-    bar.barView.table.selectRowIndexes([3], byExtendingSelection: false)
-    XCTAssertEqual(bar.barView.selectionIndicator.layer?.transform.m42, 0)
-    XCTAssertFalse(bar.barView.selectionMotion.isRunning)
-  }
-
-  func testNewResultsDoNotSlideTheFill() throws {
-    let all = tabs(4)
-    bar.openTabsProvider = { all }
-    bar.barView.selectionMotion.reduceMotion = { false }
-    bar.barView.selectionMotion.drivesFramesItself = false
-    bar.toggle(.newTab)
-    bar.barView.table.selectRowIndexes([3], byExtendingSelection: false)
-    bar.barView.selectionMotion.settleNow()
-    bar.setQueryForTesting("Tab 1")                        // new rows, selection back on row 0
-    XCTAssertFalse(bar.barView.selectionMotion.isRunning)
-    XCTAssertEqual(bar.barView.selectionIndicator.layer?.transform.m42, 0)
-  }
-
-  func testArrowKeysDriveTheSlide() throws {
-    let all = tabs(4)
-    bar.openTabsProvider = { all }
-    bar.barView.selectionMotion.reduceMotion = { false }
-    bar.barView.selectionMotion.drivesFramesItself = false
-    bar.toggle(.newTab)
-    try key(125, "\u{F701}")
-    XCTAssertEqual(bar.barView.table.selectedRow, 1)
-    XCTAssertTrue(bar.barView.selectionMotion.isRunning)
-    bar.hide()
-    XCTAssertFalse(bar.barView.selectionMotion.isRunning, "closing ends the motion")
-  }
-
-  // MARK: Fades
-
-  func testShowingFadesTheBarAndTheScrimIn() throws {
-    bar.openTabsProvider = { [self] in tabs(2) }
-    bar.toggle(.newTab)
-    let fade = try XCTUnwrap(bar.barView.layer?.animation(forKey: "commandBar.fade") as? CABasicAnimation)
-    XCTAssertEqual(fade.keyPath, "opacity")
-    XCTAssertEqual(fade.fromValue as? Float, 0)
-    XCTAssertEqual(fade.toValue as? Float, 1)
-    XCTAssertEqual(fade.duration, 0.1)
-    XCTAssertNotNil(bar.scrim.layer?.animation(forKey: "commandBar.fade"))
-    XCTAssertEqual(bar.panel.alphaValue, 1)
-    XCTAssertEqual(bar.barView.layer?.opacity, 1, "fully laid out: the model is already visible")
-    XCTAssertEqual(bar.barView.layer?.transform.m11, 1, "no scale")
-  }
-
-  func testDismissingFadesOutAndTheEndOfTheFadeSetsAlphaZero() throws {
-    var end: (@MainActor () -> Void)?
-    bar.dismissFinisher = { end = $0 }
-    bar.openTabsProvider = { [self] in tabs(2) }
-    bar.toggle(.newTab)
-    bar.hide()
-    let fade = try XCTUnwrap(bar.barView.layer?.animation(forKey: "commandBar.fade") as? CABasicAnimation)
-    XCTAssertEqual(fade.toValue as? Float, 0)
-    XCTAssertEqual(fade.duration, 0.1)
-    XCTAssertFalse(bar.panel.isPresented, "inert at once")
-    XCTAssertEqual(bar.panel.accessibilityChildren()?.count, 0)
-    XCTAssertEqual(bar.panel.alphaValue, 1, "still fading")
-    XCTAssertFalse(bar.scrim.isPresented)
-    try XCTUnwrap(end)()
-    XCTAssertEqual(bar.panel.alphaValue, 0)
-  }
-
-  func testAShowDuringTheFadeOutCancelsItsEnd() throws {
-    var end: (@MainActor () -> Void)?
-    bar.dismissFinisher = { end = $0 }
-    bar.openTabsProvider = { [self] in tabs(2) }
-    bar.toggle(.newTab)
-    bar.hide()
-    bar.toggle(.newTab)
-    try XCTUnwrap(end)()
-    XCTAssertEqual(bar.panel.alphaValue, 1, "the old fade's end does not hide a bar that is back")
-    XCTAssertTrue(bar.isVisible)
-  }
-
-  func testAShowDuringTheFadeOutStartsFromWhereTheLayerIsDrawn() throws {
-    bar.dismissFinisher = { _ in }
-    bar.openTabsProvider = { [self] in tabs(2) }
-    bar.toggle(.newTab)
-    bar.hide()
-    bar.toggle(.newTab)
-    let fade = try XCTUnwrap(bar.barView.layer?.animation(forKey: "commandBar.fade") as? CABasicAnimation)
-    XCTAssertEqual(fade.toValue as? Float, 1)
-    XCTAssertEqual(fade.fromValue as? Float, bar.barView.layer?.presentation()?.opacity ?? 0, "no jump to 0")
-  }
-
-  func testTheFadesRunWithReduceMotionToo() throws {
-    bar.barView.selectionMotion.reduceMotion = { true }
-    bar.openTabsProvider = { [self] in tabs(2) }
-    bar.toggle(.newTab)
-    XCTAssertNotNil(bar.barView.layer?.animation(forKey: "commandBar.fade"))
-  }
-
-  func testNothingTheBarAnimatesIsAFrameOrALayoutChange() throws {
-    bar.openTabsProvider = { [self] in tabs(3) }
-    bar.toggle(.newTab)
-    var keyPaths: Set<String> = []
-    for layer in [bar.barView.layer, bar.scrim.layer, bar.barView.selectionIndicator.layer].compactMap({ $0 }) {
-      for key in layer.animationKeys() ?? [] {
-        if let animation = layer.animation(forKey: key) as? CABasicAnimation, let keyPath = animation.keyPath {
-          keyPaths.insert(keyPath)
-        }
-      }
-    }
-    XCTAssertTrue(keyPaths.isSubset(of: ["opacity", "transform.translation.y"]), "\(keyPaths)")
+    shell.commandBar.clipboardURLProvider = { nil }
+    shell.commandBar.toggle(.newTab)
+    defer { shell.commandBar.hide() }
+    let rows = shell.commandBar.results.filter { $0.group == .tabs }
+    XCTAssertEqual(rows.prefix(2).map(\.kind), [.switchTo(second), .switchTo(elsewhere)])
+    XCTAssertFalse(rows.contains { $0.kind == .switchTo(third) }, "the tab on screen is not offered")
   }
 }

@@ -19,11 +19,6 @@ final class CommandBarTests: XCTestCase {
     shell.showWindow(nil)
     window.makeKeyAndOrderFront(nil)
     bar = CommandBarController(parent: window)
-    // The geometry tests pin the notice (BH-113) off; the notice tests re-enable it on their own settings.
-    bar.settings.dismissSearchSuggestionNotice()
-    bar.dismissFinisher = { $0() }                  // the dismiss fade ends at once; its own tests step it by hand
-    bar.barView.selectionMotion.drivesFramesItself = false   // no display link: tests step the slide by hand
-    bar.barView.widthMotion.drivesFramesItself = false
     bar.prewarm()
     try await Task.sleep(for: .milliseconds(300))   // let the window server settle
   }
@@ -114,9 +109,9 @@ final class CommandBarTests: XCTestCase {
     // The window server may clamp the 1800 x 1072 request to the screen, so expect from the actual frame.
     // Tolerance 1 pt: panel origins snap to backing pixels.
     let parent = window.frame
-    XCTAssertEqual(panel.frame.width, min(680, parent.width - 48), accuracy: 1)
+    XCTAssertEqual(panel.frame.width, min(600, parent.width - 48), accuracy: 1)
     XCTAssertEqual(panel.frame.midX, parent.midX, accuracy: 1)
-    XCTAssertEqual(panel.frame.maxY, parent.maxY - 0.22 * parent.height, accuracy: 1)
+    XCTAssertEqual(panel.frame.maxY, parent.maxY - CommandBarGeometry.top(windowHeight: parent.height), accuracy: 1)
     XCTAssertEqual(panel.frame.height, CommandBarGeometry.inputHeight)          // empty Cmd-T: input row only
     // The surface follows the window behind it, light or dark (the panel no longer forces dark).
     let expected: NSAppearance.Name = ThemeFlavor(appearance: window.effectiveAppearance) == .dark ? .darkAqua : .aqua
@@ -130,7 +125,8 @@ final class CommandBarTests: XCTestCase {
     let top = bar.panel.frame.maxY
     bar.setQueryForTesting("example.com")
     XCTAssertEqual(bar.results.map(\.kind.name), ["open", "search"])
-    XCTAssertEqual(bar.panel.frame.height, CommandBarGeometry.contentHeight(rowCount: 2))
+    XCTAssertEqual(bar.panel.frame.height,
+                   CommandBarGeometry.contentHeight(rowCount: 2, headerCount: 1, firstRowHasHeader: false))
     XCTAssertEqual(bar.panel.frame.maxY, top, accuracy: 0.5)
     XCTAssertEqual(bar.barView.table.selectedRow, 0)
   }
@@ -150,12 +146,15 @@ final class CommandBarTests: XCTestCase {
     XCTAssertFalse(bar.isVisible)
   }
 
-  // #96: Cmd-L on a URL lists it once: no "Search Google" row with the same text, no subtitle repeating it.
-  func testCmdLOnAURLShowsOneOpenRow() async throws {
+  /// Cmd-L's untouched address shows the empty state (README, Keyboard): no Go or Search row for the address itself.
+  func testCmdLOnAURLShowsTheEmptyState() async throws {
+    bar.openTabsProvider = { [CommandBarResults.OpenTab(node: UUID(), title: "Notes",
+                                                         url: URL(string: "https://notes.example")!)] }
     bar.toggle(.currentTab(URL(string: "https://example.com/a")))
-    XCTAssertEqual(bar.results.map(\.kind.name), ["open"])
-    XCTAssertEqual(bar.results.first?.subtitle, "")
-    XCTAssertEqual(bar.panel.frame.height, CommandBarGeometry.contentHeight(rowCount: 1))
+    XCTAssertEqual(bar.results.map(\.kind.name), ["switch"])
+    XCTAssertEqual(bar.results.first?.group, .tabs)
+    bar.setQueryForTesting("https://example.com/ab")
+    XCTAssertEqual(bar.results.map(\.kind.name), ["open", "search"], "an edited address gets Go, and Search for")
   }
 
   func testCmdLEditedEnterNavigatesCurrentTab() async throws {
@@ -250,7 +249,7 @@ final class CommandBarTests: XCTestCase {
     bar.toggle(.newTab)
     bar.panel.displayIfNeeded()
     let cell = try XCTUnwrap(bar.barView.table.view(atColumn: 0, row: 0, makeIfNecessary: false) as? CommandBarCellView)
-    for label in [cell.title, cell.hint] {
+    for label in [cell.title, cell.trailingText] {
       XCTAssertGreaterThanOrEqual(label.frame.width, label.fittingSize.width, label.stringValue)
     }
   }
@@ -432,7 +431,9 @@ final class CommandBarTests: XCTestCase {
   func expectedFrame() throws -> NSRect {
     let window = try XCTUnwrap(shell.window)
     return CommandBarGeometry.frame(parentFrame: window.frame,
-                                    contentHeight: CommandBarGeometry.contentHeight(rowCount: bar.results.count))
+                                    contentHeight: CommandBarGeometry.contentHeight(
+                                      rowCount: bar.results.count, headerCount: bar.groupHeaders.count,
+                                      firstRowHasHeader: bar.groupHeaders[0] != nil))
   }
 
   /// Within 1 pt: panel origins snap to backing pixels.
@@ -784,7 +785,7 @@ final class CommandBarTests: XCTestCase {
     let pageDown = String(UnicodeScalar(UInt16(NSPageDownFunctionKey))!)
     let pageUp = String(UnicodeScalar(UInt16(NSPageUpFunctionKey))!)
     try sendKey(121, pageDown, [.function])
-    XCTAssertEqual(bar.barView.table.selectedRow, min(CommandBarGeometry.maxVisibleRows, count - 1))
+    XCTAssertEqual(bar.barView.table.selectedRow, min(CommandBarGeometry.pageRows, count - 1))
     try sendKey(121, pageDown, [.function])
     XCTAssertEqual(bar.barView.table.selectedRow, count - 1, "clamps at the last row")
     try sendKey(116, pageUp, [.function])
@@ -852,9 +853,9 @@ final class CommandBarTests: XCTestCase {
     bar.setQueryForTesting("example")                  // open-tab matches plus the search row
     let table = bar.barView.table
     let last = bar.results.count - 1
-    // Results never exceed maxVisibleRows today, so shorten the panel to make the list scroll.
+    // Shorten the panel to make the list scroll.
     var frame = bar.panel.frame
-    frame.size.height = CommandBarGeometry.contentHeight(rowCount: 3)
+    frame.size.height = CommandBarGeometry.contentHeight(rowCount: 2, headerCount: 1, firstRowHasHeader: true)
     bar.panel.setFrame(frame, display: true)
     bar.panel.layoutIfNeeded()
     table.selectRowIndexes([last], byExtendingSelection: false)
@@ -947,83 +948,6 @@ final class CommandBarTests: XCTestCase {
     return bar.control(bar.barView.field, textView: editor, doCommandBy: #selector(NSResponder.deleteBackward(_:)))
   }
 
-  /// BH-106 / KB-081: Tab on the bar just opened with Cmd-T enters action search; Enter runs the action.
-  func testTabOnTheEmptyCmdTBarEntersActionSearch() async throws {
-    var ran: String?
-    bar.actionsProvider = { [CommandBarAction(id: "newSpace", title: "New Space"),
-                             CommandBarAction(id: "toggleToolbar", title: "Toggle Toolbar")] }
-    bar.onAction = { ran = $0 }
-    bar.toggle(.newTab)
-    XCTAssertTrue(try insertTab())
-    XCTAssertEqual(bar.scope, .actions)
-    XCTAssertEqual(bar.results.map(\.kind), [.action("newSpace"), .action("toggleToolbar")])
-    XCTAssertEqual(bar.barView.field.placeholderAttributedString?.string, "Search actions...")
-    XCTAssertFalse(bar.barView.scopeChip.isHidden)
-    XCTAssertEqual(bar.barView.scopeChip.stringValue, "Actions")
-
-    bar.setQueryForTesting("tool")
-    XCTAssertEqual(bar.results.map(\.kind), [.action("toggleToolbar")])
-    bar.commit()
-    XCTAssertEqual(ran, "toggleToolbar")
-    XCTAssertFalse(bar.isVisible)
-  }
-
-  /// KB-081 is about the bar just opened with Cmd-T: Cmd-L (even empty) and a typed query keep Tab unscoped. With
-  /// nothing to scope, Tab cycles the filters (the smart Tab rule, #371).
-  func testTabOutsideCmdTDoesNotEnterActionSearch() async throws {
-    bar.actionsProvider = { [CommandBarAction(id: "newSpace", title: "New Space")] }
-    bar.toggle(.currentTab(nil))
-    XCTAssertEqual(bar.barView.field.stringValue, "")
-    XCTAssertTrue(try insertTab())
-    XCTAssertEqual(bar.scope, .normal)
-    XCTAssertEqual(bar.filter, .tabs, "cycled")
-
-    bar.toggle(.newTab)
-    bar.toggle(.newTab)
-    bar.setQueryForTesting("zzz")                          // a query that is no alias
-    XCTAssertTrue(try insertTab())
-    XCTAssertEqual(bar.scope, .normal)
-    XCTAssertEqual(bar.filter, .tabs)
-    bar.toggle(.newTab)
-  }
-
-  /// BH-107 / KB-082: an alias typed, then Tab, scopes the query to that engine; Enter opens its search URL.
-  func testTabOnAnAliasScopesTheQueryToTheEngine() async throws {
-    var opened: (URL, CommandBarController.OpenTarget)?
-    bar.onOpen = { opened = ($0, $1) }
-    bar.toggle(.newTab)
-    bar.setQueryForTesting("yt")
-    XCTAssertTrue(try insertTab())
-    XCTAssertEqual(bar.scope, .siteSearch(SiteSearchEngines.seeded[0]))
-    XCTAssertEqual(bar.barView.field.stringValue, "")
-    XCTAssertEqual(bar.barView.scopeChip.stringValue, "YouTube")
-    XCTAssertEqual(bar.barView.field.placeholderAttributedString?.string, "Search YouTube")
-
-    bar.setQueryForTesting("lofi")
-    XCTAssertEqual(bar.results.map(\.kind.name), ["siteSearch"])
-    bar.commit()
-    XCTAssertEqual(opened?.0.absoluteString, "https://www.youtube.com/results?search_query=lofi")
-    XCTAssertEqual(opened?.1, .newTab)
-    XCTAssertFalse(bar.isVisible)
-
-    bar.toggle(.newTab)                                    // the next open starts unscoped
-    XCTAssertEqual(bar.scope, .normal)
-    XCTAssertTrue(bar.barView.scopeChip.isHidden)
-    bar.toggle(.newTab)
-  }
-
-  /// [I] Backspace on the empty scoped field leaves the scope (Chromium omnibox convention; Arc unverified).
-  func testBackspaceOnTheEmptyScopedFieldExitsTheScope() async throws {
-    bar.actionsProvider = { [CommandBarAction(id: "newSpace", title: "New Space")] }
-    bar.toggle(.newTab)
-    XCTAssertTrue(try insertTab())
-    XCTAssertEqual(bar.scope, .actions)
-    XCTAssertTrue(try deleteBackward())
-    XCTAssertEqual(bar.scope, .normal)
-    XCTAssertTrue(bar.barView.scopeChip.isHidden)
-    bar.toggle(.newTab)
-  }
-
   /// BH-108 / GS-035: a URL on the clipboard makes "Paste and Go" the top suggestion; Enter opens it.
   func testPasteAndGoRowOpensTheClipboardURL() async throws {
     var opened: (URL, CommandBarController.OpenTarget)?
@@ -1084,82 +1008,6 @@ final class CommandBarTests: XCTestCase {
     bar.barView.table.selectRowIndexes([0], byExtendingSelection: false)
     try sendKey(51, "\u{7f}", [.command, .option])
     XCTAssertEqual(bar.results.map(\.kind.name), ["open", "search"])
-    bar.toggle(.newTab)
-  }
-
-  /// BH-109: the hovered removable row shows an X that removes it; other rows show none.
-  func testHoverCloseButtonRemovesTheSuggestion() async throws {
-    var removed: String?
-    let list = tabs(2)
-    bar.openTabsProvider = { list }
-    bar.onRemoveSuggestion = { removed = $0.title }
-    bar.toggle(.newTab)
-    try hover(row: 1)
-    let cell = try XCTUnwrap(bar.barView.table.view(atColumn: 0, row: 1, makeIfNecessary: false)
-                             as? CommandBarCellView)
-    XCTAssertFalse(cell.closeButton.isHidden)
-    cell.closeButton.performClick(nil)
-    XCTAssertEqual(removed, "Tab 2")
-    XCTAssertEqual(bar.results.map(\.title), ["Tab 1"])
-
-    bar.setQueryForTesting("example.com")                  // rows: open (not removable), search (removable)
-    try hover(row: 0)
-    let openCell = try XCTUnwrap(bar.barView.table.view(atColumn: 0, row: 0, makeIfNecessary: false)
-                                 as? CommandBarCellView)
-    XCTAssertTrue(openCell.closeButton.isHidden)
-    try hover(row: 1)
-    let searchCell = try XCTUnwrap(bar.barView.table.view(atColumn: 0, row: 1, makeIfNecessary: false)
-                                   as? CommandBarCellView)
-    XCTAssertFalse(searchCell.closeButton.isHidden)
-    bar.toggle(.newTab)
-  }
-
-  /// BH-113: the notice appears with the first search row, the X dismisses it, and it never comes back.
-  func testNoticeShowsWithSearchRowsAndDismissalSticks() async throws {
-    let settings = CommandBarSettings.ephemeral()
-    bar.settings = settings
-    bar.toggle(.newTab)
-    XCTAssertFalse(bar.isNoticeVisible, "no search row on an empty query")
-    bar.setQueryForTesting("hello")
-    XCTAssertTrue(bar.isNoticeVisible)
-    XCTAssertFalse(bar.barView.noticeView.isHidden)
-    XCTAssertEqual(bar.barView.noticeLabel.stringValue,
-                   "We talk to your search engine to help us suggest results.")
-
-    XCTAssertNotNil(bar.barView.noticeDismissButton.image, "the notice's X draws a glyph")
-    bar.barView.noticeDismissButton.performClick(nil)
-    XCTAssertTrue(settings.searchSuggestionNoticeDismissed)
-    XCTAssertFalse(bar.isNoticeVisible)
-    XCTAssertTrue(bar.barView.noticeView.isHidden)
-
-    bar.setQueryForTesting("world")
-    XCTAssertFalse(bar.isNoticeVisible, "dismissed for good")
-    bar.toggle(.newTab)
-  }
-
-  /// BH-113: the notice takes its height out of the panel; dismissing shrinks it back, top pinned.
-  func testNoticeAddsItsHeightToThePanel() async throws {
-    bar.settings = CommandBarSettings.ephemeral()
-    bar.toggle(.newTab)
-    bar.setQueryForTesting("hello")
-    let top = bar.panel.frame.maxY
-    XCTAssertEqual(bar.panel.frame.height,
-                   CommandBarGeometry.contentHeight(rowCount: 1, showsNotice: true), accuracy: 1)
-    bar.dismissNotice()
-    XCTAssertEqual(bar.panel.frame.height,
-                   CommandBarGeometry.contentHeight(rowCount: 1, showsNotice: false), accuracy: 1)
-    XCTAssertEqual(bar.panel.frame.maxY, top, accuracy: 1, "the top edge stays pinned")
-    bar.toggle(.newTab)
-  }
-
-  /// `searchSuggestEnabled` off: no search row, no notice (no engine round trip).
-  func testSuggestionsOffHidesTheSearchRowAndTheNotice() async throws {
-    bar.settings = CommandBarSettings.ephemeral()
-    bar.settings.setSearchSuggestionsEnabled(false)
-    bar.toggle(.newTab)
-    bar.setQueryForTesting("hello")
-    XCTAssertTrue(bar.results.isEmpty)
-    XCTAssertFalse(bar.isNoticeVisible)
     bar.toggle(.newTab)
   }
 

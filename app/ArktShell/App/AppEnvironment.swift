@@ -28,20 +28,6 @@ enum AppEnvironment {
     try? FaviconStore(directory: location.directory.appendingPathComponent("Favicons", isDirectory: true))
   }
 
-  /// The command bar's page thumbnails (#370), in the app's cache folder (`<Caches>/<bundle id>/PageImages`), never
-  /// the browsing profile. Debug, Profile and Engine runs with `ARKT_DATA_DIR` keep them in `<data folder>/Caches`, so
-  /// a test run never touches the real caches. Nothing is read or created until the first thumbnail.
-  static func pageImageCache(in location: DatabaseLocation) -> PageImageCache? {
-    #if DEBUG || ARKT_SMOKE_BUILD || ARKT_TEST_SWITCHES
-    if ProcessInfo.processInfo.environment["ARKT_DATA_DIR"] != nil {
-      return PageImageCache(directory: location.directory.appending(path: "Caches/PageImages", directoryHint: .isDirectory))
-    }
-    #endif
-    guard let bundle = Bundle.main.bundleIdentifier,
-          let directory = PageImageCache.defaultDirectory(bundleIdentifier: bundle) else { return nil }
-    return PageImageCache(directory: directory)
-  }
-
   /// Arc's data folder; read only after the user asks for an import. Debug and Profile builds may point it at a
   /// fixture copy.
   static var arcDirectory: URL {

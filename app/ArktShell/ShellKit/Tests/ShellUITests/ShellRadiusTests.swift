@@ -25,14 +25,12 @@ struct ShellRadiusTests {
     #expect(SidebarDropCanvas.slotCornerRadius == ShellRadius.row)
     #expect(SettingsMetrics.rowRadius == ShellRadius.row)
     #expect(SettingsMetrics.paneItemRadius == ShellRadius.row)
-    #expect(CommandBarGeometry.selectedRowRadius == ShellRadius.row)
   }
 
   @Test func smallControlsFollowTheControlToken() {
     #expect(SettingsMetrics.popUpRadius == ShellRadius.control)
     #expect(DialogMetrics.inputRadius == ShellRadius.control)
     #expect(LittleArktSegmentButton.cornerRadius == ShellRadius.control)
-    #expect(CommandBarGeometry.previewButtonRadius == ShellRadius.control)
     #expect(ArchiveMetrics.chipRemoveRadius == ShellRadius.control)
   }
 
@@ -43,7 +41,6 @@ struct ShellRadiusTests {
 
   @Test func cardsTilesPopoversAndSheetsFollowTheirTokens() {
     #expect(ShellMetrics.standard.cardCornerRadius == ShellRadius.card)
-    #expect(CommandBarGeometry.previewThumbnailRadius == ShellRadius.card)
     #expect(LittleArktGeometry.cornerRadius == ShellRadius.popover)
     #expect(LittleArktLayout.cornerRadius == ShellRadius.popover)
     #expect(TabSwitcherView.cornerRadius == ShellRadius.popover)
@@ -69,7 +66,9 @@ struct ShellRadiusTests {
     #expect(SettingsMetrics.swatchRadius == 6)
     #expect(ArchiveMetrics.bannerRadius == 12)
     #expect(PeekLayout.grabberRadius == 3)
-    #expect(CommandBarGeometry.scopeChipRadius == 6)
+    #expect(CommandBarGeometry.rowRadius == 8)
+    #expect(CommandBarGeometry.cornerRadius == 14)
+    #expect(CommandBarGeometry.keyCapRadius == 5)
     #expect(ExtensionsPanelMetrics.dotRadius == 4)
     #expect(ExtensionsPanelMetrics.insertionLineRadius == 1)
     #expect(PrivatePageRowView.buttonRadius == 4)

@@ -2,73 +2,83 @@ import CoreGraphics
 import Testing
 @testable import ShellUI
 
-/// The hybrid design's metrics (design/command-bar/README.md, Layout), all in points.
+/// The grouped bar's metrics (design/command-bar/README.md, Layout), all in points.
 struct CommandBarGeometryTests {
+  typealias G = CommandBarGeometry
+
   @Test func `the layout table`() {
-    typealias G = CommandBarGeometry
-    #expect(G.preferredWidth == 680)
-    #expect(G.cornerRadius == 16)
-    #expect(G.inputHeight == 58)
-    #expect(G.inputLeading == 18)
-    #expect(G.rowHeight == 40)
-    #expect(G.selectedRowRadius == 9)
-    #expect(G.rowHorizontalPadding == 12)
-    #expect(G.slotWidth == 20)
+    #expect(G.maxWidth == 600)
+    #expect(G.sideMargin == 24)
+    #expect(G.cornerRadius == 14)
+    #expect(G.inputHeight == 54)
+    #expect(G.inputLeading == 20)
+    #expect(G.magnifierSize == 18)
+    #expect(G.magnifierGap == 12)
+    #expect(G.rowHeight == 36)
+    #expect(G.rowRadius == 8)
+    #expect(G.rowHorizontalPadding == 10)
+    #expect(G.slotWidth == 18)
     #expect(G.slotGap == 12)
-    #expect(G.listPadding == 6)
-    #expect(G.hintStripHeight == 34)
-    #expect(G.tickWidth == 3)
-    #expect(G.tickInset == 10)
-    #expect(G.maxVisibleRows == 5)
-  }
-
-  @Test func `centered, with the top edge a fixed 22 percent down so results grow downward`() {
-    // 176 pt from the top of the prototype's 800 pt window.
-    let parent = CGRect(x: 100, y: 50, width: 1280, height: 800)
-    let small = CommandBarGeometry.frame(parentFrame: parent, contentHeight: 58)
-    let tall = CommandBarGeometry.frame(parentFrame: parent, contentHeight: 330)
-    #expect(small.width == 680)
-    #expect(small.midX == parent.midX)
-    #expect(abs(small.maxY - (parent.maxY - 176)) < 0.001)
-    #expect(small.maxY == tall.maxY, "the top edge does not move when rows are added")
-    #expect(tall.height == 330)
-  }
-
-  @Test func `shrinks in narrow windows and keeps the side margin`() {
-    let frame = CommandBarGeometry.frame(parentFrame: CGRect(x: 0, y: 0, width: 700, height: 600), contentHeight: 58)
-    #expect(frame.width == CGFloat(700 - 2 * 24))   // typed: the macro evaluates bare literals as Int
-  }
-
-  @Test func `height for rows is the field, a hairline, the padded rows, a hairline and the hint strip`() {
-    typealias G = CommandBarGeometry
-    let threeRows: CGFloat = 58 + 1 + 6 + 120 + 6 + 1 + 34
-    #expect(G.contentHeight(rowCount: 0) == 58)
-    #expect(G.contentHeight(rowCount: 3) == threeRows)
-    #expect(G.contentHeight(rowCount: 20) == G.contentHeight(rowCount: 5), "five rows without scrolling")
-  }
-
-  @Test func `group headers add their height and the empty state shows more rows`() {
-    typealias G = CommandBarGeometry
+    #expect(G.iconSize == 16)
+    #expect(G.listSidePadding == 6)
+    #expect(G.listTopPadding == 6)
+    #expect(G.listBottomPadding == 8)
     #expect(G.groupHeaderHeight == 26)
-    let oneHeader = G.contentHeight(rowCount: 2) + 26
-    let emptyState: CGFloat = 58 + 1 + 6 + 280 + 78 + 6 + 1 + 34
-    #expect(G.contentHeight(rowCount: 2, headerCount: 1) == oneHeader)
-    #expect(G.contentHeight(rowCount: 7, headerCount: 3, maxRows: G.maxEmptyStateRows) == emptyState)
-    #expect(G.maxEmptyStateRows == 7)
+    #expect(G.firstGroupHeaderHeight == 20)
+    #expect(G.keyCapHeight == 20)
+    #expect(G.keyCapRadius == 5)
+    #expect(G.minimumURLWidth == 48)
   }
 
-  /// BH-113: the notice strip adds its height, with and without result rows.
-  @Test func `the notice adds its height`() {
-    let rows = 1
-    #expect(CommandBarGeometry.contentHeight(rowCount: rows, showsNotice: true)
-            == CommandBarGeometry.contentHeight(rowCount: rows) + CommandBarGeometry.noticeHeight)
-    #expect(CommandBarGeometry.contentHeight(rowCount: 0, showsNotice: true)
-            == CommandBarGeometry.inputHeight + CommandBarGeometry.noticeHeight)
+  /// clamp(48, 14 % of the window height, 110), rounded to a whole point.
+  @Test func `the top edge`() {
+    #expect(G.top(windowHeight: 420) == 59)
+    #expect(G.top(windowHeight: 300) == 48)
+    #expect(G.top(windowHeight: 700) == 98)
+    #expect(G.top(windowHeight: 800) == 110)
+    #expect(G.top(windowHeight: 1400) == 110)
   }
 
-  @Test func `Little Arkt keeps the metrics the command bar had before the hybrid design`() {
-    #expect(LittleArktGeometry.preferredWidth == 766)
-    #expect(LittleArktGeometry.rowHeight == 50)
-    #expect(LittleArktGeometry.inputHeight == 60)
+  /// The spec's height arithmetic: the worst case with a Go row, the 15-row worst screen, no results, an empty list.
+  @Test func `content heights`() {
+    #expect(G.contentHeight(rowCount: 16, headerCount: 5, firstRowHasHeader: false) == 775)
+    #expect(G.contentHeight(rowCount: 15, headerCount: 5, firstRowHasHeader: true) == 733)
+    #expect(G.contentHeight(rowCount: 1, headerCount: 1, firstRowHasHeader: true) == 125)
+    #expect(G.contentHeight(rowCount: 0, headerCount: 0, firstRowHasHeader: false) == 54)
+  }
+
+  /// A row that starts a group is taller by its header: 20 at the top of the list, 26 elsewhere.
+  @Test func `row heights`() {
+    #expect(G.rowHeight(hasHeader: false, isFirst: true) == 36)
+    #expect(G.rowHeight(hasHeader: true, isFirst: true) == 56)
+    #expect(G.rowHeight(hasHeader: true, isFirst: false) == 62)
+  }
+
+  /// Centered, 600 wide from a 648 pt window up, top edge fixed so results grow downward.
+  @Test func `the frame in a large window`() {
+    let parent = CGRect(x: 100, y: 50, width: 1280, height: 800)
+    let frame = G.frame(parentFrame: parent, contentHeight: 300)
+    #expect(frame.width == 600)
+    #expect(frame.midX == parent.midX)
+    #expect(frame.maxY == parent.maxY - CGFloat(110))
+    #expect(frame.height == 300)
+  }
+
+  /// At most `window height - top - 24` tall; then the list scrolls. 909 pt is the first window the worst case fits.
+  @Test func `the panel stops 24 above the bottom`() {
+    let parent = CGRect(x: 0, y: 0, width: 1280, height: 800)
+    #expect(G.frame(parentFrame: parent, contentHeight: 775).height == CGFloat(800 - 110 - 24))
+    let tall = CGRect(x: 0, y: 0, width: 1280, height: 909)
+    #expect(G.frame(parentFrame: tall, contentHeight: 775).height == 775)
+  }
+
+  /// The smallest window, 640 x 420: 592 wide, top 59.
+  @Test func `the smallest window`() {
+    let parent = CGRect(x: 0, y: 0, width: 640, height: 420)
+    let frame = G.frame(parentFrame: parent, contentHeight: 733)
+    #expect(frame.width == 592)
+    #expect(frame.minX == 24)
+    #expect(frame.maxY == CGFloat(420 - 59))
+    #expect(frame.height == CGFloat(420 - 59 - 24))
   }
 }

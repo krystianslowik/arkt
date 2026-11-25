@@ -112,12 +112,10 @@ final class LittleArktLookupCellView: NSTableCellView {
     let symbol = switch result.kind {
     case .open, .pasteAndGo: "globe"
     case .switchTo: "square.on.square"
-    case .search, .siteSearch: "magnifyingglass"
-    case .restore: "archivebox"
-    case .action: "bolt"
-    case .switchSpace: "square.grid.2x2"
+    case .search, .suggestion: "magnifyingglass"
     case .history: "clock"
-    case .noMatch: "magnifyingglass"
+    case .folder: "folder"
+    case .extensionAction: "puzzlepiece.extension"
     }
     icon.image = SymbolImageCache.shared.symbol(symbol, box: Self.iconSize, color: ShellTokens.lookupText,
                                                 scale: scale)

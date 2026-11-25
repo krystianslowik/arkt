@@ -1,116 +1,69 @@
 import Foundation
 
-/// A key cap glyph or label as the bar draws it.
+/// A key cap glyph as the bar draws it.
 public enum CommandBarKeyCaps {
   public static let `return` = "\u{21A9}"
-  public static let command = "\u{2318}"
-  public static let shift = "\u{21E7}"
-  public static let option = "\u{2325}"
-  public static let control = "\u{2303}"
-  public static let tab = "tab"
-  public static let escape = "esc"
-  public static let up = "\u{2191}"
-  public static let down = "\u{2193}"
 }
 
-/// One item of a row's trailing group, right-aligned: a caption or a key cap.
-public enum CommandBarTrailing: Equatable, Sendable {
-  case text(String)
-  case keyCap(String)
-}
-
-/// The kinds of row the bar shows (design/command-bar/README.md, Row anatomy).
-public enum CommandBarRowKind: Equatable, Sendable {
-  case openTab, searchSuggestion, history, siteSearch, action, pasteAndGo, archived, address, space, noMatch
-}
-
+/// What a row shows besides its title (design/command-bar/README.md, "Layout" and "Selected row").
 extension CommandBarResults.Result {
-  public var rowKind: CommandBarRowKind {
-    switch kind {
-    case .switchTo: .openTab
-    case .search: .searchSuggestion
-    case .siteSearch: .siteSearch
-    case .action: .action
-    case .pasteAndGo: .pasteAndGo
-    case .restore: .archived
-    case .open: .address
-    case .switchSpace: .space
-    case .history: .history
-    case .noMatch: .noMatch
-    }
+  /// The title as drawn: the Search for row says what it searches for.
+  public var displayTitle: String {
+    if case .search = kind { return "Search for \u{201C}\(title)\u{201D}" }
+    return title
   }
 
-  /// The SF Symbol in the row's slot. An open tab's slot carries a generic symbol until favicons reach the bar.
+  /// The SF Symbol in the row's slot when there is no favicon or extension icon.
   public var symbolName: String {
-    switch rowKind {
-    case .openTab: "square.on.square"
-    case .searchSuggestion, .siteSearch: "magnifyingglass"
+    switch kind {
+    case .switchTo: "square.on.square"
+    case .search, .suggestion: "magnifyingglass"
     case .history: "clock"
-    case .action: "bolt"
     case .pasteAndGo: "doc.on.clipboard"
-    case .archived: "archivebox"
-    case .address: "globe"
-    case .space: "square.grid.2x2"
-    case .noMatch: ""
+    case .open: "globe"
+    case .folder: "folder"
+    case .extensionAction: "puzzlepiece.extension"
     }
   }
 
-  /// The URL or detail after the title. Search suggestions, site search, actions and Spaces have none: what they are
-  /// is said by the trailing caption and the symbol.
+  /// The text after the title: host and path (tabs, history, Paste and Go), "<n> tabs" (folders), the description
+  /// (extensions). Go, Search for and suggestion rows have none.
   public var secondaryText: String {
-    switch rowKind {
-    case .openTab, .history, .archived: subtitle
-    case .pasteAndGo, .address: CommandBarTitleMatch.displayURL(subtitle)
-    case .searchSuggestion, .siteSearch, .action, .space, .noMatch: ""
+    switch kind {
+    case .switchTo, .history, .pasteAndGo, .folder, .extensionAction: subtitle
+    case .open, .search, .suggestion: ""
     }
   }
 
-  /// The right-aligned group. A caption is always shown; Return shows on the selected row, since it runs it.
-  public func trailing(isSelected: Bool) -> [CommandBarTrailing] {
-    let returnCap = CommandBarTrailing.keyCap(CommandBarKeyCaps.return)
-    switch rowKind {
-    case .openTab, .address, .archived, .space, .history:
-      let caption = timeText ?? trailingHint ?? accessibilityCaption
-      return isSelected && rowKind != .archived && rowKind != .space ? [.text(caption), returnCap] : [.text(caption)]
-    case .searchSuggestion:
-      return isSelected ? [.text("Search"), returnCap] : [.text("Search")]
-    case .siteSearch:
-      // The Tab key cap says Tab scopes to the site (the smart Tab rule); Return runs the search.
-      let tabCap = CommandBarTrailing.keyCap(CommandBarKeyCaps.tab)
-      if showsTabKeyCap { return isSelected ? [tabCap, returnCap] : [tabCap] }
-      return isSelected ? [returnCap] : []
-    case .pasteAndGo:
-      return isSelected ? [returnCap] : []
-    case .noMatch:
-      return []
-    case .action:
-      if !keyCaps.isEmpty { return keyCaps.map { .keyCap($0) } }
-      return isSelected ? [returnCap] : []
+  /// The verb the selected row shows next to the Return key cap. The Search for row has none: its title says it.
+  public var verb: String? {
+    switch kind {
+    case .switchTo: "Switch to Tab"
+    case .folder: "Show Folder"
+    case .history: "Open"
+    case .extensionAction: "Open Extension"
+    case .open, .pasteAndGo: "Go"
+    case .suggestion: "Search"
+    case .search: nil
     }
   }
 
-  /// Whether the row shows a Tab key cap: a normal-scope site-search row, where Tab scopes to its site.
-  public var showsTabKeyCap: Bool { rowKind == .siteSearch && siteSearchEngine != nil }
-
-  /// What a screen reader says for the row: "<title>, <host>, <kind>, <k> of <n>" (k from 1). The empty row is its
-  /// title alone.
+  /// What a screen reader says for the row: "<title>, <secondary text>, <kind>, <k> of <n>" (k from 1).
   public func accessibilityLabel(position: Int, of count: Int) -> String {
-    if rowKind == .noMatch { return title }
-    return [title, secondaryText, accessibilityKind, "\(position) of \(count)"].filter { !$0.isEmpty }.joined(separator: ", ")
+    [displayTitle, secondaryText, accessibilityKind, "\(position) of \(count)"].filter { !$0.isEmpty }
+      .joined(separator: ", ")
   }
 
   private var accessibilityKind: String {
-    switch rowKind {
-    case .openTab: "open tab"
-    case .searchSuggestion: "search suggestion"
+    switch kind {
+    case .switchTo: "open tab"
+    case .folder: "folder"
     case .history: "history"
-    case .siteSearch: "site search"
-    case .action: "action"
-    case .pasteAndGo: "clipboard"
-    case .archived: "archived"
-    case .address: "address"
-    case .space: "space"
-    case .noMatch: ""
+    case .extensionAction: "extension"
+    case .suggestion: "search suggestion"
+    case .search: "search for what you typed"
+    case .open: "go to address"
+    case .pasteAndGo: "paste and go"
     }
   }
 }
@@ -122,9 +75,7 @@ public enum CommandBarTitleMatch {
     guard !trimmed.isEmpty else { return nil }
     return title.range(of: trimmed, options: [.caseInsensitive, .diacriticInsensitive])
   }
-}
 
-extension CommandBarTitleMatch {
   /// A URL as a row shows it: without the scheme and a trailing slash ("arkt.dev/changelog").
   public static func displayURL(_ text: String) -> String {
     var shown = text

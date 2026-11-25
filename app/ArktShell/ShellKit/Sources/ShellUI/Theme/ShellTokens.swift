@@ -96,20 +96,6 @@ public enum ShellTokens {
   /// shows the page barely dimmed.
   public static let commandBarScrim = TokenPair(light: .srgb(hex: 0x202321, alpha: 0.10),
                                                 dark: .srgb(hex: 0x0A0B0A, alpha: 0.28))
-  /// The pill capsule around the four filters: `--well`.
-  public static let commandBarPillWell = TokenPair(light: .srgb(hex: 0x202321, alpha: 0.06),
-                                                   dark: .srgb(hex: 0x000000, alpha: 0.22))
-  /// The selected pill: porcelain in dark, graphite in light, with `commandBarPillOnText` on it.
-  public static let commandBarPillOn = TokenPair(light: BrandTokens.Palette.graphite,
-                                                 dark: .srgb(hex: 0xFAF9F5, alpha: 0.92))
-  public static let commandBarPillOnText = TokenPair(light: BrandTokens.Palette.porcelain,
-                                                     dark: BrandTokens.Palette.graphite)
-  /// The selected row's tick and the caret: mustard fills, never text or a stroke.
-  public static let commandBarTick = BrandTokens.accent
-  /// The preview thumbnail's well until the image arrives (#372). The favicon or symbol sits on it.
-  public static let commandBarThumbnailWell = TokenPair(light: .srgb(hex: 0xFFFFFF), dark: .srgb(hex: 0x0F1110))
-  /// The open-tab dot beside the preview's meta line. The words already say "open"; the dot is a status mark.
-  public static let commandBarOpenDot = TokenPair(light: .srgb(hex: 0x3FB36D), dark: .srgb(hex: 0x3FB36D))
   // Quick lookup bar (Little Arkt): the command bar's look before the hybrid design; always a dark surface.
   public static let lookupSurface = RGBA.p3(hex: 0x1C1C20, alpha: 0.98)
   public static let lookupText = RGBA.white(0.80)

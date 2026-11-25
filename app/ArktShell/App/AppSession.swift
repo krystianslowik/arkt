@@ -47,12 +47,6 @@ final class AppSession {
   /// The archive thresholds Settings edits (#448): each change reaches `autoArchive` at once and is stored. Little
   /// Arkt reads its threshold here (`littleArktThreshold`, 6 hours by default).
   let archiveSettings: ArchiveSettingsModel
-  /// Archived matches in every window's command bar (#111).
-  let archiveSearch: ArchiveCommandBarSearch
-  /// The command bar preview's page thumbnails (#370): live tabs through the engine, history items from the cache.
-  let pageThumbnails: PageThumbnails
-  /// Emptied with Clear Archive.
-  private let pageImageCache: PageImageCache?
   /// The archive held an item at the last check (Window > Clear Archive... is enabled then); refreshed off the main
   /// actor each time the menu is validated, like `isArcImportAvailable`.
   private(set) var archiveHasItems = false
@@ -126,11 +120,7 @@ final class AppSession {
     let archiveSettings = ArchiveSettingsModel(state: settingsStore)
     archiveSettings.onChange = { [weak autoArchive] in autoArchive?.apply($0) }
     self.archiveSettings = archiveSettings
-    self.archiveSearch = ArchiveCommandBarSearch(source: source, store: archiveStore, coordinator: archive)
     self.faviconStore = faviconStore
-    let pageImageCache = AppEnvironment.pageImageCache(in: location)
-    self.pageImageCache = pageImageCache
-    self.pageThumbnails = PageThumbnails(engine: engine, cache: pageImageCache)
     source.onDidChange = { [weak self] sidebar in
       guard let self else { return }
       autosaver.scheduleSave(sidebar)                 // every model change
@@ -152,9 +142,6 @@ final class AppSession {
     windows.sidebarBanner = SidebarBannerCenter(model: SidebarBannerModel(
       source: AppEnvironment.sidebarNoticeSource(),
       dismissals: SidebarNoticeDismissals(defaults: AppEnvironment.userDefaults)))
-    archiveSearch.currentSpaceProvider = { [weak self] in self?.windows.primary?.currentSpace }
-    archiveSearch.onRestored = { [weak self] restored, text in self?.didRestore(restored, toast: text) }
-    archiveSearch.onRestoreFailed = { [weak self] text in self?.shownWindow().toasts.show(Toast(text: text, kind: .error)) }
     settings.addObserver(self)
     ReorderHapticGate.bind(settings)
   }
@@ -247,9 +234,6 @@ final class AppSession {
     window.opensLittleArktOnOptionCommandClick = { [weak self] in                                // #356, BH-132
       self?.settings.opensLittleArktOnOptionCommandClick ?? true
     }
-    window.pageThumbnails = pageThumbnails
-    window.commandBar.archivedProvider = { [weak self] query in await self?.archiveSearch.matches(for: query) ?? [] }
-    window.commandBar.onRestoreArchived = { [weak self] id in self?.archiveSearch.restore(id) }   // BH-104
     guard let writer = faviconWriter else { return }
     let load = writer.loadStored(Set(source.sidebar.nodes.keys))
     Task { [weak window] in
@@ -372,7 +356,6 @@ final class AppSession {
     model.currentSpaceProvider = { [weak self] in self?.windows.primary?.currentSpace }
     model.onRestored = { [weak self] restored, text in self?.didRestore(restored, toast: text) }
     model.onRestoreFailed = { [weak self] text in self?.shownWindow().toasts.show(Toast(text: text, kind: .error)) }
-    model.onCleared = { [pageImageCache] in await pageImageCache?.removeAll() }     // cleared pages lose their thumbnails
     let controller = ArchiveWindowController(dataSource: model)
     controller.onOpenSettings = { [weak self] in self?.showSettings(pane: .spaces) }   // the education banner
     archiveWindow = controller

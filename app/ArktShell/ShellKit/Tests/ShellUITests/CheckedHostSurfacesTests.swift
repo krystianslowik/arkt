@@ -77,10 +77,13 @@ struct CheckedHostSurfacesTests {
     CommandBarResults.OpenTab(node: UUID(), title: title, url: Self.url("https://\(host)/a"))
   }
 
-  @Test func commandBarTabRowAndPreviewShowTheCheckedHost() throws {
+  @Test func commandBarTabRowShowsTheCheckedHost() throws {
     let rows = CommandBarResults.make(query: "", openTabs: [tab(Self.real), tab(Self.lookalike)])
     #expect(rows.map(\.subtitle) == [Self.realShown, Self.lookalike])
-    #expect(rows.map { $0.previewFacts?.host } == [Self.realShown, Self.lookalike])
+    var input = CommandBarResults.Input()
+    input.openTabs = [tab(Self.real), tab(Self.lookalike)]
+    let grouped = CommandBarResults.grouped(query: "", input: input)
+    #expect(grouped.map(\.subtitle) == ["\(Self.realShown)/a", "\(Self.lookalike)/a"])
   }
 
   @Test func commandBarShowsASavedHostTitleCheckedAndTheModelKeepsItRaw() throws {
@@ -92,7 +95,9 @@ struct CheckedHostSurfacesTests {
     let fakeNode = sidebar.addTab(url: fakeURL, title: HostDisplay.savedTitle(for: fakeURL), in: .today(space))
     let rows = CommandBarResults.make(query: "", openTabs: CommandBarResults.openTabs(in: sidebar, space: space))
     #expect(rows.map(\.title) == [Self.realShown, Self.lookalike])
-    #expect(rows.map { $0.previewFacts?.title } == [Self.realShown, Self.lookalike])
+    var input = CommandBarResults.Input()
+    input.openTabs = CommandBarResults.openTabs(in: sidebar, space: space)
+    #expect(CommandBarResults.grouped(query: "", input: input).map(\.title) == [Self.realShown, Self.lookalike])
     guard case .tab(_, _, let realTitle)? = sidebar.node(realNode),
           case .tab(_, _, let fakeTitle)? = sidebar.node(fakeNode) else {
       Issue.record("tabs missing")
@@ -102,30 +107,34 @@ struct CheckedHostSurfacesTests {
     #expect(fakeTitle == Self.lookalike)
   }
 
-  @Test func commandBarHistoryRowAndPreviewShowTheCheckedHost() throws {
+  @Test func commandBarHistoryRowShowsTheCheckedHost() throws {
     var input = CommandBarResults.Input()
     input.history = [
       .init(title: "Stadt", url: Self.url("https://\(Self.real)/rathaus")),
       .init(title: "Stadt", url: Self.url("https://\(Self.lookalike)/rathaus")),
     ]
-    let rows = CommandBarResults.make(query: "Stadt", input: input).filter {
+    let rows = CommandBarResults.grouped(query: "Stadt", input: input).filter {
       if case .history = $0.kind { true } else { false }
     }
     #expect(rows.map(\.subtitle) == ["\(Self.realShown)/rathaus", "\(Self.lookalike)/rathaus"])
-    #expect(rows.map { $0.previewFacts?.host } == [Self.realShown, Self.lookalike])
   }
 
+  /// Little Arkt's address row writes the host by the rule; the command bar's Go row shows the text as typed, and its
+  /// Paste and Go row writes the clipboard host by the rule.
   @Test func commandBarTypedAndPastedAddressesShowTheCheckedHost() throws {
-    let typed = CommandBarResults.make(query: Self.real, input: CommandBarResults.Input())
+    let typed = CommandBarResults.make(query: Self.real, openTabs: [])
     #expect(typed.first?.subtitle == "https://\(Self.realShown)")
-    let typedFake = CommandBarResults.make(query: Self.lookalike, input: CommandBarResults.Input())
+    let typedFake = CommandBarResults.make(query: Self.lookalike, openTabs: [])
     #expect(typedFake.first?.subtitle == "https://\(Self.lookalike)")
+    let go = CommandBarResults.grouped(query: Self.lookalike, input: CommandBarResults.Input())
+    #expect(go.first?.title == Self.lookalike)
+    #expect(go.first?.secondaryText == "")
 
     var input = CommandBarResults.Input()
     input.clipboardURL = Self.url("https://\(Self.real)/x")
-    #expect(CommandBarResults.make(query: "", input: input).first?.subtitle == "https://\(Self.realShown)/x")
+    #expect(CommandBarResults.grouped(query: "", input: input).first?.subtitle == "\(Self.realShown)/x")
     input.clipboardURL = Self.url("https://\(Self.lookalike)/x")
-    #expect(CommandBarResults.make(query: "", input: input).first?.subtitle == "https://\(Self.lookalike)/x")
+    #expect(CommandBarResults.grouped(query: "", input: input).first?.subtitle == "\(Self.lookalike)/x")
   }
 
   /// A tab or a visit is found by its host typed either way: in Unicode as the bar shows it (any case), or encoded.
@@ -134,7 +143,7 @@ struct CheckedHostSurfacesTests {
     var input = CommandBarResults.Input()
     input.openTabs = [tab(Self.real, title: "Stadtportal"), tab("example.org", title: "Other")]
     input.history = [.init(title: "Rathaus", url: Self.url("https://\(Self.real)/rathaus"))]
-    let rows = CommandBarResults.make(query: query, input: input)
+    let rows = CommandBarResults.grouped(query: query, input: input)
     #expect(rows.contains { $0.title == "Stadtportal" })
     #expect(rows.contains { $0.title == "Rathaus" })
     #expect(!rows.contains { $0.title == "Other" })
@@ -147,11 +156,12 @@ struct CheckedHostSurfacesTests {
     let url = Self.url("https://\(Self.accented)/")
     var input = CommandBarResults.Input()
     input.openTabs = [.init(node: UUID(), title: HostDisplay.savedTitle(for: url), url: url)]
-    input.history = [.init(title: Self.accented, url: url)]
-    #expect(!CommandBarResults.make(query: "paypal", input: input).contains {
+    // History leaves out a page that is an open tab, so the visit is another page on the host.
+    input.history = [.init(title: Self.accented, url: Self.url("https://\(Self.accented)/visited"))]
+    #expect(!CommandBarResults.grouped(query: "paypal", input: input).contains {
       if case .switchTo = $0.kind { true } else if case .history = $0.kind { true } else { false }
     })
-    let found = CommandBarResults.make(query: "P\u{00C0}YPAL", input: input)
+    let found = CommandBarResults.grouped(query: "P\u{00C0}YPAL", input: input)
     #expect(found.contains { if case .switchTo = $0.kind { true } else { false } })
     #expect(found.contains { if case .history = $0.kind { true } else { false } })
   }

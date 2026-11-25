@@ -32,7 +32,7 @@ struct CommandBarSelectionTests {
   }
 
   @Test func pageMovesByTheVisibleRowCountAndClamps() {
-    let size = CommandBarGeometry.maxVisibleRows
+    let size = CommandBarGeometry.pageRows
     #expect(CommandBarSelection.page(from: 0, by: 1, count: 20) == size)
     #expect(CommandBarSelection.page(from: size, by: -1, count: 20) == 0)
     #expect(CommandBarSelection.page(from: 15, by: 1, count: 20) == 19)
@@ -45,7 +45,7 @@ struct CommandBarSelectionTests {
   }
 
   @Test func pageFromNoSelectionStartsAtTheTop() {
-    #expect(CommandBarSelection.page(from: -1, by: 1, count: 20) == CommandBarGeometry.maxVisibleRows - 1)
+    #expect(CommandBarSelection.page(from: -1, by: 1, count: 20) == CommandBarGeometry.pageRows - 1)
     #expect(CommandBarSelection.page(from: -1, by: -1, count: 20) == 0)
   }
 }

@@ -4,10 +4,10 @@ import CoreGraphics
 /// enum, never from a number at the assignment (`CornerRadiusLintTests`). A value that fits no role stays in the
 /// surface's metric enum under its own name. Changing a value here moves every surface of that role at once.
 public enum ShellRadius {
-  /// Row-shaped fills: sidebar and Settings rows, the command bar's selected row, the sidebar drop slot.
+  /// Row-shaped fills: sidebar and Settings rows, the sidebar drop slot.
   public static let row: CGFloat = 9  // TODO(measure): Arc's row radius (#77)
-  /// Small controls: the Settings pop-up button, the dialog input, the Little Arkt split button, the command bar
-  /// preview button, the Archive chip's remove button.
+  /// Small controls: the Settings pop-up button, the dialog input, the Little Arkt split button, the Archive chip's
+  /// remove button.
   public static let control: CGFloat = 8
   /// Recessed fields that hold rows or text: Settings groups, the Archive list, the dialog list, the import field.
   public static let field: CGFloat = 10
