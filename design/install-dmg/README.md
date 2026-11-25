@@ -1,6 +1,6 @@
 # Install DMG window
 
-The Finder window that opens when a user mounts `Arkt-0.1.0-preview.1-arm64.dmg` (issue #983). The maintainer picked
+The Finder window that opens when a user mounts `Arkt-0.1.0-alpha.1-arm64.dmg` (issue #983). The maintainer picked
 the Hero-line direction on the particle field (the earlier card, band and wordmark directions were rejected as not
 fitting the Arkt designs; they remain in this branch's history).
 

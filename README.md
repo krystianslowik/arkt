@@ -81,8 +81,8 @@ and offers to bring it across, then lets you pick a look for your first Space.
   <tr>
     <td width="50%">
       <picture>
-        <source media="(prefers-color-scheme: dark)" srcset="design/command-bar/screens/hybrid-tab-dark.png">
-        <img src="design/command-bar/screens/hybrid-tab-light.png" alt="Arkt command bar: results for a search across tabs, history and actions, with a preview of the selected tab." width="420">
+        <source media="(prefers-color-scheme: dark)" srcset="design/command-bar/screens/search-dark.png">
+        <img src="design/command-bar/screens/search-light.png" alt="Arkt command bar: results for a search grouped into tabs, folders, history, extensions and web search." width="420">
       </picture>
     </td>
     <td width="50%">
