@@ -81,7 +81,7 @@ All values in points. Window sizes from 640 x 420 (the shell minimum) up.
 | List padding | 6 on the sides, 6 on top, 8 on the bottom |
 | Group header | 11 semibold, tertiary text, +0.02 em tracking; 26 high including 10 above (20 high, 4 above, for a group that starts the list) |
 | Row | 36 high, 8 corner radius, 10 horizontal padding, 12 gap |
-| Row slot | 18 wide: favicon 16 (4 radius) or a 16 symbol (clock for history, magnifier for search, globe for Go, clipboard for Paste and Go, folder for a folder, the extension's own icon or a puzzle piece for an extension) |
+| Row slot | 18 wide: favicon 16 (4 radius) or a 16 symbol (clock for history, magnifier for search, globe for Go, clipboard for Paste and Go, `arrow.clockwise` for Reload, folder for a folder, the extension's own icon or a puzzle piece for an extension) |
 | Row title | 14 regular, text; the part that matches the query 600 weight |
 | Row secondary text | 13 regular, tertiary text: host and path without the scheme (tabs, history), "<n> tabs" (folders), the extension's short description (extensions) |
 | Trailing | 12; history rows show the relative time when not selected: "12 min" and "3 h" today, "Yesterday", the weekday ("Monday") within the last week, then a short date ("Oct 20"; with the year in another year); the selected row shows its verb and the Return key cap |

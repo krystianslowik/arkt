@@ -52,8 +52,9 @@ final class CommandBarTests: XCTestCase {
   /// Gate (coordinator decision, "work + earliest frame"):
   /// - show() work p95 under 4 ms, measured as main-thread CPU time so preemption by a loaded machine
   ///   (a Chromium build) does not count against the shell;
-  /// - show() and the Core Animation commit that carries it land within 4 ms of wall time (p95 of
-  ///   `lastShowCommitDelay`), so work that waits rather than computes is caught too;
+  /// - show() and the Core Animation commit that carries it land within 3 ms of wall time (p95 of
+  ///   `lastShowCommitDelay`; about twice the 1.0 to 1.4 ms measured under load), so work that waits rather than
+  ///   computes is caught too, and a commit that slips by a frame cannot hide behind a later vsync;
   /// - the panel lands on the earliest possible frame after that commit: wall-clock p95 total within commit p95 +
   ///   2 intervals (the first vsync after the commit, then the frame it presents; #1000 review: measuring from the
   ///   end of show() instead missed the commit's own time under load).
@@ -103,7 +104,7 @@ final class CommandBarTests: XCTestCase {
     if let notMeasurable {
       print("commandbar.earliestframe skipped: NOT-MEASURABLE (\(notMeasurable))")
     } else {
-      XCTAssertLessThan(commitP95, 0.004, "show() and its commit over 4 ms of wall time")
+      XCTAssertLessThan(commitP95, 0.003, "show() and its commit over 3 ms of wall time")
       XCTAssertLessThanOrEqual(p95, bound, "panel missed its earliest possible frame")
     }
   }
@@ -206,9 +207,9 @@ final class CommandBarTests: XCTestCase {
     let list = tabs(2)
     bar.openTabsProvider = { list }
     bar.toggle(.currentTab(URL(string: "https://example.com")))
-    bar.barView.onHoverRow?(0)
+    _ = bar.barView.onHoverRow?(0)
     XCTAssertEqual(bar.results.first?.kind.name, "reload", "a hover over the Reload row keeps it")
-    bar.barView.onHoverRow?(2)
+    _ = bar.barView.onHoverRow?(2)
     XCTAssertEqual(bar.results.map(\.kind.name), ["switch", "switch"])
     XCTAssertEqual(bar.barView.table.selectedRow, 1)
     bar.commit()
@@ -219,6 +220,88 @@ final class CommandBarTests: XCTestCase {
     bar.setQueryForTesting("https://example.com/x")
     bar.setQueryForTesting("https://example.com")              // back to the address: still no Reload row
     XCTAssertFalse(bar.results.contains { $0.kind.name == "reload" })
+  }
+
+  /// A mouse event at the middle of `row`, in the panel's window.
+  private func mouse(_ type: NSEvent.EventType, onRow row: Int) throws -> (event: NSEvent, inTable: NSPoint) {
+    let table = bar.barView.table
+    let rect = table.rect(ofRow: row)
+    let inTable = NSPoint(x: rect.midX, y: rect.maxY - 10)
+    let event = try XCTUnwrap(NSEvent.mouseEvent(
+      with: type, location: table.convert(inTable, to: nil), modifierFlags: [], timestamp: 0,
+      windowNumber: bar.panel.windowNumber, context: nil, eventNumber: 0, clickCount: 1,
+      pressure: type == .leftMouseDown ? 1 : 0))
+    return (event, inTable)
+  }
+
+  /// #1000 review: on an untouched Cmd-L, with the pointer already over the list (no hover first), a click on the
+  /// second tab runs that tab. The press must not take the Reload row away before the table works out the clicked
+  /// row. A test app is not active, so the table runs no click action of its own: the release runs the row under the
+  /// press, as `clickedRow` gives it.
+  func testCmdLAClickRunsThePressedRow() async throws {
+    var reloaded = false
+    var switched: NodeID?
+    bar.onReload = { reloaded = true }
+    bar.onSwitch = { switched = $0 }
+    let list = tabs(2)
+    bar.openTabsProvider = { list }
+    bar.toggle(.currentTab(URL(string: "https://example.com")))
+    bar.barView.layoutSubtreeIfNeeded()
+    let table = bar.barView.table
+    XCTAssertEqual(bar.results.map(\.kind.name), ["reload", "switch", "switch"])
+    let down = try mouse(.leftMouseDown, onRow: 2)
+    NSApp.postEvent(try mouse(.leftMouseUp, onRow: 2).event, atStart: false)
+    table.mouseDown(with: down.event)
+    _ = NSApp.nextEvent(matching: .leftMouseUp, until: Date(), inMode: .default, dequeue: true)
+    XCTAssertEqual(bar.results.count, 3, "the press keeps the rows where they are")
+    XCTAssertEqual(table.selectedRow, 2, "the pressed row takes the fill")
+    bar.clickRow(table.row(at: down.inTable))
+    XCTAssertFalse(reloaded)
+    XCTAssertEqual(switched, list[1].node)
+  }
+
+  /// A hover that takes the Reload row away leaves the hover and the fill on the same row: the one moved to.
+  func testCmdLAHoverKeepsTheHoverAndTheFillTogether() async throws {
+    bar.openTabsProvider = { self.tabs(2) }
+    bar.toggle(.currentTab(URL(string: "https://example.com")))
+    bar.barView.layoutSubtreeIfNeeded()
+    let moved = try XCTUnwrap(NSEvent.mouseEvent(
+      with: .mouseMoved, location: try mouse(.leftMouseDown, onRow: 2).event.locationInWindow, modifierFlags: [],
+      timestamp: 0, windowNumber: bar.panel.windowNumber, context: nil, eventNumber: 0, clickCount: 0, pressure: 0))
+    bar.barView.mouseMoved(with: moved)
+    XCTAssertEqual(bar.results.count, 2, "the Reload row is gone")
+    XCTAssertEqual(bar.barView.table.selectedRow, 1)
+    XCTAssertEqual(bar.barView.hoveredRow, 1)
+  }
+
+  /// Removing a history row while the Reload row shows removes that history row, not the one below it.
+  func testCmdLRemovingAHistoryRowRemovesThatRow() async throws {
+    var removed: CommandBarResults.Result?
+    bar.onRemoveSuggestion = { removed = $0 }
+    bar.historyProvider = {
+      (1...3).map { .init(title: "Page \($0)", url: URL(string: "https://h\($0).example")!,
+                          visited: Date(timeIntervalSinceNow: -Double($0) * 60)) }
+    }
+    bar.toggle(.currentTab(URL(string: "https://example.com")))
+    let row = try XCTUnwrap(bar.results.firstIndex { $0.title == "Page 2" })
+    XCTAssertEqual(bar.results.first?.kind.name, "reload")
+    bar.removeSuggestion(at: row)
+    XCTAssertEqual(removed?.title, "Page 2")
+    XCTAssertEqual(bar.results.map(\.title), ["Page 1", "Page 3"])
+  }
+
+  /// Opt-Return on the Reload row opens the page again in a new tab; nothing reloads.
+  func testOptionReturnOnTheReloadRowReopensThePageInANewTab() async throws {
+    var reloaded = false
+    var opened: (URL, CommandBarController.OpenTarget)?
+    bar.onReload = { reloaded = true }
+    bar.onOpen = { opened = ($0, $1) }
+    bar.toggle(.currentTab(URL(string: "https://example.com/page")))
+    XCTAssertEqual(bar.results.first?.kind.name, "reload")
+    try sendReturn(.option)
+    XCTAssertFalse(reloaded)
+    XCTAssertEqual(opened?.0.absoluteString, "https://example.com/page")
+    XCTAssertEqual(opened?.1, .newTab)
   }
 
   func testCmdLPrefillAndUneditedEnterReloads() async throws {

@@ -161,8 +161,9 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
       children.forEach { $0.setAccessibilityParent(parent) }
       return children
     }
-    barView.onHoverRow = { [weak self] row in self?.select(row, byKeyboard: false) }
-    barView.table.onMouseDownRow = { [weak self] row in self?.select(row, byKeyboard: false) }
+    barView.onHoverRow = { [weak self] row in self?.select(row, byKeyboard: false) ?? row }
+    // A press only moves the fill: the rows must not change before the table works out which row the click is on.
+    barView.table.onMouseDownRow = { [weak self] row in self?.select(row, byKeyboard: false, removesReload: false) }
     panel.keyDownHandler = { [weak self] event in self?.handleKeyDown(event) ?? false }
     for name in [NSWindow.didMoveNotification, NSWindow.didResizeNotification, NSWindow.didChangeScreenNotification,
                  NSWindow.didChangeBackingPropertiesNotification] {
@@ -507,7 +508,12 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   }
 
   @objc private func rowClicked(_ sender: Any?) {
-    let row = barView.table.clickedRow
+    clickRow(barView.table.clickedRow)
+  }
+
+  /// A click's release on `row` (the table's `clickedRow`): runs it. Tests call it with the row under a press, since
+  /// a test app that is not active gets no click action from the table.
+  func clickRow(_ row: Int) {
     if row >= 0 { commit(row: row) }
   }
 
@@ -645,8 +651,12 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
   /// Cmd-Opt-Delete or a history row's remove button: the row stays hidden for this controller's lifetime;
   /// `onRemoveSuggestion` is the persistence hook.
   func removeSuggestion(at row: Int) {
+    var row = row
+    if case .reload? = results.first?.kind, row > 0 {
+      disarmReload()                                  // the Reload row goes first; the row asked for moves up one
+      row -= 1
+    }
     guard results.indices.contains(row), let id = results[row].removalID else { return }
-    disarmReload()
     let result = results[row]
     removedSuggestionIDs.insert(id)
     onRemoveSuggestion?(result)
@@ -679,21 +689,25 @@ public final class CommandBarController: NSObject, NSTextFieldDelegate, NSTableV
 
   /// A keyboard move scrolls the row into view with the least movement and, since focus stays in the field, speaks
   /// the row's label (#608). A hover does neither: the row under the pointer is already visible.
-  private func select(_ row: Int, byKeyboard: Bool) {
-    guard row >= 0, row < results.count else { return }
+  /// Selects `row` and returns where it is now. Moving off the Reload row takes it away (`removesReload`), so the row
+  /// moved to is one higher; a mouse-down keeps it until the click is over.
+  @discardableResult
+  private func select(_ row: Int, byKeyboard: Bool, removesReload: Bool = true) -> Int {
+    guard row >= 0, row < results.count else { return row }
     var row = row
-    if barView.table.selectedRow != row, case .reload? = results.first?.kind {
+    if removesReload, barView.table.selectedRow != row, case .reload? = results.first?.kind {
       // Moving off the Reload row takes it away; the rows below it move up one.
       disarmReload()
       row = max(row - 1, 0)
     }
     let changed = barView.table.selectedRow != row
     if changed { barView.table.selectRowIndexes([row], byExtendingSelection: false) }
-    guard byKeyboard else { return }
+    guard byKeyboard else { return row }
     barView.table.scrollRowToVisible(row)
     if changed {
       announce(results[row].commandBarLabel(position: row + 1, of: results.count), AXAnnouncement.selectionPriority)
     }
+    return row
   }
 
   /// The user moved the selection or edited the text: Return runs the selected row from now on.

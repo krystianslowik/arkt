@@ -162,7 +162,7 @@ final class CommandBarBehaviourTests: XCTestCase {
     XCTAssertEqual(announcements.last, "acme/git-tools, github.com/acme/git-tools, open tab, 2 of 7")
     XCTAssertEqual(priorities.last, .high)
     let spoken = announcements.count
-    bar.barView.onHoverRow?(4)
+    _ = bar.barView.onHoverRow?(4)
     XCTAssertEqual(selected, 4)
     XCTAssertEqual(announcements.count, spoken, "a pointer hover selects without speaking")
   }

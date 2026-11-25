@@ -159,7 +159,8 @@ final class CommandBarView: NSView {
 
   /// Called with the result row under the pointer when it moves over one. Only moves select, so a pointer that
   /// already rests where the bar appears does not change the selection.
-  var onHoverRow: ((Int) -> Void)?
+  /// Returns the row the pointer is over afterwards, which moves up one when the hover took the Reload row away.
+  var onHoverRow: ((Int) -> Int)?
 
   // MARK: Appearance
 
@@ -222,8 +223,8 @@ final class CommandBarView: NSView {
     let point = table.convert(event.locationInWindow, from: nil)
     guard table.visibleRect.contains(point) else { return }   // a row scrolled out of view is not under the pointer
     let row = table.row(at: point)
-    let target = row >= 0 && row < table.numberOfRows ? row : nil
-    if let target { onHoverRow?(target) }
+    var target = row >= 0 && row < table.numberOfRows ? row : nil
+    if let hovered = target { target = onHoverRow?(hovered) ?? hovered }
     setHoveredRow(target)
   }
 
