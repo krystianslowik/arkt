@@ -440,23 +440,30 @@ final class DownloadsWindowTests: XCTestCase {
     library.show(section: .history)
     let window = try XCTUnwrap(library.window)
     let root = try XCTUnwrap(window.contentView)
-    window.display()
-    for name in ["downloads", "history"] {
-      let item = try XCTUnwrap(find(AXID.Downloads.railItem(name), in: root) as? LibraryRailItem)
-      XCTAssertFalse(item.wantsUpdateLayer, "\(name): draw(_:) must run")
-      let rep = try XCTUnwrap(item.bitmapImageRepForCachingDisplay(in: item.bounds))
-      item.cacheDisplay(in: item.bounds, to: rep)
-      let corner = try XCTUnwrap(rep.colorAt(x: 2, y: 2)?.usingColorSpace(.sRGB))
-      var ink = 0
-      for x in stride(from: 0, to: rep.pixelsWide, by: 2) {
-        for y in stride(from: 0, to: rep.pixelsHigh, by: 2) {
-          guard let c = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
-          let delta = abs(c.redComponent - corner.redComponent) + abs(c.greenComponent - corner.greenComponent)
-            + abs(c.blueComponent - corner.blueComponent)
-          if delta > 0.3 { ink += 1 }
+    // Both appearances, and both a current item (with the fill) and one without: ink is measured against the item's
+    // own background, read at mid height left of the glyph (x 3 pt; the glyph starts at 9), alpha included.
+    for appearance in [NSAppearance.Name.aqua, .darkAqua] {
+      window.appearance = NSAppearance(named: appearance)
+      window.display()
+      for name in ["downloads", "history"] {
+        let item = try XCTUnwrap(find(AXID.Downloads.railItem(name), in: root) as? LibraryRailItem)
+        XCTAssertFalse(item.wantsUpdateLayer, "\(name): draw(_:) must run")
+        let rep = try XCTUnwrap(item.bitmapImageRepForCachingDisplay(in: item.bounds))
+        item.cacheDisplay(in: item.bounds, to: rep)
+        let scale = CGFloat(rep.pixelsWide) / item.bounds.width
+        let background = try XCTUnwrap(rep.colorAt(x: Int(3 * scale), y: rep.pixelsHigh / 2)?.usingColorSpace(.sRGB))
+        var ink = 0
+        // The middle band only, clear of the rounded corners, which differ from the fill without any drawing.
+        for x in stride(from: Int(8 * scale), to: rep.pixelsWide - Int(8 * scale), by: 2) {
+          for y in stride(from: rep.pixelsHigh * 3 / 10, to: rep.pixelsHigh * 7 / 10, by: 1) {
+            guard let c = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
+            let delta = abs(c.redComponent - background.redComponent) + abs(c.greenComponent - background.greenComponent)
+              + abs(c.blueComponent - background.blueComponent) + abs(c.alphaComponent - background.alphaComponent)
+            if delta > 0.3 { ink += 1 }
+          }
         }
+        XCTAssertGreaterThan(ink, 20, "\(name) in \(appearance.rawValue): the glyph and name are not drawn")
       }
-      XCTAssertGreaterThan(ink, 20, "\(name): the glyph and name are not drawn")
     }
   }
 
