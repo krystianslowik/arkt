@@ -17,7 +17,7 @@ const hl = (t, q) => {
   return i < 0 ? esc(t) : esc(t.slice(0, i)) + '<b>' + esc(t.slice(i, i + q.length)) + '</b>' + esc(t.slice(i + q.length));
 };
 
-/* Row: k = tab | hist | sugg | url | paste, ic = slot html, t, u (secondary), w (when) */
+/* Row: k = tab | fold | hist | ext | sugg | lit | url | paste, ic = slot html, t, u (secondary), w (when) */
 const R = {
   lin:  { k: 'tab', ic: fav('f-lin', 'L'), t: 'Cycle 42 · Linear', u: 'linear.app/acme/cycle/42', w: '2 min' },
   gh:   { k: 'tab', ic: fav('f-gh', 'G'), t: 'acme/atlas · Pull requests', u: 'github.com/acme/atlas/pulls', w: '12 min' },
@@ -32,7 +32,6 @@ const R = {
   ext:  { k: 'ext', ic: ICO.puzzle, t: 'Git Pilot', u: 'Pull request shortcuts in your toolbar' },
   s1:   { k: 'sugg', ic: ICO.search, t: 'git rebase onto' },
   s2:   { k: 'sugg', ic: ICO.search, t: 'git stash pop' },
-  url:  { k: 'url', ic: ICO.go, t: 'git-scm.com', u: 'Go to site' },
   paste:{ k: 'paste', ic: ICO.clip, t: 'Paste and Go', u: 'example.com/notes/2026/launch-checklist' },
 };
 const LONG_T = 'A very long page title that keeps going well past the width of any sensible results list: Part 2 of 14, notes on layout, measurement and the cost of reflow in large documents · The Engineering Blog';
@@ -42,7 +41,7 @@ const W = (k, ic, t, u, w) => ({ k, ic, t, u, w });
 const WORST = [
   W('tab', fav('f-blog', 'E'), LONG_T, LONG_U, '4 min'),
   W('tab', fav('f-doc', 'D'), 'Layout', 'docs.example.com/layout', '1 h'),
-  W('tab', fav('f-lin', 'L'), 'レイアウトエンジンの設計と実装 – 第3章 リフローのコスト', 'ドコス.example.jp/book/3', '3 h'),
+  W('tab', fav('f-lin', 'L'), 'レイアウトエンジンの設計と実装 – 第3章 リフローのコスト', 'layout.example.jp/book/3', '3 h'),
   W('tab', fav('f-apple', 'A'), 'Auto Layout Guide: Anatomy of a Constraint, Priorities and Content Hugging', 'developer.example.com/library/archive/documentation/UserExperience', '5 h'),
   W('hist', ICO.clock, 'CSS Grid layout: a complete guide with live examples and 40 patterns', 'css-tricks.example.com/snippets/css/complete-guide-grid', 'Yesterday'),
   W('hist', ICO.clock, LONG_T.replace('Part 2', 'Part 3'), LONG_U.replace('autumn', 'winter'), 'Yesterday'),
@@ -52,7 +51,7 @@ const WORST = [
   W('hist', ICO.clock, 'Layout engines compared', 'example.org/wiki/Layout_engine', 'Last week'),
   W('fold', ICO.folder, 'Layout and typography research, collected for the redesign of the long reading view', '128 tabs'),
   W('fold', ICO.folder, 'Layout', '9 tabs'),
-  W('fold', ICO.folder, '\u30ec\u30a4\u30a2\u30a6\u30c8\u8cc7\u6599', '14 tabs'),
+  W('fold', ICO.folder, '\u30ec\u30a4\u30a2\u30a6\u30c8\u8cc7\u6599 layout', '14 tabs'),
   W('ext', ICO.puzzle, 'Layout Inspector Pro with Grid, Flexbox and Baseline Overlays', 'Draws grid and flexbox overlays on any page, measures spacing and exports the result'),
   W('ext', fav('f-note', 'L'), 'Layout Notes', 'Sticky notes pinned to elements'),
   W('ext', ICO.puzzle, 'Responsive Layout Tester', 'Resize any page to common widths'),
@@ -60,7 +59,6 @@ const WORST = [
   W('sugg', ICO.search, 'layout thrashing'),
   W('sugg', ICO.search, 'layout shift score'),
   W('sugg', ICO.search, 'layoutsubviews not called'),
-  W('url', ICO.go, 'layout.example.com', 'Go to site'),
   W('hist', ICO.clock, 'Layout · Guide', 'example.com/guide/layout', 'Last week'),
   W('hist', ICO.clock, 'The Layout Anatomy Poster', 'posters.example.com/layout', 'Oct 28'),
   W('hist', ICO.clock, 'Layout inspector', 'tools.example.com/inspect', 'Oct 21'),
@@ -70,7 +68,6 @@ const WORST = [
 ];
 const LIT = q => ({ k: 'lit', ic: ICO.search, t: '\u201c' + q + '\u201d', lead: 'Search for ' });
 const GO = q => ({ k: 'url', ic: ICO.go, t: q });
-const SG = (t) => ({ k: 'sugg', ic: ICO.search, t });
 const STATES = {
   empty:  { q: '', top: [R.paste], g: [['Tabs', [R.lin, R.gh, R.road]], ['History', [R.mail, R.hmaps, R.hbook]]] },
   search: { q: 'git', top: [], g: [['Tabs', [R.git, R.gh]], ['Folders', [R.fold]], ['History', [R.hbook, R.cheat]], ['Extensions', [R.ext]],
@@ -93,4 +90,3 @@ function rowHTML(r, q, sel, trail) {
 const RET = '<span class="kbd">' + ICO.ret + '</span>';
 const FIELD_PH = 'Search or enter address';
 const fieldText = q => `<span class="ft">` + (q ? `<span class="qt">${esc(q)}</span><span class="caret"></span>` : `<span class="caret"></span><span class="ph">${FIELD_PH}</span>`) + `</span>`;
-const page = (cls) => `<div class="win" id="win"></div>`;

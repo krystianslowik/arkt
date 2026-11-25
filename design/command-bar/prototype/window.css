@@ -1,4 +1,4 @@
-/* Shared by the four redesign mocks: tokens, the Arkt window behind the bar, favicon tiles, key caps.
+/* Tokens (the shipped ShellTokens values), the Arkt window behind the bar, favicon tiles and key caps.
    1280 x 800 pt canvas, rendered at 2x. System font only (everyday chrome). */
 :root {
   --porcelain: #FAF9F5; --graphite: #202321; --mustard: #E9B520;

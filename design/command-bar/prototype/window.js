@@ -1,5 +1,5 @@
 /* Renders the Arkt window behind the bar and applies the theme from the URL hash:
-   index.html#s=empty|search|worst&theme=dark|light */
+   index.html#s=empty|search|url|worst|none|small&theme=dark|light */
 const H = Object.fromEntries(new URLSearchParams(location.hash.slice(1)));
 if (H.s === 'small') document.documentElement.classList.add('small');
 if (H.theme === 'light') document.body.classList.add('light');

@@ -1,5 +1,6 @@
-/* Rule: the bar shows at most 3 rows per group, in the order Tabs, History, Search.
-   A literal row (Paste and Go, Go to a typed address) sits above the groups, no header.
+/* Rule: the bar shows at most 3 rows per group, in the order Tabs, Folders, History, Extensions, Search.
+   A literal row (Paste and Go, Go to a typed address) sits above the groups, no header. The Search for row
+   is the first row of the Search group, not a literal row.
    The selected row is always the first row. Selecting only changes the fill, never animates. */
 const S = STATES[H.s || 'search'];
 const VERB = { tab: 'Switch to Tab', fold: 'Show Folder', ext: 'Open Extension', hist: 'Open', sugg: 'Search', lit: '', url: 'Go', paste: 'Go' };

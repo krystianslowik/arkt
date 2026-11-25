@@ -79,7 +79,7 @@ All values in points. Window sizes from 640 x 420 (the shell minimum) up.
 | Caret | 2 wide, mustard fill |
 | Divider | 1 hairline under the field |
 | List padding | 6 on the sides, 6 on top, 8 on the bottom |
-| Group header | 11 semibold, tertiary text, +0.02 em tracking; 26 high including 10 above (20 high, 4 above, for the first group) |
+| Group header | 11 semibold, tertiary text, +0.02 em tracking; 26 high including 10 above (20 high, 4 above, for a group that starts the list) |
 | Row | 36 high, 8 corner radius, 10 horizontal padding, 12 gap |
 | Row slot | 18 wide: favicon 16 (4 radius) or a 16 symbol (clock for history, magnifier for search, globe for Go, clipboard for Paste and Go, folder for a folder, the extension's own icon or a puzzle piece for an extension) |
 | Row title | 14 regular, text; the part that matches the query 600 weight |
@@ -93,7 +93,7 @@ All values in points. Window sizes from 640 x 420 (the shell minimum) up.
 Selection always starts on the first row of the list. Rows keep their position while typing: a late result never
 inserts above the selection.
 
-1. **Literal row, no header, only when it applies.** It sits above the groups and is the selected row.
+1. **Literal row, no header, only when it applies** (the Go and Paste and Go rows only; the Search for row belongs to the Search group). It sits above the groups and is the selected row.
    - Empty field and the clipboard holds an address: **Paste and Go**, with the address in the URL slot.
    - The field parses as an address (scheme, or `host.tld`, with optional path): **Go**, showing the text as typed.
 2. **Tabs.** Open tabs in this window, all Spaces, excluding the current tab. Matches word starts in the title and in
@@ -111,7 +111,7 @@ inserts above the selection.
 6. **Search.** Only with text in the field. First row, always present: **Search for "<text>"** with the exact text
    (sent as typed, with the user's search engine from Settings). Then up to 2 suggestions from the search engine when
    "Include search engine suggestions" is on (#562). Suggestions arrive asynchronously and fill rows below the
-   literal row; nothing above them moves.
+   Search for row; nothing above them moves.
 
 Why this order. Tabs and Folders come first because they are the user's own sidebar: live, nearest, and the usual
 target of Cmd-L/Cmd-T typing. History is the past. Extensions are a rare target, so they sit just above Search, where
@@ -120,13 +120,14 @@ grow without moving anything above it. Because selection starts on the first row
 user's own things, and Cmd-Return is the one key for "no, search the web".
 
 Consequences worth stating: there is no "no results" dead end, because the Search row is always there; an address
-that is also a tab shows both the Go row and the tab; the cap is 3 rows per group, so the panel has at most 15 rows (a Go row
-only appears when the Search group has just its literal row, so the maximum stays 15) and 5 headers.
+that is also a tab shows both the Go row and the tab; the cap is 3 rows per group, so the panel has at most 16 rows and 5
+headers: a Go row, 3 tabs, 3 folders, 3 history rows, 3 extensions, and the Search for row with 2 suggestions.
 
-Height arithmetic, for the worst case with all five groups full: field 54 + divider 1 + list padding 14 + 15 rows x 36
-(540) + headers 20 + 4 x 26 (124) = 733 pt. The panel may be at most `window height - top - 24` tall, so the worst case
-fits without scrolling only in a window at least 867 pt high (top 110 + 733 + 24). In the 800 pt prototype window the
-worst case scrolls (`worst-*.png` shows the overlay scroller). Typical queries match two or three groups (about
+Height arithmetic, for that worst case: field 54 + divider 1 + list padding 14 + 16 rows x 36 (576) + headers
+20 + 4 x 26 (124) = 769 pt. (`worst-*.png` shows 15 rows, because "layout" is not an address, so there is no Go row;
+that is 733 pt.) The panel may be at most `window height - top - 24` tall, so the worst case
+fits without scrolling only in a window at least 903 pt high (top 110 + 769 + 24). In the 800 pt prototype window the
+worst case scrolls (`worst-*.png` shows the overlay scroller). The `url` screens show no suggestions; the search engine often returns none for an address. Typical queries match two or three groups (about
 300 to 520 pt) and fit in any window of 700 pt or more. When it scrolls, moving the selection scrolls the row into view
 with the least movement, and group headers scroll with their rows. The cap of 3 is what keeps the worst case bounded.
 
@@ -147,10 +148,10 @@ with the least movement, and group headers scroll with their rows. The cap of 3 
 | State | File | Notes |
 |---|---|---|
 | Empty | `empty-{light,dark}.png` | Paste and Go (only when the clipboard holds an address), Tabs (3 recent), History (3 recent). No Folders, Extensions or Search group. |
-| Typing a search | `search-{light,dark}.png` | query "git": Tabs, Folders, History, Extensions, Search with the literal row and 2 suggestions. |
-| Typing an address | `url-{light,dark}.png` | the Go row on top, the matching tab and history row below, one literal Search row. |
-| Worst case | `worst-{light,dark}.png` | very long titles and URLs, CJK, all five groups full: capped at 3 rows each, 733 pt tall, so it scrolls in the 800 pt window. |
-| No results | `no-results-{light,dark}.png` | only the Search group with the literal row, selected. The panel shrinks to field plus one row. |
+| Typing a search | `search-{light,dark}.png` | query "git": Tabs, Folders, History, Extensions, Search with the Search for row and 2 suggestions. |
+| Typing an address | `url-{light,dark}.png` | the Go row on top, the matching tab and history row below, one Search for row. |
+| Worst case | `worst-{light,dark}.png` | very long titles and URLs, CJK, all five groups full: capped at 3 rows each, 15 rows, 733 pt tall, so it scrolls in the 800 pt window. |
+| No results | `no-results-{light,dark}.png` | only the Search header and the Search for row, selected. The panel shrinks to field, header and one row. |
 | Smallest window | `small-window-{light,dark}.png` | 640 x 420: panel 592 wide, top 59, list scrolls. |
 
 ## Keyboard
@@ -205,19 +206,19 @@ headers, placeholder) uses `commandBarSecondaryText`.
 - The list is filled synchronously from in-memory indexes (open tabs, folders, history, extensions) on every keystroke: top 3 per group,
   no thumbnails, no preview snapshots, no network on the key path.
 - Favicons come from the existing cache and fall back to a letter tile; a missing one never delays a row.
-- Search suggestions are the only async part. They fill rows below the literal row, never above, and are dropped if
+- Search suggestions are the only async part. They fill rows below the Search for row, never above, and are dropped if
   the text changed (generation check, see #884).
 - Return always has something to do: the Search row exists whenever there is text, and Paste and Go or Go cover the
   rest.
 - No state to remember between opens: no filter, no preview target, no scope. Each open starts the same way.
-- Bounded work: at most 15 rows laid out, so layout cost is constant.
+- Bounded work: at most 16 rows laid out, so layout cost is constant.
 
 ## Accessibility
 
 - The panel is a dialog group labelled "Command bar". The field is the first element, an `AXTextField` labelled
   "Search or enter address", and keeps focus.
 - The list is an `AXList`. Group headers are `AXGroup` labels ("Tabs", "Folders", "History", "Extensions", "Search"). Each row reads
-  "<title>, <host>, <kind>, <k> of <n>" with kind one of "open tab", "folder, <n> tabs", "history", "extension", "search suggestion", "search for
+  "<title>, <secondary text, if any>, <kind>, <k> of <n>" with kind one of "open tab", "folder", "history", "extension", "search suggestion", "search for
   what you typed", "go to address", "paste and go". The selected row is announced on every move.
 - After typing settles (150 ms), announce the count once: "<n> results". With only the Search row:
   "No matches. Return searches the web."
