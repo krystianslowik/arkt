@@ -1,6 +1,6 @@
 ---
 name: arkt-issue-loop
-description: Use when picking up the next Arkt issue and taking it from claim to an open pull request - choosing work by status and order labels, claiming it, one worktree and branch per issue, test-first implementation, opening the pull request, and cleaning up after the merge.
+description: Use when resuming your in-progress Arkt issues or picking up the next one and taking it from claim to an open pull request - choosing work by status and order labels, claiming it, one worktree and branch per issue, test-first implementation, opening the pull request, and cleaning up after the merge.
 ---
 
 # Arkt issue loop
@@ -61,6 +61,33 @@ engine build" in the issue or pull request, and continue. Do not set `status:blo
 
 Do not assume what is not written down. If a guess would be hard to undo, ask. If it is easy to undo, decide, note
 it, and continue.
+
+## 0. Resume your own work first
+
+GitHub is the record of where work stands. A local worktree or branch is disposable. Before picking anything new,
+finish what you already hold:
+
+```zsh
+gh issue list --assignee @me --label status:in-progress --state open
+gh pr list --author @me --state open
+```
+
+For each one:
+
+1. Read the issue and its pull request, newest comments first. The last comment says where the work stopped. If
+   `main` has since made it stale (already shipped, scope changed), say so in a comment and follow "Decide or ask".
+2. Start a fresh worktree from the pull request's branch, not from a leftover local branch:
+
+   ```zsh
+   git fetch origin
+   git worktree add ../arkt-wt/<N>-<slug> -b <branch> --track origin/<branch>
+   ```
+
+3. Continue from step 4.
+
+When you stop mid-issue, leave it resumable from GitHub alone: push every commit to the pull request branch (open a
+draft if there is none) and post one comment on the issue or pull request with what is done, what is next and what
+is blocked. Work that exists only in a local worktree does not count.
 
 ## 1. Pick
 
@@ -195,6 +222,8 @@ process you started, by its PID, and clear test attachments (see `arkt-local-app
 
 ## Common mistakes we made
 
+- Leaving commits and uncommitted changes in local worktrees when a session ended. Old worktrees then had to be
+  checked one by one against GitHub before they could be deleted. Push and comment before you stop (step 0).
 - Picking an issue whose blocker had closed but whose label still said blocked, or leaving a blocked label after the
   blocker closed. Re-check blockers every loop.
 - Reporting "tests pass" without counts, or with counts from before the last change.
