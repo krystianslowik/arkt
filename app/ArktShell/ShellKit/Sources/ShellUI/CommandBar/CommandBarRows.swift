@@ -133,7 +133,7 @@ final class CommandBarCellView: NSTableCellView {
     header.lineBreakMode = .byTruncatingTail
     header.cell?.usesSingleLineMode = true
     header.isHidden = true
-    header.setAccessibilityElement(false)                // the controller publishes headers from its model
+    // Not an accessibility element: it has no published label. The controller publishes headers from its model.
     [icon, title, subtitle, trailingText, returnKey, header].forEach(addSubview)
     removeButton.isBordered = false
     removeButton.imagePosition = .imageOnly
@@ -318,6 +318,17 @@ final class CommandBarCellView: NSTableCellView {
 /// A group header ("Tabs", "History"): an accessibility group with the header's text as its label.
 @MainActor
 final class CommandBarGroupHeaderLabel: NSTextField {
+  /// The label the controller publishes. The header is an element only while it has one. It is kept here, not read
+  /// back through `accessibilityLabel()`: without an explicit label AppKit derives one by asking
+  /// `isAccessibilityElement()`, and the two recursed until the stack overflowed whenever an accessibility client
+  /// looked at the window.
+  private var publishedLabel: String?
+
+  override func setAccessibilityLabel(_ label: String?) {
+    publishedLabel = label
+    super.setAccessibilityLabel(label)
+  }
+
   override func accessibilityRole() -> NSAccessibility.Role? { .group }
-  override func isAccessibilityElement() -> Bool { accessibilityLabel() != nil && super.isAccessibilityElement() }
+  override func isAccessibilityElement() -> Bool { !(publishedLabel ?? "").isEmpty }
 }
